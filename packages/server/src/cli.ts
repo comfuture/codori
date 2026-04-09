@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { parseArgs } from 'node:util'
 import { asErrorMessage, CodoriError } from './errors.js'
+import { startHttpServer } from './http-server.js'
 import { createRuntimeManager } from './process-manager.js'
 import type { ProjectStatusRecord, StartProjectResult } from './types.js'
 
@@ -120,8 +121,14 @@ const main = async () => {
       }
       return
     }
+    case 'serve': {
+      const app = await startHttpServer(manager)
+      process.stdout.write(`Codori listening on http://${manager.config.server.host}:${manager.config.server.port}\n`)
+      await app.ready()
+      return
+    }
     default:
-      process.stdout.write('Usage: codori <list|status|start|stop> [projectId] [--root <path>] [--json]\n')
+      process.stdout.write('Usage: codori <serve|list|status|start|stop> [projectId] [--root <path>] [--json]\n')
   }
 }
 
@@ -133,4 +140,3 @@ void main().catch((error) => {
   }
   process.exitCode = 1
 })
-
