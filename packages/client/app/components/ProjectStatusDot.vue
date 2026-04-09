@@ -29,25 +29,26 @@ const dotClass = computed(() => {
   }
 })
 
-const pulseClass = 'bg-success/35'
+const pulseClass = 'text-success/35'
 </script>
 
 <template>
   <span
-    class="inline-flex items-center justify-center"
+    class="relative inline-grid shrink-0 place-items-center align-middle"
     :class="padded ? 'rounded-md p-2' : ''"
   >
-    <span class="relative inline-flex size-2 items-center justify-center">
-      <span
-        v-if="pulse"
-        class="project-status-pulse absolute size-2 rounded-full"
-        :class="pulseClass"
-      />
-      <span
-        class="relative size-2 rounded-full ring-4"
-        :class="dotClass"
-      />
+    <span
+      v-if="pulse"
+      aria-hidden="true"
+      class="project-status-pulse pointer-events-none absolute inset-0 rounded-full"
+      :class="pulseClass"
+    >
     </span>
+
+    <span
+      class="relative z-10 block size-2 shrink-0 rounded-full ring-4"
+      :class="dotClass"
+    />
   </span>
 </template>
 
@@ -58,18 +59,18 @@ const pulseClass = 'bg-success/35'
 
 @keyframes project-status-pulse {
   0% {
-    opacity: 0.55;
-    transform: scale(1);
+    box-shadow: 0 0 0 0 currentColor;
+    opacity: 0.9;
   }
 
   72% {
-    opacity: 0.1;
-    transform: scale(4.4);
+    box-shadow: 0 0 0 10px color-mix(in srgb, currentColor 22%, transparent);
+    opacity: 0.2;
   }
 
   100% {
+    box-shadow: 0 0 0 12px transparent;
     opacity: 0;
-    transform: scale(4.8);
   }
 }
 </style>
