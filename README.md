@@ -57,21 +57,10 @@ Then open your deployed Codori client and point it at that server origin, choose
 
 Codori does not create private connectivity on its own. Typical patterns are:
 
-- direct local access on the same machine
 - access over a Tailscale tailnet
 - access through another tunnel you manage yourself
 
-### Option 1: Same machine
-
-Start the server:
-
-```bash
-npx @codori/server --root ~/Project
-```
-
-Then open the client against `http://127.0.0.1:4310` or the client dev server configuration you use locally.
-
-### Option 2: Tailscale MagicDNS
+### Option 1: Tailscale MagicDNS
 
 According to Tailscale's current MagicDNS documentation, MagicDNS gives each node a machine name and a fully-qualified tailnet DNS name under `.ts.net`, and short hostnames usually work inside the same tailnet. Source: [MagicDNS](https://tailscale.com/kb/1081/magicdns/).
 
@@ -97,7 +86,7 @@ http://my-codori-host.your-tailnet.ts.net:4310
 
 This is the simplest option when you are comfortable exposing the Codori HTTP server directly inside your private tailnet.
 
-### Option 3: Tailscale Serve
+### Option 2: Tailscale Serve
 
 Tailscale's current Serve documentation says `tailscale serve` can publish a local HTTP service securely to other devices in the same tailnet, and recent CLI syntax changed in Tailscale 1.52+. Sources: [tailscale serve command](https://tailscale.com/kb/1242/tailscale-serve), [Tailscale Serve](https://tailscale.com/docs/features/tailscale-serve).
 
