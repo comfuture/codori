@@ -1,4 +1,5 @@
-import { defineComponent, h, resolveComponent, type PropType } from 'vue'
+import { defineComponent, h, type PropType } from 'vue'
+import { UChatReasoning } from '#components'
 import { EVENT_PART, ITEM_PART, type ChatMessage, type ChatPart } from '~~/shared/codex-chat.js'
 import MessagePartEvent from './message-part/Event.vue'
 import MessagePartItem from './message-part/Item.js'
@@ -17,8 +18,6 @@ export default defineComponent({
     }
   },
   setup(props) {
-    const chatReasoning = resolveComponent('UChatReasoning')
-
     return () => {
       if (!props.part) {
         return null
@@ -31,7 +30,7 @@ export default defineComponent({
             part: props.part
           })
         case 'reasoning':
-          return h(chatReasoning, {
+          return h(UChatReasoning, {
             icon: 'i-lucide-brain',
             text: [...props.part.summary, ...props.part.content].join('\n\n').trim(),
             streaming: props.part.state === 'streaming',
