@@ -58,7 +58,7 @@ const main = async () => {
     options: optionConfig
   })
 
-  const [command, maybeProjectId] = parsed.positionals
+  const [command = 'serve', maybeProjectId] = parsed.positionals
   const manager = createRuntimeManager({
     configOverrides: {
       root: parsed.values.root,
@@ -128,7 +128,7 @@ const main = async () => {
       return
     }
     default:
-      process.stdout.write('Usage: codori <serve|list|status|start|stop> [projectId] [--root <path>] [--json]\n')
+      process.stdout.write('Usage: npx @codori/server [serve|list|status|start|stop] [projectId] --root <path> [--host <host>] [--port <port>] [--json]\n')
   }
 }
 

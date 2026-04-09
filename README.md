@@ -26,20 +26,7 @@ Codori follows a few hard constraints:
 ## Requirements
 
 - Node.js 22+
-- pnpm 10+
 - `codex` installed on the host that will run project app-servers
-
-Codori starts project runtimes with this command:
-
-```bash
-codex app-server --listen ws://0.0.0.0:{PORT}
-```
-
-## Install
-
-```bash
-pnpm install
-```
 
 ## Usage
 
@@ -53,23 +40,18 @@ The normal flow is simple:
 Start the Codori management server:
 
 ```bash
-node packages/server/dist/cli.js serve --root ~/Project --host 127.0.0.1 --port 4310
+npx @codori/server --root ~/Project
 ```
 
-Run the client UI in development:
+By default this binds Codori to `127.0.0.1:4310`. `--host` and `--port` are optional.
+
+If you need different bind settings:
 
 ```bash
-pnpm --filter @codori/client dev
+npx @codori/server --root ~/Project --host 0.0.0.0 --port 4310
 ```
 
-If you run the Nuxt client separately, point it at the Codori server with:
-
-```bash
-CODORI_SERVER_BASE=http://127.0.0.1:4310
-CODORI_SERVER_WS_BASE=ws://127.0.0.1:4310
-```
-
-Then open the client, choose a discovered Git project, and either start a new thread or resume an older one.
+Then open your deployed Codori client and point it at that server origin, choose a discovered Git project, and either start a new thread or resume an older one.
 
 ## Remote Access
 
@@ -84,7 +66,7 @@ Codori does not create private connectivity on its own. Typical patterns are:
 Start the server:
 
 ```bash
-codori serve --root ~/Project --host 127.0.0.1 --port 4310
+npx @codori/server --root ~/Project
 ```
 
 Then open the client against `http://127.0.0.1:4310` or the client dev server configuration you use locally.
@@ -98,7 +80,7 @@ Example:
 1. Run Codori on a host in your tailnet:
 
 ```bash
-codori serve --root ~/Project --host 0.0.0.0 --port 4310
+npx @codori/server --root ~/Project --host 0.0.0.0 --port 4310
 ```
 
 2. From another machine in the same tailnet, connect to either:
@@ -124,7 +106,7 @@ Typical flow:
 1. Bind Codori locally on the host:
 
 ```bash
-codori serve --root ~/Project --host 127.0.0.1 --port 4310
+npx @codori/server --root ~/Project
 ```
 
 2. Publish it to your tailnet with Tailscale Serve:
@@ -178,7 +160,7 @@ Example:
 {
   "root": "/Users/comfuture/Project",
   "server": {
-    "host": "0.0.0.0",
+    "host": "127.0.0.1",
     "port": 4310
   },
   "ports": {
@@ -248,27 +230,27 @@ If you want to access Codori from another machine, you must provide your own pri
 List discovered projects:
 
 ```bash
-codori list --root ~/Project
-codori list --root ~/Project --json
+npx @codori/server list --root ~/Project
+npx @codori/server list --root ~/Project --json
 ```
 
 Start a project runtime:
 
 ```bash
-codori start codori --root ~/Project
+npx @codori/server start codori --root ~/Project
 ```
 
 Stop a project runtime:
 
 ```bash
-codori stop codori --root ~/Project
+npx @codori/server stop codori --root ~/Project
 ```
 
 Inspect runtime status:
 
 ```bash
-codori status --root ~/Project
-codori status codori --root ~/Project
+npx @codori/server status --root ~/Project
+npx @codori/server status codori --root ~/Project
 ```
 
 3. Check status:

@@ -1,13 +1,11 @@
 {
   "name": "@codori/server",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "bin": {
-    "codori": "./dist/cli.js"
-  },
+  "bin": "./dist/cli.js",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "lint": "eslint src test --ext .ts",

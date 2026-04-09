@@ -17,6 +17,17 @@ const createHome = () => {
 }
 
 describe('resolveConfig', () => {
+  it('uses localhost defaults when server host and port are not provided', () => {
+    const homeDir = createHome()
+
+    const config = resolveConfig({
+      root: '/tmp/from-cli'
+    }, homeDir)
+
+    expect(config.server.host).toBe('127.0.0.1')
+    expect(config.server.port).toBe(4310)
+  })
+
   it('uses overrides ahead of file config', () => {
     const homeDir = createHome()
     const codoriDir = join(homeDir, '.codori')
@@ -39,4 +50,3 @@ describe('resolveConfig', () => {
     expect(config.server.port).toBe(4100)
   })
 })
-
