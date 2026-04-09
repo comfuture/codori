@@ -86,7 +86,7 @@
           </UCard>
         </div>
 
-        <cd-tunnel-notice />
+        <TunnelNotice />
       </div>
     </template>
   </UDashboardPanel>

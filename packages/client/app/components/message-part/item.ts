@@ -4,12 +4,12 @@ import {
   type ChatPart,
   type ItemData
 } from '~~/shared/codex-chat.js'
-import MessageItemCommandExecution from '../message-item/command-execution.vue'
-import MessageItemContextCompaction from '../message-item/context-compaction.vue'
-import MessageItemDynamicToolCall from '../message-item/dynamic-tool-call.vue'
-import MessageItemFileChange from '../message-item/file-change.vue'
-import MessageItemMcpToolCall from '../message-item/mcp-tool-call.vue'
-import MessageItemWebSearch from '../message-item/web-search.vue'
+import MessageItemCommandExecution from '../message-item/CommandExecution.vue'
+import MessageItemContextCompaction from '../message-item/ContextCompaction.vue'
+import MessageItemDynamicToolCall from '../message-item/DynamicToolCall.vue'
+import MessageItemFileChange from '../message-item/FileChange.vue'
+import MessageItemMcpToolCall from '../message-item/McpToolCall.vue'
+import MessageItemWebSearch from '../message-item/WebSearch.vue'
 
 export default defineComponent({
   name: 'MessagePartItem',

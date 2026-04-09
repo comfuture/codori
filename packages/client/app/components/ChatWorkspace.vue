@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useRouter } from '#imports'
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
-import MessageContent from './message-content.vue'
+import MessageContent from './MessageContent.vue'
 import { useChatSession } from '../composables/useChatSession.js'
 import { useProjects } from '../composables/useProjects.js'
 import { useRpc } from '../composables/useRpc.js'

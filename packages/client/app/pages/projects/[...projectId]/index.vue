@@ -1,9 +1,6 @@
 <script setup lang="ts">
 import { useRoute, useRouter } from '#imports'
 import { computed, onMounted } from 'vue'
-import ChatWorkspace from '../../../components/chat-workspace.vue'
-import ThreadPanel from '../../../components/thread-panel.vue'
-import TunnelNotice from '../../../components/tunnel-notice.vue'
 import { useProjects } from '../../../composables/useProjects.js'
 import { useThreadPanel } from '../../../composables/useThreadPanel.js'
 import {

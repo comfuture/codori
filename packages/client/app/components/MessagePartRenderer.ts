@@ -1,8 +1,8 @@
 import { defineComponent, h, resolveComponent, type PropType } from 'vue'
 import { EVENT_PART, ITEM_PART, type ChatMessage, type ChatPart } from '~~/shared/codex-chat.js'
-import MessagePartEvent from './message-part/event.vue'
-import MessagePartItem from './message-part/item.js'
-import MessagePartText from './message-part/text.vue'
+import MessagePartEvent from './message-part/Event.vue'
+import MessagePartItem from './message-part/Item.js'
+import MessagePartText from './message-part/Text.vue'
 
 export default defineComponent({
   name: 'MessagePartRenderer',

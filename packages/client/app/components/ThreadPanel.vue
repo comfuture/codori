@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useThreadPanel } from '../composables/useThreadPanel.js'
-import ThreadList from './thread-list.vue'
+import ThreadList from './ThreadList.vue'
 
 defineProps<{
   projectId: string | null

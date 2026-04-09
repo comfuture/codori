@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import MessagePartRenderer from './message-part-renderer.js'
+import MessagePartRenderer from './MessagePartRenderer.js'
 import type { ChatMessage, ChatPart } from '~~/shared/codex-chat.js'
 
 defineProps<{

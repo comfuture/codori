@@ -56,7 +56,7 @@ const sidebarUi = computed(() =>
       </template>
 
       <template #default="{ collapsed }">
-        <cd-project-sidebar :collapsed="collapsed" />
+        <ProjectSidebar :collapsed="collapsed" />
       </template>
 
       <template #footer>
