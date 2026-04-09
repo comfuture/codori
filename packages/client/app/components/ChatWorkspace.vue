@@ -67,6 +67,32 @@ const selectedProject = computed(() => getProject(props.projectId))
 const submitError = computed(() => error.value ? new Error(error.value) : undefined)
 const isBusy = computed(() => status.value === 'submitted' || status.value === 'streaming')
 const routeThreadId = computed(() => props.threadId ?? null)
+const projectTitle = computed(() => selectedProject.value?.projectId ?? props.projectId)
+const showWelcomeState = computed(() =>
+  !routeThreadId.value
+  && !activeThreadId.value
+  && messages.value.length === 0
+  && !isBusy.value
+)
+
+const starterPrompts = computed(() => {
+  const project = projectTitle.value
+
+  return [
+    {
+      title: 'Map the codebase',
+      text: `Summarize the structure of ${project} and identify the main entry points.`
+    },
+    {
+      title: 'Find the next task',
+      text: `Inspect ${project} and suggest the highest-impact improvement to make next.`
+    },
+    {
+      title: 'Build a plan',
+      text: `Read ${project} and propose a concrete implementation plan for the next feature.`
+    }
+  ]
+})
 
 const isActiveTurnStatus = (value: string | null | undefined) => {
   if (!value) {
@@ -788,6 +814,15 @@ const sendMessage = async () => {
   }
 }
 
+const sendStarterPrompt = async (text: string) => {
+  if (isBusy.value) {
+    return
+  }
+
+  input.value = text
+  await sendMessage()
+}
+
 const onPromptEnter = (event: KeyboardEvent) => {
   if (!shouldSubmit(event)) {
     return
@@ -859,7 +894,10 @@ watch(status, (nextStatus, previousStatus) => {
 
 <template>
   <section class="flex h-full min-h-0 flex-col bg-default">
-    <div class="flex shrink-0 items-center justify-between gap-3 border-b border-default px-4 py-3 md:px-6">
+    <div
+      v-if="!showWelcomeState"
+      class="flex shrink-0 items-center justify-between gap-3 border-b border-default px-4 py-3 md:px-6"
+    >
       <div class="min-w-0">
         <div class="text-sm font-semibold text-highlighted">
           Codex Workspace
@@ -881,7 +919,49 @@ watch(status, (nextStatus, previousStatus) => {
       class="min-h-0 flex-1 overflow-y-auto"
       @scroll="updatePinnedState"
     >
+      <div
+        v-if="showWelcomeState"
+        class="flex min-h-full items-center justify-center px-6 py-10"
+      >
+        <div class="flex w-full max-w-4xl flex-col items-center gap-10 text-center">
+          <div class="space-y-4">
+            <div class="text-xs font-medium uppercase tracking-[0.28em] text-primary">
+              Ready To Code
+            </div>
+            <div class="space-y-2">
+              <h1 class="text-balance text-4xl font-semibold tracking-tight text-highlighted md:text-5xl">
+                Let's build
+              </h1>
+              <p class="text-balance text-3xl font-medium tracking-tight text-toned md:text-4xl">
+                {{ projectTitle }}
+              </p>
+            </div>
+            <p class="mx-auto max-w-2xl text-base leading-7 text-muted md:text-lg">
+              Start with a goal, a bug, or a question. Codori will start the runtime when needed and keep the thread ready to continue.
+            </p>
+          </div>
+
+          <div class="grid w-full gap-3 md:grid-cols-3">
+            <button
+              v-for="prompt in starterPrompts"
+              :key="prompt.title"
+              type="button"
+              class="rounded-3xl border border-default/70 bg-elevated/25 px-5 py-5 text-left transition hover:border-primary/30 hover:bg-elevated/45"
+              @click="sendStarterPrompt(prompt.text)"
+            >
+              <div class="text-sm font-semibold text-highlighted">
+                {{ prompt.title }}
+              </div>
+              <p class="mt-3 text-sm leading-6 text-muted">
+                {{ prompt.text }}
+              </p>
+            </button>
+          </div>
+        </div>
+      </div>
+
       <UChatMessages
+        v-else
         :messages="messages"
         :status="status"
         :should-auto-scroll="false"
@@ -909,6 +989,8 @@ watch(status, (nextStatus, previousStatus) => {
     </div>
 
     <div class="sticky bottom-0 shrink-0 border-t border-default bg-default/95 px-4 py-3 backdrop-blur md:px-6">
+      <div class="mx-auto w-full max-w-5xl">
+        <TunnelNotice class="mb-3" />
       <UAlert
         v-if="error"
         color="error"
@@ -933,6 +1015,7 @@ watch(status, (nextStatus, previousStatus) => {
           :status="status"
         />
       </UChatPrompt>
+      </div>
     </div>
   </section>
 </template>

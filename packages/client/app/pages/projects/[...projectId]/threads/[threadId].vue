@@ -28,41 +28,45 @@ const onNewThread = async () => {
     <UDashboardPanel
       id="thread-shell"
       class="min-h-0 min-w-0 flex-1"
-      :ui="{ body: 'p-0' }"
+      :ui="{ root: '!p-0', body: '!p-0 sm:!p-0 !gap-0 sm:!gap-0' }"
     >
       <template #header>
-        <UDashboardNavbar :title="threadId ?? 'Thread'">
+        <UDashboardNavbar
+          :title="threadId ?? 'Thread'"
+          icon="i-lucide-message-square-text"
+        >
           <template #right>
             <div class="flex items-center gap-2">
-              <UButton
-                icon="i-lucide-plus"
-                color="primary"
-                variant="soft"
-                label="New thread"
-                @click="onNewThread"
-              />
-              <UButton
-                icon="i-lucide-history"
-                color="neutral"
-                variant="outline"
-                label="Previous threads"
-                @click="openPanel"
-              />
+              <UTooltip text="New thread">
+                <UButton
+                  icon="i-lucide-plus"
+                  color="primary"
+                  variant="soft"
+                  square
+                  @click="onNewThread"
+                />
+              </UTooltip>
+              <UTooltip text="Previous threads">
+                <UButton
+                  icon="i-lucide-history"
+                  color="neutral"
+                  variant="outline"
+                  square
+                  @click="openPanel"
+                />
+              </UTooltip>
             </div>
           </template>
         </UDashboardNavbar>
       </template>
 
       <template #body>
-        <div class="flex h-full min-h-0 flex-col">
-          <TunnelNotice class="m-4 mb-0 shrink-0 md:m-6 md:mb-0" />
-          <ChatWorkspace
-            v-if="projectId"
-            :project-id="projectId"
-            :thread-id="threadId"
-            class="min-h-0 flex-1"
-          />
-        </div>
+        <ChatWorkspace
+          v-if="projectId"
+          :project-id="projectId"
+          :thread-id="threadId"
+          class="min-h-0 flex-1"
+        />
       </template>
     </UDashboardPanel>
 
