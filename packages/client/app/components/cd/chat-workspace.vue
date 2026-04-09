@@ -149,7 +149,6 @@ const ensureThread = async () => {
   })
 
   activeThreadId.value = response.thread.id
-  await router.push(toProjectThreadRoute(props.projectId, response.thread.id))
   return response.thread.id
 }
 
@@ -336,7 +335,13 @@ const sendMessage = async () => {
     }
 
     await completion
-    await hydrateThread(threadId)
+
+    if (props.threadId) {
+      await hydrateThread(threadId)
+      return
+    }
+
+    await router.push(toProjectThreadRoute(props.projectId, threadId))
   } catch (caughtError) {
     unsubscribe?.()
     error.value = caughtError instanceof Error ? caughtError.message : String(caughtError)
