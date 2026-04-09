@@ -3,7 +3,7 @@ import type { NavigationMenuItem } from '@nuxt/ui'
 import { useRoute } from '#imports'
 import { computed, onMounted } from 'vue'
 import { useProjects } from '../composables/useProjects.js'
-import { projectStatusMeta, toProjectRoute } from '~~/shared/codori.js'
+import { toProjectRoute } from '~~/shared/codori.js'
 
 const props = defineProps<{
   collapsed?: boolean
@@ -12,7 +12,6 @@ type ProjectNavigationItem = NavigationMenuItem & {
   projectId: string
   projectPath: string
   status: 'running' | 'stopped' | 'error'
-  port: number | null
   error: string | null
 }
 
@@ -50,7 +49,6 @@ const projectItems = computed<ProjectNavigationItem[][]>(() => [
     projectId: project.projectId,
     projectPath: project.projectPath,
     status: project.status,
-    port: project.port,
     error: project.error
   }))
 ])
@@ -143,25 +141,12 @@ const statusDotClass = (status: ProjectNavigationItem['status']) => {
         <template #item-trailing="{ item }">
           <div
             v-if="!props.collapsed"
-            class="flex items-center gap-2"
+            class="flex items-center"
           >
             <span
               class="size-2 rounded-full ring-4"
               :class="statusDotClass(asProjectItem(item).status)"
             />
-            <UBadge
-              :color="projectStatusMeta(asProjectItem(item).status).color"
-              variant="soft"
-              size="sm"
-            >
-              {{ projectStatusMeta(asProjectItem(item).status).label }}
-            </UBadge>
-            <span
-              v-if="asProjectItem(item).port"
-              class="text-[11px] text-muted"
-            >
-              :{{ asProjectItem(item).port }}
-            </span>
           </div>
         </template>
       </UNavigationMenu>
