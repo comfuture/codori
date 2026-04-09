@@ -19,7 +19,7 @@ Codori follows a few hard constraints:
 - Thin management layer: Codori manages Codex app-server processes but does not replace them.
 - Safe runtime model: one project gets at most one active app-server, tracked by PID/runtime files.
 - Bring-your-own network: private access is your responsibility.
-- Reuse proven pieces: the UI and app-server integration are adapted from Corazon where that reduces risk.
+- Keep the surface area focused: Codori solves project discovery, runtime control, and Codex access without trying to absorb adjacent infrastructure concerns.
 
 ## What Codori Does
 
