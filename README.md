@@ -2,16 +2,18 @@
 
 Codori is a self-hosted remote coding control plane for Codex app-server.
 
+## Philosophy
+
+Codori exists so you can keep using your desktop development environment as it is, then continue that work remotely through a thin control plane instead of rebuilding your workflow around a new platform.
+
 It is designed for people who keep many Git repositories under one parent directory and want a single place to:
 
 - discover projects
-- start and stop one Codex app-server per project
-- open a browser dashboard
-- continue previous Codex threads per project
+- open the right project in a browser dashboard
+- start exactly one Codex app-server per project when needed
+- continue previous Codex threads in that same project context
 
 Codori is intentionally small. It manages project runtimes and gives you a UI. It does not try to become your VPN, ingress proxy, auth platform, or deployment layer.
-
-## Philosophy
 
 Codori follows a few hard constraints:
 
@@ -20,39 +22,6 @@ Codori follows a few hard constraints:
 - Safe runtime model: one project gets at most one active app-server, tracked by PID/runtime files.
 - Bring-your-own network: private access is your responsibility.
 - Keep the surface area focused: Codori solves project discovery, runtime control, and Codex access without trying to absorb adjacent infrastructure concerns.
-
-## What Codori Does
-
-- Scans a configured root directory and finds descendant directories that contain a direct `.git` child.
-- Exposes CLI commands to list, start, stop, and inspect project runtimes.
-- Starts project-specific Codex app-server processes on demand.
-- Allocates a free TCP port from a configured safe range.
-- Stores runtime metadata under `~/.codori/run/`.
-- Provides a Nuxt UI dashboard for project selection, chat, and thread resume.
-- Proxies browser WebSocket traffic to the correct project app-server.
-
-## What Codori Does Not Do
-
-Codori v1 does not provide:
-
-- a private tunnel
-- public ingress
-- built-in authentication
-- SSO
-- multi-root project indexing
-- automatic idle shutdown
-- a separate Codori-owned thread database
-
-If you want to access Codori from another machine, you must provide your own private network path with something like Tailscale or Cloudflare Tunnel.
-
-## Monorepo Structure
-
-This repository is a pnpm workspace with two packages:
-
-- `@codori/server`: project discovery, runtime management, CLI, REST API, and WebSocket proxy
-- `@codori/client`: Nuxt + Nuxt UI dashboard for project browsing and Codex chat
-
-See [docs/prd.md](/Users/comfuture/Project/codori/docs/prd.md) for the detailed product specification.
 
 ## Requirements
 
@@ -72,32 +41,25 @@ codex app-server --listen ws://0.0.0.0:{PORT}
 pnpm install
 ```
 
-## Development
+## Usage
 
-Run the full workspace checks:
+The normal flow is simple:
+
+1. Run the Codori server on the machine that already has your projects and local tooling.
+2. Open the client UI locally or through your own private network path.
+3. Pick a project from the sidebar and start coding.
+4. Let Codori start the project runtime only when chat or thread access actually needs it.
+
+Start the Codori management server:
 
 ```bash
-pnpm lint
-pnpm typecheck
-pnpm test
+node packages/server/dist/cli.js serve --root ~/Project --host 127.0.0.1 --port 4310
 ```
 
 Run the client UI in development:
 
 ```bash
 pnpm --filter @codori/client dev
-```
-
-Build the workspace:
-
-```bash
-pnpm build
-```
-
-Run the compiled server CLI locally:
-
-```bash
-node packages/server/dist/cli.js serve --root ~/Project --host 127.0.0.1 --port 4310
 ```
 
 If you run the Nuxt client separately, point it at the Codori server with:
@@ -107,95 +69,7 @@ CODORI_SERVER_BASE=http://127.0.0.1:4310
 CODORI_SERVER_WS_BASE=ws://127.0.0.1:4310
 ```
 
-## Server Configuration
-
-Configuration precedence:
-
-1. CLI flags
-2. `~/.codori/config.json`
-3. built-in defaults
-
-Example:
-
-```json
-{
-  "root": "/Users/comfuture/Project",
-  "server": {
-    "host": "0.0.0.0",
-    "port": 4310
-  },
-  "ports": {
-    "start": 46000,
-    "end": 46999
-  }
-}
-```
-
-## CLI Usage
-
-Start the Codori management server:
-
-```bash
-codori serve --root ~/Project --host 0.0.0.0 --port 4310
-```
-
-List discovered projects:
-
-```bash
-codori list --root ~/Project
-codori list --root ~/Project --json
-```
-
-Start a project runtime:
-
-```bash
-codori start codori --root ~/Project
-```
-
-Stop a project runtime:
-
-```bash
-codori stop codori --root ~/Project
-```
-
-Inspect runtime status:
-
-```bash
-codori status --root ~/Project
-codori status codori --root ~/Project
-```
-
-## Project Discovery Rules
-
-Given a root directory such as `~/Project`, Codori treats any descendant directory with a direct `.git` child as a project.
-
-Examples:
-
-- `~/Project/codori/.git` -> project id `codori`
-- `~/Project/team/api/.git` -> project id `team/api`
-
-Codori ignores common heavy directories during recursive scanning such as `node_modules`, `.git`, `.nuxt`, `.output`, `dist`, `build`, and `coverage`.
-
-## Runtime Model
-
-- Each project gets at most one active Codex app-server.
-- If a PID/runtime file points to a live process, Codori reuses it instead of spawning another runtime.
-- If a PID/runtime file is stale, Codori cleans it up and starts a fresh runtime.
-- Runtime metadata is stored under `~/.codori/run/`.
-
-This keeps the browser UI stateless with respect to process ownership while still making runtime state explicit on disk.
-
-## Client UI
-
-The client dashboard provides:
-
-- a left sidebar with all discovered projects
-- start/stop controls per project
-- a main chat workspace
-- a new thread action
-- a previous threads panel for resume
-
-When you open a stopped project and start chatting, Codori starts its app-server first and then connects the UI through the Codori WebSocket proxy.
+Then open the client, choose a discovered Git project, and either start a new thread or resume an older one.
 
 ## Remote Access
 
@@ -257,6 +131,144 @@ codori serve --root ~/Project --host 127.0.0.1 --port 4310
 
 ```bash
 tailscale serve --https=443 http://127.0.0.1:4310
+```
+
+## Development
+
+Run the full workspace checks:
+
+```bash
+pnpm lint
+pnpm typecheck
+pnpm test
+```
+
+Run the client UI in development:
+
+```bash
+pnpm --filter @codori/client dev
+```
+
+Build the workspace:
+
+```bash
+pnpm build
+```
+
+## Monorepo Structure
+
+This repository is a pnpm workspace with two packages:
+
+- `@codori/server`: project discovery, runtime management, CLI, REST API, and WebSocket proxy
+- `@codori/client`: Nuxt + Nuxt UI dashboard for project browsing and Codex chat
+
+See [docs/prd.md](/Users/comfuture/Project/codori/docs/prd.md) for the detailed product specification.
+
+## Server Configuration
+
+Configuration precedence:
+
+1. CLI flags
+2. `~/.codori/config.json`
+3. built-in defaults
+
+Example:
+
+```json
+{
+  "root": "/Users/comfuture/Project",
+  "server": {
+    "host": "0.0.0.0",
+    "port": 4310
+  },
+  "ports": {
+    "start": 46000,
+    "end": 46999
+  }
+}
+```
+
+## Project Discovery Rules
+
+Given a root directory such as `~/Project`, Codori treats any descendant directory with a direct `.git` child as a project.
+
+Examples:
+
+- `~/Project/codori/.git` -> project id `codori`
+- `~/Project/team/api/.git` -> project id `team/api`
+
+Codori ignores common heavy directories during recursive scanning such as `node_modules`, `.git`, `.nuxt`, `.output`, `dist`, `build`, and `coverage`.
+
+## Runtime Model
+
+- Each project gets at most one active Codex app-server.
+- If a PID/runtime file points to a live process, Codori reuses it instead of spawning another runtime.
+- If a PID/runtime file is stale, Codori cleans it up and starts a fresh runtime.
+- Runtime metadata is stored under `~/.codori/run/`.
+
+This keeps the browser UI stateless with respect to process ownership while still making runtime state explicit on disk.
+
+## Client UI
+
+The client dashboard provides:
+
+- a left sidebar with all discovered projects
+- a main chat workspace
+- a new thread action
+- a previous threads panel for resume
+
+When you open a stopped project and start chatting, Codori starts its app-server first and then connects the UI through the Codori WebSocket proxy.
+
+## What Codori Does
+
+- Scans a configured root directory and finds descendant directories that contain a direct `.git` child.
+- Exposes CLI commands to list, start, stop, and inspect project runtimes.
+- Starts project-specific Codex app-server processes on demand.
+- Allocates a free TCP port from a configured safe range.
+- Stores runtime metadata under `~/.codori/run/`.
+- Provides a Nuxt UI dashboard for project selection, chat, and thread resume.
+- Proxies browser WebSocket traffic to the correct project app-server.
+
+## What Codori Does Not Do
+
+Codori v1 does not provide:
+
+- a private tunnel
+- public ingress
+- built-in authentication
+- SSO
+- multi-root project indexing
+- automatic idle shutdown
+- a separate Codori-owned thread database
+
+If you want to access Codori from another machine, you must provide your own private network path with something like Tailscale or Cloudflare Tunnel.
+
+## CLI Usage
+
+List discovered projects:
+
+```bash
+codori list --root ~/Project
+codori list --root ~/Project --json
+```
+
+Start a project runtime:
+
+```bash
+codori start codori --root ~/Project
+```
+
+Stop a project runtime:
+
+```bash
+codori stop codori --root ~/Project
+```
+
+Inspect runtime status:
+
+```bash
+codori status --root ~/Project
+codori status codori --root ~/Project
 ```
 
 3. Check status:
