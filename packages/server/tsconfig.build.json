@@ -5,6 +5,7 @@
     "emitDeclarationOnly": false,
     "noEmit": false,
     "outDir": "dist",
+    "rootDir": "src",
     "types": [
       "node"
     ]
@@ -13,4 +14,3 @@
     "test/**/*.ts"
   ]
 }
-
