@@ -86,6 +86,10 @@ const clearLiveStream = () => {
   session.liveStream = null
 }
 
+const stripOptimisticDraftMessages = () => {
+  messages.value = messages.value.filter(message => !message.id.startsWith('local-user-'))
+}
+
 const isTextPart = (part: CodoriChatPart): part is Extract<CodoriChatPart, { type: 'text' }> =>
   part.type === 'text'
 
@@ -463,6 +467,9 @@ const applyNotification = (notification: CodexRpcNotification) => {
     }
     case 'item/completed': {
       const params = notification.params as { item: CodexThreadItem }
+      if (params.item.type === 'userMessage') {
+        stripOptimisticDraftMessages()
+      }
       for (const nextMessage of itemToMessages(params.item)) {
         messages.value = upsertStreamingMessage(messages.value, {
           ...nextMessage,
@@ -636,17 +643,21 @@ const sendMessage = async () => {
   error.value = null
   status.value = 'submitted'
   input.value = ''
+  const shouldRenderOptimisticDraft = !routeThreadId.value
 
-  const optimisticMessage: CodoriChatMessage = {
-    id: `local-user-${Date.now()}`,
-    role: 'user',
-    parts: [{
-      type: 'text',
-      text,
-      state: 'done'
-    }]
+  if (shouldRenderOptimisticDraft) {
+    const optimisticMessage: CodoriChatMessage = {
+      id: `local-user-${Date.now()}`,
+      role: 'user',
+      parts: [{
+        type: 'text',
+        text,
+        state: 'done'
+      }]
+    }
+
+    messages.value = [...messages.value, optimisticMessage]
   }
-  messages.value = [...messages.value, optimisticMessage]
   let unsubscribe: (() => void) | null = null
 
   try {
