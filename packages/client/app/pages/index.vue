@@ -1,92 +1,61 @@
 <template>
   <UDashboardPanel
     id="landing-panel"
-    class="min-h-screen"
-    :min-size="50"
-    :max-size="100"
-    :default-size="100"
-    :resizable="false"
+    class="min-h-screen min-w-0 flex-1"
+    :ui="{ body: 'flex flex-1 items-center justify-center p-0' }"
   >
     <template #header>
-      <UDashboardNavbar title="Codori">
-        <template #right>
-          <UButton
-            to="/"
-            color="primary"
-            variant="soft"
-            icon="i-lucide-home"
-            label="Overview"
-          />
-        </template>
-      </UDashboardNavbar>
+      <UDashboardNavbar
+        class="lg:hidden"
+        title="Codori"
+        :toggle="{ color: 'neutral', variant: 'ghost' }"
+      />
     </template>
 
     <template #body>
-      <div class="mx-auto flex w-full max-w-5xl flex-col gap-6 p-6">
-        <div class="grid gap-6 lg:grid-cols-[1.3fr_0.9fr]">
-          <UCard>
-            <template #header>
-              <div class="space-y-2">
-                <div class="text-xs font-medium uppercase tracking-[0.28em] text-primary">
-                  Remote Coding
-                </div>
-                <h1 class="text-3xl font-semibold tracking-tight text-default">
-                  Launch Codex app-server per project, only when needed.
-                </h1>
-                <p class="max-w-2xl text-sm leading-6 text-muted">
-                  Choose a Git project from the sidebar, start its runtime, then enter a new chat thread or resume an old one from the dashboard.
-                </p>
-              </div>
-            </template>
-            <div class="grid gap-4 md:grid-cols-3">
-              <div class="rounded-2xl border border-default p-4">
-                <div class="text-sm font-medium">
-                  Project discovery
-                </div>
-                <p class="mt-2 text-sm text-muted">
-                  Codori scans one root directory and treats direct `.git` children as projects.
-                </p>
-              </div>
-              <div class="rounded-2xl border border-default p-4">
-                <div class="text-sm font-medium">
-                  One runtime per project
-                </div>
-                <p class="mt-2 text-sm text-muted">
-                  Existing app-server processes are reused and tracked with PID metadata.
-                </p>
-              </div>
-              <div class="rounded-2xl border border-default p-4">
-                <div class="text-sm font-medium">
-                  Dashboard-first control
-                </div>
-                <p class="mt-2 text-sm text-muted">
-                  Start, stop, inspect, and later resume threads from a single Nuxt UI workspace.
-                </p>
-              </div>
+      <div class="flex w-full items-center justify-center px-6 py-10">
+        <div class="flex w-full max-w-3xl flex-col items-center gap-8 text-center">
+          <div class="space-y-4">
+            <div class="text-xs font-medium uppercase tracking-[0.28em] text-primary">
+              Remote Coding
             </div>
-          </UCard>
+            <h1 class="text-balance text-4xl font-semibold tracking-tight text-highlighted md:text-5xl">
+              Pick a project and start coding.
+            </h1>
+            <p class="mx-auto max-w-2xl text-base leading-7 text-muted md:text-lg">
+              Codori manages one Codex runtime per Git project and keeps chat threads ready to resume from the dashboard.
+            </p>
+          </div>
 
-          <UCard>
-            <template #header>
-              <div class="text-lg font-semibold">
-                Start Here
+          <div class="grid w-full gap-3 md:grid-cols-3">
+            <div class="rounded-2xl border border-default/70 bg-elevated/30 px-4 py-4">
+              <div class="text-sm font-medium text-highlighted">
+                1. Browse
               </div>
-            </template>
-            <div class="space-y-4 text-sm text-muted">
-              <p>
-                1. Run `codori serve --root ~/Project`.
-              </p>
-              <p>
-                2. Expose the service through your own private tunnel if remote access is needed.
-              </p>
-              <p>
-                3. Pick a project from the left sidebar.
+              <p class="mt-2 text-sm leading-6 text-muted">
+                Projects appear in the left sidebar.
               </p>
             </div>
-          </UCard>
+            <div class="rounded-2xl border border-default/70 bg-elevated/30 px-4 py-4">
+              <div class="text-sm font-medium text-highlighted">
+                2. Connect
+              </div>
+              <p class="mt-2 text-sm leading-6 text-muted">
+                Open a project and Codori starts its runtime only when needed.
+              </p>
+            </div>
+            <div class="rounded-2xl border border-default/70 bg-elevated/30 px-4 py-4">
+              <div class="text-sm font-medium text-highlighted">
+                3. Continue
+              </div>
+              <p class="mt-2 text-sm leading-6 text-muted">
+                Start a thread or resume a previous session from the same workspace.
+              </p>
+            </div>
+          </div>
+
+          <TunnelNotice class="w-full text-left" />
         </div>
-
-        <TunnelNotice />
       </div>
     </template>
   </UDashboardPanel>

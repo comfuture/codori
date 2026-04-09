@@ -27,12 +27,8 @@ const onNewThread = async () => {
   <div class="flex h-screen min-h-0 flex-1 min-w-0">
     <UDashboardPanel
       id="thread-shell"
-      class="min-h-0"
+      class="min-h-0 min-w-0 flex-1"
       :ui="{ body: 'p-0' }"
-      :min-size="50"
-      :max-size="100"
-      :default-size="100"
-      :resizable="false"
     >
       <template #header>
         <UDashboardNavbar :title="threadId ?? 'Thread'">
