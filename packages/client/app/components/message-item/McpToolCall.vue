@@ -15,16 +15,7 @@ const formatPrettyJson = (value: unknown) => {
   }
 }
 
-const title = computed(() => {
-  switch (props.item.status) {
-    case 'inProgress':
-      return 'Calling MCP tool'
-    case 'failed':
-      return 'MCP tool failed'
-    default:
-      return 'MCP tool'
-  }
-})
+const title = computed(() => 'MCP')
 
 const icon = computed(() =>
   props.item.status === 'failed' ? 'i-lucide-triangle-alert' : 'i-lucide-plug-zap'

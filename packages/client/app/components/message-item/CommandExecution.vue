@@ -10,11 +10,11 @@ const props = defineProps<{
 const title = computed(() => {
   switch (props.item.status) {
     case 'inProgress':
-      return 'Running command'
+      return 'Running..'
     case 'failed':
-      return 'Command failed'
+      return 'Run failed'
     default:
-      return 'Command'
+      return 'Ran'
   }
 })
 

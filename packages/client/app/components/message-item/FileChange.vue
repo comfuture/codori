@@ -7,33 +7,67 @@ const props = defineProps<{
   item: FileChangeItem
 }>()
 
+const changes = computed(() => props.item.changes ?? [])
+
+const hasDiff = (diff?: string | null) => typeof diff === 'string' && diff.trim().length > 0
+
 const filePreview = computed(() => {
-  const [firstChange] = props.item.changes
+  const [firstChange] = changes.value
   if (!firstChange?.path) {
     return 'file changes'
   }
 
-  if (props.item.changes.length === 1) {
+  if (changes.value.length === 1) {
     return firstChange.path
   }
 
-  return `${firstChange.path} +${props.item.changes.length - 1} more`
+  return `${firstChange.path} +${changes.value.length - 1} more`
 })
 
 const title = computed(() => {
+  const hasChanges = changes.value.length > 0
+  const deletedOnly = hasChanges && changes.value.every(change => change.kind === 'delete')
+
   switch (props.item.status) {
     case 'inProgress':
-      return 'Applying file changes'
+      return 'Editing..'
     case 'failed':
-      return 'File change failed'
+      return 'Edit failed'
     default:
-      return 'File changes'
+      return deletedOnly ? 'Deleted' : 'Edited'
   }
 })
 
 const icon = computed(() =>
   props.item.status === 'failed' ? 'i-lucide-triangle-alert' : 'i-lucide-file-pen-line'
 )
+
+const changeKindIcon = (kind?: string) => {
+  switch (kind) {
+    case 'add':
+      return 'i-lucide-plus'
+    case 'delete':
+      return 'i-lucide-minus'
+    case 'update':
+      return 'i-lucide-pencil'
+    default:
+      return 'i-lucide-file'
+  }
+}
+
+const changeKindClass = (kind?: string) => {
+  switch (kind) {
+    case 'add':
+      return 'text-success'
+    case 'delete':
+      return 'text-error'
+    case 'update':
+      return 'text-warning'
+    default:
+      return 'text-muted'
+  }
+}
+
 const { open, isLoading, isStreaming } = useChatToolState(() => props.item.status, props.item.status !== 'completed')
 </script>
 
@@ -57,21 +91,22 @@ const { open, isLoading, isStreaming } = useChatToolState(() => props.item.statu
 
       <ul class="space-y-3">
         <li
-          v-for="(change, index) in item.changes"
+          v-for="(change, index) in changes"
           :key="`${item.id}-${change.path}-${index}`"
           class="space-y-2 rounded-xl border border-default/70 bg-elevated/20 px-3 py-3"
         >
           <div class="flex items-center gap-2 text-xs font-medium text-muted">
             <UIcon
-              :name="change.kind === 'add' ? 'i-lucide-plus' : change.kind === 'delete' ? 'i-lucide-minus' : 'i-lucide-pencil'"
+              :name="changeKindIcon(change.kind as string | undefined)"
               class="size-3.5"
+              :class="changeKindClass(change.kind as string | undefined)"
             />
             <span class="font-mono text-toned">{{ change.path }}</span>
           </div>
-          <pre
-            v-if="change.diff"
-            class="overflow-x-auto rounded-lg bg-default px-3 py-3 text-[11px] leading-5 text-toned"
-          >{{ change.diff }}</pre>
+          <MessageItemUnifiedDiffViewer
+            v-if="hasDiff(change.diff)"
+            :diff="change.diff ?? ''"
+          />
         </li>
       </ul>
     </div>
