@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { itemToMessages } from '../shared/codex-chat.js'
+import { CODORI_ITEM_PART, itemToMessages } from '../shared/codex-chat.js'
 import {
   encodeProjectIdSegment,
   normalizeProjectIdParam,
@@ -31,7 +31,44 @@ describe('client package', () => {
     })).toEqual([{
       id: 'agent-1',
       role: 'assistant',
-      text: 'Working on it'
+      parts: [{
+        type: 'text',
+        text: 'Working on it',
+        state: 'done'
+      }]
+    }])
+  })
+
+  it('maps tool items into structured message parts', () => {
+    expect(itemToMessages({
+      type: 'mcpToolCall',
+      id: 'tool-1',
+      server: 'filesystem',
+      tool: 'read_file',
+      arguments: { path: '/tmp/demo.txt' },
+      result: null,
+      error: null,
+      status: 'inProgress'
+    })).toEqual([{
+      id: 'tool-1',
+      role: 'system',
+      pending: true,
+      parts: [{
+        type: CODORI_ITEM_PART,
+        data: {
+          kind: 'mcp_tool_call',
+          item: {
+            type: 'mcpToolCall',
+            id: 'tool-1',
+            server: 'filesystem',
+            tool: 'read_file',
+            arguments: { path: '/tmp/demo.txt' },
+            result: null,
+            error: null,
+            status: 'inProgress'
+          }
+        }
+      }]
     }])
   })
 })

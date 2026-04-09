@@ -1,14 +1,21 @@
 <script setup lang="ts">
 import { useRouter } from '#imports'
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import CdMessageContent from './message-content.vue'
 import { useCodoriProjects } from '../../composables/useCodoriProjects.js'
 import { useCodoriRpc } from '../../composables/useCodoriRpc.js'
 import { useChatSubmitGuard } from '../../composables/useChatSubmitGuard.js'
 import {
+  CODORI_ITEM_PART,
+  eventToMessage,
   itemToMessages,
   threadToMessages,
   upsertStreamingMessage,
-  type CodoriChatMessage
+  type CodoriChatMessage,
+  type CodoriChatPart,
+  type CodoriFileChangeItem,
+  type CodoriItemData,
+  type CodoriMcpToolCallItem
 } from '~~/shared/codex-chat.js'
 import {
   notificationThreadId,
@@ -26,19 +33,6 @@ const props = defineProps<{
   projectId: string
   threadId?: string | null
 }>()
-
-type UiChatMessage = {
-  id: string
-  role: 'user' | 'assistant' | 'system'
-  metadata?: {
-    label?: string
-  }
-  parts: Array<{
-    type: 'text'
-    text: string
-    state?: 'done' | 'streaming'
-  }>
-}
 
 const router = useRouter()
 const { getClient } = useCodoriRpc()
@@ -67,24 +61,20 @@ const selectedProject = computed(() => getProject(props.projectId))
 const submitError = computed(() => error.value ? new Error(error.value) : undefined)
 const isBusy = computed(() => status.value === 'submitted' || status.value === 'streaming')
 
-const uiMessages = computed<UiChatMessage[]>(() =>
-  messages.value.map(message => ({
-    id: message.id,
-    role: message.role,
-    metadata: message.label ? { label: message.label } : undefined,
-    parts: [{
-      type: 'text',
-      text: message.text,
-      state: message.pending ? 'streaming' : 'done'
-    }]
-  }))
-)
+const isTextPart = (part: CodoriChatPart): part is Extract<CodoriChatPart, { type: 'text' }> =>
+  part.type === 'text'
 
-const getMessageText = (message: UiChatMessage) =>
-  message.parts
-    .filter(part => part.type === 'text')
-    .map(part => part.text)
-    .join('\n')
+const isItemPart = (part: CodoriChatPart): part is Extract<CodoriChatPart, { type: typeof CODORI_ITEM_PART }> =>
+  part.type === CODORI_ITEM_PART
+
+const getFallbackItemData = (message: CodoriChatMessage) => {
+  const itemPart = message.parts.find(isItemPart)
+  if (!itemPart) {
+    throw new Error('Expected fallback item part.')
+  }
+
+  return itemPart.data
+}
 
 const updatePinnedState = () => {
   const viewport = scrollViewport.value
@@ -203,15 +193,152 @@ const seedStreamingMessage = (item: CodexThreadItem) => {
   })
 }
 
-const appendStreamingText = (messageId: string, delta: string, fallback: Partial<CodoriChatMessage>) => {
+const updateMessage = (
+  messageId: string,
+  fallbackMessage: CodoriChatMessage,
+  transform: (message: CodoriChatMessage) => CodoriChatMessage
+) => {
   const existing = messages.value.find(message => message.id === messageId)
-  messages.value = upsertStreamingMessage(messages.value, {
-    id: messageId,
-    role: existing?.role ?? fallback.role ?? 'assistant',
-    label: existing?.label ?? fallback.label,
-    text: `${existing?.text ?? fallback.text ?? ''}${delta}`,
-    pending: true
+  messages.value = upsertStreamingMessage(messages.value, transform(existing ?? fallbackMessage))
+}
+
+const appendTextPartDelta = (
+  messageId: string,
+  delta: string,
+  fallbackMessage: CodoriChatMessage
+) => {
+  updateMessage(messageId, fallbackMessage, (message) => {
+    const partIndex = message.parts.findIndex(isTextPart)
+    const existingTextPart = partIndex === -1 ? null : message.parts[partIndex] as Extract<CodoriChatPart, { type: 'text' }>
+    const nextText = existingTextPart ? `${existingTextPart.text}${delta}` : delta
+    const nextTextPart: Extract<CodoriChatPart, { type: 'text' }> = {
+      type: 'text',
+      text: nextText,
+      state: 'streaming'
+    }
+    const nextParts = partIndex === -1
+      ? [...message.parts, nextTextPart]
+      : message.parts.map((part, index) => index === partIndex ? nextTextPart : part)
+
+    return {
+      ...message,
+      pending: true,
+      parts: nextParts
+    }
   })
+}
+
+const updateItemPart = (
+  messageId: string,
+  fallbackMessage: CodoriChatMessage,
+  transform: (itemData: CodoriItemData) => CodoriItemData
+) => {
+  updateMessage(messageId, fallbackMessage, (message) => {
+    const partIndex = message.parts.findIndex(isItemPart)
+    const existingData = partIndex === -1 ? null : (message.parts[partIndex] as Extract<CodoriChatPart, { type: typeof CODORI_ITEM_PART }>).data
+    const nextData = transform(existingData ?? getFallbackItemData(fallbackMessage))
+    const nextPart: Extract<CodoriChatPart, { type: typeof CODORI_ITEM_PART }> = {
+      type: CODORI_ITEM_PART,
+      data: nextData
+    }
+    const nextParts = partIndex === -1
+      ? [...message.parts, nextPart]
+      : message.parts.map((part, index) => index === partIndex ? nextPart : part)
+
+    return {
+      ...message,
+      pending: true,
+      parts: nextParts
+    }
+  })
+}
+
+const fallbackCommandMessage = (itemId: string): CodoriChatMessage => ({
+  id: itemId,
+  role: 'system',
+  pending: true,
+  parts: [{
+    type: CODORI_ITEM_PART,
+    data: {
+      kind: 'command_execution',
+      item: {
+        type: 'commandExecution',
+        id: itemId,
+        command: 'Command',
+        aggregatedOutput: '',
+        exitCode: null,
+        status: 'inProgress'
+      }
+    }
+  }]
+})
+
+const fallbackFileChangeMessage = (itemId: string): CodoriChatMessage => ({
+  id: itemId,
+  role: 'system',
+  pending: true,
+  parts: [{
+    type: CODORI_ITEM_PART,
+    data: {
+      kind: 'file_change',
+      item: {
+        type: 'fileChange',
+        id: itemId,
+        changes: [],
+        status: 'inProgress',
+        liveOutput: ''
+      }
+    }
+  }]
+})
+
+const fallbackMcpToolMessage = (itemId: string): CodoriChatMessage => ({
+  id: itemId,
+  role: 'system',
+  pending: true,
+  parts: [{
+    type: CODORI_ITEM_PART,
+    data: {
+      kind: 'mcp_tool_call',
+      item: {
+        type: 'mcpToolCall',
+        id: itemId,
+        server: 'mcp',
+        tool: 'tool',
+        arguments: null,
+        result: null,
+        error: null,
+        status: 'inProgress',
+        progressMessages: []
+      }
+    }
+  }]
+})
+
+const fallbackCommandItemData = (itemId: string) =>
+  getFallbackItemData(fallbackCommandMessage(itemId)) as Extract<CodoriItemData, { kind: 'command_execution' }>
+
+const fallbackFileChangeItemData = (itemId: string) =>
+  getFallbackItemData(fallbackFileChangeMessage(itemId)) as Extract<CodoriItemData, { kind: 'file_change' }>
+
+const fallbackMcpToolItemData = (itemId: string) =>
+  getFallbackItemData(fallbackMcpToolMessage(itemId)) as Extract<CodoriItemData, { kind: 'mcp_tool_call' }>
+
+const pushEventMessage = (kind: 'turn.failed' | 'stream.error', messageText: string) => {
+  messages.value = upsertStreamingMessage(
+    messages.value,
+    eventToMessage(`event-${kind}-${Date.now()}`, kind === 'turn.failed'
+      ? {
+          kind,
+          error: {
+            message: messageText
+          }
+        }
+      : {
+          kind,
+          message: messageText
+        })
+  )
 }
 
 const applyNotification = (notification: CodexRpcNotification) => {
@@ -234,41 +361,89 @@ const applyNotification = (notification: CodexRpcNotification) => {
     }
     case 'item/agentMessage/delta': {
       const params = notification.params as { itemId: string, delta: string }
-      appendStreamingText(params.itemId, params.delta, {
+      appendTextPartDelta(params.itemId, params.delta, {
+        id: params.itemId,
         role: 'assistant',
-        text: ''
+        pending: true,
+        parts: [{
+          type: 'text',
+          text: '',
+          state: 'streaming'
+        }]
       })
       status.value = 'streaming'
       return
     }
     case 'item/commandExecution/outputDelta': {
       const params = notification.params as { itemId: string, delta: string }
-      appendStreamingText(params.itemId, params.delta, {
-        role: 'system',
-        label: 'Command',
-        text: ''
-      })
+      const fallbackItem = fallbackCommandItemData(params.itemId)
+      updateItemPart(params.itemId, fallbackCommandMessage(params.itemId), (itemData) => ({
+        kind: 'command_execution',
+        item: {
+          ...(itemData.kind === 'command_execution' ? itemData.item : fallbackItem.item),
+          aggregatedOutput: `${(itemData.kind === 'command_execution' ? itemData.item.aggregatedOutput : '') ?? ''}${params.delta}`,
+          status: 'inProgress'
+        }
+      }))
       status.value = 'streaming'
       return
     }
     case 'item/fileChange/outputDelta': {
       const params = notification.params as { itemId: string, delta: string }
-      appendStreamingText(params.itemId, params.delta, {
-        role: 'system',
-        label: 'File changes',
-        text: ''
+      const fallbackItem = fallbackFileChangeItemData(params.itemId)
+      updateItemPart(params.itemId, fallbackFileChangeMessage(params.itemId), (itemData) => {
+        const baseItem: CodoriFileChangeItem = itemData.kind === 'file_change'
+          ? itemData.item
+          : fallbackItem.item
+        return {
+          kind: 'file_change',
+          item: {
+            ...baseItem,
+            liveOutput: `${baseItem.liveOutput ?? ''}${params.delta}`,
+            status: 'inProgress'
+          }
+        }
       })
       status.value = 'streaming'
       return
     }
     case 'item/mcpToolCall/progress': {
       const params = notification.params as { itemId: string, message: string }
-      appendStreamingText(params.itemId, `${params.message}\n`, {
-        role: 'system',
-        label: 'MCP tool',
-        text: ''
+      const fallbackItem = fallbackMcpToolItemData(params.itemId)
+      updateItemPart(params.itemId, fallbackMcpToolMessage(params.itemId), (itemData) => {
+        const baseItem: CodoriMcpToolCallItem = itemData.kind === 'mcp_tool_call'
+          ? itemData.item
+          : fallbackItem.item
+        return {
+          kind: 'mcp_tool_call',
+          item: {
+            ...baseItem,
+            progressMessages: [...(baseItem.progressMessages ?? []), params.message],
+            status: 'inProgress'
+          }
+        }
       })
       status.value = 'streaming'
+      return
+    }
+    case 'turn/failed': {
+      const params = notification.params as { error?: { message?: string } }
+      const messageText = params.error?.message ?? 'The turn failed.'
+      pushEventMessage('turn.failed', messageText)
+      error.value = messageText
+      status.value = 'error'
+      return
+    }
+    case 'stream/error': {
+      const params = notification.params as { message?: string }
+      const messageText = params.message ?? 'The stream failed.'
+      pushEventMessage('stream.error', messageText)
+      error.value = messageText
+      status.value = 'error'
+      return
+    }
+    case 'turn/completed': {
+      status.value = 'ready'
       return
     }
     default:
@@ -290,7 +465,11 @@ const sendMessage = async () => {
   const optimisticMessage: CodoriChatMessage = {
     id: `local-user-${Date.now()}`,
     role: 'user',
-    text
+    parts: [{
+      type: 'text',
+      text,
+      state: 'done'
+    }]
   }
   messages.value = [...messages.value, optimisticMessage]
   let unsubscribe: (() => void) | null = null
@@ -319,18 +498,25 @@ const sendMessage = async () => {
         completionResolved = true
         unsubscribe?.()
         const params = notification.params as { error?: { message?: string } }
-        rejectCompletion?.(new Error(params.error?.message ?? 'Turn failed.'))
+        const messageText = params.error?.message ?? 'Turn failed.'
+        pushEventMessage('stream.error', messageText)
+        rejectCompletion?.(new Error(messageText))
         return true
       }
 
-      if (notification.method !== 'turn/completed') {
-        applyNotification(notification)
-      }
+      applyNotification(notification)
 
       if (notification.method === 'turn/completed') {
         completionResolved = true
         unsubscribe?.()
         resolveCompletion?.()
+        return true
+      }
+
+      if (notification.method === 'turn/failed' || notification.method === 'stream/error') {
+        completionResolved = true
+        unsubscribe?.()
+        rejectCompletion?.(new Error(error.value ?? 'Turn failed.'))
         return true
       }
 
@@ -375,6 +561,7 @@ const sendMessage = async () => {
     }
 
     await completion
+    status.value = 'ready'
 
     if (props.threadId) {
       await hydrateThread(threadId)
@@ -431,11 +618,11 @@ watch(status, (nextStatus, previousStatus) => {
 <template>
   <section class="flex h-full min-h-0 flex-col bg-default">
     <div class="flex shrink-0 items-center justify-between gap-3 border-b border-default px-4 py-3 md:px-6">
-      <div>
+      <div class="min-w-0">
         <div class="text-sm font-semibold text-highlighted">
           Codex Workspace
         </div>
-        <div class="text-sm text-muted">
+        <div class="truncate text-sm text-muted">
           {{ activeThreadId ? `Thread ${activeThreadId}` : 'Start a new thread for this project.' }}
         </div>
       </div>
@@ -453,34 +640,28 @@ watch(status, (nextStatus, previousStatus) => {
       @scroll="updatePinnedState"
     >
       <UChatMessages
-        :messages="uiMessages"
+        :messages="messages"
         :status="status"
         :should-auto-scroll="false"
         :should-scroll-to-bottom="false"
         :auto-scroll="false"
-        :spacing-offset="120"
+        :spacing-offset="140"
         :user="{
           ui: {
             root: 'scroll-mt-4',
             container: 'gap-3 pb-8',
-            content: 'px-4 py-3 rounded-lg min-h-12'
+            content: 'px-4 py-3 rounded-2xl min-h-12'
           }
         }"
-        :ui="{ root: 'min-h-full px-4 py-4 md:px-6' }"
+        :ui="{
+          root: 'min-h-full px-4 py-5 md:px-6',
+          message: 'max-w-none',
+          content: 'w-full max-w-5xl'
+        }"
         compact
       >
         <template #content="{ message }">
-          <div class="space-y-2">
-            <div
-              v-if="message.metadata?.label"
-              class="text-[11px] font-medium uppercase tracking-[0.24em] text-muted"
-            >
-              {{ message.metadata.label }}
-            </div>
-            <div class="whitespace-pre-wrap text-sm leading-6">
-              {{ getMessageText(message as UiChatMessage) }}
-            </div>
-          </div>
+          <CdMessageContent :message="message as CodoriChatMessage" />
         </template>
       </UChatMessages>
     </div>

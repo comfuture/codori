@@ -11,3 +11,65 @@ body {
   margin: 0;
 }
 
+.cd-markdown {
+  font-size: 0.95rem;
+  line-height: 1.8;
+  color: var(--ui-text-highlighted);
+}
+
+.cd-markdown p,
+.cd-markdown ul,
+.cd-markdown ol,
+.cd-markdown pre,
+.cd-markdown blockquote {
+  margin: 0;
+}
+
+.cd-markdown > * + * {
+  margin-top: 0.85rem;
+}
+
+.cd-markdown ul,
+.cd-markdown ol {
+  padding-left: 1.25rem;
+}
+
+.cd-markdown li + li {
+  margin-top: 0.35rem;
+}
+
+.cd-markdown a {
+  color: var(--ui-primary);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--ui-primary) 45%, transparent);
+  text-underline-offset: 0.18em;
+}
+
+.cd-markdown code {
+  border: 1px solid color-mix(in srgb, var(--ui-border) 85%, transparent);
+  background: color-mix(in srgb, var(--ui-bg-elevated) 55%, transparent);
+  border-radius: 0.5rem;
+  padding: 0.14rem 0.4rem;
+  font-size: 0.85em;
+}
+
+.cd-markdown pre {
+  overflow-x: auto;
+  border: 1px solid color-mix(in srgb, var(--ui-border) 85%, transparent);
+  background: color-mix(in srgb, var(--ui-bg-elevated) 60%, transparent);
+  border-radius: 1rem;
+  padding: 0.9rem 1rem;
+}
+
+.cd-markdown pre code {
+  border: 0;
+  background: transparent;
+  border-radius: 0;
+  padding: 0;
+}
+
+.cd-markdown blockquote {
+  border-left: 3px solid color-mix(in srgb, var(--ui-primary) 45%, transparent);
+  padding-left: 1rem;
+  color: var(--ui-text-toned);
+}
