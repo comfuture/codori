@@ -1,8 +1,7 @@
-import { defineComponent, h, type PropType } from 'vue'
+import { defineComponent, h, resolveComponent, type PropType } from 'vue'
 import type { CodoriChatMessage, CodoriChatPart } from '~~/shared/codex-chat.js'
 import CdMessagePartEvent from './message-part/event.vue'
 import CdMessagePartItem from './message-part/item.js'
-import CdMessagePartReasoning from './message-part/reasoning.vue'
 import CdMessagePartText from './message-part/text.vue'
 
 export default defineComponent({
@@ -18,6 +17,8 @@ export default defineComponent({
     }
   },
   setup(props) {
+    const chatReasoning = resolveComponent('UChatReasoning')
+
     return () => {
       if (!props.part) {
         return null
@@ -30,8 +31,12 @@ export default defineComponent({
             part: props.part
           })
         case 'reasoning':
-          return h(CdMessagePartReasoning, {
-            part: props.part
+          return h(chatReasoning, {
+            icon: 'i-lucide-brain',
+            text: [...props.part.summary, ...props.part.content].join('\n\n').trim(),
+            streaming: props.part.state === 'streaming',
+            defaultOpen: props.part.state === 'streaming',
+            autoCloseDelay: 600
           })
         case 'data-codori-event':
           return h(CdMessagePartEvent, {

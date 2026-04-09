@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { CodoriDynamicToolCallItem } from '~~/shared/codex-chat.js'
-import CdMessageItemChatTool from './chat-tool.vue'
+import { useChatToolState } from './use-chat-tool-state.js'
 
 const props = defineProps<{
   item: CodoriDynamicToolCallItem
@@ -70,16 +70,20 @@ const suffix = computed(() => {
 
   return props.item.tool
 })
+const { open, isLoading, isStreaming } = useChatToolState(() => props.item.status, props.item.status === 'failed')
 </script>
 
 <template>
-  <CdMessageItemChatTool
+  <UChatTool
     :text="title"
     :suffix="suffix"
     :icon="icon"
-    :status="item.status"
+    :loading="isLoading"
+    :streaming="isStreaming"
     :variant="item.arguments != null || inputSummary ? 'card' : 'inline'"
+    :open="open"
     :default-open="item.status === 'failed'"
+    @update:open="open = $event"
   >
     <div class="space-y-3">
       <pre
@@ -100,5 +104,5 @@ const suffix = computed(() => {
         {{ item.success ? 'Completed successfully.' : 'Reported failure.' }}
       </p>
     </div>
-  </CdMessageItemChatTool>
+  </UChatTool>
 </template>

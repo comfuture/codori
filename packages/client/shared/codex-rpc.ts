@@ -107,6 +107,7 @@ export type CodexThreadItem =
       type: 'webSearch'
       id: string
       query: string
+      status?: string
     }
   | {
       type: 'contextCompaction'

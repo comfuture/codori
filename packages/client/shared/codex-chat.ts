@@ -196,6 +196,7 @@ export const itemToMessages = (item: CodexThreadItem): CodoriChatMessage[] => {
       return [{
         id: item.id,
         role: 'system',
+        pending: item.status === 'inProgress',
         parts: [{
           type: CODORI_ITEM_PART,
           data: {

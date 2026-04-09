@@ -1,17 +1,24 @@
 <script setup lang="ts">
 import type { CodexThreadItem } from '~~/shared/codex-rpc.js'
-import CdMessageItemChatTool from './chat-tool.vue'
+import { useChatToolState } from './use-chat-tool-state.js'
 
-defineProps<{
+const props = defineProps<{
   item: Extract<CodexThreadItem, { type: 'webSearch' }>
 }>()
+
+const { open, isLoading, isStreaming } = useChatToolState(() => props.item.status, props.item.status === 'failed')
 </script>
 
 <template>
-  <CdMessageItemChatTool
+  <UChatTool
     text="Web search"
     :suffix="item.query"
     icon="i-lucide-search"
+    :loading="isLoading"
+    :streaming="isStreaming"
     variant="inline"
+    :open="open"
+    :default-open="item.status === 'failed'"
+    @update:open="open = $event"
   />
 </template>

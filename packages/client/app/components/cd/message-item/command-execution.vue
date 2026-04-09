@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { CodoriCommandExecutionItem } from '~~/shared/codex-chat.js'
-import CdMessageItemChatTool from './chat-tool.vue'
+import { useChatToolState } from './use-chat-tool-state.js'
 
 const props = defineProps<{
   item: CodoriCommandExecutionItem
@@ -22,16 +22,20 @@ const output = computed(() => props.item.aggregatedOutput?.trim() ?? '')
 const icon = computed(() =>
   props.item.status === 'failed' ? 'i-lucide-triangle-alert' : 'i-lucide-terminal'
 )
+const { open, isLoading, isStreaming } = useChatToolState(() => props.item.status, props.item.status !== 'completed')
 </script>
 
 <template>
-  <CdMessageItemChatTool
+  <UChatTool
     :text="title"
     :suffix="item.command"
     :icon="icon"
-    :status="item.status"
+    :loading="isLoading"
+    :streaming="isStreaming"
     variant="card"
+    :open="open"
     :default-open="item.status !== 'completed'"
+    @update:open="open = $event"
   >
     <div class="space-y-3">
       <pre
@@ -58,5 +62,5 @@ const icon = computed(() =>
         :title="`Command failed with exit code ${item.exitCode}`"
       />
     </div>
-  </CdMessageItemChatTool>
+  </UChatTool>
 </template>

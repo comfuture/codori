@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { CodoriFileChangeItem } from '~~/shared/codex-chat.js'
-import CdMessageItemChatTool from './chat-tool.vue'
+import { useChatToolState } from './use-chat-tool-state.js'
 
 const props = defineProps<{
   item: CodoriFileChangeItem
@@ -34,16 +34,20 @@ const title = computed(() => {
 const icon = computed(() =>
   props.item.status === 'failed' ? 'i-lucide-triangle-alert' : 'i-lucide-file-pen-line'
 )
+const { open, isLoading, isStreaming } = useChatToolState(() => props.item.status, props.item.status !== 'completed')
 </script>
 
 <template>
-  <CdMessageItemChatTool
+  <UChatTool
     :text="title"
     :suffix="filePreview"
     :icon="icon"
-    :status="item.status"
+    :loading="isLoading"
+    :streaming="isStreaming"
     variant="card"
+    :open="open"
     :default-open="item.status !== 'completed'"
+    @update:open="open = $event"
   >
     <div class="space-y-3">
       <pre
@@ -71,5 +75,5 @@ const icon = computed(() =>
         </li>
       </ul>
     </div>
-  </CdMessageItemChatTool>
+  </UChatTool>
 </template>

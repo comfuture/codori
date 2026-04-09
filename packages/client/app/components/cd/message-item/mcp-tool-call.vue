@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { CodoriMcpToolCallItem } from '~~/shared/codex-chat.js'
-import CdMessageItemChatTool from './chat-tool.vue'
+import { useChatToolState } from './use-chat-tool-state.js'
 
 const props = defineProps<{
   item: CodoriMcpToolCallItem
@@ -29,16 +29,20 @@ const title = computed(() => {
 const icon = computed(() =>
   props.item.status === 'failed' ? 'i-lucide-triangle-alert' : 'i-lucide-plug-zap'
 )
+const { open, isLoading, isStreaming } = useChatToolState(() => props.item.status, props.item.status !== 'completed')
 </script>
 
 <template>
-  <CdMessageItemChatTool
+  <UChatTool
     :text="title"
     :suffix="`${item.server} ${item.tool}`"
     :icon="icon"
-    :status="item.status"
+    :loading="isLoading"
+    :streaming="isStreaming"
     variant="card"
+    :open="open"
     :default-open="item.status !== 'completed'"
+    @update:open="open = $event"
   >
     <div class="space-y-3">
       <div
@@ -87,5 +91,5 @@ const icon = computed(() =>
         :title="item.error.message"
       />
     </div>
-  </CdMessageItemChatTool>
+  </UChatTool>
 </template>
