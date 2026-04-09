@@ -2,7 +2,7 @@
 import type { NavigationMenuItem } from '@nuxt/ui'
 import { useRoute } from '#imports'
 import { computed, onMounted } from 'vue'
-import { useProjects } from '../../composables/useProjects.js'
+import { useProjects } from '../composables/useProjects.js'
 import { projectStatusMeta, toProjectRoute } from '~~/shared/codori.js'
 
 const props = defineProps<{

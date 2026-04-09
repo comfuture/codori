@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { useThreadPanel } from '../../composables/useThreadPanel.js'
-import CdThreadList from './thread-list.vue'
+import { useThreadPanel } from '../composables/useThreadPanel.js'
+import ThreadList from './thread-list.vue'
 
 defineProps<{
   projectId: string | null
@@ -41,7 +41,7 @@ const { open, closePanel } = useThreadPanel()
         </div>
       </template>
       <template #body>
-        <CdThreadList :project-id="projectId" />
+        <ThreadList :project-id="projectId" />
       </template>
     </UDashboardPanel>
   </div>
@@ -54,7 +54,7 @@ const { open, closePanel } = useThreadPanel()
     side="right"
   >
     <template #body>
-      <CdThreadList :project-id="projectId" />
+      <ThreadList :project-id="projectId" />
     </template>
   </USlideover>
 </template>

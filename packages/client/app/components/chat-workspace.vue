@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { useRouter } from '#imports'
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
-import CdMessageContent from './message-content.vue'
-import { useChatSession } from '../../composables/useChatSession.js'
-import { useProjects } from '../../composables/useProjects.js'
-import { useRpc } from '../../composables/useRpc.js'
-import { useChatSubmitGuard } from '../../composables/useChatSubmitGuard.js'
+import MessageContent from './message-content.vue'
+import { useChatSession } from '../composables/useChatSession.js'
+import { useProjects } from '../composables/useProjects.js'
+import { useRpc } from '../composables/useRpc.js'
+import { useChatSubmitGuard } from '../composables/useChatSubmitGuard.js'
 import {
   ITEM_PART,
   eventToMessage,
@@ -903,7 +903,7 @@ watch(status, (nextStatus, previousStatus) => {
         compact
       >
         <template #content="{ message }">
-          <CdMessageContent :message="message as ChatMessage" />
+          <MessageContent :message="message as ChatMessage" />
         </template>
       </UChatMessages>
     </div>

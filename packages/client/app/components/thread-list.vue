@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { useRoute, useRouter } from '#imports'
 import { computed, onMounted, ref, watch } from 'vue'
-import { useProjects } from '../../composables/useProjects.js'
-import { useRpc } from '../../composables/useRpc.js'
+import { useProjects } from '../composables/useProjects.js'
+import { useRpc } from '../composables/useRpc.js'
 import type { ThreadListResponse } from '~~/shared/codex-rpc.js'
 import { toProjectThreadRoute } from '~~/shared/codori.js'
 

@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { useRoute, useRouter } from '#imports'
 import { computed, onMounted } from 'vue'
-import CdChatWorkspace from '../../../components/cd/chat-workspace.vue'
-import CdThreadPanel from '../../../components/cd/thread-panel.vue'
-import CdTunnelNotice from '../../../components/cd/tunnel-notice.vue'
+import ChatWorkspace from '../../../components/chat-workspace.vue'
+import ThreadPanel from '../../../components/thread-panel.vue'
+import TunnelNotice from '../../../components/tunnel-notice.vue'
 import { useProjects } from '../../../composables/useProjects.js'
 import { useThreadPanel } from '../../../composables/useThreadPanel.js'
 import {
@@ -122,9 +122,9 @@ const onNewThread = async () => {
             </div>
           </div>
 
-          <cd-tunnel-notice class="m-4 mb-0 shrink-0 md:m-6 md:mb-0" />
+          <TunnelNotice class="m-4 mb-0 shrink-0 md:m-6 md:mb-0" />
 
-          <cd-chat-workspace
+          <ChatWorkspace
             :project-id="projectId ?? ''"
             class="min-h-0 flex-1"
           />
@@ -132,6 +132,6 @@ const onNewThread = async () => {
       </template>
     </UDashboardPanel>
 
-    <cd-thread-panel :project-id="projectId" />
+    <ThreadPanel :project-id="projectId" />
   </div>
 </template>

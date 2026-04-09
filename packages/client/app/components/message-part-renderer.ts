@@ -1,11 +1,11 @@
 import { defineComponent, h, resolveComponent, type PropType } from 'vue'
 import { EVENT_PART, ITEM_PART, type ChatMessage, type ChatPart } from '~~/shared/codex-chat.js'
-import CdMessagePartEvent from './message-part/event.vue'
-import CdMessagePartItem from './message-part/item.js'
-import CdMessagePartText from './message-part/text.vue'
+import MessagePartEvent from './message-part/event.vue'
+import MessagePartItem from './message-part/item.js'
+import MessagePartText from './message-part/text.vue'
 
 export default defineComponent({
-  name: 'CdMessagePartRenderer',
+  name: 'MessagePartRenderer',
   props: {
     message: {
       type: Object as PropType<ChatMessage | null>,
@@ -26,7 +26,7 @@ export default defineComponent({
 
       switch (props.part.type) {
         case 'text':
-          return h(CdMessagePartText, {
+          return h(MessagePartText, {
             role: props.message?.role,
             part: props.part
           })
@@ -39,11 +39,11 @@ export default defineComponent({
             autoCloseDelay: 600
           })
         case EVENT_PART:
-          return h(CdMessagePartEvent, {
+          return h(MessagePartEvent, {
             part: props.part
           })
         case ITEM_PART:
-          return h(CdMessagePartItem, {
+          return h(MessagePartItem, {
             part: props.part
           })
         default:
