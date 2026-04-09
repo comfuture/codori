@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { CodoriMcpToolCallItem } from '~~/shared/codex-chat.js'
+import type { McpToolCallItem } from '~~/shared/codex-chat.js'
 import { useChatToolState } from './use-chat-tool-state.js'
 
 const props = defineProps<{
-  item: CodoriMcpToolCallItem
+  item: McpToolCallItem
 }>()
 
 const formatPrettyJson = (value: unknown) => {

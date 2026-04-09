@@ -4,7 +4,7 @@ import { CodexRpcClient } from '~~/shared/codex-rpc.js'
 
 const clients = new Map<string, CodexRpcClient>()
 
-export const useCodoriRpc = () => {
+export const useRpc = () => {
   const runtimeConfig = useRuntimeConfig()
 
   const getClient = (projectId: string) => {

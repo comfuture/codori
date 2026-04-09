@@ -13,7 +13,7 @@ const mergeProject = (projects: ProjectRecord[], nextProject: ProjectRecord) => 
   return [...filtered, nextProject].sort((left, right) => left.projectId.localeCompare(right.projectId))
 }
 
-export const useCodoriProjects = () => {
+export const useProjects = () => {
   const projects = useState<ProjectRecord[]>('codori-projects', () => [])
   const loaded = useState<boolean>('codori-projects-loaded', () => false)
   const loading = useState<boolean>('codori-projects-loading', () => false)

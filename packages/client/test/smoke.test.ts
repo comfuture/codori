@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { CODORI_ITEM_PART, itemToMessages } from '../shared/codex-chat.js'
+import { ITEM_PART, itemToMessages } from '../shared/codex-chat.js'
 import {
   encodeProjectIdSegment,
   normalizeProjectIdParam,
@@ -54,7 +54,7 @@ describe('client package', () => {
       role: 'system',
       pending: true,
       parts: [{
-        type: CODORI_ITEM_PART,
+        type: ITEM_PART,
         data: {
           kind: 'mcp_tool_call',
           item: {

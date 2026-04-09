@@ -1,9 +1,9 @@
 import type { CodexThread, CodexThreadItem, CodexUserInput } from './codex-rpc.js'
 
-export const CODORI_EVENT_PART = 'data-codori-event' as const
-export const CODORI_ITEM_PART = 'data-codori-item' as const
+export const EVENT_PART = 'data-thread-event' as const
+export const ITEM_PART = 'data-thread-item' as const
 
-export type CodoriThreadEventData =
+export type ThreadEventData =
   | {
       kind: 'thread.started' | 'thread.ended' | 'thread.title' | 'turn.started' | 'turn.completed'
       title?: string | null
@@ -19,36 +19,36 @@ export type CodoriThreadEventData =
       message: string
     }
 
-export type CodoriCommandExecutionItem = Extract<CodexThreadItem, { type: 'commandExecution' }>
+export type CommandExecutionItem = Extract<CodexThreadItem, { type: 'commandExecution' }>
 
-export type CodoriFileChangeItem = Extract<CodexThreadItem, { type: 'fileChange' }> & {
+export type FileChangeItem = Extract<CodexThreadItem, { type: 'fileChange' }> & {
   liveOutput?: string | null
 }
 
-export type CodoriMcpToolCallItem = Extract<CodexThreadItem, { type: 'mcpToolCall' }> & {
+export type McpToolCallItem = Extract<CodexThreadItem, { type: 'mcpToolCall' }> & {
   progressMessages?: string[]
 }
 
-export type CodoriDynamicToolCallItem = Extract<CodexThreadItem, { type: 'dynamicToolCall' }> & {
+export type DynamicToolCallItem = Extract<CodexThreadItem, { type: 'dynamicToolCall' }> & {
   progressMessages?: string[]
 }
 
-export type CodoriItemData =
+export type ItemData =
   | {
       kind: 'command_execution'
-      item: CodoriCommandExecutionItem
+      item: CommandExecutionItem
     }
   | {
       kind: 'file_change'
-      item: CodoriFileChangeItem
+      item: FileChangeItem
     }
   | {
       kind: 'mcp_tool_call'
-      item: CodoriMcpToolCallItem
+      item: McpToolCallItem
     }
   | {
       kind: 'dynamic_tool_call'
-      item: CodoriDynamicToolCallItem
+      item: DynamicToolCallItem
     }
   | {
       kind: 'web_search'
@@ -59,7 +59,7 @@ export type CodoriItemData =
       item: Extract<CodexThreadItem, { type: 'contextCompaction' }>
     }
 
-export type CodoriChatPart =
+export type ChatPart =
   | {
       type: 'text'
       text: string
@@ -72,19 +72,19 @@ export type CodoriChatPart =
       state?: 'done' | 'streaming'
     }
   | {
-      type: typeof CODORI_EVENT_PART
-      data: CodoriThreadEventData
+      type: typeof EVENT_PART
+      data: ThreadEventData
     }
   | {
-      type: typeof CODORI_ITEM_PART
-      data: CodoriItemData
+      type: typeof ITEM_PART
+      data: ItemData
     }
 
-export type CodoriChatMessage = {
+export type ChatMessage = {
   id: string
   role: 'user' | 'assistant' | 'system'
   pending?: boolean
-  parts: CodoriChatPart[]
+  parts: ChatPart[]
 }
 
 const formatUserInput = (input: CodexUserInput) => {
@@ -97,7 +97,7 @@ const formatUserInput = (input: CodexUserInput) => {
 
 const streamingState = (pending?: boolean) => pending ? 'streaming' : 'done'
 
-export const itemToMessages = (item: CodexThreadItem): CodoriChatMessage[] => {
+export const itemToMessages = (item: CodexThreadItem): ChatMessage[] => {
   switch (item.type) {
     case 'userMessage':
       return [{
@@ -146,7 +146,7 @@ export const itemToMessages = (item: CodexThreadItem): CodoriChatMessage[] => {
         role: 'system',
         pending: item.status === 'inProgress',
         parts: [{
-          type: CODORI_ITEM_PART,
+          type: ITEM_PART,
           data: {
             kind: 'command_execution',
             item
@@ -159,7 +159,7 @@ export const itemToMessages = (item: CodexThreadItem): CodoriChatMessage[] => {
         role: 'system',
         pending: item.status === 'inProgress',
         parts: [{
-          type: CODORI_ITEM_PART,
+          type: ITEM_PART,
           data: {
             kind: 'file_change',
             item
@@ -172,7 +172,7 @@ export const itemToMessages = (item: CodexThreadItem): CodoriChatMessage[] => {
         role: 'system',
         pending: item.status === 'inProgress',
         parts: [{
-          type: CODORI_ITEM_PART,
+          type: ITEM_PART,
           data: {
             kind: 'mcp_tool_call',
             item
@@ -185,7 +185,7 @@ export const itemToMessages = (item: CodexThreadItem): CodoriChatMessage[] => {
         role: 'system',
         pending: item.status === 'inProgress',
         parts: [{
-          type: CODORI_ITEM_PART,
+          type: ITEM_PART,
           data: {
             kind: 'dynamic_tool_call',
             item
@@ -198,7 +198,7 @@ export const itemToMessages = (item: CodexThreadItem): CodoriChatMessage[] => {
         role: 'system',
         pending: item.status === 'inProgress',
         parts: [{
-          type: CODORI_ITEM_PART,
+          type: ITEM_PART,
           data: {
             kind: 'web_search',
             item
@@ -210,7 +210,7 @@ export const itemToMessages = (item: CodexThreadItem): CodoriChatMessage[] => {
         id: item.id,
         role: 'system',
         parts: [{
-          type: CODORI_ITEM_PART,
+          type: ITEM_PART,
           data: {
             kind: 'context_compaction',
             item
@@ -225,16 +225,16 @@ export const itemToMessages = (item: CodexThreadItem): CodoriChatMessage[] => {
 export const threadToMessages = (thread: CodexThread) =>
   thread.turns.flatMap(turn => turn.items.flatMap(item => itemToMessages(item)))
 
-export const eventToMessage = (id: string, data: CodoriThreadEventData): CodoriChatMessage => ({
+export const eventToMessage = (id: string, data: ThreadEventData): ChatMessage => ({
   id,
   role: 'system',
   parts: [{
-    type: CODORI_EVENT_PART,
+    type: EVENT_PART,
     data
   }]
 })
 
-const normalizeParts = (message: CodoriChatMessage): CodoriChatPart[] =>
+const normalizeParts = (message: ChatMessage): ChatPart[] =>
   message.parts.map((part) => {
     if (part.type === 'text') {
       return {
@@ -253,7 +253,7 @@ const normalizeParts = (message: CodoriChatMessage): CodoriChatPart[] =>
     return part
   })
 
-export const upsertStreamingMessage = (messages: CodoriChatMessage[], nextMessage: CodoriChatMessage) => {
+export const upsertStreamingMessage = (messages: ChatMessage[], nextMessage: ChatMessage) => {
   const normalizedMessage = {
     ...nextMessage,
     parts: normalizeParts(nextMessage)

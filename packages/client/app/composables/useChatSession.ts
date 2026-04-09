@@ -1,32 +1,32 @@
 import { ref, type Ref } from 'vue'
-import type { CodoriChatMessage } from '~~/shared/codex-chat.js'
+import type { ChatMessage } from '~~/shared/codex-chat.js'
 import type { CodexRpcNotification } from '~~/shared/codex-rpc.js'
 
-export type CodoriChatStatus = 'ready' | 'submitted' | 'streaming' | 'error'
+export type ChatStatus = 'ready' | 'submitted' | 'streaming' | 'error'
 
-export type CodoriLiveStream = {
+export type LiveStream = {
   threadId: string
   turnId: string | null
   bufferedNotifications: CodexRpcNotification[]
   unsubscribe: (() => void) | null
 }
 
-export type CodoriChatSession = {
-  messages: Ref<CodoriChatMessage[]>
-  status: Ref<CodoriChatStatus>
+export type ChatSession = {
+  messages: Ref<ChatMessage[]>
+  status: Ref<ChatStatus>
   error: Ref<string | null>
   activeThreadId: Ref<string | null>
   pendingThreadId: Ref<string | null>
   autoRedirectThreadId: Ref<string | null>
   loadVersion: Ref<number>
-  liveStream: CodoriLiveStream | null
+  liveStream: LiveStream | null
 }
 
-const sessions = new Map<string, CodoriChatSession>()
+const sessions = new Map<string, ChatSession>()
 
-const createSession = (): CodoriChatSession => ({
-  messages: ref<CodoriChatMessage[]>([]),
-  status: ref<CodoriChatStatus>('ready'),
+const createSession = (): ChatSession => ({
+  messages: ref<ChatMessage[]>([]),
+  status: ref<ChatStatus>('ready'),
   error: ref<string | null>(null),
   activeThreadId: ref<string | null>(null),
   pendingThreadId: ref<string | null>(null),
@@ -35,7 +35,7 @@ const createSession = (): CodoriChatSession => ({
   liveStream: null
 })
 
-export const useCodoriChatSession = (projectId: string) => {
+export const useChatSession = (projectId: string) => {
   const existing = sessions.get(projectId)
   if (existing) {
     return existing

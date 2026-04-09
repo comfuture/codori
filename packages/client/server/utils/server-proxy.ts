@@ -4,12 +4,12 @@ import { $fetch } from 'ofetch'
 
 const trimTrailingSlash = (value: string) => value.replace(/\/+$/, '')
 
-export const getCodoriServerBase = (event: H3Event) => {
+export const getServerBase = (event: H3Event) => {
   const runtimeConfig = useRuntimeConfig(event)
   return trimTrailingSlash(runtimeConfig.codoriServerBase as string)
 }
 
-export const proxyCodoriRequest = async <T>(
+export const proxyServerRequest = async <T>(
   event: H3Event,
   path: string,
   options: {
@@ -17,7 +17,7 @@ export const proxyCodoriRequest = async <T>(
     body?: unknown
   } = {}
 ) => {
-  const baseURL = getCodoriServerBase(event)
+  const baseURL = getServerBase(event)
   return await $fetch<T>(`${baseURL}${path}`, {
     method: options.method,
     body: options.body as BodyInit | Record<string, unknown> | undefined

@@ -1,5 +1,5 @@
 import { defineComponent, h, resolveComponent, type PropType } from 'vue'
-import type { CodoriChatMessage, CodoriChatPart } from '~~/shared/codex-chat.js'
+import { EVENT_PART, ITEM_PART, type ChatMessage, type ChatPart } from '~~/shared/codex-chat.js'
 import CdMessagePartEvent from './message-part/event.vue'
 import CdMessagePartItem from './message-part/item.js'
 import CdMessagePartText from './message-part/text.vue'
@@ -8,11 +8,11 @@ export default defineComponent({
   name: 'CdMessagePartRenderer',
   props: {
     message: {
-      type: Object as PropType<CodoriChatMessage | null>,
+      type: Object as PropType<ChatMessage | null>,
       default: null
     },
     part: {
-      type: Object as PropType<CodoriChatPart | null>,
+      type: Object as PropType<ChatPart | null>,
       default: null
     }
   },
@@ -38,11 +38,11 @@ export default defineComponent({
             defaultOpen: props.part.state === 'streaming',
             autoCloseDelay: 600
           })
-        case 'data-codori-event':
+        case EVENT_PART:
           return h(CdMessagePartEvent, {
             part: props.part
           })
-        case 'data-codori-item':
+        case ITEM_PART:
           return h(CdMessagePartItem, {
             part: props.part
           })

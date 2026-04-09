@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { CodoriDynamicToolCallItem } from '~~/shared/codex-chat.js'
+import type { DynamicToolCallItem } from '~~/shared/codex-chat.js'
 import { useChatToolState } from './use-chat-tool-state.js'
 
 const props = defineProps<{
-  item: CodoriDynamicToolCallItem
+  item: DynamicToolCallItem
 }>()
 
 const inputSummary = computed(() =>

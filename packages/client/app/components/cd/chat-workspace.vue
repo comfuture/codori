@@ -2,21 +2,21 @@
 import { useRouter } from '#imports'
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import CdMessageContent from './message-content.vue'
-import { useCodoriChatSession } from '../../composables/useCodoriChatSession.js'
-import { useCodoriProjects } from '../../composables/useCodoriProjects.js'
-import { useCodoriRpc } from '../../composables/useCodoriRpc.js'
+import { useChatSession } from '../../composables/useChatSession.js'
+import { useProjects } from '../../composables/useProjects.js'
+import { useRpc } from '../../composables/useRpc.js'
 import { useChatSubmitGuard } from '../../composables/useChatSubmitGuard.js'
 import {
-  CODORI_ITEM_PART,
+  ITEM_PART,
   eventToMessage,
   itemToMessages,
   threadToMessages,
   upsertStreamingMessage,
-  type CodoriChatMessage,
-  type CodoriChatPart,
-  type CodoriFileChangeItem,
-  type CodoriItemData,
-  type CodoriMcpToolCallItem
+  type ChatMessage,
+  type ChatPart,
+  type FileChangeItem,
+  type ItemData,
+  type McpToolCallItem
 } from '~~/shared/codex-chat.js'
 import {
   notificationThreadId,
@@ -36,13 +36,13 @@ const props = defineProps<{
 }>()
 
 const router = useRouter()
-const { getClient } = useCodoriRpc()
+const { getClient } = useRpc()
 const {
   loaded,
   refreshProjects,
   getProject,
   startProject
-} = useCodoriProjects()
+} = useProjects()
 const {
   onCompositionStart,
   onCompositionEnd,
@@ -52,7 +52,7 @@ const {
 const input = ref('')
 const scrollViewport = ref<HTMLElement | null>(null)
 const pinnedToBottom = ref(true)
-const session = useCodoriChatSession(props.projectId)
+const session = useChatSession(props.projectId)
 const {
   messages,
   status,
@@ -90,13 +90,13 @@ const stripOptimisticDraftMessages = () => {
   messages.value = messages.value.filter(message => !message.id.startsWith('local-user-'))
 }
 
-const isTextPart = (part: CodoriChatPart): part is Extract<CodoriChatPart, { type: 'text' }> =>
+const isTextPart = (part: ChatPart): part is Extract<ChatPart, { type: 'text' }> =>
   part.type === 'text'
 
-const isItemPart = (part: CodoriChatPart): part is Extract<CodoriChatPart, { type: typeof CODORI_ITEM_PART }> =>
-  part.type === CODORI_ITEM_PART
+const isItemPart = (part: ChatPart): part is Extract<ChatPart, { type: typeof ITEM_PART }> =>
+  part.type === ITEM_PART
 
-const getFallbackItemData = (message: CodoriChatMessage) => {
+const getFallbackItemData = (message: ChatMessage) => {
   const itemPart = message.parts.find(isItemPart)
   if (!itemPart) {
     throw new Error('Expected fallback item part.')
@@ -291,8 +291,8 @@ const seedStreamingMessage = (item: CodexThreadItem) => {
 
 const updateMessage = (
   messageId: string,
-  fallbackMessage: CodoriChatMessage,
-  transform: (message: CodoriChatMessage) => CodoriChatMessage
+  fallbackMessage: ChatMessage,
+  transform: (message: ChatMessage) => ChatMessage
 ) => {
   const existing = messages.value.find(message => message.id === messageId)
   messages.value = upsertStreamingMessage(messages.value, transform(existing ?? fallbackMessage))
@@ -301,13 +301,13 @@ const updateMessage = (
 const appendTextPartDelta = (
   messageId: string,
   delta: string,
-  fallbackMessage: CodoriChatMessage
+  fallbackMessage: ChatMessage
 ) => {
   updateMessage(messageId, fallbackMessage, (message) => {
     const partIndex = message.parts.findIndex(isTextPart)
-    const existingTextPart = partIndex === -1 ? null : message.parts[partIndex] as Extract<CodoriChatPart, { type: 'text' }>
+    const existingTextPart = partIndex === -1 ? null : message.parts[partIndex] as Extract<ChatPart, { type: 'text' }>
     const nextText = existingTextPart ? `${existingTextPart.text}${delta}` : delta
-    const nextTextPart: Extract<CodoriChatPart, { type: 'text' }> = {
+    const nextTextPart: Extract<ChatPart, { type: 'text' }> = {
       type: 'text',
       text: nextText,
       state: 'streaming'
@@ -326,15 +326,15 @@ const appendTextPartDelta = (
 
 const updateItemPart = (
   messageId: string,
-  fallbackMessage: CodoriChatMessage,
-  transform: (itemData: CodoriItemData) => CodoriItemData
+  fallbackMessage: ChatMessage,
+  transform: (itemData: ItemData) => ItemData
 ) => {
   updateMessage(messageId, fallbackMessage, (message) => {
     const partIndex = message.parts.findIndex(isItemPart)
-    const existingData = partIndex === -1 ? null : (message.parts[partIndex] as Extract<CodoriChatPart, { type: typeof CODORI_ITEM_PART }>).data
+    const existingData = partIndex === -1 ? null : (message.parts[partIndex] as Extract<ChatPart, { type: typeof ITEM_PART }>).data
     const nextData = transform(existingData ?? getFallbackItemData(fallbackMessage))
-    const nextPart: Extract<CodoriChatPart, { type: typeof CODORI_ITEM_PART }> = {
-      type: CODORI_ITEM_PART,
+    const nextPart: Extract<ChatPart, { type: typeof ITEM_PART }> = {
+      type: ITEM_PART,
       data: nextData
     }
     const nextParts = partIndex === -1
@@ -349,12 +349,12 @@ const updateItemPart = (
   })
 }
 
-const fallbackCommandMessage = (itemId: string): CodoriChatMessage => ({
+const fallbackCommandMessage = (itemId: string): ChatMessage => ({
   id: itemId,
   role: 'system',
   pending: true,
   parts: [{
-    type: CODORI_ITEM_PART,
+    type: ITEM_PART,
     data: {
       kind: 'command_execution',
       item: {
@@ -369,12 +369,12 @@ const fallbackCommandMessage = (itemId: string): CodoriChatMessage => ({
   }]
 })
 
-const fallbackFileChangeMessage = (itemId: string): CodoriChatMessage => ({
+const fallbackFileChangeMessage = (itemId: string): ChatMessage => ({
   id: itemId,
   role: 'system',
   pending: true,
   parts: [{
-    type: CODORI_ITEM_PART,
+    type: ITEM_PART,
     data: {
       kind: 'file_change',
       item: {
@@ -388,12 +388,12 @@ const fallbackFileChangeMessage = (itemId: string): CodoriChatMessage => ({
   }]
 })
 
-const fallbackMcpToolMessage = (itemId: string): CodoriChatMessage => ({
+const fallbackMcpToolMessage = (itemId: string): ChatMessage => ({
   id: itemId,
   role: 'system',
   pending: true,
   parts: [{
-    type: CODORI_ITEM_PART,
+    type: ITEM_PART,
     data: {
       kind: 'mcp_tool_call',
       item: {
@@ -412,13 +412,13 @@ const fallbackMcpToolMessage = (itemId: string): CodoriChatMessage => ({
 })
 
 const fallbackCommandItemData = (itemId: string) =>
-  getFallbackItemData(fallbackCommandMessage(itemId)) as Extract<CodoriItemData, { kind: 'command_execution' }>
+  getFallbackItemData(fallbackCommandMessage(itemId)) as Extract<ItemData, { kind: 'command_execution' }>
 
 const fallbackFileChangeItemData = (itemId: string) =>
-  getFallbackItemData(fallbackFileChangeMessage(itemId)) as Extract<CodoriItemData, { kind: 'file_change' }>
+  getFallbackItemData(fallbackFileChangeMessage(itemId)) as Extract<ItemData, { kind: 'file_change' }>
 
 const fallbackMcpToolItemData = (itemId: string) =>
-  getFallbackItemData(fallbackMcpToolMessage(itemId)) as Extract<CodoriItemData, { kind: 'mcp_tool_call' }>
+  getFallbackItemData(fallbackMcpToolMessage(itemId)) as Extract<ItemData, { kind: 'mcp_tool_call' }>
 
 const pushEventMessage = (kind: 'turn.failed' | 'stream.error', messageText: string) => {
   messages.value = upsertStreamingMessage(
@@ -529,8 +529,8 @@ const applyNotification = (notification: CodexRpcNotification) => {
               summary: [],
               content: []
             }
-          : message.parts[partIndex] as Extract<CodoriChatPart, { type: 'reasoning' }>
-        const nextPart: Extract<CodoriChatPart, { type: 'reasoning' }> = {
+          : message.parts[partIndex] as Extract<ChatPart, { type: 'reasoning' }>
+        const nextPart: Extract<ChatPart, { type: 'reasoning' }> = {
           type: 'reasoning',
           summary: notification.method === 'item/reasoning/summaryTextDelta'
             ? [...existingPart.summary, params.delta]
@@ -571,7 +571,7 @@ const applyNotification = (notification: CodexRpcNotification) => {
       const params = notification.params as { itemId: string, delta: string }
       const fallbackItem = fallbackFileChangeItemData(params.itemId)
       updateItemPart(params.itemId, fallbackFileChangeMessage(params.itemId), (itemData) => {
-        const baseItem: CodoriFileChangeItem = itemData.kind === 'file_change'
+        const baseItem: FileChangeItem = itemData.kind === 'file_change'
           ? itemData.item
           : fallbackItem.item
         return {
@@ -590,7 +590,7 @@ const applyNotification = (notification: CodexRpcNotification) => {
       const params = notification.params as { itemId: string, message: string }
       const fallbackItem = fallbackMcpToolItemData(params.itemId)
       updateItemPart(params.itemId, fallbackMcpToolMessage(params.itemId), (itemData) => {
-        const baseItem: CodoriMcpToolCallItem = itemData.kind === 'mcp_tool_call'
+        const baseItem: McpToolCallItem = itemData.kind === 'mcp_tool_call'
           ? itemData.item
           : fallbackItem.item
         return {
@@ -646,7 +646,7 @@ const sendMessage = async () => {
   const shouldRenderOptimisticDraft = !routeThreadId.value
 
   if (shouldRenderOptimisticDraft) {
-    const optimisticMessage: CodoriChatMessage = {
+    const optimisticMessage: ChatMessage = {
       id: `local-user-${Date.now()}`,
       role: 'user',
       parts: [{
@@ -903,7 +903,7 @@ watch(status, (nextStatus, previousStatus) => {
         compact
       >
         <template #content="{ message }">
-          <CdMessageContent :message="message as CodoriChatMessage" />
+          <CdMessageContent :message="message as ChatMessage" />
         </template>
       </UChatMessages>
     </div>

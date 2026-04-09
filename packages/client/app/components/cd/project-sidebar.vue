@@ -2,7 +2,7 @@
 import type { NavigationMenuItem } from '@nuxt/ui'
 import { useRoute } from '#imports'
 import { computed, onMounted } from 'vue'
-import { useCodoriProjects } from '../../composables/useCodoriProjects.js'
+import { useProjects } from '../../composables/useProjects.js'
 import { projectStatusMeta, toProjectRoute } from '~~/shared/codori.js'
 
 const props = defineProps<{
@@ -22,7 +22,7 @@ const {
   loaded,
   loading,
   refreshProjects
-} = useCodoriProjects()
+} = useProjects()
 
 const activeProjectId = computed(() => {
   const param = route.params.projectId

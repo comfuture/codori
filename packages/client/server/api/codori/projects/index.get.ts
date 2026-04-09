@@ -1,7 +1,7 @@
 import { defineEventHandler } from 'h3'
 import type { ProjectsResponse } from '~~/shared/codori.js'
-import { proxyCodoriRequest } from '../../../utils/codori-server.js'
+import { proxyServerRequest } from '../../../utils/server-proxy.js'
 
 export default defineEventHandler(async (event) =>
-  await proxyCodoriRequest<ProjectsResponse>(event, '/api/projects')
+  await proxyServerRequest<ProjectsResponse>(event, '/api/projects')
 )

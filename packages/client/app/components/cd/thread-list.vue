@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { useRoute, useRouter } from '#imports'
 import { computed, onMounted, ref, watch } from 'vue'
-import { useCodoriProjects } from '../../composables/useCodoriProjects.js'
-import { useCodoriRpc } from '../../composables/useCodoriRpc.js'
+import { useProjects } from '../../composables/useProjects.js'
+import { useRpc } from '../../composables/useRpc.js'
 import type { ThreadListResponse } from '~~/shared/codex-rpc.js'
 import { toProjectThreadRoute } from '~~/shared/codori.js'
 
@@ -18,8 +18,8 @@ type ThreadSummary = {
 
 const route = useRoute()
 const router = useRouter()
-const { loaded, refreshProjects, startProject, getProject } = useCodoriProjects()
-const { getClient } = useCodoriRpc()
+const { loaded, refreshProjects, startProject, getProject } = useProjects()
+const { getClient } = useRpc()
 
 const threads = ref<ThreadSummary[]>([])
 const loading = ref(false)

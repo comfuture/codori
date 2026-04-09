@@ -4,7 +4,7 @@ import { computed, onMounted } from 'vue'
 import CdChatWorkspace from '../../../components/cd/chat-workspace.vue'
 import CdThreadPanel from '../../../components/cd/thread-panel.vue'
 import CdTunnelNotice from '../../../components/cd/tunnel-notice.vue'
-import { useCodoriProjects } from '../../../composables/useCodoriProjects.js'
+import { useProjects } from '../../../composables/useProjects.js'
 import { useThreadPanel } from '../../../composables/useThreadPanel.js'
 import {
   normalizeProjectIdParam,
@@ -14,7 +14,7 @@ import {
 const route = useRoute()
 const router = useRouter()
 const { openPanel } = useThreadPanel()
-const { loaded, getProject, refreshProjects, startProject, stopProject, pendingProjectId } = useCodoriProjects()
+const { loaded, getProject, refreshProjects, startProject, stopProject, pendingProjectId } = useProjects()
 
 const projectId = computed(() => normalizeProjectIdParam(route.params.projectId as string | string[] | undefined))
 const project = computed(() => getProject(projectId.value))

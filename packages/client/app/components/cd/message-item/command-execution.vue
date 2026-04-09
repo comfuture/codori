@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { CodoriCommandExecutionItem } from '~~/shared/codex-chat.js'
+import type { CommandExecutionItem } from '~~/shared/codex-chat.js'
 import { useChatToolState } from './use-chat-tool-state.js'
 
 const props = defineProps<{
-  item: CodoriCommandExecutionItem
+  item: CommandExecutionItem
 }>()
 
 const title = computed(() => {

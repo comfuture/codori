@@ -1,16 +1,16 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { CODORI_EVENT_PART, type CodoriThreadEventData } from '~~/shared/codex-chat.js'
+import { EVENT_PART, type ThreadEventData } from '~~/shared/codex-chat.js'
 
 const props = defineProps<{
   part?: {
     type: string
-    data: CodoriThreadEventData
+    data: ThreadEventData
   } | null
 }>()
 
 const eventData = computed(() =>
-  props.part?.type === CODORI_EVENT_PART ? props.part.data : null
+  props.part?.type === EVENT_PART ? props.part.data : null
 )
 
 const shouldRenderEvent = computed(() => {

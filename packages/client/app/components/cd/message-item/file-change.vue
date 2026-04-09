@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { CodoriFileChangeItem } from '~~/shared/codex-chat.js'
+import type { FileChangeItem } from '~~/shared/codex-chat.js'
 import { useChatToolState } from './use-chat-tool-state.js'
 
 const props = defineProps<{
-  item: CodoriFileChangeItem
+  item: FileChangeItem
 }>()
 
 const filePreview = computed(() => {

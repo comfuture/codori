@@ -1,8 +1,8 @@
 import { defineComponent, h, type PropType } from 'vue'
 import {
-  CODORI_ITEM_PART,
-  type CodoriChatPart,
-  type CodoriItemData
+  ITEM_PART,
+  type ChatPart,
+  type ItemData
 } from '~~/shared/codex-chat.js'
 import CdMessageItemCommandExecution from '../message-item/command-execution.vue'
 import CdMessageItemContextCompaction from '../message-item/context-compaction.vue'
@@ -15,17 +15,17 @@ export default defineComponent({
   name: 'CdMessagePartItem',
   props: {
     part: {
-      type: Object as PropType<CodoriChatPart | null>,
+      type: Object as PropType<ChatPart | null>,
       default: null
     }
   },
   setup(props) {
     return () => {
-      if (!props.part || props.part.type !== CODORI_ITEM_PART) {
+      if (!props.part || props.part.type !== ITEM_PART) {
         return null
       }
 
-      const itemData = props.part.data as CodoriItemData
+      const itemData = props.part.data as ItemData
       switch (itemData.kind) {
         case 'command_execution':
           return h(CdMessageItemCommandExecution, { item: itemData.item })
