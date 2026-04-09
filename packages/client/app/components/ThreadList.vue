@@ -1,13 +1,16 @@
 <script setup lang="ts">
-import { useRoute, useRouter } from '#imports'
+import type { NavigationMenuItem } from '@nuxt/ui'
+import { useRoute } from '#imports'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useProjects } from '../composables/useProjects.js'
 import { useRpc } from '../composables/useRpc.js'
+import { useThreadPanel } from '../composables/useThreadPanel.js'
 import type { ThreadListResponse } from '~~/shared/codex-rpc.js'
 import { toProjectThreadRoute } from '~~/shared/codori.js'
 
 const props = defineProps<{
   projectId: string | null
+  autoCloseOnSelect?: boolean
 }>()
 
 type ThreadSummary = {
@@ -16,10 +19,14 @@ type ThreadSummary = {
   updatedAt: number
 }
 
+type ThreadNavigationItem = NavigationMenuItem & {
+  updatedAt: number
+}
+
 const route = useRoute()
-const router = useRouter()
 const { loaded, refreshProjects, startProject, getProject } = useProjects()
 const { getClient } = useRpc()
+const { closePanel } = useThreadPanel()
 
 const threads = ref<ThreadSummary[]>([])
 const loading = ref(false)
@@ -63,14 +70,34 @@ const fetchThreads = async () => {
     loading.value = false
   }
 }
+const activeThreadId = computed(() => {
+  const value = route.params.threadId
+  return typeof value === 'string' ? value : null
+})
 
-const openThread = async (threadId: string) => {
+const threadItems = computed<ThreadNavigationItem[][]>(() => {
   if (!props.projectId) {
-    return
+    return [[]]
   }
 
-  await router.push(toProjectThreadRoute(props.projectId, threadId))
-}
+  return [threads.value.map(thread => ({
+    label: thread.title,
+    icon: 'i-lucide-message-square-text',
+    to: toProjectThreadRoute(props.projectId!, thread.id),
+    active: activeThreadId.value === thread.id,
+    onSelect: () => {
+      if (props.autoCloseOnSelect) {
+        closePanel()
+      }
+    },
+    tooltip: {
+      text: thread.title
+    },
+    updatedAt: thread.updatedAt
+  }))]
+})
+
+const asThreadItem = (item: NavigationMenuItem) => item as ThreadNavigationItem
 
 onMounted(() => {
   void fetchThreads()
@@ -88,23 +115,9 @@ watch(() => route.fullPath, () => {
 
 <template>
   <div class="flex h-full min-h-0 flex-col">
-    <div class="flex items-center justify-between gap-2 px-4 py-3">
-      <div class="text-xs font-medium uppercase tracking-[0.24em] text-muted">
-        Sessions
-      </div>
-      <UButton
-        icon="i-lucide-refresh-cw"
-        color="neutral"
-        variant="ghost"
-        size="xs"
-        :loading="loading"
-        @click="fetchThreads"
-      />
-    </div>
-
     <div
       v-if="error"
-      class="px-4 pb-3"
+      class="px-3 py-3"
     >
       <UAlert
         color="error"
@@ -116,26 +129,37 @@ watch(() => route.fullPath, () => {
 
     <div
       v-if="!threads.length && !loading && !error"
-      class="px-4 pb-4 text-sm text-muted"
+      class="px-3 py-3 text-sm text-muted"
     >
       No previous threads were found for this project.
     </div>
 
-    <div class="min-h-0 flex-1 space-y-2 overflow-y-auto px-4 pb-4">
-      <button
-        v-for="thread in threads"
-        :key="thread.id"
-        type="button"
-        class="w-full rounded-2xl border border-default px-3 py-3 text-left transition hover:border-primary/30 hover:bg-muted/40"
-        @click="openThread(thread.id)"
+    <div class="min-h-0 flex-1 overflow-y-auto px-2 py-2">
+      <UNavigationMenu
+        v-if="threads.length"
+        :items="threadItems"
+        orientation="vertical"
+        highlight
+        color="primary"
+        variant="link"
+        :popover="false"
+        class="w-full"
+        :ui="{
+          root: 'w-full',
+          list: 'gap-1',
+          item: 'w-full',
+          link: 'w-full rounded-lg px-3 py-2.5 text-sm',
+          linkLeadingIcon: 'size-4 text-dimmed',
+          linkLabel: 'min-w-0 flex-1',
+          linkTrailing: 'hidden'
+        }"
       >
-        <div class="truncate text-sm font-medium">
-          {{ thread.title }}
-        </div>
-        <div class="mt-1 truncate text-[11px] text-muted">
-          {{ thread.id }}
-        </div>
-      </button>
+        <template #item-label="{ item }">
+          <div class="truncate font-medium text-highlighted">
+            {{ asThreadItem(item).label }}
+          </div>
+        </template>
+      </UNavigationMenu>
     </div>
   </div>
 </template>

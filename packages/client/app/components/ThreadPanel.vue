@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import { useThreadPanel } from '../composables/useThreadPanel.js'
 import ThreadList from './ThreadList.vue'
 
@@ -7,6 +8,11 @@ defineProps<{
 }>()
 
 const { open, closePanel } = useThreadPanel()
+const threadListKey = ref(0)
+
+const refreshThreads = () => {
+  threadListKey.value += 1
+}
 </script>
 
 <template>
@@ -22,26 +28,35 @@ const { open, closePanel } = useThreadPanel()
       resizable
     >
       <template #header>
-        <div class="flex items-center justify-between px-4 py-3">
-          <div>
-            <div class="text-sm font-semibold">
-              Previous Threads
-            </div>
-            <div class="text-xs text-muted">
-              {{ projectId }}
-            </div>
+        <div class="flex items-center justify-between gap-2 px-3 py-2">
+          <div class="text-sm font-medium text-highlighted">
+            Resume Threads
           </div>
-          <UButton
-            icon="i-lucide-panel-right-close"
-            color="neutral"
-            variant="ghost"
-            size="xs"
-            @click="closePanel"
-          />
+          <div class="flex items-center gap-1">
+            <UButton
+              icon="i-lucide-refresh-cw"
+              color="neutral"
+              variant="ghost"
+              size="xs"
+              square
+              @click="refreshThreads"
+            />
+            <UButton
+              icon="i-lucide-panel-right-close"
+              color="neutral"
+              variant="ghost"
+              size="xs"
+              square
+              @click="closePanel"
+            />
+          </div>
         </div>
       </template>
       <template #body>
-        <ThreadList :project-id="projectId" />
+        <ThreadList
+          :key="threadListKey"
+          :project-id="projectId"
+        />
       </template>
     </UDashboardPanel>
   </div>
@@ -49,12 +64,30 @@ const { open, closePanel } = useThreadPanel()
   <USlideover
     v-if="projectId"
     v-model:open="open"
-    title="Previous Threads"
-    description="Thread history becomes available when chat transport is connected."
+    title="Resume Threads"
     side="right"
+    dismissible
+    :ui="{
+      header: 'px-3 py-2',
+      body: '!p-0 sm:!p-0'
+    }"
   >
+    <template #actions>
+      <UButton
+        icon="i-lucide-refresh-cw"
+        color="neutral"
+        variant="ghost"
+        size="xs"
+        square
+        @click="refreshThreads"
+      />
+    </template>
     <template #body>
-      <ThreadList :project-id="projectId" />
+      <ThreadList
+        :key="`mobile-${threadListKey}`"
+        :project-id="projectId"
+        auto-close-on-select
+      />
     </template>
   </USlideover>
 </template>
