@@ -68,7 +68,7 @@ const toSubagentAvatarText = (name: string) => {
   return Array.from(normalized || 'AG').slice(0, 2).join('')
 }
 const subagentAvatarItems = computed(() =>
-  activePanels.value.map((panel, index) => ({
+  availablePanels.value.map((panel, index) => ({
     threadId: panel.threadId,
     name: panel.name,
     text: toSubagentAvatarText(panel.name),
@@ -167,13 +167,13 @@ watch(
         <UDashboardNavbar
           icon="i-lucide-message-square-text"
           :ui="{
-            title: 'min-w-0',
-            left: 'min-w-0',
+            title: 'min-w-0 flex-1',
+            left: 'min-w-0 flex-1',
             right: 'shrink-0'
           }"
         >
           <template #title>
-            <div class="min-w-0 space-y-0.5">
+            <div class="min-w-0 overflow-hidden pe-2 space-y-0.5">
               <div class="min-w-0">
                 <div class="truncate text-xs font-medium uppercase tracking-[0.22em] text-muted">
                   {{ projectName }}
@@ -187,7 +187,7 @@ watch(
             </div>
           </template>
           <template #right>
-            <div class="flex items-center gap-2">
+            <div class="flex items-center gap-1.5 lg:gap-2">
               <UTooltip
                 v-if="hasAvailableSubagents"
                 text="Subagents"
@@ -197,11 +197,12 @@ watch(
                   :variant="isSubagentsPanelVisible ? 'soft' : 'ghost'"
                   :icon="subagentsToggleIcon"
                   size="sm"
-                  class="gap-2 ps-2 pe-2.5"
+                  class="px-2 xl:ps-2 xl:pe-2.5"
                   :aria-label="isSubagentsPanelVisible ? 'Hide subagents' : 'Show subagents'"
                   @click="toggleSubagentsPanel"
                 >
                   <UAvatarGroup
+                    class="hidden xl:flex"
                     size="xs"
                     :max="4"
                     :ui="{ base: 'ring-2 -me-2 first:me-0' }"
@@ -290,12 +291,10 @@ watch(
       </template>
 
       <template #body>
-        <div class="h-full min-h-0 p-3">
-          <VisualSubagentStack
-            :agents="availablePanels"
-            class="h-full min-h-0"
-          />
-        </div>
+        <VisualSubagentStack
+          :agents="availablePanels"
+          class="h-full min-h-0"
+        />
       </template>
     </UDashboardPanel>
 
