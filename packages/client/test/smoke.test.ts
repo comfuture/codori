@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { ITEM_PART, itemToMessages } from '../shared/codex-chat.js'
+import { ITEM_PART, isSubagentActiveStatus, itemToMessages } from '../shared/codex-chat.js'
 import {
   encodeProjectIdSegment,
   normalizeProjectIdParam,
@@ -70,5 +70,58 @@ describe('client package', () => {
         }
       }]
     }])
+  })
+
+  it('maps subagent activity items into structured message parts', () => {
+    expect(itemToMessages({
+      type: 'collabAgentToolCall',
+      id: 'sub-1',
+      tool: 'spawnAgent',
+      status: 'inProgress',
+      senderThreadId: 'parent-thread',
+      receiverThreadIds: ['child-thread'],
+      prompt: 'Inspect the API surface.',
+      model: 'gpt-5.4-mini',
+      reasoningEffort: 'medium',
+      agentsStates: {
+        'child-thread': {
+          status: 'running',
+          message: 'Scanning files'
+        }
+      }
+    })).toEqual([{
+      id: 'sub-1',
+      role: 'system',
+      pending: true,
+      parts: [{
+        type: ITEM_PART,
+        data: {
+          kind: 'subagent_activity',
+          item: {
+            type: 'collabAgentToolCall',
+            id: 'sub-1',
+            tool: 'spawnAgent',
+            status: 'inProgress',
+            senderThreadId: 'parent-thread',
+            receiverThreadIds: ['child-thread'],
+            prompt: 'Inspect the API surface.',
+            model: 'gpt-5.4-mini',
+            reasoningEffort: 'medium',
+            agentsStates: [{
+              threadId: 'child-thread',
+              status: 'running',
+              message: 'Scanning files'
+            }]
+          }
+        }
+      }]
+    }])
+  })
+
+  it('treats pending and running subagents as active', () => {
+    expect(isSubagentActiveStatus(null)).toBe(true)
+    expect(isSubagentActiveStatus('pendingInit')).toBe(true)
+    expect(isSubagentActiveStatus('running')).toBe(true)
+    expect(isSubagentActiveStatus('completed')).toBe(false)
   })
 })

@@ -1,5 +1,5 @@
 import { ref, type Ref } from 'vue'
-import type { ChatMessage } from '~~/shared/codex-chat.js'
+import type { ChatMessage, SubagentAgentStatus, VisualSubagentPanel } from '~~/shared/codex-chat.js'
 import type { CodexRpcNotification } from '~~/shared/codex-rpc.js'
 
 export type ChatStatus = 'ready' | 'submitted' | 'streaming' | 'error'
@@ -8,11 +8,20 @@ export type LiveStream = {
   threadId: string
   turnId: string | null
   bufferedNotifications: CodexRpcNotification[]
+  observedSubagentThreadIds: Set<string>
   unsubscribe: (() => void) | null
+}
+
+export type SubagentPanelState = VisualSubagentPanel & {
+  turnId: string | null
+  bootstrapped: boolean
+  bufferedNotifications: CodexRpcNotification[]
+  status: SubagentAgentStatus
 }
 
 export type ChatSession = {
   messages: Ref<ChatMessage[]>
+  subagentPanels: Ref<SubagentPanelState[]>
   status: Ref<ChatStatus>
   error: Ref<string | null>
   activeThreadId: Ref<string | null>
@@ -27,6 +36,7 @@ const sessions = new Map<string, ChatSession>()
 
 const createSession = (): ChatSession => ({
   messages: ref<ChatMessage[]>([]),
+  subagentPanels: ref<SubagentPanelState[]>([]),
   status: ref<ChatStatus>('ready'),
   error: ref<string | null>(null),
   activeThreadId: ref<string | null>(null),

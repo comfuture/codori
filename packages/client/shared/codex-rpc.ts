@@ -104,6 +104,21 @@ export type CodexThreadItem =
       success: boolean | null
     }
   | {
+      type: 'collabAgentToolCall'
+      id: string
+      tool: 'spawnAgent' | 'sendInput' | 'resumeAgent' | 'wait' | 'closeAgent'
+      status: string
+      senderThreadId: string
+      receiverThreadIds: string[]
+      prompt: string | null
+      model: string | null
+      reasoningEffort: string | null
+      agentsStates: Record<string, {
+        status: 'pendingInit' | 'running' | 'interrupted' | 'completed' | 'errored' | 'shutdown' | 'notFound' | null
+        message: string | null
+      } | undefined>
+    }
+  | {
       type: 'webSearch'
       id: string
       query: string
@@ -130,6 +145,8 @@ export type CodexThread = {
   createdAt: number
   updatedAt: number
   name: string | null
+  agentNickname?: string | null
+  agentRole?: string | null
   turns: CodexTurn[]
 }
 

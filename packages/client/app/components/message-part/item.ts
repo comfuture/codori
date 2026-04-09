@@ -9,6 +9,7 @@ import MessageItemContextCompaction from '../message-item/ContextCompaction.vue'
 import MessageItemDynamicToolCall from '../message-item/DynamicToolCall.vue'
 import MessageItemFileChange from '../message-item/FileChange.vue'
 import MessageItemMcpToolCall from '../message-item/McpToolCall.vue'
+import MessageItemSubagentActivity from '../message-item/SubagentActivity.vue'
 import MessageItemWebSearch from '../message-item/WebSearch.vue'
 
 export default defineComponent({
@@ -35,6 +36,8 @@ export default defineComponent({
           return h(MessageItemMcpToolCall, { item: itemData.item })
         case 'dynamic_tool_call':
           return h(MessageItemDynamicToolCall, { item: itemData.item })
+        case 'subagent_activity':
+          return h(MessageItemSubagentActivity, { item: itemData.item })
         case 'web_search':
           return h(MessageItemWebSearch, { item: itemData.item })
         case 'context_compaction':

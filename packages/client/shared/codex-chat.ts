@@ -33,6 +33,37 @@ export type DynamicToolCallItem = Extract<CodexThreadItem, { type: 'dynamicToolC
   progressMessages?: string[]
 }
 
+export type SubagentTool = Extract<CodexThreadItem, { type: 'collabAgentToolCall' }>['tool']
+export type SubagentToolStatus = 'inProgress' | 'completed' | 'failed'
+export type SubagentAgentStatus =
+  | 'pendingInit'
+  | 'running'
+  | 'interrupted'
+  | 'completed'
+  | 'errored'
+  | 'shutdown'
+  | 'notFound'
+  | null
+
+export type SubagentAgentState = {
+  threadId: string
+  status: SubagentAgentStatus
+  message: string | null
+}
+
+export type SubagentActivityItem = Omit<Extract<CodexThreadItem, { type: 'collabAgentToolCall' }>, 'agentsStates'> & {
+  agentsStates: SubagentAgentState[]
+}
+
+export type VisualSubagentPanel = {
+  threadId: string
+  name: string
+  status: SubagentAgentStatus
+  messages: ChatMessage[]
+  firstSeenAt: number
+  lastSeenAt: number
+}
+
 export type ItemData =
   | {
       kind: 'command_execution'
@@ -49,6 +80,10 @@ export type ItemData =
   | {
       kind: 'dynamic_tool_call'
       item: DynamicToolCallItem
+    }
+  | {
+      kind: 'subagent_activity'
+      item: SubagentActivityItem
     }
   | {
       kind: 'web_search'
@@ -86,6 +121,9 @@ export type ChatMessage = {
   pending?: boolean
   parts: ChatPart[]
 }
+
+export const isSubagentActiveStatus = (status: SubagentAgentStatus) =>
+  status === null || status === 'pendingInit' || status === 'running'
 
 const formatUserInput = (input: CodexUserInput) => {
   if (input.type === 'text') {
@@ -189,6 +227,29 @@ export const itemToMessages = (item: CodexThreadItem): ChatMessage[] => {
           data: {
             kind: 'dynamic_tool_call',
             item
+          }
+        }]
+      }]
+    case 'collabAgentToolCall':
+      return [{
+        id: item.id,
+        role: 'system',
+        pending: item.status === 'inProgress',
+        parts: [{
+          type: ITEM_PART,
+          data: {
+            kind: 'subagent_activity',
+            item: {
+              ...item,
+              agentsStates: [
+                ...item.receiverThreadIds,
+                ...Object.keys(item.agentsStates).filter(threadId => !item.receiverThreadIds.includes(threadId))
+              ].map((threadId) => ({
+                threadId,
+                status: item.agentsStates[threadId]?.status ?? null,
+                message: item.agentsStates[threadId]?.message ?? null
+              }))
+            }
           }
         }]
       }]

@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { useRoute, useRouter } from '#imports'
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useChatSession } from '../../../../composables/useChatSession.js'
 import { useProjects } from '../../../../composables/useProjects.js'
 import { useThreadPanel } from '../../../../composables/useThreadPanel.js'
+import { useVisualSubagentPanels } from '../../../../composables/useVisualSubagentPanels.js'
 import { normalizeProjectIdParam, toProjectRoute } from '~~/shared/codori.js'
 
 const route = useRoute()
@@ -17,6 +18,10 @@ const threadId = computed(() => {
   return typeof value === 'string' ? value : null
 })
 const selectedProject = computed(() => getProject(projectId.value))
+const subagentPanels = computed(() =>
+  projectId.value ? useChatSession(projectId.value).subagentPanels.value : []
+)
+const { availablePanels, activePanels } = useVisualSubagentPanels(() => subagentPanels.value)
 const projectName = computed(() => selectedProject.value?.projectId ?? projectId.value ?? 'Project')
 const threadTitle = computed(() => {
   if (!projectId.value) {
@@ -45,6 +50,50 @@ const rpcStatus = computed(() => {
       return 'Checking'
   }
 })
+const isSubagentsPanelOpen = ref(false)
+const hasUserToggledSubagentsPanel = ref(false)
+const hasResolvedSubagentPanelState = ref(false)
+const previousActiveSubagentCount = ref(0)
+const hasAvailableSubagents = computed(() => availablePanels.value.length > 0)
+const isSubagentsPanelVisible = computed(() =>
+  isSubagentsPanelOpen.value && hasAvailableSubagents.value
+)
+const subagentsToggleIcon = computed(() =>
+  isSubagentsPanelVisible.value
+    ? 'i-lucide-panel-right-close'
+    : 'i-lucide-panel-right-open'
+)
+const toSubagentAvatarText = (name: string) => {
+  const normalized = name.replace(/\s+/g, '').trim()
+  return Array.from(normalized || 'AG').slice(0, 2).join('')
+}
+const subagentAvatarItems = computed(() =>
+  activePanels.value.map((panel, index) => ({
+    threadId: panel.threadId,
+    name: panel.name,
+    text: toSubagentAvatarText(panel.name),
+    class: [
+      'bg-emerald-500/15 text-emerald-700 ring-1 ring-inset ring-emerald-500/30 dark:text-emerald-300',
+      'bg-sky-500/15 text-sky-700 ring-1 ring-inset ring-sky-500/30 dark:text-sky-300',
+      'bg-amber-500/15 text-amber-800 ring-1 ring-inset ring-amber-500/35 dark:text-amber-300',
+      'bg-rose-500/15 text-rose-700 ring-1 ring-inset ring-rose-500/30 dark:text-rose-300',
+      'bg-violet-500/15 text-violet-700 ring-1 ring-inset ring-violet-500/30 dark:text-violet-300'
+    ][index % 5]
+  }))
+)
+
+const toggleSubagentsPanel = () => {
+  if (!hasAvailableSubagents.value) {
+    return
+  }
+  hasUserToggledSubagentsPanel.value = true
+  isSubagentsPanelOpen.value = !isSubagentsPanelOpen.value
+}
+
+const closeSubagentsPanel = () => {
+  hasUserToggledSubagentsPanel.value = true
+  isSubagentsPanelOpen.value = false
+}
 
 const onNewThread = async () => {
   if (!projectId.value) {
@@ -59,6 +108,48 @@ onMounted(() => {
     void refreshProjects()
   }
 })
+
+watch(threadId, () => {
+  hasUserToggledSubagentsPanel.value = false
+  hasResolvedSubagentPanelState.value = false
+  previousActiveSubagentCount.value = 0
+  isSubagentsPanelOpen.value = false
+}, { immediate: true })
+
+watch(hasAvailableSubagents, (value) => {
+  if (!value) {
+    hasUserToggledSubagentsPanel.value = false
+    hasResolvedSubagentPanelState.value = false
+    previousActiveSubagentCount.value = 0
+    isSubagentsPanelOpen.value = false
+  }
+}, { immediate: true })
+
+watch(
+  () => activePanels.value.length,
+  (nextCount) => {
+    if (!hasAvailableSubagents.value) {
+      return
+    }
+
+    if (!hasResolvedSubagentPanelState.value) {
+      hasResolvedSubagentPanelState.value = true
+      previousActiveSubagentCount.value = nextCount
+      isSubagentsPanelOpen.value = nextCount > 0
+      return
+    }
+
+    if (!hasUserToggledSubagentsPanel.value
+      && previousActiveSubagentCount.value === 0
+      && nextCount > 0
+    ) {
+      isSubagentsPanelOpen.value = true
+    }
+
+    previousActiveSubagentCount.value = nextCount
+  },
+  { immediate: true }
+)
 </script>
 
 <template>
@@ -66,6 +157,10 @@ onMounted(() => {
     <UDashboardPanel
       id="thread-shell"
       class="min-h-0 min-w-0 flex-1"
+      :default-size="isSubagentsPanelVisible ? 70 : undefined"
+      :min-size="isSubagentsPanelVisible ? 50 : undefined"
+      :max-size="isSubagentsPanelVisible ? 75 : undefined"
+      :resizable="isSubagentsPanelVisible"
       :ui="{ root: '!p-0', body: '!p-0 sm:!p-0 !gap-0 sm:!gap-0' }"
     >
       <template #header>
@@ -93,6 +188,34 @@ onMounted(() => {
           </template>
           <template #right>
             <div class="flex items-center gap-2">
+              <UTooltip
+                v-if="hasAvailableSubagents"
+                text="Subagents"
+              >
+                <UButton
+                  :color="isSubagentsPanelVisible ? 'primary' : 'neutral'"
+                  :variant="isSubagentsPanelVisible ? 'soft' : 'ghost'"
+                  :icon="subagentsToggleIcon"
+                  size="sm"
+                  class="gap-2 ps-2 pe-2.5"
+                  :aria-label="isSubagentsPanelVisible ? 'Hide subagents' : 'Show subagents'"
+                  @click="toggleSubagentsPanel"
+                >
+                  <UAvatarGroup
+                    size="xs"
+                    :max="4"
+                    :ui="{ base: 'ring-2 -me-2 first:me-0' }"
+                  >
+                    <UAvatar
+                      v-for="agent in subagentAvatarItems"
+                      :key="agent.threadId"
+                      :text="agent.text"
+                      :alt="agent.name"
+                      :class="agent.class"
+                    />
+                  </UAvatarGroup>
+                </UButton>
+              </UTooltip>
               <UTooltip :text="`RPC ${rpcStatus}`">
                 <ProjectStatusDot
                   :status="rpcStatus"
@@ -130,6 +253,49 @@ onMounted(() => {
           :thread-id="threadId"
           class="min-h-0 flex-1"
         />
+      </template>
+    </UDashboardPanel>
+
+    <UDashboardPanel
+      v-if="isSubagentsPanelVisible"
+      id="thread-subagents-panel"
+      class="h-full min-h-0"
+      :default-size="30"
+      :min-size="20"
+      :max-size="40"
+      resizable
+      :ui="{ body: '!p-0' }"
+    >
+      <template #header>
+        <div class="flex items-center justify-between gap-2 px-4 py-3">
+          <div class="flex items-center gap-2">
+            <span class="text-sm font-semibold text-highlighted">Subagents</span>
+            <UBadge
+              color="primary"
+              variant="soft"
+              size="sm"
+            >
+              {{ availablePanels.length }}
+            </UBadge>
+          </div>
+          <UButton
+            icon="i-lucide-x"
+            color="neutral"
+            variant="ghost"
+            size="xs"
+            aria-label="Close subagents panel"
+            @click="closeSubagentsPanel"
+          />
+        </div>
+      </template>
+
+      <template #body>
+        <div class="h-full min-h-0 p-3">
+          <VisualSubagentStack
+            :agents="availablePanels"
+            class="h-full min-h-0"
+          />
+        </div>
       </template>
     </UDashboardPanel>
 
