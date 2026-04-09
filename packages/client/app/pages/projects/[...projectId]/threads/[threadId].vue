@@ -2,7 +2,7 @@
 import { useRoute } from '#imports'
 import { computed } from 'vue'
 import { useThreadPanel } from '../../../../composables/useThreadPanel.js'
-import { normalizeProjectIdParam } from '../../../../../shared/codori.js'
+import { normalizeProjectIdParam } from '~~/shared/codori.js'
 
 const route = useRoute()
 const { openPanel } = useThreadPanel()

@@ -1,6 +1,6 @@
 import { useRuntimeConfig } from '#imports'
-import { encodeProjectIdSegment } from '../../shared/codori.js'
-import { CodexRpcClient } from '../../shared/codex-rpc.js'
+import { encodeProjectIdSegment } from '~~/shared/codori.js'
+import { CodexRpcClient } from '~~/shared/codex-rpc.js'
 
 const clients = new Map<string, CodexRpcClient>()
 

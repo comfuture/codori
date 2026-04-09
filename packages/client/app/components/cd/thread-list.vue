@@ -3,8 +3,8 @@ import { useRoute, useRouter } from '#imports'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useCodoriProjects } from '../../composables/useCodoriProjects.js'
 import { useCodoriRpc } from '../../composables/useCodoriRpc.js'
-import type { ThreadListResponse } from '../../../shared/codex-rpc.js'
-import { toProjectThreadRoute } from '../../../shared/codori.js'
+import type { ThreadListResponse } from '~~/shared/codex-rpc.js'
+import { toProjectThreadRoute } from '~~/shared/codori.js'
 
 const props = defineProps<{
   projectId: string | null

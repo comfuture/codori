@@ -2,7 +2,7 @@
 import { useRoute, useRouter } from '#imports'
 import { computed, onMounted } from 'vue'
 import { useCodoriProjects } from '../../composables/useCodoriProjects.js'
-import { projectStatusMeta, toProjectRoute } from '../../../shared/codori.js'
+import { projectStatusMeta, toProjectRoute } from '~~/shared/codori.js'
 
 const props = defineProps<{
   collapsed?: boolean

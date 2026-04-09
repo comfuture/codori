@@ -1,12 +1,12 @@
 import { useState } from '#imports'
 import { $fetch } from 'ofetch'
-import { encodeProjectIdSegment } from '../../shared/codori.js'
+import { encodeProjectIdSegment } from '~~/shared/codori.js'
 import type {
   ProjectRecord,
   ProjectResponse,
   ProjectsResponse,
   StartProjectResult
-} from '../../shared/codori.js'
+} from '~~/shared/codori.js'
 
 const mergeProject = (projects: ProjectRecord[], nextProject: ProjectRecord) => {
   const filtered = projects.filter(project => project.projectId !== nextProject.projectId)

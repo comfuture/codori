@@ -9,7 +9,7 @@ import {
   threadToMessages,
   upsertStreamingMessage,
   type CodoriChatMessage
-} from '../../../shared/codex-chat.js'
+} from '~~/shared/codex-chat.js'
 import {
   notificationThreadId,
   notificationTurnId,
@@ -19,8 +19,8 @@ import {
   type ThreadResumeResponse,
   type ThreadStartResponse,
   type TurnStartResponse
-} from '../../../shared/codex-rpc.js'
-import { toProjectThreadRoute } from '../../../shared/codori.js'
+} from '~~/shared/codex-rpc.js'
+import { toProjectThreadRoute } from '~~/shared/codori.js'
 
 const props = defineProps<{
   projectId: string

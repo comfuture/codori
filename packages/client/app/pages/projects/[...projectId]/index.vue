@@ -6,7 +6,7 @@ import { useThreadPanel } from '../../../composables/useThreadPanel.js'
 import {
   normalizeProjectIdParam,
   projectStatusMeta
-} from '../../../../shared/codori.js'
+} from '~~/shared/codori.js'
 
 const route = useRoute()
 const router = useRouter()
