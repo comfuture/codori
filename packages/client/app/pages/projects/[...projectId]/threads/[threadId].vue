@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { useRoute, useRouter } from '#imports'
 import { computed } from 'vue'
+import CdChatWorkspace from '../../../../components/cd/chat-workspace.vue'
+import CdThreadPanel from '../../../../components/cd/thread-panel.vue'
+import CdTunnelNotice from '../../../../components/cd/tunnel-notice.vue'
 import { useThreadPanel } from '../../../../composables/useThreadPanel.js'
 import { normalizeProjectIdParam, toProjectRoute } from '~~/shared/codori.js'
 

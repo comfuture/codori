@@ -2,6 +2,7 @@
 import { useRouter } from '#imports'
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import CdMessageContent from './message-content.vue'
+import { useCodoriChatSession } from '../../composables/useCodoriChatSession.js'
 import { useCodoriProjects } from '../../composables/useCodoriProjects.js'
 import { useCodoriRpc } from '../../composables/useCodoriRpc.js'
 import { useChatSubmitGuard } from '../../composables/useChatSubmitGuard.js'
@@ -48,18 +49,42 @@ const {
   shouldSubmit
 } = useChatSubmitGuard()
 
-const messages = ref<CodoriChatMessage[]>([])
 const input = ref('')
-const status = ref<'ready' | 'submitted' | 'streaming' | 'error'>('ready')
-const error = ref<string | null>(null)
-const activeThreadId = ref<string | null>(props.threadId ?? null)
-const loadVersion = ref(0)
 const scrollViewport = ref<HTMLElement | null>(null)
 const pinnedToBottom = ref(true)
+const session = useCodoriChatSession(props.projectId)
+const {
+  messages,
+  status,
+  error,
+  activeThreadId,
+  pendingThreadId,
+  autoRedirectThreadId,
+  loadVersion
+} = session
 
 const selectedProject = computed(() => getProject(props.projectId))
 const submitError = computed(() => error.value ? new Error(error.value) : undefined)
 const isBusy = computed(() => status.value === 'submitted' || status.value === 'streaming')
+const routeThreadId = computed(() => props.threadId ?? null)
+
+const isActiveTurnStatus = (value: string | null | undefined) => {
+  if (!value) {
+    return false
+  }
+
+  return !/(completed|failed|error|cancelled|canceled|interrupted|stopped)/i.test(value)
+}
+
+const currentLiveStream = () =>
+  session.liveStream?.threadId === activeThreadId.value
+    ? session.liveStream
+    : null
+
+const clearLiveStream = () => {
+  session.liveStream?.unsubscribe?.()
+  session.liveStream = null
+}
 
 const isTextPart = (part: CodoriChatPart): part is Extract<CodoriChatPart, { type: 'text' }> =>
   part.type === 'text'
@@ -132,6 +157,39 @@ const hydrateThread = async (threadId: string) => {
   try {
     await ensureProjectRuntime()
     const client = getClient(props.projectId)
+    activeThreadId.value = threadId
+
+    const existingLiveStream = currentLiveStream()
+
+    if (!existingLiveStream) {
+      const nextLiveStream = {
+        threadId,
+        turnId: null,
+        bufferedNotifications: [] as CodexRpcNotification[],
+        unsubscribe: null as (() => void) | null
+      }
+
+      nextLiveStream.unsubscribe = client.subscribe((notification) => {
+        if (notificationThreadId(notification) !== threadId) {
+          return
+        }
+
+        if (!nextLiveStream.turnId) {
+          nextLiveStream.bufferedNotifications.push(notification)
+          return
+        }
+
+        const turnId = notificationTurnId(notification)
+        if (turnId && turnId !== nextLiveStream.turnId) {
+          return
+        }
+
+        applyNotification(notification)
+      })
+
+      session.liveStream = nextLiveStream
+    }
+
     await client.request<ThreadResumeResponse>('thread/resume', {
       threadId,
       cwd: selectedProject.value?.projectPath ?? null,
@@ -149,15 +207,43 @@ const hydrateThread = async (threadId: string) => {
 
     activeThreadId.value = response.thread.id
     messages.value = threadToMessages(response.thread)
-    status.value = 'ready'
+    const activeTurn = [...response.thread.turns].reverse().find(turn => isActiveTurnStatus(turn.status))
+
+    if (!activeTurn) {
+      clearLiveStream()
+      status.value = 'ready'
+      return
+    }
+
+    if (!session.liveStream) {
+      status.value = 'streaming'
+      return
+    }
+
+    session.liveStream.turnId = activeTurn.id
+    status.value = 'streaming'
+
+    const pendingNotifications = session.liveStream.bufferedNotifications.splice(0, session.liveStream.bufferedNotifications.length)
+    for (const notification of pendingNotifications) {
+      const turnId = notificationTurnId(notification)
+      if (turnId && turnId !== activeTurn.id) {
+        continue
+      }
+
+      applyNotification(notification)
+    }
   } catch (caughtError) {
+    clearLiveStream()
     error.value = caughtError instanceof Error ? caughtError.message : String(caughtError)
     status.value = 'error'
   }
 }
 
 const resetDraftThread = () => {
+  clearLiveStream()
   activeThreadId.value = null
+  pendingThreadId.value = null
+  autoRedirectThreadId.value = null
   messages.value = []
   error.value = null
   status.value = 'ready'
@@ -165,7 +251,10 @@ const resetDraftThread = () => {
 
 const ensureThread = async () => {
   if (activeThreadId.value) {
-    return activeThreadId.value
+    return {
+      threadId: activeThreadId.value,
+      created: false
+    }
   }
 
   await ensureProjectRuntime()
@@ -178,7 +267,10 @@ const ensureThread = async () => {
   })
 
   activeThreadId.value = response.thread.id
-  return response.thread.id
+  return {
+    threadId: response.thread.id,
+    created: true
+  }
 }
 
 const seedStreamingMessage = (item: CodexThreadItem) => {
@@ -343,6 +435,26 @@ const pushEventMessage = (kind: 'turn.failed' | 'stream.error', messageText: str
 
 const applyNotification = (notification: CodexRpcNotification) => {
   switch (notification.method) {
+    case 'thread/started': {
+      const nextThreadId = notificationThreadId(notification)
+      if (!nextThreadId) {
+        return
+      }
+
+      activeThreadId.value = nextThreadId
+      pendingThreadId.value = pendingThreadId.value ?? nextThreadId
+      return
+    }
+    case 'turn/started': {
+      messages.value = upsertStreamingMessage(
+        messages.value,
+        eventToMessage(`event-turn-started-${notificationTurnId(notification) ?? Date.now()}`, {
+          kind: 'turn.started'
+        })
+      )
+      status.value = 'streaming'
+      return
+    }
     case 'item/started': {
       const params = notification.params as { item: CodexThreadItem }
       seedStreamingMessage(params.item)
@@ -370,6 +482,66 @@ const applyNotification = (notification: CodexRpcNotification) => {
           text: '',
           state: 'streaming'
         }]
+      })
+      status.value = 'streaming'
+      return
+    }
+    case 'item/plan/delta': {
+      const params = notification.params as { itemId: string, delta: string }
+      appendTextPartDelta(params.itemId, params.delta, {
+        id: params.itemId,
+        role: 'assistant',
+        pending: true,
+        parts: [{
+          type: 'text',
+          text: '',
+          state: 'streaming'
+        }]
+      })
+      status.value = 'streaming'
+      return
+    }
+    case 'item/reasoning/textDelta':
+    case 'item/reasoning/summaryTextDelta': {
+      const params = notification.params as { itemId: string, delta: string }
+      updateMessage(params.itemId, {
+        id: params.itemId,
+        role: 'assistant',
+        pending: true,
+        parts: [{
+          type: 'reasoning',
+          summary: [],
+          content: [],
+          state: 'streaming'
+        }]
+      }, (message) => {
+        const partIndex = message.parts.findIndex(part => part.type === 'reasoning')
+        const existingPart = partIndex === -1
+          ? {
+              type: 'reasoning' as const,
+              summary: [],
+              content: []
+            }
+          : message.parts[partIndex] as Extract<CodoriChatPart, { type: 'reasoning' }>
+        const nextPart: Extract<CodoriChatPart, { type: 'reasoning' }> = {
+          type: 'reasoning',
+          summary: notification.method === 'item/reasoning/summaryTextDelta'
+            ? [...existingPart.summary, params.delta]
+            : existingPart.summary,
+          content: notification.method === 'item/reasoning/textDelta'
+            ? [...existingPart.content, params.delta]
+            : existingPart.content,
+          state: 'streaming'
+        }
+        const nextParts = partIndex === -1
+          ? [...message.parts, nextPart]
+          : message.parts.map((part, index) => index === partIndex ? nextPart : part)
+
+        return {
+          ...message,
+          pending: true,
+          parts: nextParts
+        }
       })
       status.value = 'streaming'
       return
@@ -430,6 +602,7 @@ const applyNotification = (notification: CodexRpcNotification) => {
       const params = notification.params as { error?: { message?: string } }
       const messageText = params.error?.message ?? 'The turn failed.'
       pushEventMessage('turn.failed', messageText)
+      clearLiveStream()
       error.value = messageText
       status.value = 'error'
       return
@@ -438,12 +611,14 @@ const applyNotification = (notification: CodexRpcNotification) => {
       const params = notification.params as { message?: string }
       const messageText = params.message ?? 'The stream failed.'
       pushEventMessage('stream.error', messageText)
+      clearLiveStream()
       error.value = messageText
       status.value = 'error'
       return
     }
     case 'turn/completed': {
       status.value = 'ready'
+      clearLiveStream()
       return
     }
     default:
@@ -476,7 +651,7 @@ const sendMessage = async () => {
 
   try {
     await ensureProjectRuntime()
-    const threadId = await ensureThread()
+    const { threadId, created } = await ensureThread()
     const client = getClient(props.projectId)
     const buffered: CodexRpcNotification[] = []
     let currentTurnId: string | null = null
@@ -497,6 +672,9 @@ const sendMessage = async () => {
       if (notification.method === 'error') {
         completionResolved = true
         unsubscribe?.()
+        if (session.liveStream?.unsubscribe === unsubscribe) {
+          session.liveStream = null
+        }
         const params = notification.params as { error?: { message?: string } }
         const messageText = params.error?.message ?? 'Turn failed.'
         pushEventMessage('stream.error', messageText)
@@ -509,6 +687,9 @@ const sendMessage = async () => {
       if (notification.method === 'turn/completed') {
         completionResolved = true
         unsubscribe?.()
+        if (session.liveStream?.unsubscribe === unsubscribe) {
+          session.liveStream = null
+        }
         resolveCompletion?.()
         return true
       }
@@ -516,6 +697,9 @@ const sendMessage = async () => {
       if (notification.method === 'turn/failed' || notification.method === 'stream/error') {
         completionResolved = true
         unsubscribe?.()
+        if (session.liveStream?.unsubscribe === unsubscribe) {
+          session.liveStream = null
+        }
         rejectCompletion?.(new Error(error.value ?? 'Turn failed.'))
         return true
       }
@@ -523,10 +707,19 @@ const sendMessage = async () => {
       return false
     }
 
+    clearLiveStream()
+
     const completion = new Promise<void>((resolve, reject) => {
       resolveCompletion = resolve
       rejectCompletion = (caughtError: Error) => reject(caughtError)
     })
+
+    const liveStream = {
+      threadId,
+      turnId: null as string | null,
+      bufferedNotifications: buffered,
+      unsubscribe: null as (() => void) | null
+    }
 
     unsubscribe = client.subscribe((notification) => {
       if (notificationThreadId(notification) !== threadId) {
@@ -540,6 +733,12 @@ const sendMessage = async () => {
 
       settleNotification(notification)
     })
+    liveStream.unsubscribe = unsubscribe
+    session.liveStream = liveStream
+
+    if (created && !routeThreadId.value) {
+      pendingThreadId.value = threadId
+    }
 
     const turnStart = await client.request<TurnStartResponse>('turn/start', {
       threadId,
@@ -553,6 +752,7 @@ const sendMessage = async () => {
     })
 
     currentTurnId = turnStart.turn.id
+    liveStream.turnId = turnStart.turn.id
 
     for (const notification of buffered.splice(0, buffered.length)) {
       if (settleNotification(notification) && completionResolved) {
@@ -563,14 +763,15 @@ const sendMessage = async () => {
     await completion
     status.value = 'ready'
 
-    if (props.threadId) {
+    if (routeThreadId.value) {
       await hydrateThread(threadId)
       return
     }
-
-    await router.push(toProjectThreadRoute(props.projectId, threadId))
   } catch (caughtError) {
     unsubscribe?.()
+    if (session.liveStream?.unsubscribe === unsubscribe) {
+      session.liveStream = null
+    }
     error.value = caughtError instanceof Error ? caughtError.message : String(caughtError)
     status.value = 'error'
   }
@@ -595,12 +796,42 @@ onMounted(() => {
 
 watch(() => props.threadId ?? null, (threadId) => {
   if (!threadId) {
+    if (isBusy.value || pendingThreadId.value) {
+      return
+    }
+
     resetDraftThread()
+    return
+  }
+
+  if (
+    autoRedirectThreadId.value === threadId
+    && activeThreadId.value === threadId
+    && isBusy.value
+  ) {
+    autoRedirectThreadId.value = null
+    pendingThreadId.value = null
     return
   }
 
   void hydrateThread(threadId)
 }, { immediate: true })
+
+watch(pendingThreadId, async (threadId) => {
+  if (!threadId) {
+    return
+  }
+
+  if (routeThreadId.value === threadId) {
+    pendingThreadId.value = null
+    autoRedirectThreadId.value = null
+    return
+  }
+
+  autoRedirectThreadId.value = threadId
+  await router.push(toProjectThreadRoute(props.projectId, threadId))
+  pendingThreadId.value = null
+})
 
 watch(messages, () => {
   void scheduleScrollToBottom(status.value === 'streaming' ? 'auto' : 'smooth')

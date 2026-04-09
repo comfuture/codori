@@ -198,6 +198,11 @@ export const notificationThreadId = (notification: CodexRpcNotification) => {
     return directThreadId
   }
 
+  const thread = isObjectRecord(params?.thread) ? params.thread : null
+  if (typeof thread?.id === 'string') {
+    return thread.id
+  }
+
   return null
 }
 
