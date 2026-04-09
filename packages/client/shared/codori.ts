@@ -39,6 +39,8 @@ export const toProjectRoute = (projectId: string) => `/projects/${projectId}`
 export const toProjectThreadRoute = (projectId: string, threadId: string) =>
   `/projects/${projectId}/threads/${encodeURIComponent(threadId)}`
 
+export const encodeProjectIdSegment = (projectId: string) => encodeURIComponent(projectId)
+
 export const projectStatusMeta = (status: ProjectRuntimeStatus) => {
   switch (status) {
     case 'running':
@@ -58,4 +60,3 @@ export const projectStatusMeta = (status: ProjectRuntimeStatus) => {
       }
   }
 }
-

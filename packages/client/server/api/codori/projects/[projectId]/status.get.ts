@@ -1,5 +1,5 @@
 import { createError, defineEventHandler, getRouterParam } from 'h3'
-import type { ProjectResponse } from '../../../../../shared/codori.js'
+import { encodeProjectIdSegment, type ProjectResponse } from '../../../../../shared/codori.js'
 import { proxyCodoriRequest } from '../../../../utils/codori-server.js'
 
 export default defineEventHandler(async (event) => {
@@ -11,5 +11,5 @@ export default defineEventHandler(async (event) => {
     })
   }
 
-  return await proxyCodoriRequest<ProjectResponse>(event, `/api/projects/${projectId}/status`)
+  return await proxyCodoriRequest<ProjectResponse>(event, `/api/projects/${encodeProjectIdSegment(projectId)}/status`)
 })

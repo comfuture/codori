@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useThreadPanel } from '../../composables/useThreadPanel.js'
+import CdThreadList from './thread-list.vue'
 
 defineProps<{
   projectId: string | null
@@ -40,9 +41,7 @@ const { open, closePanel } = useThreadPanel()
         </div>
       </template>
       <template #body>
-        <div class="p-4 text-sm text-muted">
-          Thread history becomes available when chat transport is connected.
-        </div>
+        <CdThreadList :project-id="projectId" />
       </template>
     </UDashboardPanel>
   </div>
@@ -55,14 +54,7 @@ const { open, closePanel } = useThreadPanel()
     side="right"
   >
     <template #body>
-      <div class="space-y-2 p-4 text-sm text-muted">
-        <div class="font-medium text-default">
-          {{ projectId }}
-        </div>
-        <p>
-          This panel is wired and ready. Thread list and resume behavior will be populated by the chat transport layer.
-        </p>
-      </div>
+      <CdThreadList :project-id="projectId" />
     </template>
   </USlideover>
 </template>

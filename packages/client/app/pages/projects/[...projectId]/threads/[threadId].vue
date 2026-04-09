@@ -10,7 +10,7 @@ const { openPanel } = useThreadPanel()
 const projectId = computed(() => normalizeProjectIdParam(route.params.projectId as string | string[] | undefined))
 const threadId = computed(() => {
   const value = route.params.threadId
-  return typeof value === 'string' ? decodeURIComponent(value) : null
+  return typeof value === 'string' ? value : null
 })
 </script>
 
@@ -42,12 +42,10 @@ const threadId = computed(() => {
 
       <template #body>
         <div class="mx-auto flex w-full max-w-5xl flex-col gap-6 p-6">
-          <UAlert
-            color="info"
-            variant="soft"
-            icon="i-lucide-waypoints"
-            :title="projectId ?? 'Project'"
-            :description="threadId ? `Thread ${threadId} is selected. Resume and transcript hydration will be enabled by the chat integration commit.` : 'Select a thread.'"
+          <cd-chat-workspace
+            v-if="projectId"
+            :project-id="projectId"
+            :thread-id="threadId"
           />
           <cd-tunnel-notice />
         </div>

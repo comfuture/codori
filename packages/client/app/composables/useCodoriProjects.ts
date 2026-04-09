@@ -1,5 +1,6 @@
 import { useState } from '#imports'
 import { $fetch } from 'ofetch'
+import { encodeProjectIdSegment } from '../../shared/codori.js'
 import type {
   ProjectRecord,
   ProjectResponse,
@@ -46,7 +47,7 @@ export const useCodoriProjects = () => {
   const startProject = async (projectId: string) => {
     pendingProjectId.value = projectId
     try {
-      const response = await $fetch<ProjectResponse>(`/api/codori/projects/${encodeURIComponent(projectId)}/start`, {
+      const response = await $fetch<ProjectResponse>(`/api/codori/projects/${encodeProjectIdSegment(projectId)}/start`, {
         method: 'POST'
       })
       return applyProjectResponse(response) as StartProjectResult
@@ -58,7 +59,7 @@ export const useCodoriProjects = () => {
   const stopProject = async (projectId: string) => {
     pendingProjectId.value = projectId
     try {
-      const response = await $fetch<ProjectResponse>(`/api/codori/projects/${encodeURIComponent(projectId)}/stop`, {
+      const response = await $fetch<ProjectResponse>(`/api/codori/projects/${encodeProjectIdSegment(projectId)}/stop`, {
         method: 'POST'
       })
       return applyProjectResponse(response)

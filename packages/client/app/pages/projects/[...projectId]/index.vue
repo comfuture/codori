@@ -152,16 +152,7 @@ const onNewThread = async () => {
                 </div>
               </div>
             </template>
-            <div class="rounded-3xl border border-dashed border-muted px-6 py-12 text-center">
-              <div class="mx-auto max-w-xl space-y-3">
-                <div class="text-lg font-medium">
-                  The dashboard shell is ready.
-                </div>
-                <p class="text-sm leading-6 text-muted">
-                  The next implementation step connects this panel to the project WebSocket RPC stream and hydrates previous thread data.
-                </p>
-              </div>
-            </div>
+            <cd-chat-workspace :project-id="projectId ?? ''" />
           </UCard>
 
           <cd-tunnel-notice />
