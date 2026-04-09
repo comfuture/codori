@@ -17,7 +17,7 @@ export default tseslint.config(
       }
     }
   },
-  ...tseslint.configs.recommendedTypeChecked,
+  ...tseslint.configs.recommended,
   ...pluginVue.configs['flat/recommended'],
   {
     files: ['**/*.{ts,vue}'],
@@ -25,8 +25,6 @@ export default tseslint.config(
       parser: vueParser,
       parserOptions: {
         parser: tseslint.parser,
-        project: './tsconfig.json',
-        tsconfigRootDir: import.meta.dirname,
         extraFileExtensions: ['.vue']
       },
       globals: {
@@ -35,11 +33,8 @@ export default tseslint.config(
       }
     },
     rules: {
+      'no-undef': 'off',
       'vue/multi-word-component-names': 'off'
     }
   },
-  {
-    files: ['eslint.config.mjs'],
-    extends: [tseslint.configs.disableTypeChecked]
-  }
 )

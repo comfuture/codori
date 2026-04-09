@@ -1,0 +1,88 @@
+import { useState } from '#imports'
+import { $fetch } from 'ofetch'
+import type {
+  ProjectRecord,
+  ProjectResponse,
+  ProjectsResponse,
+  StartProjectResult
+} from '../../shared/codori.js'
+
+const mergeProject = (projects: ProjectRecord[], nextProject: ProjectRecord) => {
+  const filtered = projects.filter(project => project.projectId !== nextProject.projectId)
+  return [...filtered, nextProject].sort((left, right) => left.projectId.localeCompare(right.projectId))
+}
+
+export const useCodoriProjects = () => {
+  const projects = useState<ProjectRecord[]>('codori-projects', () => [])
+  const loaded = useState<boolean>('codori-projects-loaded', () => false)
+  const loading = useState<boolean>('codori-projects-loading', () => false)
+  const pendingProjectId = useState<string | null>('codori-projects-pending-id', () => null)
+  const error = useState<string | null>('codori-projects-error', () => null)
+
+  const refreshProjects = async () => {
+    if (loading.value) {
+      return
+    }
+
+    loading.value = true
+    error.value = null
+    try {
+      const response = await $fetch<ProjectsResponse>('/api/codori/projects')
+      projects.value = response.projects
+      loaded.value = true
+    } catch (caughtError) {
+      error.value = caughtError instanceof Error ? caughtError.message : String(caughtError)
+    } finally {
+      loading.value = false
+    }
+  }
+
+  const applyProjectResponse = (response: ProjectResponse) => {
+    const nextProject = response.project as ProjectRecord
+    projects.value = mergeProject(projects.value, nextProject)
+    return nextProject
+  }
+
+  const startProject = async (projectId: string) => {
+    pendingProjectId.value = projectId
+    try {
+      const response = await $fetch<ProjectResponse>(`/api/codori/projects/${encodeURIComponent(projectId)}/start`, {
+        method: 'POST'
+      })
+      return applyProjectResponse(response) as StartProjectResult
+    } finally {
+      pendingProjectId.value = null
+    }
+  }
+
+  const stopProject = async (projectId: string) => {
+    pendingProjectId.value = projectId
+    try {
+      const response = await $fetch<ProjectResponse>(`/api/codori/projects/${encodeURIComponent(projectId)}/stop`, {
+        method: 'POST'
+      })
+      return applyProjectResponse(response)
+    } finally {
+      pendingProjectId.value = null
+    }
+  }
+
+  const getProject = (projectId: string | null) => {
+    if (!projectId) {
+      return null
+    }
+    return projects.value.find((project: ProjectRecord) => project.projectId === projectId) ?? null
+  }
+
+  return {
+    projects,
+    loaded,
+    loading,
+    error,
+    pendingProjectId,
+    refreshProjects,
+    startProject,
+    stopProject,
+    getProject
+  }
+}

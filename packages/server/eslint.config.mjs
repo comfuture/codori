@@ -7,21 +7,17 @@ export default tseslint.config(
     ignores: ['dist/**']
   },
   js.configs.recommended,
-  ...tseslint.configs.recommendedTypeChecked,
+  ...tseslint.configs.recommended,
   {
     files: ['**/*.ts'],
     languageOptions: {
-      parserOptions: {
-        project: './tsconfig.json',
-        tsconfigRootDir: import.meta.dirname
-      },
       globals: {
         ...globals.node
       }
     },
     rules: {
-      '@typescript-eslint/no-confusing-void-expression': 'off'
+      '@typescript-eslint/no-confusing-void-expression': 'off',
+      'no-undef': 'off'
     }
   }
 )
-

@@ -1,20 +1,17 @@
 {
-  "extends": "../../tsconfig.base.json",
+  "extends": "./.nuxt/tsconfig.json",
+  "compilerOptions": {
+    "composite": true,
+    "types": [
+      "vitest/globals"
+    ]
+  },
   "include": [
-    ".nuxt/nuxt.d.ts",
     "app/**/*.ts",
     "app/**/*.vue",
     "server/**/*.ts",
     "shared/**/*.ts",
     "nuxt.config.ts",
     "test/**/*.ts"
-  ],
-  "compilerOptions": {
-    "composite": true,
-    "types": [
-      "node",
-      "vitest/globals"
-    ]
-  }
+  ]
 }
-
