@@ -48,6 +48,7 @@ const onNewThread = async () => {
     <UDashboardPanel
       id="project-shell"
       class="min-h-0"
+      :ui="{ body: 'p-0' }"
       :min-size="50"
       :max-size="100"
       :default-size="100"
@@ -77,85 +78,53 @@ const onNewThread = async () => {
       </template>
 
       <template #body>
-        <div class="mx-auto flex w-full max-w-5xl flex-col gap-6 p-6">
-          <UCard v-if="project">
-            <template #header>
-              <div class="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <div class="text-xs font-medium uppercase tracking-[0.24em] text-muted">
-                    Selected project
-                  </div>
-                  <h1 class="mt-1 text-2xl font-semibold">
-                    {{ project.projectId }}
-                  </h1>
-                  <p class="mt-2 text-sm text-muted">
-                    {{ project.projectPath }}
-                  </p>
+        <div class="flex h-full min-h-0 flex-col">
+          <div
+            v-if="project"
+            class="shrink-0 border-b border-default px-4 py-4 md:px-6"
+          >
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <div class="min-w-0">
+                <div class="text-xs font-medium uppercase tracking-[0.24em] text-muted">
+                  Selected project
                 </div>
-                <div class="flex items-center gap-2">
-                  <UBadge
-                    :color="projectStatusMeta(project.status).color"
-                    variant="soft"
-                  >
-                    {{ projectStatusMeta(project.status).label }}
-                  </UBadge>
-                  <UButton
-                    :label="project.status === 'running' ? 'Stop runtime' : 'Start runtime'"
-                    :loading="pendingProjectId === project.projectId"
-                    :color="project.status === 'running' ? 'neutral' : 'primary'"
-                    :variant="project.status === 'running' ? 'outline' : 'soft'"
-                    @click="onStartOrStop"
-                  />
-                </div>
-              </div>
-            </template>
-
-            <div class="grid gap-4 md:grid-cols-3">
-              <div class="rounded-2xl border border-default p-4">
-                <div class="text-sm font-medium">
-                  Runtime
-                </div>
-                <p class="mt-2 text-sm text-muted">
-                  {{ project.status === 'running'
-                    ? `Listening on port ${project.port}`
-                    : 'Runtime is currently stopped.' }}
+                <h1 class="mt-1 truncate text-xl font-semibold text-highlighted md:text-2xl">
+                  {{ project.projectId }}
+                </h1>
+                <p class="mt-1 truncate text-sm text-muted">
+                  {{ project.projectPath }}
                 </p>
               </div>
-              <div class="rounded-2xl border border-default p-4">
-                <div class="text-sm font-medium">
-                  Threads
-                </div>
-                <p class="mt-2 text-sm text-muted">
-                  Use the navbar to create a new thread or inspect previous sessions.
-                </p>
-              </div>
-              <div class="rounded-2xl border border-default p-4">
-                <div class="text-sm font-medium">
-                  RPC channel
-                </div>
-                <p class="mt-2 text-sm text-muted">
-                  Chat transport will attach to the project through the Codori WebSocket proxy.
-                </p>
+              <div class="flex items-center gap-2">
+                <UBadge
+                  :color="projectStatusMeta(project.status).color"
+                  variant="soft"
+                >
+                  {{ projectStatusMeta(project.status).label }}
+                </UBadge>
+                <span
+                  v-if="project.port"
+                  class="text-sm text-muted"
+                >
+                  :{{ project.port }}
+                </span>
+                <UButton
+                  :label="project.status === 'running' ? 'Stop runtime' : 'Start runtime'"
+                  :loading="pendingProjectId === project.projectId"
+                  :color="project.status === 'running' ? 'neutral' : 'primary'"
+                  :variant="project.status === 'running' ? 'outline' : 'soft'"
+                  @click="onStartOrStop"
+                />
               </div>
             </div>
-          </UCard>
+          </div>
 
-          <UCard>
-            <template #header>
-              <div class="flex items-center gap-2">
-                <UIcon
-                  name="i-lucide-messages-square"
-                  class="size-5 text-primary"
-                />
-                <div class="text-lg font-semibold">
-                  Chat workspace
-                </div>
-              </div>
-            </template>
-            <cd-chat-workspace :project-id="projectId ?? ''" />
-          </UCard>
+          <cd-tunnel-notice class="m-4 mb-0 shrink-0 md:m-6 md:mb-0" />
 
-          <cd-tunnel-notice />
+          <cd-chat-workspace
+            :project-id="projectId ?? ''"
+            class="min-h-0 flex-1"
+          />
         </div>
       </template>
     </UDashboardPanel>

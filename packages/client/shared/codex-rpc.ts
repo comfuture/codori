@@ -325,7 +325,7 @@ export class CodexRpcClient {
   }
 
   private async handleMessage(raw: unknown) {
-    const payload = this.parsePayload(raw)
+    const payload = await this.parsePayload(raw)
     if (!payload) {
       return
     }
@@ -361,8 +361,14 @@ export class CodexRpcClient {
     }
   }
 
-  private parsePayload(raw: unknown): JsonRpcResponse | JsonRpcNotification | JsonRpcServerRequest | null {
-    const text = typeof raw === 'string' ? raw : raw instanceof ArrayBuffer ? new TextDecoder().decode(raw) : null
+  private async parsePayload(raw: unknown): Promise<JsonRpcResponse | JsonRpcNotification | JsonRpcServerRequest | null> {
+    const text = typeof raw === 'string'
+      ? raw
+      : raw instanceof ArrayBuffer
+        ? new TextDecoder().decode(raw)
+        : raw instanceof Blob
+          ? await raw.text()
+          : null
     if (!text) {
       return null
     }

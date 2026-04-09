@@ -1,3 +1,4 @@
+import net from 'node:net'
 import websocket from '@fastify/websocket'
 import Fastify, {
   type FastifyInstance,
@@ -56,6 +57,46 @@ const getProjectIdFromRequest = (value: string | undefined) => {
 }
 
 const resolveValue = async <T>(value: MaybePromise<T>) => value
+
+const wait = async (ms: number) =>
+  new Promise<void>((resolvePromise) => {
+    setTimeout(resolvePromise, ms)
+  })
+
+const canConnectToPort = (port: number, host = '127.0.0.1', timeoutMs = 200) =>
+  new Promise<boolean>((resolvePromise) => {
+    const socket = net.createConnection({ host, port })
+    let settled = false
+
+    const settle = (value: boolean) => {
+      if (settled) {
+        return
+      }
+
+      settled = true
+      socket.removeAllListeners()
+      socket.destroy()
+      resolvePromise(value)
+    }
+
+    socket.once('connect', () => settle(true))
+    socket.once('error', () => settle(false))
+    socket.setTimeout(timeoutMs, () => settle(false))
+  })
+
+const waitForPortReady = async (port: number, host = '127.0.0.1', timeoutMs = 5_000) => {
+  const deadline = Date.now() + timeoutMs
+
+  while (Date.now() < deadline) {
+    if (await canConnectToPort(port, host)) {
+      return true
+    }
+
+    await wait(100)
+  }
+
+  return false
+}
 
 export const createHttpServer = async (manager: RuntimeManagerLike): Promise<FastifyInstance> => {
   const app = Fastify({
@@ -121,33 +162,20 @@ export const createHttpServer = async (manager: RuntimeManagerLike): Promise<Fas
     { websocket: true },
     async (clientSocket: WebSocket, request: FastifyRequest<{ Params: { projectId: string } }>) => {
       const projectId = getProjectIdFromRequest(request.params.projectId)
-      const started = await resolveValue(manager.startProject(projectId))
-      const upstream = new WebSocket(`ws://127.0.0.1:${started.port}`)
       const pendingClientMessages: Array<{ message: WebSocket.RawData, isBinary: boolean }> = []
+      let upstream: WebSocket | null = null
 
       const closeBoth = (code = 1011, reason = 'proxy error') => {
         if (clientSocket.readyState === clientSocket.OPEN || clientSocket.readyState === clientSocket.CONNECTING) {
           clientSocket.close(code, reason)
         }
-        if (upstream.readyState === WebSocket.OPEN || upstream.readyState === WebSocket.CONNECTING) {
+        if (upstream && (upstream.readyState === WebSocket.OPEN || upstream.readyState === WebSocket.CONNECTING)) {
           upstream.close(code, reason)
         }
       }
 
-      upstream.once('open', () => {
-        for (const entry of pendingClientMessages.splice(0, pendingClientMessages.length)) {
-          upstream.send(entry.message, { binary: entry.isBinary })
-        }
-
-        clientSocket.on('close', () => {
-          if (upstream.readyState === WebSocket.OPEN || upstream.readyState === WebSocket.CONNECTING) {
-            upstream.close()
-          }
-        })
-      })
-
       clientSocket.on('message', (message: WebSocket.RawData, isBinary: boolean) => {
-        if (upstream.readyState === WebSocket.OPEN) {
+        if (upstream?.readyState === WebSocket.OPEN) {
           upstream.send(message, { binary: isBinary })
           return
         }
@@ -155,22 +183,52 @@ export const createHttpServer = async (manager: RuntimeManagerLike): Promise<Fas
         pendingClientMessages.push({ message, isBinary })
       })
 
-      upstream.on('message', (message: WebSocket.RawData, isBinary: boolean) => {
-        clientSocket.send(message, { binary: isBinary })
+      clientSocket.on('error', () => {
+        closeBoth(1011, 'client websocket failed')
       })
 
-      upstream.on('error', () => {
-        closeBoth(1011, 'upstream websocket failed')
-      })
-
-      upstream.on('close', () => {
-        if (clientSocket.readyState === clientSocket.OPEN || clientSocket.readyState === clientSocket.CONNECTING) {
-          clientSocket.close()
+      clientSocket.on('close', () => {
+        if (upstream && (upstream.readyState === WebSocket.OPEN || upstream.readyState === WebSocket.CONNECTING)) {
+          upstream.close()
         }
       })
 
-      clientSocket.on('error', () => {
-        closeBoth(1011, 'client websocket failed')
+      void (async () => {
+        const started = await resolveValue(manager.startProject(projectId))
+        if (typeof started.port !== 'number') {
+          closeBoth(1011, 'runtime port unavailable')
+          return
+        }
+
+        const ready = await waitForPortReady(started.port)
+        if (!ready) {
+          closeBoth(1011, 'runtime did not become ready')
+          return
+        }
+
+        upstream = new WebSocket(`ws://127.0.0.1:${started.port}`)
+
+        upstream.once('open', () => {
+          for (const entry of pendingClientMessages.splice(0, pendingClientMessages.length)) {
+            upstream?.send(entry.message, { binary: entry.isBinary })
+          }
+        })
+
+        upstream.on('message', (message: WebSocket.RawData, isBinary: boolean) => {
+          clientSocket.send(message, { binary: isBinary })
+        })
+
+        upstream.on('error', () => {
+          closeBoth(1011, 'upstream websocket failed')
+        })
+
+        upstream.on('close', () => {
+          if (clientSocket.readyState === clientSocket.OPEN || clientSocket.readyState === clientSocket.CONNECTING) {
+            clientSocket.close()
+          }
+        })
+      })().catch(() => {
+        closeBoth(1011, 'upstream bootstrap failed')
       })
     }
   )

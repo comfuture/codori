@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { useRoute } from '#imports'
+import { useRoute, useRouter } from '#imports'
 import { computed } from 'vue'
 import { useThreadPanel } from '../../../../composables/useThreadPanel.js'
-import { normalizeProjectIdParam } from '~~/shared/codori.js'
+import { normalizeProjectIdParam, toProjectRoute } from '~~/shared/codori.js'
 
 const route = useRoute()
+const router = useRouter()
 const { openPanel } = useThreadPanel()
 
 const projectId = computed(() => normalizeProjectIdParam(route.params.projectId as string | string[] | undefined))
@@ -12,6 +13,14 @@ const threadId = computed(() => {
   const value = route.params.threadId
   return typeof value === 'string' ? value : null
 })
+
+const onNewThread = async () => {
+  if (!projectId.value) {
+    return
+  }
+
+  await router.push(toProjectRoute(projectId.value))
+}
 </script>
 
 <template>
@@ -19,6 +28,7 @@ const threadId = computed(() => {
     <UDashboardPanel
       id="thread-shell"
       class="min-h-0"
+      :ui="{ body: 'p-0' }"
       :min-size="50"
       :max-size="100"
       :default-size="100"
@@ -28,6 +38,13 @@ const threadId = computed(() => {
         <UDashboardNavbar :title="threadId ?? 'Thread'">
           <template #right>
             <div class="flex items-center gap-2">
+              <UButton
+                icon="i-lucide-plus"
+                color="primary"
+                variant="soft"
+                label="New thread"
+                @click="onNewThread"
+              />
               <UButton
                 icon="i-lucide-history"
                 color="neutral"
@@ -41,13 +58,14 @@ const threadId = computed(() => {
       </template>
 
       <template #body>
-        <div class="mx-auto flex w-full max-w-5xl flex-col gap-6 p-6">
+        <div class="flex h-full min-h-0 flex-col">
+          <cd-tunnel-notice class="m-4 mb-0 shrink-0 md:m-6 md:mb-0" />
           <cd-chat-workspace
             v-if="projectId"
             :project-id="projectId"
             :thread-id="threadId"
+            class="min-h-0 flex-1"
           />
-          <cd-tunnel-notice />
         </div>
       </template>
     </UDashboardPanel>

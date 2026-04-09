@@ -46,6 +46,50 @@ const createFixture = () => {
   }
 }
 
+const listenOnPort = (server: ReturnType<typeof createServer>, port: number) =>
+  new Promise<void>((resolvePromise, reject) => {
+    server.listen(port, '0.0.0.0', (error?: Error) => {
+      if (error) {
+        reject(error)
+        return
+      }
+
+      resolvePromise()
+    })
+  })
+
+const closeServer = (server: ReturnType<typeof createServer>) =>
+  new Promise<void>((resolvePromise, reject) => {
+    server.close((error) => {
+      if (error) {
+        reject(error)
+        return
+      }
+
+      resolvePromise()
+    })
+  })
+
+const reservePortRange = async (size: number, start = 47000, end = 49000) => {
+  for (let candidate = start; candidate <= end - size + 1; candidate += 1) {
+    const probes = Array.from({ length: size }, () => createServer())
+
+    try {
+      for (const [index, probe] of probes.entries()) {
+        await listenOnPort(probe, candidate + index)
+      }
+
+      return candidate
+    } catch {
+      // Try the next port range.
+    } finally {
+      await Promise.allSettled(probes.map(probe => closeServer(probe)))
+    }
+  }
+
+  throw new Error('Failed to reserve a free TCP port range for the runtime-manager test.')
+}
+
 describe('RuntimeManager', () => {
   it('starts once and reuses the existing process', async () => {
     const fixture = createFixture()
@@ -95,25 +139,18 @@ describe('RuntimeManager', () => {
 
   it('skips occupied ports while allocating a runtime port', async () => {
     const fixture = createFixture()
+    const startPort = await reservePortRange(3)
     const busyServer = createServer()
     occupiedServers.push(busyServer)
-    await new Promise<void>((resolvePromise, reject) => {
-      busyServer.listen(46000, '0.0.0.0', (error?: Error) => {
-        if (error) {
-          reject(error)
-          return
-        }
-        resolvePromise()
-      })
-    })
+    await listenOnPort(busyServer, startPort)
 
     const manager = createRuntimeManager({
       homeDir: fixture.homeDir,
       config: {
         ...fixture.config,
         ports: {
-          start: 46000,
-          end: 46002
+          start: startPort,
+          end: startPort + 2
         }
       },
       commandFactory: () => ({
@@ -124,6 +161,6 @@ describe('RuntimeManager', () => {
     runningManagers.push(manager)
 
     const started = await manager.startProject('demo')
-    expect(started.port).toBe(46001)
+    expect(started.port).toBe(startPort + 1)
   })
 })

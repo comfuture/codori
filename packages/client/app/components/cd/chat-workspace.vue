@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useRouter } from '#imports'
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useCodoriProjects } from '../../composables/useCodoriProjects.js'
 import { useCodoriRpc } from '../../composables/useCodoriRpc.js'
 import { useChatSubmitGuard } from '../../composables/useChatSubmitGuard.js'
@@ -60,9 +60,12 @@ const status = ref<'ready' | 'submitted' | 'streaming' | 'error'>('ready')
 const error = ref<string | null>(null)
 const activeThreadId = ref<string | null>(props.threadId ?? null)
 const loadVersion = ref(0)
+const scrollViewport = ref<HTMLElement | null>(null)
+const pinnedToBottom = ref(true)
 
 const selectedProject = computed(() => getProject(props.projectId))
 const submitError = computed(() => error.value ? new Error(error.value) : undefined)
+const isBusy = computed(() => status.value === 'submitted' || status.value === 'streaming')
 
 const uiMessages = computed<UiChatMessage[]>(() =>
   messages.value.map(message => ({
@@ -82,6 +85,42 @@ const getMessageText = (message: UiChatMessage) =>
     .filter(part => part.type === 'text')
     .map(part => part.text)
     .join('\n')
+
+const updatePinnedState = () => {
+  const viewport = scrollViewport.value
+  if (!viewport) {
+    return
+  }
+
+  pinnedToBottom.value = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 80
+}
+
+const scrollToBottom = (behavior: ScrollBehavior = 'auto') => {
+  const viewport = scrollViewport.value
+  if (!viewport) {
+    return
+  }
+
+  viewport.scrollTo({
+    top: viewport.scrollHeight,
+    behavior
+  })
+}
+
+const scheduleScrollToBottom = async (behavior: ScrollBehavior = 'auto') => {
+  await nextTick()
+
+  if (!import.meta.client) {
+    scrollToBottom(behavior)
+    return
+  }
+
+  requestAnimationFrame(() => {
+    if (pinnedToBottom.value || isBusy.value) {
+      scrollToBottom(behavior)
+    }
+  })
+}
 
 const ensureProjectRuntime = async () => {
   if (!loaded.value) {
@@ -243,6 +282,7 @@ const sendMessage = async () => {
     return
   }
 
+  pinnedToBottom.value = true
   error.value = null
   status.value = 'submitted'
   input.value = ''
@@ -362,6 +402,8 @@ onMounted(() => {
   if (!loaded.value) {
     void refreshProjects()
   }
+
+  void scheduleScrollToBottom('auto')
 })
 
 watch(() => props.threadId ?? null, (threadId) => {
@@ -372,39 +414,51 @@ watch(() => props.threadId ?? null, (threadId) => {
 
   void hydrateThread(threadId)
 }, { immediate: true })
+
+watch(messages, () => {
+  void scheduleScrollToBottom(status.value === 'streaming' ? 'auto' : 'smooth')
+}, { flush: 'post' })
+
+watch(status, (nextStatus, previousStatus) => {
+  if (nextStatus === previousStatus) {
+    return
+  }
+
+  void scheduleScrollToBottom(nextStatus === 'streaming' ? 'auto' : 'smooth')
+}, { flush: 'post' })
 </script>
 
 <template>
-  <UCard
-    :ui="{
-      body: 'p-0',
-      footer: 'p-0'
-    }"
-    class="overflow-hidden"
-  >
-    <template #header>
-      <div class="flex items-center justify-between gap-3">
-        <div>
-          <div class="text-lg font-semibold">
-            Codex Workspace
-          </div>
-          <div class="text-sm text-muted">
-            {{ activeThreadId ? `Thread ${activeThreadId}` : 'Start a new thread for this project.' }}
-          </div>
+  <section class="flex h-full min-h-0 flex-col bg-default">
+    <div class="flex shrink-0 items-center justify-between gap-3 border-b border-default px-4 py-3 md:px-6">
+      <div>
+        <div class="text-sm font-semibold text-highlighted">
+          Codex Workspace
         </div>
-        <UBadge
-          :color="status === 'error' ? 'error' : status === 'ready' ? 'neutral' : 'primary'"
-          variant="soft"
-        >
-          {{ status }}
-        </UBadge>
+        <div class="text-sm text-muted">
+          {{ activeThreadId ? `Thread ${activeThreadId}` : 'Start a new thread for this project.' }}
+        </div>
       </div>
-    </template>
+      <UBadge
+        :color="status === 'error' ? 'error' : status === 'ready' ? 'neutral' : 'primary'"
+        variant="soft"
+      >
+        {{ status }}
+      </UBadge>
+    </div>
 
-    <div class="flex min-h-[32rem] flex-col">
+    <div
+      ref="scrollViewport"
+      class="min-h-0 flex-1 overflow-y-auto"
+      @scroll="updatePinnedState"
+    >
       <UChatMessages
         :messages="uiMessages"
         :status="status"
+        :should-auto-scroll="false"
+        :should-scroll-to-bottom="false"
+        :auto-scroll="false"
+        :spacing-offset="120"
         :user="{
           ui: {
             root: 'scroll-mt-4',
@@ -412,9 +466,8 @@ watch(() => props.threadId ?? null, (threadId) => {
             content: 'px-4 py-3 rounded-lg min-h-12'
           }
         }"
-        :ui="{ root: 'min-h-0 flex-1 px-4 pt-4' }"
+        :ui="{ root: 'min-h-full px-4 py-4 md:px-6' }"
         compact
-        should-auto-scroll
       >
         <template #content="{ message }">
           <div class="space-y-2">
@@ -430,33 +483,33 @@ watch(() => props.threadId ?? null, (threadId) => {
           </div>
         </template>
       </UChatMessages>
-
-      <div class="border-t border-default p-4">
-        <UAlert
-          v-if="error"
-          color="error"
-          variant="soft"
-          icon="i-lucide-circle-alert"
-          :title="error"
-          class="mb-3"
-        />
-
-        <UChatPrompt
-          v-model="input"
-          placeholder="Describe the change you want Codex to make"
-          :error="submitError"
-          :disabled="status === 'submitted' || status === 'streaming'"
-          autoresize
-          @submit.prevent="sendMessage"
-          @keydown.enter="onPromptEnter"
-          @compositionstart="onCompositionStart"
-          @compositionend="onCompositionEnd"
-        >
-          <UChatPromptSubmit
-            :status="status"
-          />
-        </UChatPrompt>
-      </div>
     </div>
-  </UCard>
+
+    <div class="sticky bottom-0 shrink-0 border-t border-default bg-default/95 px-4 py-3 backdrop-blur md:px-6">
+      <UAlert
+        v-if="error"
+        color="error"
+        variant="soft"
+        icon="i-lucide-circle-alert"
+        :title="error"
+        class="mb-3"
+      />
+
+      <UChatPrompt
+        v-model="input"
+        placeholder="Describe the change you want Codex to make"
+        :error="submitError"
+        :disabled="isBusy"
+        autoresize
+        @submit.prevent="sendMessage"
+        @keydown.enter="onPromptEnter"
+        @compositionstart="onCompositionStart"
+        @compositionend="onCompositionEnd"
+      >
+        <UChatPromptSubmit
+          :status="status"
+        />
+      </UChatPrompt>
+    </div>
+  </section>
 </template>

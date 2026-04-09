@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { useRoute, useRouter } from '#imports'
+import type { NavigationMenuItem } from '@nuxt/ui'
+import { useRoute } from '#imports'
 import { computed, onMounted } from 'vue'
 import { useCodoriProjects } from '../../composables/useCodoriProjects.js'
 import { projectStatusMeta, toProjectRoute } from '~~/shared/codori.js'
@@ -7,17 +8,20 @@ import { projectStatusMeta, toProjectRoute } from '~~/shared/codori.js'
 const props = defineProps<{
   collapsed?: boolean
 }>()
+type ProjectNavigationItem = NavigationMenuItem & {
+  projectId: string
+  projectPath: string
+  status: 'running' | 'stopped' | 'error'
+  port: number | null
+  error: string | null
+}
 
 const route = useRoute()
-const router = useRouter()
 const {
   projects,
   loaded,
   loading,
-  pendingProjectId,
-  refreshProjects,
-  startProject,
-  stopProject
+  refreshProjects
 } = useCodoriProjects()
 
 const activeProjectId = computed(() => {
@@ -34,17 +38,34 @@ onMounted(() => {
   }
 })
 
-const navigateToProject = async (projectId: string) => {
-  await router.push(toProjectRoute(projectId))
-}
+const projectItems = computed<ProjectNavigationItem[][]>(() => [
+  projects.value.map(project => ({
+    label: project.projectId,
+    icon: 'i-lucide-folder-git-2',
+    to: toProjectRoute(project.projectId),
+    active: activeProjectId.value === project.projectId,
+    tooltip: {
+      text: project.projectId
+    },
+    projectId: project.projectId,
+    projectPath: project.projectPath,
+    status: project.status,
+    port: project.port,
+    error: project.error
+  }))
+])
 
-const onToggleProject = async (projectId: string, status: 'running' | 'stopped' | 'error') => {
-  if (status === 'running') {
-    await stopProject(projectId)
-    return
+const asProjectItem = (item: NavigationMenuItem) => item as ProjectNavigationItem
+
+const statusDotClass = (status: ProjectNavigationItem['status']) => {
+  switch (status) {
+    case 'running':
+      return 'bg-success ring-success/20'
+    case 'error':
+      return 'bg-error ring-error/20'
+    default:
+      return 'bg-muted ring-default'
   }
-
-  await startProject(projectId)
 }
 </script>
 
@@ -70,82 +91,80 @@ const onToggleProject = async (projectId: string, status: 'running' | 'stopped' 
 
     <div
       v-if="!projects.length && !loading"
-      class="rounded-xl border border-dashed border-muted px-3 py-4 text-sm text-muted"
+      class="rounded-lg border border-dashed border-muted px-3 py-4 text-sm text-muted"
     >
       <span v-if="props.collapsed">0</span>
       <span v-else>No Git projects were discovered under the configured root.</span>
     </div>
 
-    <div class="min-h-0 flex-1 space-y-2 overflow-y-auto">
-      <button
-        v-for="project in projects"
-        :key="project.projectId"
-        type="button"
-        class="w-full rounded-2xl border px-3 py-3 text-left transition"
-        :class="activeProjectId === project.projectId
-          ? 'border-primary/60 bg-primary/8 shadow-sm'
-          : 'border-default hover:border-primary/30 hover:bg-muted/40'"
-        @click="navigateToProject(project.projectId)"
+    <div class="min-h-0 flex-1 overflow-y-auto">
+      <UNavigationMenu
+        :items="projectItems"
+        orientation="vertical"
+        :collapsed="props.collapsed"
+        highlight
+        color="primary"
+        variant="link"
+        :popover="false"
+        :tooltip="props.collapsed"
+        class="w-full"
+        :ui="{
+          root: 'w-full',
+          list: 'gap-1',
+          item: 'w-full',
+          link: props.collapsed
+            ? 'w-full justify-center rounded-lg px-2 py-2'
+            : 'w-full rounded-lg px-3 py-2.5 text-sm',
+          linkLeadingIcon: props.collapsed ? 'size-4' : 'size-4 text-dimmed',
+          linkLabel: 'min-w-0 flex-1',
+          linkTrailing: 'ms-3 shrink-0'
+        }"
       >
-        <div
-          class="flex items-start gap-3"
-          :class="props.collapsed ? 'justify-center' : 'justify-between'"
-        >
+        <template #item-label="{ item }">
           <div
-            v-if="props.collapsed"
-            class="flex flex-col items-center gap-1"
+            v-if="!props.collapsed"
+            class="min-w-0"
           >
-            <UIcon
-              name="i-lucide-folder-git-2"
-              class="size-4"
+            <div class="truncate font-medium text-highlighted">
+              {{ asProjectItem(item).projectId }}
+            </div>
+            <div class="truncate text-[11px] text-muted">
+              {{ asProjectItem(item).projectPath }}
+            </div>
+            <div
+              v-if="asProjectItem(item).error"
+              class="truncate text-[11px] text-error"
+            >
+              {{ asProjectItem(item).error }}
+            </div>
+          </div>
+        </template>
+
+        <template #item-trailing="{ item }">
+          <div
+            v-if="!props.collapsed"
+            class="flex items-center gap-2"
+          >
+            <span
+              class="size-2 rounded-full ring-4"
+              :class="statusDotClass(asProjectItem(item).status)"
             />
-            <span class="text-[10px] font-medium uppercase text-muted">
-              {{ project.status.slice(0, 1) }}
+            <UBadge
+              :color="projectStatusMeta(asProjectItem(item).status).color"
+              variant="soft"
+              size="sm"
+            >
+              {{ projectStatusMeta(asProjectItem(item).status).label }}
+            </UBadge>
+            <span
+              v-if="asProjectItem(item).port"
+              class="text-[11px] text-muted"
+            >
+              :{{ asProjectItem(item).port }}
             </span>
           </div>
-
-          <template v-else>
-            <div class="min-w-0 space-y-2">
-              <div class="truncate font-medium">
-                {{ project.projectId }}
-              </div>
-              <div class="truncate text-xs text-muted">
-                {{ project.projectPath }}
-              </div>
-              <div class="flex items-center gap-2">
-                <UBadge
-                  :color="projectStatusMeta(project.status).color"
-                  variant="soft"
-                  size="sm"
-                >
-                  {{ projectStatusMeta(project.status).label }}
-                </UBadge>
-                <span
-                  v-if="project.port"
-                  class="text-[11px] text-muted"
-                >
-                  :{{ project.port }}
-                </span>
-              </div>
-              <p
-                v-if="project.error"
-                class="text-xs text-error"
-              >
-                {{ project.error }}
-              </p>
-            </div>
-
-            <UButton
-              :label="project.status === 'running' ? 'Stop' : 'Start'"
-              :color="project.status === 'running' ? 'neutral' : 'primary'"
-              :variant="project.status === 'running' ? 'outline' : 'soft'"
-              size="xs"
-              :loading="pendingProjectId === project.projectId"
-              @click.stop="onToggleProject(project.projectId, project.status)"
-            />
-          </template>
-        </div>
-      </button>
+        </template>
+      </UNavigationMenu>
     </div>
   </div>
 </template>
