@@ -68,6 +68,7 @@ const refreshThreads = () => {
     side="right"
     dismissible
     :ui="{
+      content: 'w-[80vw] max-w-[80vw] sm:w-80 sm:max-w-80',
       header: 'px-3 py-2',
       body: '!p-0 sm:!p-0'
     }"

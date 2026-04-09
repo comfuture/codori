@@ -6,10 +6,12 @@ const sidebarCollapsed = ref(false)
 const sidebarUi = computed(() =>
   sidebarCollapsed.value
     ? {
+        content: 'w-[80vw] max-w-[80vw] sm:w-80 sm:max-w-80',
         body: 'flex flex-col gap-4 flex-1 overflow-y-auto px-1 py-2',
         footer: 'overflow-visible'
       }
     : {
+        content: 'w-[80vw] max-w-[80vw] sm:w-80 sm:max-w-80',
         footer: 'overflow-visible'
       }
 )
