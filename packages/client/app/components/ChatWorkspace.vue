@@ -58,6 +58,7 @@ const {
   status,
   error,
   activeThreadId,
+  threadTitle,
   pendingThreadId,
   autoRedirectThreadId,
   loadVersion
@@ -114,6 +115,11 @@ const clearLiveStream = () => {
 
 const stripOptimisticDraftMessages = () => {
   messages.value = messages.value.filter(message => !message.id.startsWith('local-user-'))
+}
+
+const resolveThreadTitle = (thread: { name: string | null, preview: string, id: string }) => {
+  const nextTitle = thread.name?.trim() || thread.preview.trim()
+  return nextTitle || `Thread ${thread.id}`
 }
 
 const isTextPart = (part: ChatPart): part is Extract<ChatPart, { type: 'text' }> =>
@@ -236,6 +242,7 @@ const hydrateThread = async (threadId: string) => {
     }
 
     activeThreadId.value = response.thread.id
+    threadTitle.value = resolveThreadTitle(response.thread)
     messages.value = threadToMessages(response.thread)
     const activeTurn = [...response.thread.turns].reverse().find(turn => isActiveTurnStatus(turn.status))
 
@@ -272,6 +279,7 @@ const hydrateThread = async (threadId: string) => {
 const resetDraftThread = () => {
   clearLiveStream()
   activeThreadId.value = null
+  threadTitle.value = null
   pendingThreadId.value = null
   autoRedirectThreadId.value = null
   messages.value = []
@@ -297,6 +305,7 @@ const ensureThread = async () => {
   })
 
   activeThreadId.value = response.thread.id
+  threadTitle.value = resolveThreadTitle(response.thread)
   return {
     threadId: response.thread.id,
     created: true
@@ -894,26 +903,6 @@ watch(status, (nextStatus, previousStatus) => {
 
 <template>
   <section class="flex h-full min-h-0 flex-col bg-default">
-    <div
-      v-if="!showWelcomeState"
-      class="flex shrink-0 items-center justify-between gap-3 border-b border-default px-4 py-3 md:px-6"
-    >
-      <div class="min-w-0">
-        <div class="text-sm font-semibold text-highlighted">
-          Codex Workspace
-        </div>
-        <div class="truncate text-sm text-muted">
-          {{ activeThreadId ? `Thread ${activeThreadId}` : 'Start a new thread for this project.' }}
-        </div>
-      </div>
-      <UBadge
-        :color="status === 'error' ? 'error' : status === 'ready' ? 'neutral' : 'primary'"
-        variant="soft"
-      >
-        {{ status }}
-      </UBadge>
-    </div>
-
     <div
       ref="scrollViewport"
       class="min-h-0 flex-1 overflow-y-auto"

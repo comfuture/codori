@@ -55,16 +55,7 @@ const projectItems = computed<ProjectNavigationItem[][]>(() => [
 
 const asProjectItem = (item: NavigationMenuItem) => item as ProjectNavigationItem
 
-const statusDotClass = (status: ProjectNavigationItem['status']) => {
-  switch (status) {
-    case 'running':
-      return 'bg-success ring-success/20'
-    case 'error':
-      return 'bg-error ring-error/20'
-    default:
-      return 'bg-muted ring-default'
-  }
-}
+const isActiveProject = (item: ProjectNavigationItem) => activeProjectId.value === item.projectId
 </script>
 
 <template>
@@ -143,9 +134,9 @@ const statusDotClass = (status: ProjectNavigationItem['status']) => {
             v-if="!props.collapsed"
             class="flex items-center"
           >
-            <span
-              class="size-2 rounded-full ring-4"
-              :class="statusDotClass(asProjectItem(item).status)"
+            <ProjectStatusDot
+              :status="asProjectItem(item).status"
+              :pulse="isActiveProject(asProjectItem(item))"
             />
           </div>
         </template>

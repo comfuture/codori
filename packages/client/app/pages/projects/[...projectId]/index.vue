@@ -1,14 +1,37 @@
 <script setup lang="ts">
 import { useRoute, useRouter } from '#imports'
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
+import { useProjects } from '../../../composables/useProjects.js'
 import { useThreadPanel } from '../../../composables/useThreadPanel.js'
 import { normalizeProjectIdParam } from '~~/shared/codori.js'
 
 const route = useRoute()
 const router = useRouter()
 const { openPanel } = useThreadPanel()
+const { loaded, refreshProjects, getProject, pendingProjectId } = useProjects()
 
 const projectId = computed(() => normalizeProjectIdParam(route.params.projectId as string | string[] | undefined))
+const selectedProject = computed(() => getProject(projectId.value))
+const rpcStatus = computed(() => {
+  if (!projectId.value) {
+    return 'Offline'
+  }
+
+  if (pendingProjectId.value === projectId.value) {
+    return 'Starting'
+  }
+
+  switch (selectedProject.value?.status) {
+    case 'running':
+      return 'Running'
+    case 'stopped':
+      return 'Stopped'
+    case 'error':
+      return 'Error'
+    default:
+      return 'Checking'
+  }
+})
 
 const onNewThread = async () => {
   if (!projectId.value) {
@@ -16,6 +39,12 @@ const onNewThread = async () => {
   }
   await router.push(`/projects/${projectId.value}`)
 }
+
+onMounted(() => {
+  if (!loaded.value) {
+    void refreshProjects()
+  }
+})
 </script>
 
 <template>
@@ -32,6 +61,13 @@ const onNewThread = async () => {
         >
           <template #right>
             <div class="flex items-center gap-2">
+              <UTooltip :text="`RPC ${rpcStatus}`">
+                <ProjectStatusDot
+                  :status="rpcStatus"
+                  pulse
+                  padded
+                />
+              </UTooltip>
               <UTooltip text="New thread">
                 <UButton
                   icon="i-lucide-plus"

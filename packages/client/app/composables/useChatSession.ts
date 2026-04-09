@@ -16,6 +16,7 @@ export type ChatSession = {
   status: Ref<ChatStatus>
   error: Ref<string | null>
   activeThreadId: Ref<string | null>
+  threadTitle: Ref<string | null>
   pendingThreadId: Ref<string | null>
   autoRedirectThreadId: Ref<string | null>
   loadVersion: Ref<number>
@@ -29,6 +30,7 @@ const createSession = (): ChatSession => ({
   status: ref<ChatStatus>('ready'),
   error: ref<string | null>(null),
   activeThreadId: ref<string | null>(null),
+  threadTitle: ref<string | null>(null),
   pendingThreadId: ref<string | null>(null),
   autoRedirectThreadId: ref<string | null>(null),
   loadVersion: ref(0),
