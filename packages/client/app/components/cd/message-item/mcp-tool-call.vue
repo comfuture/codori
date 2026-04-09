@@ -25,13 +25,17 @@ const title = computed(() => {
       return 'MCP tool'
   }
 })
+
+const icon = computed(() =>
+  props.item.status === 'failed' ? 'i-lucide-triangle-alert' : 'i-lucide-plug-zap'
+)
 </script>
 
 <template>
   <CdMessageItemChatTool
     :text="title"
     :suffix="`${item.server} ${item.tool}`"
-    icon="i-lucide-plug-zap"
+    :icon="icon"
     :status="item.status"
     variant="card"
     :default-open="item.status !== 'completed'"

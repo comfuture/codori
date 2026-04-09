@@ -19,13 +19,16 @@ const title = computed(() => {
 })
 
 const output = computed(() => props.item.aggregatedOutput?.trim() ?? '')
+const icon = computed(() =>
+  props.item.status === 'failed' ? 'i-lucide-triangle-alert' : 'i-lucide-terminal'
+)
 </script>
 
 <template>
   <CdMessageItemChatTool
     :text="title"
     :suffix="item.command"
-    icon="i-lucide-terminal"
+    :icon="icon"
     :status="item.status"
     variant="card"
     :default-open="item.status !== 'completed'"
@@ -47,6 +50,13 @@ const output = computed(() => props.item.aggregatedOutput?.trim() ?? '')
       >
         Exit code {{ item.exitCode }}
       </p>
+      <UAlert
+        v-if="item.status === 'failed' && item.exitCode !== null"
+        color="error"
+        variant="soft"
+        icon="i-lucide-triangle-alert"
+        :title="`Command failed with exit code ${item.exitCode}`"
+      />
     </div>
   </CdMessageItemChatTool>
 </template>

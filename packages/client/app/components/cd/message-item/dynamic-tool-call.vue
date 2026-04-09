@@ -13,7 +13,26 @@ const inputSummary = computed(() =>
   ).join('\n\n') ?? ''
 )
 
+const normalizeToolName = (value: string) =>
+  value
+    .trim()
+    .toLowerCase()
+    .split('/')
+    .filter(Boolean)
+    .at(-1)
+    ?.replace(/[_\-\s]/g, '') ?? ''
+
+const normalizedTool = computed(() => normalizeToolName(props.item.tool ?? ''))
+
 const title = computed(() => {
+  if (['sharedmemory', 'corazonsharedmemory'].includes(normalizedTool.value)) {
+    return 'Memory'
+  }
+
+  if (['manageworkflow', 'corazonmanageworkflow'].includes(normalizedTool.value)) {
+    return 'Workflow'
+  }
+
   switch (props.item.status) {
     case 'inProgress':
       return 'Running internal tool'
@@ -23,16 +42,44 @@ const title = computed(() => {
       return 'Internal tool'
   }
 })
+
+const icon = computed(() => {
+  if (props.item.status === 'failed') {
+    return 'i-lucide-triangle-alert'
+  }
+
+  if (['sharedmemory', 'corazonsharedmemory'].includes(normalizedTool.value)) {
+    return 'i-lucide-database'
+  }
+
+  if (['manageworkflow', 'corazonmanageworkflow'].includes(normalizedTool.value)) {
+    return 'i-lucide-workflow'
+  }
+
+  return 'i-lucide-wrench'
+})
+
+const suffix = computed(() => {
+  if (['sharedmemory', 'corazonsharedmemory'].includes(normalizedTool.value)) {
+    return 'Internal memory operation'
+  }
+
+  if (['manageworkflow', 'corazonmanageworkflow'].includes(normalizedTool.value)) {
+    return 'Internal workflow operation'
+  }
+
+  return props.item.tool
+})
 </script>
 
 <template>
   <CdMessageItemChatTool
     :text="title"
-    :suffix="item.tool"
-    icon="i-lucide-wrench"
+    :suffix="suffix"
+    :icon="icon"
     :status="item.status"
-    variant="card"
-    :default-open="item.status !== 'completed'"
+    :variant="item.arguments != null || inputSummary ? 'card' : 'inline'"
+    :default-open="item.status === 'failed'"
   >
     <div class="space-y-3">
       <pre

@@ -21,6 +21,7 @@ const props = withDefaults(defineProps<{
 
 const open = ref(props.defaultOpen)
 const isStreaming = computed(() => props.status === 'inProgress')
+const isLoading = computed(() => props.status === 'inProgress')
 
 watch(() => props.status, (status, previousStatus) => {
   if (status === 'inProgress' || status === 'failed') {
@@ -39,9 +40,15 @@ watch(() => props.status, (status, previousStatus) => {
     :text="text"
     :suffix="suffix"
     :icon="icon"
+    :loading="isLoading"
     :streaming="isStreaming"
     :variant="variant"
     :open="open"
+    :default-open="defaultOpen"
+    :ui="{
+      trigger: variant === 'card' ? 'rounded-2xl' : undefined,
+      body: variant === 'card' ? 'pt-3' : 'pt-2'
+    }"
     @update:open="open = $event"
   >
     <slot />

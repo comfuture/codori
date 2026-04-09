@@ -30,13 +30,17 @@ const title = computed(() => {
       return 'File changes'
   }
 })
+
+const icon = computed(() =>
+  props.item.status === 'failed' ? 'i-lucide-triangle-alert' : 'i-lucide-file-pen-line'
+)
 </script>
 
 <template>
   <CdMessageItemChatTool
     :text="title"
     :suffix="filePreview"
-    icon="i-lucide-file-pen-line"
+    :icon="icon"
     :status="item.status"
     variant="card"
     :default-open="item.status !== 'completed'"
