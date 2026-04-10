@@ -33,7 +33,7 @@ Codori follows a few hard constraints:
 The normal flow is simple:
 
 1. Run the Codori server on the machine that already has your projects and local tooling.
-2. Open the client UI locally or through your own private network path.
+2. Open the Codori UI from that same server origin locally or through your own private network path.
 3. Pick a project from the sidebar and start coding.
 4. Let Codori start the project runtime only when chat or thread access actually needs it.
 
@@ -51,7 +51,13 @@ If you need different bind settings:
 npx @codori/server --root ~/Project --host 0.0.0.0 --port 4310
 ```
 
-Then open your deployed Codori client and point it at that server origin, choose a discovered Git project, and either start a new thread or resume an older one.
+Then open:
+
+```text
+http://127.0.0.1:4310
+```
+
+Codori now serves the dashboard UI, REST API, and WebSocket proxy from the same origin. Choose a discovered Git project, then start a new thread or resume an older one.
 
 ## Remote Access
 
@@ -104,6 +110,24 @@ npx @codori/server --root ~/Project
 tailscale serve --https=443 http://127.0.0.1:4310
 ```
 
+3. Check status:
+
+```bash
+tailscale serve status
+```
+
+4. Open it from another tailnet device:
+
+```text
+https://my-codori-host.your-tailnet.ts.net/
+```
+
+5. Remove the serve configuration when no longer needed:
+
+```bash
+tailscale serve reset
+```
+
 ## Development
 
 Run the full workspace checks:
@@ -120,6 +144,14 @@ Run the client UI in development:
 pnpm --filter @codori/client dev
 ```
 
+Run the client alone against a remote Codori server:
+
+```bash
+CODORI_SERVER_BASE=https://my-codori-host.your-tailnet.ts.net \
+CODORI_SERVER_WS_BASE=wss://my-codori-host.your-tailnet.ts.net \
+pnpm --filter @codori/client dev
+```
+
 Build the workspace:
 
 ```bash
@@ -130,7 +162,7 @@ pnpm build
 
 This repository is a pnpm workspace with two packages:
 
-- `@codori/server`: project discovery, runtime management, CLI, REST API, and WebSocket proxy
+- `@codori/server`: project discovery, runtime management, CLI, REST API, WebSocket proxy, and bundled static UI serving
 - `@codori/client`: Nuxt + Nuxt UI dashboard for project browsing and Codex chat
 
 See [docs/prd.md](/Users/comfuture/Project/codori/docs/prd.md) for the detailed product specification.
@@ -199,6 +231,7 @@ When you open a stopped project and start chatting, Codori starts its app-server
 - Stores runtime metadata under `~/.codori/run/`.
 - Provides a Nuxt UI dashboard for project selection, chat, and thread resume.
 - Proxies browser WebSocket traffic to the correct project app-server.
+- Serves the built dashboard bundle from the same origin as the management API.
 
 ## What Codori Does Not Do
 
@@ -240,24 +273,6 @@ Inspect runtime status:
 ```bash
 npx @codori/server status --root ~/Project
 npx @codori/server status codori --root ~/Project
-```
-
-3. Check status:
-
-```bash
-tailscale serve status
-```
-
-4. Open it from another tailnet device:
-
-```text
-https://my-codori-host.your-tailnet.ts.net/
-```
-
-5. Remove the serve configuration when no longer needed:
-
-```bash
-tailscale serve reset
 ```
 
 Notes:
