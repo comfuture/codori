@@ -6,4 +6,4 @@ coverage
 .output
 .nitro
 *.tsbuildinfo
-
+packages/server/client-dist
