@@ -135,12 +135,37 @@ describe('createHttpServer', () => {
     expect(appRouteResponse.statusCode).toBe(200)
     expect(appRouteResponse.body).toContain('codori ui')
 
+    const dottedRouteResponse = await app.inject({
+      method: 'GET',
+      url: '/projects/demo.app',
+      headers: {
+        accept: 'text/html'
+      }
+    })
+    expect(dottedRouteResponse.statusCode).toBe(200)
+    expect(dottedRouteResponse.body).toContain('codori ui')
+
     const assetResponse = await app.inject({
       method: 'GET',
       url: '/asset.txt'
     })
     expect(assetResponse.statusCode).toBe(200)
     expect(assetResponse.body).toBe('static asset')
+
+    const missingAssetResponse = await app.inject({
+      method: 'GET',
+      url: '/missing.css?v=1',
+      headers: {
+        accept: 'text/css,*/*;q=0.1'
+      }
+    })
+    expect(missingAssetResponse.statusCode).toBe(404)
+    expect(missingAssetResponse.json()).toEqual({
+      error: {
+        code: 'NOT_FOUND',
+        message: 'Asset not found.'
+      }
+    })
   })
 
   it('bridges websocket frames to the project app-server', async () => {

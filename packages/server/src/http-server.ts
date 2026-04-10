@@ -59,6 +59,8 @@ const resolveBundledClientDir = () => {
   return null
 }
 
+const toRequestPath = (url: string) => url.split('?')[0]?.split('#')[0] ?? url
+
 const isAssetRequest = (pathname: string) =>
   /\.[a-z0-9]+$/i.test(pathname)
 
@@ -273,37 +275,37 @@ export const createHttpServer = async (
 
   if (clientBundleDir) {
     app.setNotFoundHandler((request, reply) => {
+      const requestPath = toRequestPath(request.url)
+      const acceptsHtml = request.headers.accept?.includes('text/html') ?? false
+
       if (request.method !== 'GET') {
-        reply.status(404).send({
+        return reply.status(404).send({
           error: {
             code: 'NOT_FOUND',
             message: 'Route not found.'
           }
         })
-        return
       }
 
-      if (request.url.startsWith('/api/')) {
-        reply.status(404).send({
+      if (requestPath.startsWith('/api/')) {
+        return reply.status(404).send({
           error: {
             code: 'NOT_FOUND',
             message: 'Route not found.'
           }
         })
-        return
       }
 
-      if (isAssetRequest(request.url)) {
-        reply.status(404).send({
+      if (isAssetRequest(requestPath) && !acceptsHtml) {
+        return reply.status(404).send({
           error: {
             code: 'NOT_FOUND',
             message: 'Asset not found.'
           }
         })
-        return
       }
 
-      void reply.type('text/html').sendFile('index.html')
+      return reply.type('text/html').sendFile('index.html')
     })
   }
 
