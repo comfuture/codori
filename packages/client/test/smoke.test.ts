@@ -7,6 +7,7 @@ import {
   toProjectRoute,
   toProjectThreadRoute
 } from '../shared/codori.js'
+import { resolveWsBase, shouldUseServerProxy } from '../shared/network.js'
 
 describe('client package', () => {
   it('normalizes project routes and thread routes', () => {
@@ -21,6 +22,13 @@ describe('client package', () => {
       color: 'success',
       label: 'Running'
     })
+  })
+
+  it('resolves standalone proxy mode and websocket protocol correctly', () => {
+    expect(shouldUseServerProxy('https://codori.example.com')).toBe(true)
+    expect(shouldUseServerProxy('')).toBe(false)
+    expect(resolveWsBase('', 'HTTPS://codori.example.com')).toBe('wss://codori.example.com')
+    expect(resolveWsBase('', 'http://127.0.0.1:4310')).toBe('ws://127.0.0.1:4310')
   })
 
   it('maps agent thread items into chat messages', () => {
