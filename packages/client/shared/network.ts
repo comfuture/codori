@@ -21,6 +21,14 @@ export const resolveHttpBase = (configuredBase: string | null | undefined) => {
 export const shouldUseServerProxy = (configuredBase: string | null | undefined) =>
   Boolean(configuredBase && configuredBase.trim().length > 0)
 
+export const resolveApiUrl = (
+  path: string,
+  configuredBase: string | null | undefined
+) => {
+  const normalizedPath = path.startsWith('/api/') ? path : `/api${path.startsWith('/') ? path : `/${path}`}`
+  return new URL(normalizedPath, resolveHttpBase(configuredBase)).toString()
+}
+
 export const resolveWsBase = (
   configuredWsBase: string | null | undefined,
   configuredHttpBase: string | null | undefined

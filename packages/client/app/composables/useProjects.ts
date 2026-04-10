@@ -1,7 +1,7 @@
 import { useRuntimeConfig, useState } from '#imports'
 import { $fetch } from 'ofetch'
 import { encodeProjectIdSegment } from '~~/shared/codori.js'
-import { resolveHttpBase, shouldUseServerProxy } from '~~/shared/network.js'
+import { resolveApiUrl, shouldUseServerProxy } from '~~/shared/network.js'
 import type {
   ProjectRecord,
   ProjectResponse,
@@ -21,13 +21,12 @@ export const useProjects = () => {
   const pendingProjectId = useState<string | null>('codori-projects-pending-id', () => null)
   const error = useState<string | null>('codori-projects-error', () => null)
   const configuredBase = String(useRuntimeConfig().public.serverBase ?? '')
-  const apiBase = resolveHttpBase(configuredBase)
   const useProxy = shouldUseServerProxy(configuredBase)
 
   const toApiUrl = (path: string) =>
     useProxy
       ? `/api/codori${path}`
-      : new URL(path, apiBase).toString()
+      : resolveApiUrl(path, configuredBase)
 
   const refreshProjects = async () => {
     if (loading.value) {
