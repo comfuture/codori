@@ -258,30 +258,41 @@ const loadPromptControls = async () => {
     try {
       await ensureProjectRuntime()
       const client = getClient(props.projectId)
+      const initialModel = selectedModel.value
+      const initialEffort = selectedEffort.value
       let nextModels = availableModels.value.length > 0 ? availableModels.value : FALLBACK_MODELS
-      let preferredModel = selectedModel.value
-      let preferredEffort = selectedEffort.value
+      let defaultModel: string | null = null
+      let defaultEffort: ReasoningEffort | null = null
 
-      try {
-        const response = await client.request<ModelListResponse>('model/list')
-        nextModels = visibleModelOptions(normalizeModelList(response))
-      } catch {
+      const [modelsResponse, configResponse] = await Promise.allSettled([
+        client.request<ModelListResponse>('model/list'),
+        client.request<ConfigReadResponse>('config/read')
+      ])
+
+      if (modelsResponse.status === 'fulfilled') {
+        nextModels = visibleModelOptions(normalizeModelList(modelsResponse.value))
+      } else {
         nextModels = visibleModelOptions(nextModels)
       }
 
-      try {
-        const response = await client.request<ConfigReadResponse>('config/read')
-        const defaults = normalizeConfigDefaults(response)
+      if (configResponse.status === 'fulfilled') {
+        const defaults = normalizeConfigDefaults(configResponse.value)
         if (defaults.contextWindow != null) {
           modelContextWindow.value = defaults.contextWindow
         }
-        preferredModel = defaults.model ?? preferredModel
-        preferredEffort = defaults.effort ?? preferredEffort
-      } catch {
-        // Fall back to the local defaults when config is unavailable.
+        defaultModel = defaults.model
+        defaultEffort = defaults.effort
       }
 
       availableModels.value = nextModels
+
+      const preferredModel = selectedModel.value !== initialModel
+        ? selectedModel.value
+        : defaultModel ?? initialModel
+      const preferredEffort = selectedEffort.value !== initialEffort
+        ? selectedEffort.value
+        : defaultEffort ?? initialEffort
+
       normalizePromptSelection(preferredModel, preferredEffort)
       promptControlsLoaded.value = true
     } finally {
@@ -1640,7 +1651,14 @@ const sendMessage = async () => {
     return
   }
 
-  await loadPromptControls()
+  try {
+    await loadPromptControls()
+  } catch (caughtError) {
+    error.value = caughtError instanceof Error ? caughtError.message : String(caughtError)
+    status.value = 'error'
+    return
+  }
+
   pinnedToBottom.value = true
   error.value = null
   attachmentError.value = null

@@ -4,13 +4,8 @@ type JsonRpcError = {
   data?: unknown
 }
 
-export type ReasoningEffort =
-  | 'none'
-  | 'minimal'
-  | 'low'
-  | 'medium'
-  | 'high'
-  | 'xhigh'
+export type { ReasoningEffort } from './chat-prompt-controls'
+import type { ReasoningEffort } from './chat-prompt-controls'
 
 type JsonRpcRequest = {
   id: number
