@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "packageManager": "pnpm@10.33.0",
   "scripts": {
-    "build": "pnpm -r --if-present build",
+    "build": "pnpm --filter @codori/client build && pnpm --filter @codori/server build",
     "dev": "pnpm --filter @codori/client dev",
     "lint": "pnpm -r --if-present lint",
     "typecheck": "pnpm -r --if-present typecheck",

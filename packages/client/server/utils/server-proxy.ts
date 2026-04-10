@@ -6,7 +6,7 @@ const trimTrailingSlash = (value: string) => value.replace(/\/+$/, '')
 
 export const getServerBase = (event: H3Event) => {
   const runtimeConfig = useRuntimeConfig(event)
-  return trimTrailingSlash(runtimeConfig.codoriServerBase as string)
+  return trimTrailingSlash(String(runtimeConfig.public.serverBase ?? ''))
 }
 
 export const proxyServerRequest = async <T>(

@@ -1,4 +1,8 @@
 import net from 'node:net'
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import fastifyStatic from '@fastify/static'
 import websocket from '@fastify/websocket'
 import Fastify, {
   type FastifyInstance,
@@ -33,8 +37,32 @@ type ProjectsResponse = {
   projects: ProjectStatusRecord[]
 }
 
+export type HttpServerOptions = {
+  clientBundleDir?: string | null
+}
+
 const isCodoriError = (error: unknown): error is CodoriError =>
   error instanceof CodoriError
+
+const resolveBundledClientDir = () => {
+  const candidates = [
+    fileURLToPath(new URL('../client-dist', import.meta.url)),
+    fileURLToPath(new URL('../../client/.output/public', import.meta.url))
+  ]
+
+  for (const candidate of candidates) {
+    if (existsSync(join(candidate, 'index.html'))) {
+      return candidate
+    }
+  }
+
+  return null
+}
+
+const toRequestPath = (url: string) => url.split('?')[0]?.split('#')[0] ?? url
+
+const isAssetRequest = (pathname: string) =>
+  /\.[a-z0-9]+$/i.test(pathname)
 
 const toStatusCode = (error: CodoriError) => {
   switch (error.code) {
@@ -98,12 +126,24 @@ const waitForPortReady = async (port: number, host = '127.0.0.1', timeoutMs = 5_
   return false
 }
 
-export const createHttpServer = async (manager: RuntimeManagerLike): Promise<FastifyInstance> => {
+export const createHttpServer = async (
+  manager: RuntimeManagerLike,
+  options: HttpServerOptions = {}
+): Promise<FastifyInstance> => {
   const app = Fastify({
     logger: false
   })
+  const clientBundleDir = options.clientBundleDir === undefined
+    ? resolveBundledClientDir()
+    : options.clientBundleDir
 
   await app.register(websocket)
+
+  if (clientBundleDir) {
+    await app.register(fastifyStatic, {
+      root: clientBundleDir
+    })
+  }
 
   app.setErrorHandler((error: unknown, _request: FastifyRequest, reply: FastifyReply) => {
     if (isCodoriError(error)) {
@@ -232,6 +272,42 @@ export const createHttpServer = async (manager: RuntimeManagerLike): Promise<Fas
       })
     }
   )
+
+  if (clientBundleDir) {
+    app.setNotFoundHandler((request, reply) => {
+      const requestPath = toRequestPath(request.url)
+      const acceptsHtml = request.headers.accept?.includes('text/html') ?? false
+
+      if (request.method !== 'GET') {
+        return reply.status(404).send({
+          error: {
+            code: 'NOT_FOUND',
+            message: 'Route not found.'
+          }
+        })
+      }
+
+      if (requestPath.startsWith('/api/')) {
+        return reply.status(404).send({
+          error: {
+            code: 'NOT_FOUND',
+            message: 'Route not found.'
+          }
+        })
+      }
+
+      if (isAssetRequest(requestPath) && !acceptsHtml) {
+        return reply.status(404).send({
+          error: {
+            code: 'NOT_FOUND',
+            message: 'Asset not found.'
+          }
+        })
+      }
+
+      return reply.type('text/html').sendFile('index.html')
+    })
+  }
 
   return app
 }

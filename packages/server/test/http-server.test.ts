@@ -1,4 +1,7 @@
+import { mkdtempSync, writeFileSync } from 'node:fs'
 import { createServer as createNetServer } from 'node:net'
+import os from 'node:os'
+import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import WebSocket, { WebSocketServer } from 'ws'
 import { createHttpServer, type RuntimeManagerLike } from '../src/http-server.js'
@@ -104,6 +107,63 @@ describe('createHttpServer', () => {
       project: {
         ...createProjectRecord(),
         reusedExisting: true
+      }
+    })
+  })
+
+  it('serves the bundled client and falls back to index.html for app routes', async () => {
+    const bundleDir = mkdtempSync(join(os.tmpdir(), 'codori-ui-'))
+    writeFileSync(join(bundleDir, 'index.html'), '<html><body>codori ui</body></html>')
+    writeFileSync(join(bundleDir, 'asset.txt'), 'static asset')
+
+    const app = await createHttpServer(createManager(), {
+      clientBundleDir: bundleDir
+    })
+    startedApps.push(app)
+
+    const indexResponse = await app.inject({
+      method: 'GET',
+      url: '/'
+    })
+    expect(indexResponse.statusCode).toBe(200)
+    expect(indexResponse.body).toContain('codori ui')
+
+    const appRouteResponse = await app.inject({
+      method: 'GET',
+      url: '/projects/demo/threads/thread-1'
+    })
+    expect(appRouteResponse.statusCode).toBe(200)
+    expect(appRouteResponse.body).toContain('codori ui')
+
+    const dottedRouteResponse = await app.inject({
+      method: 'GET',
+      url: '/projects/demo.app',
+      headers: {
+        accept: 'text/html'
+      }
+    })
+    expect(dottedRouteResponse.statusCode).toBe(200)
+    expect(dottedRouteResponse.body).toContain('codori ui')
+
+    const assetResponse = await app.inject({
+      method: 'GET',
+      url: '/asset.txt'
+    })
+    expect(assetResponse.statusCode).toBe(200)
+    expect(assetResponse.body).toBe('static asset')
+
+    const missingAssetResponse = await app.inject({
+      method: 'GET',
+      url: '/missing.css?v=1',
+      headers: {
+        accept: 'text/css,*/*;q=0.1'
+      }
+    })
+    expect(missingAssetResponse.statusCode).toBe(404)
+    expect(missingAssetResponse.json()).toEqual({
+      error: {
+        code: 'NOT_FOUND',
+        message: 'Asset not found.'
       }
     })
   })
