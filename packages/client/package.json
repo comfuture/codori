@@ -1,8 +1,35 @@
 {
   "name": "@codori/client",
-  "version": "0.1.0",
-  "private": true,
+  "version": "0.0.1",
+  "private": false,
+  "description": "Codori Nuxt dashboard for project browsing, Codex chat, and thread resume.",
   "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/comfuture/codori.git",
+    "directory": "packages/client"
+  },
+  "homepage": "https://github.com/comfuture/codori#readme",
+  "bugs": {
+    "url": "https://github.com/comfuture/codori/issues"
+  },
+  "keywords": [
+    "codori",
+    "codex",
+    "nuxt",
+    "dashboard",
+    "chat"
+  ],
+  "files": [
+    "app",
+    "server",
+    "shared",
+    "nuxt.config.ts",
+    "README.md"
+  ],
   "scripts": {
     "build": "nuxt generate",
     "dev": "nuxt dev",

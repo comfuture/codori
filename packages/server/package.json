@@ -1,14 +1,35 @@
 {
   "name": "@codori/server",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "private": false,
+  "description": "Codori server for Git project discovery, Codex runtime management, and bundled dashboard serving.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": "./dist/cli.js",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/comfuture/codori.git",
+    "directory": "packages/server"
+  },
+  "homepage": "https://github.com/comfuture/codori#readme",
+  "bugs": {
+    "url": "https://github.com/comfuture/codori/issues"
+  },
+  "keywords": [
+    "codori",
+    "codex",
+    "remote-coding",
+    "nuxt",
+    "fastify"
+  ],
   "files": [
     "dist",
-    "client-dist"
+    "client-dist",
+    "README.md"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json && node ./scripts/sync-client-bundle.mjs",
