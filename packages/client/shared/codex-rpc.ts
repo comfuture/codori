@@ -4,6 +4,14 @@ type JsonRpcError = {
   data?: unknown
 }
 
+export type ReasoningEffort =
+  | 'none'
+  | 'minimal'
+  | 'low'
+  | 'medium'
+  | 'high'
+  | 'xhigh'
+
 type JsonRpcRequest = {
   id: number
   method: string
@@ -163,10 +171,14 @@ export type ThreadListResponse = {
 
 export type ThreadStartResponse = {
   thread: CodexThread
+  model?: string | null
+  reasoningEffort?: ReasoningEffort | null
 }
 
 export type ThreadResumeResponse = {
   thread: CodexThread
+  model?: string | null
+  reasoningEffort?: ReasoningEffort | null
 }
 
 export type ThreadReadResponse = {
@@ -177,6 +189,18 @@ export type TurnStartResponse = {
   turn: {
     id: string
   }
+}
+
+export type ModelListResponse = {
+  data?: unknown[]
+}
+
+export type ConfigReadResponse = {
+  config?: {
+    model?: string | null
+    model_context_window?: number | string | null
+    model_reasoning_effort?: ReasoningEffort | null
+  } | null
 }
 
 export type CodexRpcNotification = {
