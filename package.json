@@ -7,6 +7,7 @@
     "build": "pnpm --filter @codori/client build && pnpm --filter @codori/server build",
     "dev": "pnpm --filter @codori/client dev",
     "lint": "pnpm -r --if-present lint",
+    "release:publish": "node ./scripts/publish-release.mjs",
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "pnpm -r --if-present test"
   },
