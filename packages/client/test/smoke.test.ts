@@ -14,6 +14,16 @@ import {
   validateAttachmentSelection
 } from '../shared/chat-attachments'
 import {
+  buildTurnOverrides,
+  coercePromptSelection,
+  ensureModelOption,
+  formatCompactTokenCount,
+  normalizeConfigDefaults,
+  normalizeModelList,
+  resolveContextWindowState,
+  resolveEffortOptions
+} from '../shared/chat-prompt-controls'
+import {
   encodeProjectIdSegment,
   normalizeProjectIdParam,
   projectStatusMeta,
@@ -325,5 +335,146 @@ describe('client package', () => {
     expect(shouldIgnoreNotificationAfterInterrupt('item/started')).toBe(true)
     expect(shouldIgnoreNotificationAfterInterrupt('item/completed')).toBe(false)
     expect(shouldIgnoreNotificationAfterInterrupt('turn/completed')).toBe(false)
+  })
+
+  it('normalizes model metadata from app-server responses', () => {
+    expect(normalizeModelList({
+      data: [{
+        id: 'model-1',
+        model: 'gpt-5.4',
+        displayName: 'GPT-5.4',
+        hidden: false,
+        isDefault: true,
+        defaultReasoningEffort: 'medium',
+        supportedReasoningEfforts: [
+          { reasoningEffort: 'low' },
+          { reasoningEffort: 'medium' },
+          { reasoningEffort: 'high' }
+        ]
+      }]
+    })).toEqual([{
+      id: 'model-1',
+      model: 'gpt-5.4',
+      displayName: 'GPT-5.4',
+      hidden: false,
+      isDefault: true,
+      defaultReasoningEffort: 'medium',
+      supportedReasoningEfforts: ['low', 'medium', 'high']
+    }])
+  })
+
+  it('derives initial selector defaults from config and coerces invalid effort values', () => {
+    const defaults = normalizeConfigDefaults({
+      config: {
+        model: 'gpt-5.4-mini',
+        model_context_window: '272000',
+        model_reasoning_effort: 'high'
+      }
+    })
+
+    const models = normalizeModelList({
+      data: [{
+        model: 'gpt-5.4-mini',
+        displayName: 'GPT-5.4 Mini',
+        hidden: false,
+        isDefault: true,
+        defaultReasoningEffort: 'medium',
+        supportedReasoningEfforts: [
+          { reasoningEffort: 'minimal' },
+          { reasoningEffort: 'medium' }
+        ]
+      }]
+    })
+
+    expect(defaults).toEqual({
+      model: 'gpt-5.4-mini',
+      effort: 'high',
+      contextWindow: 272000
+    })
+    expect(coercePromptSelection(models, defaults.model, defaults.effort)).toEqual({
+      model: 'gpt-5.4-mini',
+      effort: 'medium'
+    })
+  })
+
+  it('updates effort options when the selected model changes', () => {
+    const models = normalizeModelList({
+      data: [{
+        model: 'gpt-5.4',
+        displayName: 'GPT-5.4',
+        hidden: false,
+        isDefault: true,
+        defaultReasoningEffort: 'medium',
+        supportedReasoningEfforts: [
+          { reasoningEffort: 'low' },
+          { reasoningEffort: 'medium' },
+          { reasoningEffort: 'high' }
+        ]
+      }, {
+        model: 'gpt-5.4-mini',
+        displayName: 'GPT-5.4 Mini',
+        hidden: false,
+        isDefault: false,
+        defaultReasoningEffort: 'minimal',
+        supportedReasoningEfforts: [
+          { reasoningEffort: 'none' },
+          { reasoningEffort: 'minimal' }
+        ]
+      }]
+    })
+
+    expect(resolveEffortOptions(models, 'gpt-5.4-mini')).toEqual(['none', 'minimal'])
+    expect(coercePromptSelection(models, 'gpt-5.4-mini', 'high')).toEqual({
+      model: 'gpt-5.4-mini',
+      effort: 'minimal'
+    })
+  })
+
+  it('keeps the active thread model visible when it is missing from the fetched list', () => {
+    const models = normalizeModelList({
+      data: [{
+        model: 'gpt-5.4',
+        displayName: 'GPT-5.4',
+        hidden: false,
+        isDefault: true,
+        defaultReasoningEffort: 'medium',
+        supportedReasoningEfforts: [
+          { reasoningEffort: 'medium' }
+        ]
+      }]
+    })
+
+    expect(ensureModelOption(models, 'gpt-5.5-preview', 'high')[0]).toEqual({
+      id: 'gpt-5.5-preview',
+      model: 'gpt-5.5-preview',
+      displayName: 'gpt-5.5-preview',
+      hidden: false,
+      isDefault: false,
+      defaultReasoningEffort: 'high',
+      supportedReasoningEfforts: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh']
+    })
+  })
+
+  it('builds turn overrides and context summaries for the footer controls', () => {
+    expect(buildTurnOverrides('gpt-5.4', 'high')).toEqual({
+      model: 'gpt-5.4',
+      effort: 'high'
+    })
+    expect(resolveContextWindowState({
+      totalInputTokens: 24000,
+      totalCachedInputTokens: 6000,
+      totalOutputTokens: 4000,
+      lastInputTokens: 2000,
+      lastCachedInputTokens: 500,
+      lastOutputTokens: 700,
+      modelContextWindow: 64000
+    }, null)).toEqual({
+      contextWindow: 64000,
+      usedTokens: 28000,
+      remainingTokens: 36000,
+      usedPercent: 43.75,
+      remainingPercent: 56.25
+    })
+    expect(formatCompactTokenCount(12800)).toBe('13k')
   })
 })

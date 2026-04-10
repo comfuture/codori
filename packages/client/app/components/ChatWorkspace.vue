@@ -30,6 +30,8 @@ import {
 } from '~~/shared/codex-chat'
 import { buildTurnStartInput } from '~~/shared/chat-attachments'
 import {
+  type ConfigReadResponse,
+  type ModelListResponse,
   notificationThreadId,
   notificationTurnId,
   type CodexRpcNotification,
@@ -40,6 +42,21 @@ import {
   type ThreadStartResponse,
   type TurnStartResponse
 } from '~~/shared/codex-rpc'
+import {
+  buildTurnOverrides,
+  coercePromptSelection,
+  ensureModelOption,
+  FALLBACK_MODELS,
+  formatCompactTokenCount,
+  formatReasoningEffortLabel,
+  normalizeConfigDefaults,
+  normalizeModelList,
+  normalizeThreadTokenUsage,
+  resolveContextWindowState,
+  resolveEffortOptions,
+  visibleModelOptions,
+  type ReasoningEffort
+} from '~~/shared/chat-prompt-controls'
 import { toProjectThreadRoute } from '~~/shared/codori'
 
 const props = defineProps<{
@@ -93,7 +110,14 @@ const {
   threadTitle,
   pendingThreadId,
   autoRedirectThreadId,
-  loadVersion
+  loadVersion,
+  promptControlsLoaded,
+  promptControlsLoading,
+  availableModels,
+  selectedModel,
+  selectedEffort,
+  modelContextWindow,
+  tokenUsage
 } = session
 
 const selectedProject = computed(() => getProject(props.projectId))
@@ -147,8 +171,131 @@ const starterPrompts = computed(() => {
   ]
 })
 
+const hasKnownThreadUsage = computed(() => !activeThreadId.value || tokenUsage.value !== null)
+const effectiveModelList = computed(() => {
+  const withSelected = ensureModelOption(
+    availableModels.value.length > 0 ? availableModels.value : FALLBACK_MODELS,
+    selectedModel.value,
+    selectedEffort.value
+  )
+  return visibleModelOptions(withSelected)
+})
+const selectedModelOption = computed(() =>
+  effectiveModelList.value.find(model => model.model === selectedModel.value)
+  ?? effectiveModelList.value[0]
+  ?? FALLBACK_MODELS[0]
+)
+const modelSelectItems = computed(() =>
+  effectiveModelList.value.map(model => ({
+    label: model.displayName,
+    value: model.model
+  }))
+)
+const effortOptions = computed(() => resolveEffortOptions(effectiveModelList.value, selectedModel.value))
+const effortSelectItems = computed(() =>
+  effortOptions.value.map(effort => ({
+    label: formatReasoningEffortLabel(effort),
+    value: effort
+  }))
+)
+const contextWindowState = computed(() =>
+  resolveContextWindowState(tokenUsage.value, modelContextWindow.value, hasKnownThreadUsage.value)
+)
+const contextUsedPercent = computed(() => contextWindowState.value.usedPercent ?? 0)
+const contextIndicatorLabel = computed(() => {
+  const remainingPercent = contextWindowState.value.remainingPercent
+  return remainingPercent == null ? 'ctx' : `${Math.round(remainingPercent)}%`
+})
+const contextSummaryLabel = computed(() => {
+  const remainingPercent = contextWindowState.value.remainingPercent
+  if (remainingPercent == null) {
+    return 'Context'
+  }
+
+  return `${Math.round(remainingPercent)}% left`
+})
+
+const normalizePromptSelection = (
+  preferredModel?: string | null,
+  preferredEffort?: ReasoningEffort | null
+) => {
+  const withSelected = ensureModelOption(
+    availableModels.value.length > 0 ? availableModels.value : FALLBACK_MODELS,
+    preferredModel ?? selectedModel.value,
+    preferredEffort ?? selectedEffort.value
+  )
+  const visibleModels = visibleModelOptions(withSelected)
+  const nextSelection = coercePromptSelection(visibleModels, preferredModel ?? selectedModel.value, preferredEffort ?? selectedEffort.value)
+
+  availableModels.value = visibleModels
+  if (selectedModel.value !== nextSelection.model) {
+    selectedModel.value = nextSelection.model
+  }
+  if (selectedEffort.value !== nextSelection.effort) {
+    selectedEffort.value = nextSelection.effort
+  }
+}
+
+const syncPromptSelectionFromThread = (
+  model: string | null | undefined,
+  effort: ReasoningEffort | null | undefined
+) => {
+  normalizePromptSelection(model ?? null, effort ?? null)
+}
+
+const loadPromptControls = async () => {
+  if (promptControlsLoaded.value) {
+    return
+  }
+
+  if (promptControlsPromise) {
+    return await promptControlsPromise
+  }
+
+  promptControlsPromise = (async () => {
+    promptControlsLoading.value = true
+
+    try {
+      await ensureProjectRuntime()
+      const client = getClient(props.projectId)
+      let nextModels = availableModels.value.length > 0 ? availableModels.value : FALLBACK_MODELS
+      let preferredModel = selectedModel.value
+      let preferredEffort = selectedEffort.value
+
+      try {
+        const response = await client.request<ModelListResponse>('model/list')
+        nextModels = visibleModelOptions(normalizeModelList(response))
+      } catch {
+        nextModels = visibleModelOptions(nextModels)
+      }
+
+      try {
+        const response = await client.request<ConfigReadResponse>('config/read')
+        const defaults = normalizeConfigDefaults(response)
+        if (defaults.contextWindow != null) {
+          modelContextWindow.value = defaults.contextWindow
+        }
+        preferredModel = defaults.model ?? preferredModel
+        preferredEffort = defaults.effort ?? preferredEffort
+      } catch {
+        // Fall back to the local defaults when config is unavailable.
+      }
+
+      availableModels.value = nextModels
+      normalizePromptSelection(preferredModel, preferredEffort)
+      promptControlsLoaded.value = true
+    } finally {
+      promptControlsLoading.value = false
+      promptControlsPromise = null
+    }
+  })()
+
+  return await promptControlsPromise
+}
+
 const subagentBootstrapPromises = new Map<string, Promise<void>>()
 const optimisticAttachmentSnapshots = new Map<string, DraftAttachment[]>()
+let promptControlsPromise: Promise<void> | null = null
 
 const isActiveTurnStatus = (value: string | null | undefined) => {
   if (!value) {
@@ -535,6 +682,7 @@ const hydrateThread = async (threadId: string) => {
   const requestVersion = loadVersion.value + 1
   loadVersion.value = requestVersion
   error.value = null
+  tokenUsage.value = null
 
   try {
     await ensureProjectRuntime()
@@ -579,7 +727,7 @@ const hydrateThread = async (threadId: string) => {
       setSessionLiveStream(nextLiveStream)
     }
 
-    await client.request<ThreadResumeResponse>('thread/resume', {
+    const resumeResponse = await client.request<ThreadResumeResponse>('thread/resume', {
       threadId,
       cwd: selectedProject.value?.projectPath ?? null,
       approvalPolicy: 'never',
@@ -594,6 +742,10 @@ const hydrateThread = async (threadId: string) => {
       return
     }
 
+    syncPromptSelectionFromThread(
+      resumeResponse.model ?? null,
+      (resumeResponse.reasoningEffort as ReasoningEffort | null | undefined) ?? null
+    )
     activeThreadId.value = response.thread.id
     threadTitle.value = resolveThreadTitle(response.thread)
     messages.value = threadToMessages(response.thread)
@@ -640,6 +792,7 @@ const resetDraftThread = () => {
   messages.value = []
   subagentPanels.value = []
   error.value = null
+  tokenUsage.value = null
   status.value = 'ready'
 }
 
@@ -1427,6 +1580,16 @@ const applyNotification = (notification: CodexRpcNotification) => {
       status.value = 'streaming'
       return
     }
+    case 'thread/tokenUsage/updated': {
+      const nextUsage = normalizeThreadTokenUsage(notification.params)
+      if (nextUsage) {
+        tokenUsage.value = nextUsage
+        if (nextUsage.modelContextWindow != null) {
+          modelContextWindow.value = nextUsage.modelContextWindow
+        }
+      }
+      return
+    }
     case 'error': {
       const params = notification.params as { error?: { message?: string } }
       const messageText = params.error?.message ?? 'The stream failed.'
@@ -1477,6 +1640,7 @@ const sendMessage = async () => {
     return
   }
 
+  await loadPromptControls()
   pinnedToBottom.value = true
   error.value = null
   attachmentError.value = null
@@ -1504,7 +1668,8 @@ const sendMessage = async () => {
       await client.request<TurnStartResponse>('turn/steer', {
         threadId: liveStream.threadId,
         expectedTurnId: turnId,
-        input: buildTurnStartInput(text, uploadedAttachments)
+        input: buildTurnStartInput(text, uploadedAttachments),
+        ...buildTurnOverrides(selectedModel.value, selectedEffort.value)
       })
       return
     }
@@ -1519,7 +1684,8 @@ const sendMessage = async () => {
       threadId,
       input: buildTurnStartInput(text, uploadedAttachments),
       cwd: selectedProject.value?.projectPath ?? null,
-      approvalPolicy: 'never'
+      approvalPolicy: 'never',
+      ...buildTurnOverrides(selectedModel.value, selectedEffort.value)
     })
 
     setLiveStreamTurnId(liveStream, turnStart.turn.id)
@@ -1607,6 +1773,7 @@ onMounted(() => {
     void refreshProjects()
   }
 
+  void loadPromptControls()
   void scheduleScrollToBottom('auto')
 })
 
@@ -1660,6 +1827,18 @@ watch(status, (nextStatus, previousStatus) => {
 
   void scheduleScrollToBottom(nextStatus === 'streaming' ? 'auto' : 'smooth')
 }, { flush: 'post' })
+
+watch([selectedModel, availableModels], () => {
+  const nextSelection = coercePromptSelection(effectiveModelList.value, selectedModel.value, selectedEffort.value)
+  if (selectedModel.value !== nextSelection.model) {
+    selectedModel.value = nextSelection.model
+    return
+  }
+
+  if (selectedEffort.value !== nextSelection.effort) {
+    selectedEffort.value = nextSelection.effort
+  }
+}, { flush: 'sync' })
 </script>
 
 <template>
@@ -1779,45 +1958,15 @@ watch(status, (nextStatus, previousStatus) => {
             @compositionend="onCompositionEnd"
             @paste="onPaste"
           >
-            <UChatPromptSubmit
-              :status="promptSubmitStatus"
-              @stop="stopActiveTurn"
-            />
-
-            <template #footer>
-              <div class="flex flex-wrap items-center gap-2 pt-1">
-                <input
-                  ref="fileInput"
-                  type="file"
-                  accept="image/*"
-                  class="hidden"
-                  :disabled="isComposerDisabled"
-                  @change="onFileInputChange"
-                >
-                <UButton
-                  type="button"
-                  color="neutral"
-                  variant="soft"
-                  size="sm"
-                  icon="i-lucide-paperclip"
-                  :disabled="isComposerDisabled"
-                  @click="openFilePicker"
-                >
-                  Attach image
-                </UButton>
-                <span class="text-xs text-muted">
-                  Drag and drop or paste an image
-                </span>
-              </div>
-
+            <template #header>
               <div
                 v-if="attachments.length"
-                class="mt-3 flex flex-wrap gap-2"
+                class="flex flex-wrap gap-2 pb-2"
               >
                 <div
                   v-for="attachment in attachments"
                   :key="attachment.id"
-                  class="flex max-w-full items-center gap-3 rounded-2xl border border-default bg-elevated/35 px-3 py-2"
+                  class="flex max-w-full items-center gap-2 rounded-2xl border border-default bg-elevated/35 px-2 py-1.5"
                 >
                   <img
                     :src="attachment.previewUrl"
@@ -1825,10 +1974,10 @@ watch(status, (nextStatus, previousStatus) => {
                     class="size-10 rounded-xl object-cover"
                   >
                   <div class="min-w-0">
-                    <div class="truncate text-sm font-medium text-highlighted">
+                    <div class="max-w-40 truncate text-xs font-medium text-highlighted">
                       {{ attachment.name }}
                     </div>
-                    <div class="text-xs text-muted">
+                    <div class="text-[11px] text-muted">
                       {{ formatAttachmentSize(attachment.size) }}
                     </div>
                   </div>
@@ -1839,10 +1988,201 @@ watch(status, (nextStatus, previousStatus) => {
                     size="xs"
                     icon="i-lucide-x"
                     :disabled="isComposerDisabled"
+                    class="rounded-full"
                     :aria-label="`Remove ${attachment.name}`"
                     @click="removeAttachment(attachment.id)"
                   />
                 </div>
+              </div>
+            </template>
+
+            <UChatPromptSubmit
+              :status="promptSubmitStatus"
+              @stop="stopActiveTurn"
+            />
+
+            <template #footer>
+              <input
+                ref="fileInput"
+                type="file"
+                accept="image/*"
+                class="hidden"
+                :disabled="isComposerDisabled"
+                @change="onFileInputChange"
+              >
+
+              <div class="flex items-start justify-between gap-3 pt-1">
+                <div class="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+                  <UButton
+                    type="button"
+                    color="neutral"
+                    variant="ghost"
+                    size="sm"
+                    icon="i-lucide-plus"
+                    :disabled="isComposerDisabled"
+                    class="size-8 shrink-0 justify-center rounded-full border border-default/70"
+                    :ui="{ leadingIcon: 'size-4', base: 'px-0' }"
+                    aria-label="Attach image"
+                    @click="openFilePicker"
+                  />
+
+                  <USelect
+                    v-model="selectedModel"
+                    :items="modelSelectItems"
+                    color="neutral"
+                    variant="ghost"
+                    size="sm"
+                    :loading="promptControlsLoading"
+                    :disabled="isComposerDisabled"
+                    class="min-w-0 flex-1 sm:max-w-52 sm:flex-none"
+                    :ui="{ base: 'rounded-full border border-default/70 bg-default/70', value: 'truncate', content: 'min-w-56' }"
+                  />
+
+                  <USelect
+                    v-model="selectedEffort"
+                    :items="effortSelectItems"
+                    color="neutral"
+                    variant="ghost"
+                    size="sm"
+                    :disabled="isComposerDisabled"
+                    class="min-w-0 flex-1 sm:max-w-36 sm:flex-none"
+                    :ui="{ base: 'rounded-full border border-default/70 bg-default/70', value: 'truncate' }"
+                  />
+
+                  <span class="hidden text-[11px] text-muted md:inline">
+                    Drag, drop, or paste an image
+                  </span>
+                </div>
+
+                <UPopover
+                  :content="{ side: 'top', align: 'end' }"
+                  arrow
+                >
+                  <button
+                    type="button"
+                    class="flex shrink-0 items-center gap-2 rounded-full border border-default/70 bg-default/70 px-2 py-1 text-left"
+                  >
+                    <span class="relative flex size-8 items-center justify-center">
+                      <svg
+                        viewBox="0 0 36 36"
+                        class="size-8 -rotate-90"
+                        aria-hidden="true"
+                      >
+                        <circle
+                          cx="18"
+                          cy="18"
+                          r="15.5"
+                          fill="none"
+                          stroke-width="3"
+                          pathLength="100"
+                          class="stroke-current text-muted/20"
+                          stroke-dasharray="100 100"
+                        />
+                        <circle
+                          cx="18"
+                          cy="18"
+                          r="15.5"
+                          fill="none"
+                          stroke-width="3"
+                          pathLength="100"
+                          class="stroke-current text-primary"
+                          stroke-linecap="round"
+                          :stroke-dasharray="`${contextUsedPercent} 100`"
+                        />
+                      </svg>
+                      <span class="absolute text-[9px] font-semibold text-highlighted">
+                        {{ contextIndicatorLabel }}
+                      </span>
+                    </span>
+
+                    <div class="hidden min-w-0 leading-tight sm:block">
+                      <div class="text-[11px] font-medium text-highlighted">
+                        {{ contextSummaryLabel }}
+                      </div>
+                      <div class="text-[10px] text-muted">
+                        {{ modelContextWindow ? `${formatCompactTokenCount(modelContextWindow)} ctx` : 'Context window' }}
+                      </div>
+                    </div>
+                  </button>
+
+                  <template #content>
+                    <div class="w-72 space-y-3 p-4">
+                      <div class="space-y-1">
+                        <div class="text-xs font-semibold uppercase tracking-[0.22em] text-primary">
+                          Context Window
+                        </div>
+                        <div class="text-sm font-medium text-highlighted">
+                          {{ selectedModelOption?.displayName ?? 'Selected model' }}
+                        </div>
+                      </div>
+
+                      <div
+                        v-if="contextWindowState.contextWindow && contextWindowState.usedTokens !== null"
+                        class="grid grid-cols-2 gap-3 text-sm"
+                      >
+                        <div class="rounded-2xl border border-default bg-elevated/35 px-3 py-2">
+                          <div class="text-[11px] uppercase tracking-[0.18em] text-muted">
+                            Remaining
+                          </div>
+                          <div class="mt-1 font-semibold text-highlighted">
+                            {{ Math.round(contextWindowState.remainingPercent ?? 0) }}%
+                          </div>
+                          <div class="text-xs text-muted">
+                            {{ formatCompactTokenCount(contextWindowState.remainingTokens ?? 0) }} tokens
+                          </div>
+                        </div>
+                        <div class="rounded-2xl border border-default bg-elevated/35 px-3 py-2">
+                          <div class="text-[11px] uppercase tracking-[0.18em] text-muted">
+                            Used
+                          </div>
+                          <div class="mt-1 font-semibold text-highlighted">
+                            {{ formatCompactTokenCount(contextWindowState.usedTokens ?? 0) }}
+                          </div>
+                          <div class="text-xs text-muted">
+                            of {{ formatCompactTokenCount(contextWindowState.contextWindow) }}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div
+                        v-else
+                        class="rounded-2xl border border-default bg-elevated/35 px-3 py-2 text-sm text-muted"
+                      >
+                        <div v-if="contextWindowState.contextWindow">
+                          Live token usage will appear after the next turn completes.
+                        </div>
+                        <div v-else>
+                          Context window details are not available from the runtime yet.
+                        </div>
+                      </div>
+
+                      <div class="grid grid-cols-2 gap-3 text-sm">
+                        <div class="rounded-2xl border border-default bg-elevated/35 px-3 py-2">
+                          <div class="text-[11px] uppercase tracking-[0.18em] text-muted">
+                            Input
+                          </div>
+                          <div class="mt-1 font-semibold text-highlighted">
+                            {{ formatCompactTokenCount(tokenUsage?.totalInputTokens ?? 0) }}
+                          </div>
+                          <div class="text-xs text-muted">
+                            cached {{ formatCompactTokenCount(tokenUsage?.totalCachedInputTokens ?? 0) }}
+                          </div>
+                        </div>
+                        <div class="rounded-2xl border border-default bg-elevated/35 px-3 py-2">
+                          <div class="text-[11px] uppercase tracking-[0.18em] text-muted">
+                            Output
+                          </div>
+                          <div class="mt-1 font-semibold text-highlighted">
+                            {{ formatCompactTokenCount(tokenUsage?.totalOutputTokens ?? 0) }}
+                          </div>
+                          <div class="text-xs text-muted">
+                            effort {{ formatReasoningEffortLabel(selectedEffort) }}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </template>
+                </UPopover>
               </div>
             </template>
           </UChatPrompt>

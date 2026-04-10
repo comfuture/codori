@@ -1,6 +1,12 @@
 import { ref, type Ref } from 'vue'
 import type { ChatMessage, SubagentAgentStatus, VisualSubagentPanel } from '~~/shared/codex-chat'
 import type { CodexRpcNotification } from '~~/shared/codex-rpc'
+import {
+  FALLBACK_MODELS,
+  type ModelOption,
+  type ReasoningEffort,
+  type TokenUsageSnapshot
+} from '~~/shared/chat-prompt-controls'
 
 export type ChatStatus = 'ready' | 'submitted' | 'streaming' | 'error'
 
@@ -38,6 +44,13 @@ export type ChatSession = {
   pendingThreadId: Ref<string | null>
   autoRedirectThreadId: Ref<string | null>
   loadVersion: Ref<number>
+  promptControlsLoaded: Ref<boolean>
+  promptControlsLoading: Ref<boolean>
+  availableModels: Ref<ModelOption[]>
+  selectedModel: Ref<string>
+  selectedEffort: Ref<ReasoningEffort>
+  modelContextWindow: Ref<number | null>
+  tokenUsage: Ref<TokenUsageSnapshot | null>
   pendingLiveStream: Promise<LiveStream> | null
   liveStream: LiveStream | null
 }
@@ -54,6 +67,13 @@ const createSession = (): ChatSession => ({
   pendingThreadId: ref<string | null>(null),
   autoRedirectThreadId: ref<string | null>(null),
   loadVersion: ref(0),
+  promptControlsLoaded: ref(false),
+  promptControlsLoading: ref(false),
+  availableModels: ref<ModelOption[]>(FALLBACK_MODELS),
+  selectedModel: ref(FALLBACK_MODELS[0]!.model),
+  selectedEffort: ref(FALLBACK_MODELS[0]!.defaultReasoningEffort),
+  modelContextWindow: ref<number | null>(null),
+  tokenUsage: ref<TokenUsageSnapshot | null>(null),
   pendingLiveStream: null,
   liveStream: null
 })
