@@ -2,8 +2,16 @@
 import { useRouter } from '#imports'
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import MessageContent from './MessageContent.vue'
+import {
+  reconcileOptimisticUserMessage,
+  removeChatMessage,
+  removePendingUserMessageId,
+  resolvePromptSubmitStatus,
+  resolveTurnSubmissionMethod,
+  shouldIgnoreNotificationAfterInterrupt
+} from '../utils/chat-turn-engagement'
 import { useChatAttachments, type DraftAttachment } from '../composables/useChatAttachments'
-import { useChatSession, type SubagentPanelState } from '../composables/useChatSession'
+import { useChatSession, type LiveStream, type SubagentPanelState } from '../composables/useChatSession'
 import { useProjects } from '../composables/useProjects'
 import { useRpc } from '../composables/useRpc'
 import { useChatSubmitGuard } from '../composables/useChatSubmitGuard'
@@ -91,10 +99,25 @@ const {
 const selectedProject = computed(() => getProject(props.projectId))
 const composerError = computed(() => attachmentError.value ?? error.value)
 const submitError = computed(() => composerError.value ? new Error(composerError.value) : undefined)
+const interruptRequested = ref(false)
 const isBusy = computed(() =>
   status.value === 'submitted'
   || status.value === 'streaming'
   || isUploading.value
+)
+const hasDraftContent = computed(() =>
+  input.value.trim().length > 0
+  || attachments.value.length > 0
+)
+const isComposerDisabled = computed(() =>
+  isUploading.value
+  || interruptRequested.value
+)
+const promptSubmitStatus = computed(() =>
+  resolvePromptSubmitStatus({
+    status: status.value,
+    hasDraftContent: hasDraftContent.value
+  })
 )
 const routeThreadId = computed(() => props.threadId ?? null)
 const projectTitle = computed(() => selectedProject.value?.projectId ?? props.projectId)
@@ -125,6 +148,7 @@ const starterPrompts = computed(() => {
 })
 
 const subagentBootstrapPromises = new Map<string, Promise<void>>()
+const optimisticAttachmentSnapshots = new Map<string, DraftAttachment[]>()
 
 const isActiveTurnStatus = (value: string | null | undefined) => {
   if (!value) {
@@ -139,9 +163,143 @@ const currentLiveStream = () =>
     ? session.liveStream
     : null
 
-const clearLiveStream = () => {
-  session.liveStream?.unsubscribe?.()
-  session.liveStream = null
+const hasActiveTurnEngagement = () =>
+  Boolean(currentLiveStream() || session.pendingLiveStream)
+
+const rejectLiveStreamTurnWaiters = (liveStream: LiveStream, error: Error) => {
+  const waiters = liveStream.turnIdWaiters.splice(0, liveStream.turnIdWaiters.length)
+  for (const waiter of waiters) {
+    waiter.reject(error)
+  }
+}
+
+const createLiveStreamState = (
+  threadId: string,
+  bufferedNotifications: CodexRpcNotification[] = []
+): LiveStream => ({
+  threadId,
+  turnId: null,
+  bufferedNotifications,
+  observedSubagentThreadIds: new Set<string>(),
+  pendingUserMessageIds: [],
+  turnIdWaiters: [],
+  interruptRequested: false,
+  interruptAcknowledged: false,
+  unsubscribe: null
+})
+
+const setSessionLiveStream = (liveStream: LiveStream | null) => {
+  session.liveStream = liveStream
+  interruptRequested.value = liveStream?.interruptRequested === true
+}
+
+const setLiveStreamInterruptRequested = (liveStream: LiveStream, nextValue: boolean) => {
+  liveStream.interruptRequested = nextValue
+
+  if (session.liveStream === liveStream) {
+    interruptRequested.value = nextValue
+  }
+}
+
+const setLiveStreamTurnId = (liveStream: LiveStream, turnId: string | null) => {
+  liveStream.turnId = turnId
+
+  if (!turnId) {
+    return
+  }
+
+  liveStream.interruptAcknowledged = false
+  const waiters = liveStream.turnIdWaiters.splice(0, liveStream.turnIdWaiters.length)
+  for (const waiter of waiters) {
+    waiter.resolve(turnId)
+  }
+}
+
+const waitForLiveStreamTurnId = async (liveStream: LiveStream) => {
+  if (liveStream.turnId) {
+    return liveStream.turnId
+  }
+
+  return await new Promise<string>((resolve, reject) => {
+    liveStream.turnIdWaiters.push({ resolve, reject })
+  })
+}
+
+const clearLiveStream = (reason?: Error) => {
+  const liveStream = session.liveStream
+  if (!liveStream) {
+    interruptRequested.value = false
+    return null
+  }
+
+  liveStream.unsubscribe?.()
+  rejectLiveStreamTurnWaiters(liveStream, reason ?? new Error('The active turn is no longer available.'))
+  setSessionLiveStream(null)
+  return liveStream
+}
+
+const ensurePendingLiveStream = async () => {
+  const existingLiveStream = currentLiveStream()
+  if (existingLiveStream) {
+    return existingLiveStream
+  }
+
+  if (session.pendingLiveStream) {
+    return await session.pendingLiveStream
+  }
+
+  const pendingLiveStream = (async () => {
+    await ensureProjectRuntime()
+    const { threadId, created } = await ensureThread()
+    const client = getClient(props.projectId)
+    const buffered: CodexRpcNotification[] = []
+    clearLiveStream()
+
+    const liveStream = createLiveStreamState(threadId, buffered)
+    liveStream.unsubscribe = client.subscribe((notification) => {
+      const targetThreadId = notificationThreadId(notification)
+      if (!targetThreadId) {
+        return
+      }
+
+      if (targetThreadId !== threadId) {
+        if (liveStream.observedSubagentThreadIds.has(targetThreadId)) {
+          applySubagentNotification(targetThreadId, notification)
+        }
+        return
+      }
+
+      if (!liveStream.turnId) {
+        buffered.push(notification)
+        return
+      }
+
+      const turnId = notificationTurnId(notification)
+      if (turnId && turnId !== liveStream.turnId) {
+        return
+      }
+
+      applyNotification(notification)
+    })
+
+    setSessionLiveStream(liveStream)
+
+    if (created && !routeThreadId.value) {
+      pendingThreadId.value = threadId
+    }
+
+    return liveStream
+  })()
+
+  session.pendingLiveStream = pendingLiveStream
+
+  try {
+    return await pendingLiveStream
+  } finally {
+    if (session.pendingLiveStream === pendingLiveStream) {
+      session.pendingLiveStream = null
+    }
+  }
 }
 
 const createOptimisticMessageId = () =>
@@ -172,6 +330,14 @@ const buildOptimisticMessage = (text: string, submittedAttachments: DraftAttachm
   ]
 })
 
+const rememberOptimisticAttachments = (messageId: string, submittedAttachments: DraftAttachment[]) => {
+  if (submittedAttachments.length === 0) {
+    return
+  }
+
+  optimisticAttachmentSnapshots.set(messageId, submittedAttachments)
+}
+
 const formatAttachmentSize = (size: number) => {
   if (size >= 1024 * 1024) {
     return `${(size / (1024 * 1024)).toFixed(1)} MB`
@@ -184,8 +350,62 @@ const formatAttachmentSize = (size: number) => {
   return `${size} B`
 }
 
-const stripOptimisticDraftMessages = () => {
-  messages.value = messages.value.filter(message => !message.id.startsWith('local-user-'))
+const removeOptimisticMessage = (messageId: string) => {
+  messages.value = removeChatMessage(messages.value, messageId)
+  optimisticAttachmentSnapshots.delete(messageId)
+}
+
+const restoreDraftIfPristine = (text: string, submittedAttachments: DraftAttachment[]) => {
+  if (!input.value.trim()) {
+    input.value = text
+  }
+
+  if (attachments.value.length === 0 && submittedAttachments.length > 0) {
+    replaceAttachments(submittedAttachments)
+  }
+}
+
+const untrackPendingUserMessage = (messageId: string) => {
+  const liveStream = currentLiveStream()
+  if (!liveStream) {
+    return
+  }
+
+  liveStream.pendingUserMessageIds = removePendingUserMessageId(liveStream.pendingUserMessageIds, messageId)
+}
+
+const reconcilePendingUserMessage = (confirmedMessage: ChatMessage) => {
+  const liveStream = currentLiveStream()
+  const optimisticMessageId = liveStream?.pendingUserMessageIds.shift() ?? null
+  if (!optimisticMessageId) {
+    messages.value = upsertStreamingMessage(messages.value, confirmedMessage)
+    return
+  }
+
+  const pendingAttachments = optimisticAttachmentSnapshots.get(optimisticMessageId)
+  if (pendingAttachments) {
+    discardSnapshot(pendingAttachments)
+    optimisticAttachmentSnapshots.delete(optimisticMessageId)
+  }
+
+  messages.value = reconcileOptimisticUserMessage(messages.value, optimisticMessageId, confirmedMessage)
+}
+
+const clearPendingOptimisticMessages = (liveStream: LiveStream | null, options?: { discardSnapshots?: boolean }) => {
+  if (!liveStream) {
+    return
+  }
+
+  for (const messageId of liveStream.pendingUserMessageIds) {
+    messages.value = removeChatMessage(messages.value, messageId)
+    const pendingAttachments = optimisticAttachmentSnapshots.get(messageId)
+    if (options?.discardSnapshots && pendingAttachments) {
+      discardSnapshot(pendingAttachments)
+    }
+    optimisticAttachmentSnapshots.delete(messageId)
+  }
+
+  liveStream.pendingUserMessageIds = []
 }
 
 const resolveThreadTitle = (thread: { name: string | null, preview: string, id: string }) => {
@@ -321,16 +541,14 @@ const hydrateThread = async (threadId: string) => {
     const client = getClient(props.projectId)
     activeThreadId.value = threadId
 
-    const existingLiveStream = currentLiveStream()
+    const existingLiveStream = session.liveStream
 
-    if (!existingLiveStream) {
-      const nextLiveStream = {
-        threadId,
-        turnId: null,
-        bufferedNotifications: [] as CodexRpcNotification[],
-        observedSubagentThreadIds: new Set<string>(),
-        unsubscribe: null as (() => void) | null
-      }
+    if (existingLiveStream && existingLiveStream.threadId !== threadId) {
+      clearLiveStream()
+    }
+
+    if (!session.liveStream) {
+      const nextLiveStream = createLiveStreamState(threadId)
 
       nextLiveStream.unsubscribe = client.subscribe((notification) => {
         const targetThreadId = notificationThreadId(notification)
@@ -358,7 +576,7 @@ const hydrateThread = async (threadId: string) => {
         applyNotification(notification)
       })
 
-      session.liveStream = nextLiveStream
+      setSessionLiveStream(nextLiveStream)
     }
 
     await client.request<ThreadResumeResponse>('thread/resume', {
@@ -393,7 +611,7 @@ const hydrateThread = async (threadId: string) => {
       return
     }
 
-    session.liveStream.turnId = activeTurn.id
+    setLiveStreamTurnId(session.liveStream, activeTurn.id)
     status.value = 'streaming'
 
     const pendingNotifications = session.liveStream.bufferedNotifications.splice(0, session.liveStream.bufferedNotifications.length)
@@ -414,6 +632,7 @@ const hydrateThread = async (threadId: string) => {
 
 const resetDraftThread = () => {
   clearLiveStream()
+  session.pendingLiveStream = null
   activeThreadId.value = null
   threadTitle.value = null
   pendingThreadId.value = null
@@ -1013,6 +1232,11 @@ const applySubagentNotification = (threadId: string, notification: CodexRpcNotif
 }
 
 const applyNotification = (notification: CodexRpcNotification) => {
+  const liveStream = currentLiveStream()
+  if (liveStream?.interruptAcknowledged && shouldIgnoreNotificationAfterInterrupt(notification.method)) {
+    return
+  }
+
   switch (notification.method) {
     case 'thread/started': {
       const nextThreadId = notificationThreadId(notification)
@@ -1025,6 +1249,10 @@ const applyNotification = (notification: CodexRpcNotification) => {
       return
     }
     case 'turn/started': {
+      if (liveStream) {
+        setLiveStreamTurnId(liveStream, notificationTurnId(notification))
+        setLiveStreamInterruptRequested(liveStream, false)
+      }
       messages.value = upsertStreamingMessage(
         messages.value,
         eventToMessage(`event-turn-started-${notificationTurnId(notification) ?? Date.now()}`, {
@@ -1039,6 +1267,16 @@ const applyNotification = (notification: CodexRpcNotification) => {
       if (params.item.type === 'collabAgentToolCall') {
         applySubagentActivityItem(params.item)
       }
+      if (params.item.type === 'userMessage') {
+        for (const nextMessage of itemToMessages(params.item)) {
+          reconcilePendingUserMessage({
+            ...nextMessage,
+            pending: false
+          })
+        }
+        status.value = 'streaming'
+        return
+      }
       seedStreamingMessage(params.item)
       status.value = 'streaming'
       return
@@ -1048,14 +1286,17 @@ const applyNotification = (notification: CodexRpcNotification) => {
       if (params.item.type === 'collabAgentToolCall') {
         applySubagentActivityItem(params.item)
       }
-      if (params.item.type === 'userMessage') {
-        stripOptimisticDraftMessages()
-      }
       for (const nextMessage of itemToMessages(params.item)) {
-        messages.value = upsertStreamingMessage(messages.value, {
+        const confirmedMessage = {
           ...nextMessage,
           pending: false
-        })
+        }
+        if (params.item.type === 'userMessage') {
+          reconcilePendingUserMessage(confirmedMessage)
+          continue
+        }
+
+        messages.value = upsertStreamingMessage(messages.value, confirmedMessage)
       }
       return
     }
@@ -1186,11 +1427,22 @@ const applyNotification = (notification: CodexRpcNotification) => {
       status.value = 'streaming'
       return
     }
+    case 'error': {
+      const params = notification.params as { error?: { message?: string } }
+      const messageText = params.error?.message ?? 'The stream failed.'
+      pushEventMessage('stream.error', messageText)
+      clearPendingOptimisticMessages(liveStream, { discardSnapshots: true })
+      clearLiveStream(new Error(messageText))
+      error.value = messageText
+      status.value = 'error'
+      return
+    }
     case 'turn/failed': {
       const params = notification.params as { error?: { message?: string } }
       const messageText = params.error?.message ?? 'The turn failed.'
       pushEventMessage('turn.failed', messageText)
-      clearLiveStream()
+      clearPendingOptimisticMessages(liveStream, { discardSnapshots: true })
+      clearLiveStream(new Error(messageText))
       error.value = messageText
       status.value = 'error'
       return
@@ -1199,12 +1451,15 @@ const applyNotification = (notification: CodexRpcNotification) => {
       const params = notification.params as { message?: string }
       const messageText = params.message ?? 'The stream failed.'
       pushEventMessage('stream.error', messageText)
-      clearLiveStream()
+      clearPendingOptimisticMessages(liveStream, { discardSnapshots: true })
+      clearLiveStream(new Error(messageText))
       error.value = messageText
       status.value = 'error'
       return
     }
     case 'turn/completed': {
+      clearPendingOptimisticMessages(liveStream, { discardSnapshots: true })
+      error.value = null
       status.value = 'ready'
       clearLiveStream()
       return
@@ -1225,112 +1480,40 @@ const sendMessage = async () => {
   pinnedToBottom.value = true
   error.value = null
   attachmentError.value = null
-  status.value = 'submitted'
+  const submissionMethod = resolveTurnSubmissionMethod(hasActiveTurnEngagement())
+  if (submissionMethod === 'turn/start') {
+    status.value = 'submitted'
+  }
   input.value = ''
   clearAttachments({ revoke: false })
-  messages.value = [...messages.value, buildOptimisticMessage(text, submittedAttachments)]
-  let unsubscribe: (() => void) | null = null
+  const optimisticMessage = buildOptimisticMessage(text, submittedAttachments)
+  const optimisticMessageId = optimisticMessage.id
+  rememberOptimisticAttachments(optimisticMessageId, submittedAttachments)
+  messages.value = [...messages.value, optimisticMessage]
+  let startedLiveStream: LiveStream | null = null
 
   try {
-    await ensureProjectRuntime()
-    const { threadId, created } = await ensureThread()
-    const uploadedAttachments = await uploadAttachments(threadId, submittedAttachments)
     const client = getClient(props.projectId)
-    const buffered: CodexRpcNotification[] = []
-    let currentTurnId: string | null = null
-    let completionResolved = false
-    let resolveCompletion: (() => void) | null = null
-    let rejectCompletion: ((error: Error) => void) | null = null
 
-    const settleNotification = (notification: CodexRpcNotification) => {
-      if (notificationThreadId(notification) !== threadId) {
-        return false
-      }
+    if (submissionMethod === 'turn/steer') {
+      const liveStream = await ensurePendingLiveStream()
+      const uploadedAttachments = await uploadAttachments(liveStream.threadId, submittedAttachments)
+      liveStream.pendingUserMessageIds.push(optimisticMessageId)
+      const turnId = await waitForLiveStreamTurnId(liveStream)
 
-      const turnId = notificationTurnId(notification)
-      if (currentTurnId && turnId && turnId !== currentTurnId) {
-        return false
-      }
-
-      if (notification.method === 'error') {
-        completionResolved = true
-        unsubscribe?.()
-        if (session.liveStream?.unsubscribe === unsubscribe) {
-          session.liveStream = null
-        }
-        const params = notification.params as { error?: { message?: string } }
-        const messageText = params.error?.message ?? 'Turn failed.'
-        pushEventMessage('stream.error', messageText)
-        rejectCompletion?.(new Error(messageText))
-        return true
-      }
-
-      applyNotification(notification)
-
-      if (notification.method === 'turn/completed') {
-        completionResolved = true
-        unsubscribe?.()
-        if (session.liveStream?.unsubscribe === unsubscribe) {
-          session.liveStream = null
-        }
-        resolveCompletion?.()
-        return true
-      }
-
-      if (notification.method === 'turn/failed' || notification.method === 'stream/error') {
-        completionResolved = true
-        unsubscribe?.()
-        if (session.liveStream?.unsubscribe === unsubscribe) {
-          session.liveStream = null
-        }
-        rejectCompletion?.(new Error(error.value ?? 'Turn failed.'))
-        return true
-      }
-
-      return false
+      await client.request<TurnStartResponse>('turn/steer', {
+        threadId: liveStream.threadId,
+        expectedTurnId: turnId,
+        input: buildTurnStartInput(text, uploadedAttachments)
+      })
+      return
     }
 
-    clearLiveStream()
-
-    const completion = new Promise<void>((resolve, reject) => {
-      resolveCompletion = resolve
-      rejectCompletion = (caughtError: Error) => reject(caughtError)
-    })
-
-    const liveStream = {
-      threadId,
-      turnId: null as string | null,
-      bufferedNotifications: buffered,
-      observedSubagentThreadIds: new Set<string>(),
-      unsubscribe: null as (() => void) | null
-    }
-
-    unsubscribe = client.subscribe((notification) => {
-      const targetThreadId = notificationThreadId(notification)
-      if (!targetThreadId) {
-        return
-      }
-
-      if (targetThreadId !== threadId) {
-        if (liveStream.observedSubagentThreadIds.has(targetThreadId)) {
-          applySubagentNotification(targetThreadId, notification)
-        }
-        return
-      }
-
-      if (!currentTurnId) {
-        buffered.push(notification)
-        return
-      }
-
-      settleNotification(notification)
-    })
-    liveStream.unsubscribe = unsubscribe
-    session.liveStream = liveStream
-
-    if (created && !routeThreadId.value) {
-      pendingThreadId.value = threadId
-    }
+    const liveStream = await ensurePendingLiveStream()
+    startedLiveStream = liveStream
+    const threadId = liveStream.threadId
+    const uploadedAttachments = await uploadAttachments(threadId, submittedAttachments)
+    liveStream.pendingUserMessageIds.push(optimisticMessageId)
 
     const turnStart = await client.request<TurnStartResponse>('turn/start', {
       threadId,
@@ -1339,33 +1522,65 @@ const sendMessage = async () => {
       approvalPolicy: 'never'
     })
 
-    currentTurnId = turnStart.turn.id
-    liveStream.turnId = turnStart.turn.id
+    setLiveStreamTurnId(liveStream, turnStart.turn.id)
 
-    for (const notification of buffered.splice(0, buffered.length)) {
-      if (settleNotification(notification) && completionResolved) {
-        break
+    for (const notification of liveStream.bufferedNotifications.splice(0, liveStream.bufferedNotifications.length)) {
+      const turnId = notificationTurnId(notification)
+      if (turnId && turnId !== liveStream.turnId) {
+        continue
       }
-    }
 
-    await completion
-    discardSnapshot(submittedAttachments)
-    status.value = 'ready'
-
-    if (routeThreadId.value) {
-      await hydrateThread(threadId)
-      return
+      applyNotification(notification)
     }
   } catch (caughtError) {
-    unsubscribe?.()
-    if (session.liveStream?.unsubscribe === unsubscribe) {
-      session.liveStream = null
+    const messageText = caughtError instanceof Error ? caughtError.message : String(caughtError)
+
+    untrackPendingUserMessage(optimisticMessageId)
+    removeOptimisticMessage(optimisticMessageId)
+
+    if (submissionMethod === 'turn/start') {
+      if (startedLiveStream && session.liveStream === startedLiveStream) {
+        clearPendingOptimisticMessages(clearLiveStream(new Error(messageText)))
+      }
+      session.pendingLiveStream = null
+      restoreDraftIfPristine(text, submittedAttachments)
+      error.value = messageText
+      status.value = 'error'
+      return
     }
-    stripOptimisticDraftMessages()
-    replaceAttachments(submittedAttachments)
-    input.value = text
+
+    restoreDraftIfPristine(text, submittedAttachments)
+    error.value = messageText
+  }
+}
+
+const stopActiveTurn = async () => {
+  if (!hasActiveTurnEngagement()) {
+    return
+  }
+
+  let liveStream: LiveStream | null = null
+
+  try {
+    liveStream = await ensurePendingLiveStream()
+    if (liveStream.interruptRequested) {
+      return
+    }
+
+    setLiveStreamInterruptRequested(liveStream, true)
+    error.value = null
+    const client = getClient(props.projectId)
+    const turnId = await waitForLiveStreamTurnId(liveStream)
+    await client.request('turn/interrupt', {
+      threadId: liveStream.threadId,
+      turnId
+    })
+    liveStream.interruptAcknowledged = true
+  } catch (caughtError) {
+    if (liveStream) {
+      setLiveStreamInterruptRequested(liveStream, false)
+    }
     error.value = caughtError instanceof Error ? caughtError.message : String(caughtError)
-    status.value = 'error'
   }
 }
 
@@ -1556,7 +1771,7 @@ watch(status, (nextStatus, previousStatus) => {
             v-model="input"
             placeholder="Describe the change you want Codex to make"
             :error="submitError"
-            :disabled="isBusy"
+            :disabled="isComposerDisabled"
             autoresize
             @submit.prevent="sendMessage"
             @keydown.enter="onPromptEnter"
@@ -1565,7 +1780,8 @@ watch(status, (nextStatus, previousStatus) => {
             @paste="onPaste"
           >
             <UChatPromptSubmit
-              :status="status"
+              :status="promptSubmitStatus"
+              @stop="stopActiveTurn"
             />
 
             <template #footer>
@@ -1575,7 +1791,7 @@ watch(status, (nextStatus, previousStatus) => {
                   type="file"
                   accept="image/*"
                   class="hidden"
-                  :disabled="isBusy"
+                  :disabled="isComposerDisabled"
                   @change="onFileInputChange"
                 >
                 <UButton
@@ -1584,7 +1800,7 @@ watch(status, (nextStatus, previousStatus) => {
                   variant="soft"
                   size="sm"
                   icon="i-lucide-paperclip"
-                  :disabled="isBusy"
+                  :disabled="isComposerDisabled"
                   @click="openFilePicker"
                 >
                   Attach image
@@ -1622,7 +1838,7 @@ watch(status, (nextStatus, previousStatus) => {
                     variant="ghost"
                     size="xs"
                     icon="i-lucide-x"
-                    :disabled="isBusy"
+                    :disabled="isComposerDisabled"
                     :aria-label="`Remove ${attachment.name}`"
                     @click="removeAttachment(attachment.id)"
                   />

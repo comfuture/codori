@@ -1,4 +1,11 @@
 import { describe, expect, it } from 'vitest'
+import {
+  reconcileOptimisticUserMessage,
+  removePendingUserMessageId,
+  resolvePromptSubmitStatus,
+  resolveTurnSubmissionMethod,
+  shouldIgnoreNotificationAfterInterrupt
+} from '../app/utils/chat-turn-engagement'
 import { ITEM_PART, isSubagentActiveStatus, itemToMessages } from '../shared/codex-chat'
 import {
   buildTurnStartInput,
@@ -243,5 +250,80 @@ describe('client package', () => {
     expect(isSubagentActiveStatus('pendingInit')).toBe(true)
     expect(isSubagentActiveStatus('running')).toBe(true)
     expect(isSubagentActiveStatus('completed')).toBe(false)
+  })
+
+  it('routes submissions to turn start or same-turn steering', () => {
+    expect(resolveTurnSubmissionMethod(false)).toBe('turn/start')
+    expect(resolveTurnSubmissionMethod(true)).toBe('turn/steer')
+  })
+
+  it('keeps the prompt submit button in send mode while a draft exists', () => {
+    expect(resolvePromptSubmitStatus({
+      status: 'streaming',
+      hasDraftContent: true
+    })).toBe('ready')
+
+    expect(resolvePromptSubmitStatus({
+      status: 'submitted',
+      hasDraftContent: false
+    })).toBe('submitted')
+  })
+
+  it('reconciles a pending optimistic user message in place', () => {
+    expect(reconcileOptimisticUserMessage([{
+      id: 'local-user-1',
+      role: 'user',
+      pending: true,
+      parts: [{
+        type: 'text',
+        text: 'Follow this direction instead.',
+        state: 'done'
+      }]
+    }, {
+      id: 'agent-1',
+      role: 'assistant',
+      parts: [{
+        type: 'text',
+        text: 'Working on it',
+        state: 'streaming'
+      }]
+    }], 'local-user-1', {
+      id: 'user-1',
+      role: 'user',
+      pending: false,
+      parts: [{
+        type: 'text',
+        text: 'Follow this direction instead.',
+        state: 'done'
+      }]
+    })).toEqual([{
+      id: 'user-1',
+      role: 'user',
+      pending: false,
+      parts: [{
+        type: 'text',
+        text: 'Follow this direction instead.',
+        state: 'done'
+      }]
+    }, {
+      id: 'agent-1',
+      role: 'assistant',
+      parts: [{
+        type: 'text',
+        text: 'Working on it',
+        state: 'streaming'
+      }]
+    }])
+  })
+
+  it('removes only the failed optimistic message from the pending queue', () => {
+    expect(removePendingUserMessageId(['local-user-1', 'local-user-2'], 'local-user-1')).toEqual(['local-user-2'])
+  })
+
+  it('ignores further streaming deltas after interruption is acknowledged', () => {
+    expect(shouldIgnoreNotificationAfterInterrupt('item/agentMessage/delta')).toBe(true)
+    expect(shouldIgnoreNotificationAfterInterrupt('item/started')).toBe(true)
+    expect(shouldIgnoreNotificationAfterInterrupt('item/completed')).toBe(false)
+    expect(shouldIgnoreNotificationAfterInterrupt('turn/completed')).toBe(false)
   })
 })
