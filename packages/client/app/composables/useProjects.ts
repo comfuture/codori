@@ -1,6 +1,7 @@
-import { useState } from '#imports'
+import { useRuntimeConfig, useState } from '#imports'
 import { $fetch } from 'ofetch'
 import { encodeProjectIdSegment } from '~~/shared/codori.js'
+import { resolveHttpBase } from '~~/shared/network.js'
 import type {
   ProjectRecord,
   ProjectResponse,
@@ -19,6 +20,7 @@ export const useProjects = () => {
   const loading = useState<boolean>('codori-projects-loading', () => false)
   const pendingProjectId = useState<string | null>('codori-projects-pending-id', () => null)
   const error = useState<string | null>('codori-projects-error', () => null)
+  const apiBase = resolveHttpBase(String(useRuntimeConfig().public.serverBase ?? ''))
 
   const refreshProjects = async () => {
     if (loading.value) {
@@ -28,7 +30,7 @@ export const useProjects = () => {
     loading.value = true
     error.value = null
     try {
-      const response = await $fetch<ProjectsResponse>('/api/codori/projects')
+      const response = await $fetch<ProjectsResponse>(new URL('/api/projects', apiBase).toString())
       projects.value = response.projects
       loaded.value = true
     } catch (caughtError) {
@@ -47,7 +49,10 @@ export const useProjects = () => {
   const startProject = async (projectId: string) => {
     pendingProjectId.value = projectId
     try {
-      const response = await $fetch<ProjectResponse>(`/api/codori/projects/${encodeProjectIdSegment(projectId)}/start`, {
+      const response = await $fetch<ProjectResponse>(new URL(
+        `/api/projects/${encodeProjectIdSegment(projectId)}/start`,
+        apiBase
+      ).toString(), {
         method: 'POST'
       })
       return applyProjectResponse(response) as StartProjectResult
@@ -59,7 +64,10 @@ export const useProjects = () => {
   const stopProject = async (projectId: string) => {
     pendingProjectId.value = projectId
     try {
-      const response = await $fetch<ProjectResponse>(`/api/codori/projects/${encodeProjectIdSegment(projectId)}/stop`, {
+      const response = await $fetch<ProjectResponse>(new URL(
+        `/api/projects/${encodeProjectIdSegment(projectId)}/stop`,
+        apiBase
+      ).toString(), {
         method: 'POST'
       })
       return applyProjectResponse(response)

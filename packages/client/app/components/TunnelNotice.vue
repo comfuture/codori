@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { useRequestURL } from '#imports'
 
 const localHostnames = new Set([
   'localhost',
@@ -8,9 +7,9 @@ const localHostnames = new Set([
   '::1'
 ])
 
-const requestUrl = useRequestURL()
+const hostname = typeof window === 'undefined' ? 'localhost' : window.location.hostname
 
-const shouldShow = computed(() => !localHostnames.has(requestUrl.hostname))
+const shouldShow = computed(() => !localHostnames.has(hostname))
 </script>
 
 <template>

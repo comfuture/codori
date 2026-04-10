@@ -1,6 +1,7 @@
 import { useRuntimeConfig } from '#imports'
 import { encodeProjectIdSegment } from '~~/shared/codori.js'
 import { CodexRpcClient } from '~~/shared/codex-rpc.js'
+import { resolveWsBase } from '~~/shared/network.js'
 
 const clients = new Map<string, CodexRpcClient>()
 
@@ -14,7 +15,10 @@ export const useRpc = () => {
       return existing
     }
 
-    const wsBase = String(runtimeConfig.public.codoriServerWsBase)
+    const wsBase = resolveWsBase(
+      String(runtimeConfig.public.serverWsBase ?? ''),
+      String(runtimeConfig.public.serverBase ?? '')
+    )
     const url = new URL(
       `/api/projects/${encodeProjectIdSegment(projectId)}/rpc`,
       wsBase
