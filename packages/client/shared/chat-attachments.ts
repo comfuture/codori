@@ -1,6 +1,6 @@
 import type { CodexUserInput } from './codex-rpc'
 import { encodeProjectIdSegment } from './codori'
-import { resolveApiUrl } from './network'
+import { resolveApiUrl, shouldUseServerProxy } from './network'
 
 export const MAX_ATTACHMENTS_PER_MESSAGE = 8
 export const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
@@ -109,9 +109,27 @@ export const resolveAttachmentPreviewUrl = (input: {
   const query = new URLSearchParams({
     path: input.path
   })
+  const requestPath = `/projects/${encodeProjectIdSegment(input.projectId)}/attachments/file?${query.toString()}`
+
+  if (shouldUseServerProxy(input.configuredBase)) {
+    return `/api/codori${requestPath}`
+  }
 
   return resolveApiUrl(
-    `/projects/${encodeProjectIdSegment(input.projectId)}/attachments/file?${query.toString()}`,
+    requestPath,
     input.configuredBase
   )
+}
+
+export const resolveAttachmentUploadUrl = (input: {
+  projectId: string
+  configuredBase?: string | null
+}) => {
+  const requestPath = `/projects/${encodeProjectIdSegment(input.projectId)}/attachments`
+
+  if (shouldUseServerProxy(input.configuredBase)) {
+    return `/api/codori${requestPath}`
+  }
+
+  return resolveApiUrl(requestPath, input.configuredBase)
 }

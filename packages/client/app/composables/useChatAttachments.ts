@@ -2,13 +2,10 @@ import { ref } from 'vue'
 import { useRuntimeConfig } from '#imports'
 import { $fetch } from 'ofetch'
 import {
-  resolveApiUrl
-} from '~~/shared/network'
-import {
+  resolveAttachmentUploadUrl,
   type ProjectAttachmentUploadResponse,
   validateAttachmentSelection
 } from '~~/shared/chat-attachments'
-import { encodeProjectIdSegment } from '~~/shared/codori'
 
 export type DraftAttachment = {
   id: string
@@ -172,10 +169,10 @@ export const useChatAttachments = (projectId: string) => {
     isUploading.value = true
     try {
       const response = await $fetch<ProjectAttachmentUploadResponse>(
-        resolveApiUrl(
-          `/projects/${encodeProjectIdSegment(projectId)}/attachments`,
-          String(runtimeConfig.public.serverBase ?? '')
-        ),
+        resolveAttachmentUploadUrl({
+          projectId,
+          configuredBase: String(runtimeConfig.public.serverBase ?? '')
+        }),
         {
           method: 'POST',
           body: formData

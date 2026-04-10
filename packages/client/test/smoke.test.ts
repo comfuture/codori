@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { ITEM_PART, isSubagentActiveStatus, itemToMessages } from '../shared/codex-chat'
 import {
   buildTurnStartInput,
+  resolveAttachmentPreviewUrl,
+  resolveAttachmentUploadUrl,
   validateAttachmentSelection
 } from '../shared/chat-attachments'
 import {
@@ -72,6 +74,32 @@ describe('client package', () => {
       type: 'localImage',
       path: '/tmp/screenshot.png'
     }])
+  })
+
+  it('routes attachment requests through the Nuxt proxy in standalone client mode', () => {
+    expect(resolveAttachmentUploadUrl({
+      projectId: 'team/api',
+      configuredBase: 'https://codori.example.com'
+    })).toBe('/api/codori/projects/team%2Fapi/attachments')
+
+    expect(resolveAttachmentPreviewUrl({
+      projectId: 'team/api',
+      path: '/tmp/screenshot.png',
+      configuredBase: 'https://codori.example.com'
+    })).toBe('/api/codori/projects/team%2Fapi/attachments/file?path=%2Ftmp%2Fscreenshot.png')
+  })
+
+  it('keeps direct attachment requests when bundled with the codori server', () => {
+    expect(resolveAttachmentUploadUrl({
+      projectId: 'team/api',
+      configuredBase: ''
+    })).toBe('http://127.0.0.1:4310/api/projects/team%2Fapi/attachments')
+
+    expect(resolveAttachmentPreviewUrl({
+      projectId: 'team/api',
+      path: '/tmp/screenshot.png',
+      configuredBase: ''
+    })).toBe('http://127.0.0.1:4310/api/projects/team%2Fapi/attachments/file?path=%2Ftmp%2Fscreenshot.png')
   })
 
   it('validates attachment selections before submit', () => {
