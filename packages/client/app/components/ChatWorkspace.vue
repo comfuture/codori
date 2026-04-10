@@ -1237,6 +1237,16 @@ const applyNotification = (notification: CodexRpcNotification) => {
       if (params.item.type === 'collabAgentToolCall') {
         applySubagentActivityItem(params.item)
       }
+      if (params.item.type === 'userMessage') {
+        for (const nextMessage of itemToMessages(params.item)) {
+          reconcilePendingUserMessage({
+            ...nextMessage,
+            pending: false
+          })
+        }
+        status.value = 'streaming'
+        return
+      }
       seedStreamingMessage(params.item)
       status.value = 'streaming'
       return
