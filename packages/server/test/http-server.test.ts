@@ -1,15 +1,18 @@
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { rm } from 'node:fs/promises'
 import { createServer as createNetServer } from 'node:net'
 import os from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import WebSocket, { WebSocketServer } from 'ws'
+import { resolveProjectAttachmentsDir } from '../src/attachment-store.js'
 import { createHttpServer, type RuntimeManagerLike } from '../src/http-server.js'
 import type { ProjectStatusRecord, StartProjectResult } from '../src/types.js'
 
 const startedApps: Array<Awaited<ReturnType<typeof createHttpServer>>> = []
 const startedSocketServers: WebSocketServer[] = []
 const occupiedTcpServers: Array<ReturnType<typeof createNetServer>> = []
+const attachmentsRoots: string[] = []
 
 afterEach(async () => {
   for (const app of startedApps.splice(0, startedApps.length)) {
@@ -38,6 +41,10 @@ afterEach(async () => {
         resolvePromise()
       })
     })
+  }
+
+  for (const root of attachmentsRoots.splice(0, attachmentsRoots.length)) {
+    await rm(root, { recursive: true, force: true })
   }
 })
 
@@ -242,6 +249,193 @@ describe('createHttpServer', () => {
         }
       })
       client.once('error', reject)
+    })
+  })
+
+  it('persists uploaded attachments and serves previews', async () => {
+    const attachmentsRoot = mkdtempSync(join(os.tmpdir(), 'codori-attachments-'))
+    attachmentsRoots.push(attachmentsRoot)
+    const app = await createHttpServer(createManager(), {
+      attachmentsRootDir: attachmentsRoot
+    })
+    startedApps.push(app)
+
+    const boundary = '----codori-test-boundary'
+    const body = [
+      `--${boundary}`,
+      'Content-Disposition: form-data; name="threadId"',
+      '',
+      'thread-123',
+      `--${boundary}`,
+      'Content-Disposition: form-data; name="file"; filename="diagram.png"',
+      'Content-Type: image/png',
+      '',
+      'PNGDATA',
+      `--${boundary}--`,
+      ''
+    ].join('\r\n')
+
+    const uploadResponse = await app.inject({
+      method: 'POST',
+      url: '/api/projects/demo/attachments',
+      headers: {
+        'content-type': `multipart/form-data; boundary=${boundary}`
+      },
+      payload: body
+    })
+
+    expect(uploadResponse.statusCode).toBe(200)
+    const uploadJson = uploadResponse.json() as {
+      threadId: string
+      files: Array<{ filename: string, mediaType: string | null, path: string }>
+    }
+    expect(uploadJson.threadId).toBe('thread-123')
+    expect(uploadJson.files).toHaveLength(1)
+    expect(uploadJson.files[0]?.filename).toBe('diagram.png')
+    expect(uploadJson.files[0]?.mediaType).toBe('image/png')
+    expect(readFileSync(uploadJson.files[0]!.path, 'utf8')).toBe('PNGDATA')
+    expect(uploadJson.files[0]!.path.startsWith(resolveProjectAttachmentsDir('/tmp/demo', attachmentsRoot))).toBe(true)
+
+    const fileResponse = await app.inject({
+      method: 'GET',
+      url: `/api/projects/demo/attachments/file?path=${encodeURIComponent(uploadJson.files[0]!.path)}`
+    })
+
+    expect(fileResponse.statusCode).toBe(200)
+    expect(fileResponse.headers['content-type']).toContain('image/png')
+    expect(fileResponse.body).toBe('PNGDATA')
+  })
+
+  it('rejects non-image attachments before persisting', async () => {
+    const attachmentsRoot = mkdtempSync(join(os.tmpdir(), 'codori-attachments-'))
+    attachmentsRoots.push(attachmentsRoot)
+    const app = await createHttpServer(createManager(), {
+      attachmentsRootDir: attachmentsRoot
+    })
+    startedApps.push(app)
+
+    const boundary = '----codori-test-boundary'
+    const body = [
+      `--${boundary}`,
+      'Content-Disposition: form-data; name="threadId"',
+      '',
+      'thread-123',
+      `--${boundary}`,
+      'Content-Disposition: form-data; name="file"; filename="payload.html"',
+      'Content-Type: text/html',
+      '',
+      '<script>alert(1)</script>',
+      `--${boundary}--`,
+      ''
+    ].join('\r\n')
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/projects/demo/attachments',
+      headers: {
+        'content-type': `multipart/form-data; boundary=${boundary}`
+      },
+      payload: body
+    })
+
+    expect(response.statusCode).toBe(400)
+    expect(response.json()).toEqual({
+      error: {
+        code: 'INVALID_ATTACHMENT',
+        message: 'Only image attachments are supported.',
+        details: null
+      }
+    })
+  })
+
+  it('rejects uploads that declare a non-image mime type even if the filename looks like an image', async () => {
+    const attachmentsRoot = mkdtempSync(join(os.tmpdir(), 'codori-attachments-'))
+    attachmentsRoots.push(attachmentsRoot)
+    const app = await createHttpServer(createManager(), {
+      attachmentsRootDir: attachmentsRoot
+    })
+    startedApps.push(app)
+
+    const boundary = '----codori-test-boundary'
+    const body = [
+      `--${boundary}`,
+      'Content-Disposition: form-data; name="threadId"',
+      '',
+      'thread-123',
+      `--${boundary}`,
+      'Content-Disposition: form-data; name="file"; filename="diagram.png"',
+      'Content-Type: text/html',
+      '',
+      '<script>alert(1)</script>',
+      `--${boundary}--`,
+      ''
+    ].join('\r\n')
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/projects/demo/attachments',
+      headers: {
+        'content-type': `multipart/form-data; boundary=${boundary}`
+      },
+      payload: body
+    })
+
+    expect(response.statusCode).toBe(400)
+    expect(response.json()).toEqual({
+      error: {
+        code: 'INVALID_ATTACHMENT',
+        message: 'Only image attachments are supported.',
+        details: null
+      }
+    })
+  })
+
+  it('rejects attachment preview paths outside the project attachment root', async () => {
+    const attachmentsRoot = mkdtempSync(join(os.tmpdir(), 'codori-attachments-'))
+    attachmentsRoots.push(attachmentsRoot)
+    const app = await createHttpServer(createManager(), {
+      attachmentsRootDir: attachmentsRoot
+    })
+    startedApps.push(app)
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/projects/demo/attachments/file?path=${encodeURIComponent('/tmp/not-allowed.png')}&mediaType=image%2Fpng`
+    })
+
+    expect(response.statusCode).toBe(403)
+    expect(response.json()).toEqual({
+      error: {
+        code: 'FORBIDDEN',
+        message: 'Invalid attachment path.'
+      }
+    })
+  })
+
+  it('rejects inline previews for non-image files even when stored under the attachment root', async () => {
+    const attachmentsRoot = mkdtempSync(join(os.tmpdir(), 'codori-attachments-'))
+    attachmentsRoots.push(attachmentsRoot)
+    const projectRoot = resolveProjectAttachmentsDir('/tmp/demo', attachmentsRoot)
+    const filePath = join(projectRoot, 'thread', 'payload.html')
+    mkdirSync(join(projectRoot, 'thread'), { recursive: true })
+    writeFileSync(filePath, '<script>alert(1)</script>', { encoding: 'utf8', flag: 'w' })
+
+    const app = await createHttpServer(createManager(), {
+      attachmentsRootDir: attachmentsRoot
+    })
+    startedApps.push(app)
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/projects/demo/attachments/file?path=${encodeURIComponent(filePath)}`
+    })
+
+    expect(response.statusCode).toBe(415)
+    expect(response.json()).toEqual({
+      error: {
+        code: 'UNSUPPORTED_MEDIA_TYPE',
+        message: 'Attachment preview is only available for image files.'
+      }
     })
   })
 })

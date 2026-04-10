@@ -1,7 +1,9 @@
+import { readFile, stat } from 'node:fs/promises'
 import net from 'node:net'
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { basename, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import multipart from '@fastify/multipart'
 import fastifyStatic from '@fastify/static'
 import websocket from '@fastify/websocket'
 import Fastify, {
@@ -9,7 +11,15 @@ import Fastify, {
   type FastifyReply,
   type FastifyRequest
 } from 'fastify'
+import { lookup as lookupMimeType } from 'mime-types'
 import WebSocket from 'ws'
+import {
+  isPathInsideDirectory,
+  persistThreadAttachmentStream,
+  type PersistedAttachment,
+  readAttachmentMetadata,
+  resolveProjectAttachmentsDir
+} from './attachment-store.js'
 import { CodoriError } from './errors.js'
 import { createRuntimeManager } from './process-manager.js'
 import type { ProjectStatusRecord, StartProjectResult } from './types.js'
@@ -39,6 +49,7 @@ type ProjectsResponse = {
 
 export type HttpServerOptions = {
   clientBundleDir?: string | null
+  attachmentsRootDir?: string | null
 }
 
 const isCodoriError = (error: unknown): error is CodoriError =>
@@ -64,12 +75,17 @@ const toRequestPath = (url: string) => url.split('?')[0]?.split('#')[0] ?? url
 const isAssetRequest = (pathname: string) =>
   /\.[a-z0-9]+$/i.test(pathname)
 
+const MAX_ATTACHMENTS_PER_MESSAGE = 8
+const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
+
 const toStatusCode = (error: CodoriError) => {
   switch (error.code) {
     case 'PROJECT_NOT_FOUND':
       return 404
     case 'INVALID_CONFIG':
     case 'MISSING_PROJECT_ID':
+    case 'MISSING_THREAD_ID':
+    case 'INVALID_ATTACHMENT':
     case 'MISSING_ROOT':
       return 400
     default:
@@ -85,6 +101,30 @@ const getProjectIdFromRequest = (value: string | undefined) => {
 }
 
 const resolveValue = async <T>(value: MaybePromise<T>) => value
+
+const isStatusCodeCarrier = (error: unknown): error is { statusCode: number, message?: string, code?: string } =>
+  typeof error === 'object'
+  && error !== null
+  && 'statusCode' in error
+  && typeof (error as { statusCode?: unknown }).statusCode === 'number'
+
+const normalizeImageMediaType = (input: { filename: string, declaredMediaType: string | null }) => {
+  const declared = input.declaredMediaType?.trim().toLowerCase() ?? null
+  if (declared?.startsWith('image/')) {
+    return declared
+  }
+
+  if (declared) {
+    return null
+  }
+
+  const inferred = lookupMimeType(input.filename)
+  if (typeof inferred === 'string' && inferred.toLowerCase().startsWith('image/')) {
+    return inferred.toLowerCase()
+  }
+
+  return null
+}
 
 const wait = async (ms: number) =>
   new Promise<void>((resolvePromise) => {
@@ -137,6 +177,13 @@ export const createHttpServer = async (
     ? resolveBundledClientDir()
     : options.clientBundleDir
 
+  await app.register(multipart, {
+    limits: {
+      files: MAX_ATTACHMENTS_PER_MESSAGE,
+      fields: 4,
+      fileSize: MAX_ATTACHMENT_BYTES
+    }
+  })
   await app.register(websocket)
 
   if (clientBundleDir) {
@@ -152,6 +199,16 @@ export const createHttpServer = async (
           code: error.code,
           message: error.message,
           details: error.details ?? null
+        }
+      })
+      return
+    }
+
+    if (isStatusCodeCarrier(error)) {
+      reply.status(error.statusCode).send({
+        error: {
+          code: error.code ?? 'REQUEST_ERROR',
+          message: error.message ?? 'Request failed.'
         }
       })
       return
@@ -195,6 +252,139 @@ export const createHttpServer = async (
     async (request: FastifyRequest<{ Params: { projectId: string } }>): Promise<ProjectResponse> => ({
       project: await resolveValue(manager.stopProject(getProjectIdFromRequest(request.params.projectId)))
     })
+  )
+
+  app.post<{ Params: { projectId: string } }>(
+    '/api/projects/:projectId/attachments',
+    async (request, reply) => {
+      const projectId = getProjectIdFromRequest(request.params.projectId)
+      const project = await resolveValue(manager.getProjectStatus(projectId))
+      const files: PersistedAttachment[] = []
+      let threadId: string | null = null
+
+      for await (const part of request.parts()) {
+        if (part.type === 'file') {
+          if (!threadId) {
+            throw new CodoriError('MISSING_THREAD_ID', 'Thread id must be provided before file parts.')
+          }
+
+          const mediaType = normalizeImageMediaType({
+            filename: part.filename ?? 'attachment',
+            declaredMediaType: part.mimetype || null
+          })
+
+          if (!mediaType) {
+            throw new CodoriError('INVALID_ATTACHMENT', 'Only image attachments are supported.')
+          }
+
+          const attachment = await persistThreadAttachmentStream({
+            projectPath: project.projectPath,
+            threadId,
+            filename: part.filename ?? 'attachment',
+            mediaType,
+            stream: part.file,
+            rootDir: options.attachmentsRootDir
+          })
+
+          files.push(attachment)
+          continue
+        }
+
+        if (part.fieldname === 'threadId' && typeof part.value === 'string') {
+          threadId = part.value.trim() || null
+        }
+      }
+
+      if (!threadId) {
+        throw new CodoriError('MISSING_THREAD_ID', 'Missing thread id.')
+      }
+
+      if (!files.length) {
+        throw new CodoriError('INVALID_ATTACHMENT', 'No files provided.')
+      }
+
+      reply.header('cache-control', 'no-store')
+      return {
+        threadId,
+        files
+      }
+    }
+  )
+
+  app.get<{ Params: { projectId: string }, Querystring: { path?: string, mediaType?: string } }>(
+    '/api/projects/:projectId/attachments/file',
+    async (request, reply) => {
+      const projectId = getProjectIdFromRequest(request.params.projectId)
+      const requestedPath = typeof request.query.path === 'string'
+        ? request.query.path.trim()
+        : ''
+
+      if (!requestedPath) {
+        throw new CodoriError('INVALID_ATTACHMENT', 'Missing attachment path.')
+      }
+
+      const project = await resolveValue(manager.getProjectStatus(projectId))
+      const allowedRoot = resolveProjectAttachmentsDir(project.projectPath, options.attachmentsRootDir)
+      const resolvedPath = resolve(requestedPath)
+
+      if (!isPathInsideDirectory(resolvedPath, allowedRoot)) {
+        reply.status(403)
+        return {
+          error: {
+            code: 'FORBIDDEN',
+            message: 'Invalid attachment path.'
+          }
+        }
+      }
+
+      let fileStat
+      try {
+        fileStat = await stat(resolvedPath)
+      } catch {
+        reply.status(404)
+        return {
+          error: {
+            code: 'NOT_FOUND',
+            message: 'Attachment not found.'
+          }
+        }
+      }
+
+      if (!fileStat.isFile()) {
+        reply.status(404)
+        return {
+          error: {
+            code: 'NOT_FOUND',
+            message: 'Attachment not found.'
+          }
+        }
+      }
+
+      const attachmentMetadata = await readAttachmentMetadata(resolvedPath)
+      const inferredMediaType = typeof lookupMimeType(resolvedPath) === 'string'
+        ? String(lookupMimeType(resolvedPath)).toLowerCase()
+        : null
+      const mediaType = attachmentMetadata?.mediaType?.toLowerCase()
+        ?? inferredMediaType
+        ?? null
+
+      if (!mediaType?.startsWith('image/')) {
+        reply.status(415)
+        return {
+          error: {
+            code: 'UNSUPPORTED_MEDIA_TYPE',
+            message: 'Attachment preview is only available for image files.'
+          }
+        }
+      }
+
+      reply.header('cache-control', 'private, max-age=3600')
+      reply.header('cross-origin-resource-policy', 'cross-origin')
+      reply.header('content-type', mediaType)
+      reply.header('content-disposition', `inline; filename="${basename(resolvedPath).replace(/"/g, '')}"`)
+
+      return await readFile(resolvedPath)
+    }
   )
 
   app.get<{ Params: { projectId: string } }>(

@@ -101,6 +101,16 @@ export type ChatPart =
       state?: 'done' | 'streaming'
     }
   | {
+      type: 'attachment'
+      attachment: {
+        kind: 'image'
+        name: string
+        mediaType: string
+        url?: string | null
+        localPath?: string | null
+      }
+    }
+  | {
       type: 'reasoning'
       summary: string[]
       content: string[]
@@ -125,15 +135,31 @@ export type ChatMessage = {
 export const isSubagentActiveStatus = (status: SubagentAgentStatus) =>
   status === null || status === 'pendingInit' || status === 'running'
 
-const formatUserInput = (input: CodexUserInput) => {
+const streamingState = (pending?: boolean) => pending ? 'streaming' : 'done'
+
+const userInputToParts = (input: CodexUserInput): ChatPart[] => {
   if (input.type === 'text') {
-    return input.text
+    if (!input.text.trim()) {
+      return []
+    }
+
+    return [{
+      type: 'text',
+      text: input.text,
+      state: 'done'
+    }]
   }
 
-  return `[local image] ${input.path}`
+  return [{
+    type: 'attachment',
+    attachment: {
+      kind: 'image',
+      name: input.path.split(/[\\/]/).pop() || 'image',
+      mediaType: 'image/*',
+      localPath: input.path
+    }
+  }]
 }
-
-const streamingState = (pending?: boolean) => pending ? 'streaming' : 'done'
 
 export const itemToMessages = (item: CodexThreadItem): ChatMessage[] => {
   switch (item.type) {
@@ -141,11 +167,7 @@ export const itemToMessages = (item: CodexThreadItem): ChatMessage[] => {
       return [{
         id: item.id,
         role: 'user',
-        parts: [{
-          type: 'text',
-          text: item.content.map(formatUserInput).join('\n').trim(),
-          state: 'done'
-        }]
+        parts: item.content.flatMap(userInputToParts)
       }]
     case 'agentMessage':
       return [{

@@ -23,3 +23,26 @@ export const proxyServerRequest = async <T>(
     body: options.body as BodyInit | Record<string, unknown> | undefined
   })
 }
+
+export const proxyServerFetch = async (
+  event: H3Event,
+  path: string,
+  options: {
+    method?: 'GET' | 'POST'
+    headers?: HeadersInit
+    body?: BodyInit | null
+  } = {}
+) => {
+  const baseURL = getServerBase(event)
+  const requestInit: RequestInit & { duplex?: 'half' } = {
+    method: options.method,
+    headers: options.headers,
+    body: options.body ?? null
+  }
+
+  if (options.body) {
+    requestInit.duplex = 'half'
+  }
+
+  return await fetch(`${baseURL}${path}`, requestInit)
+}
