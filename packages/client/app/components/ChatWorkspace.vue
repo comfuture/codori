@@ -6,6 +6,7 @@ import {
   reconcileOptimisticUserMessage,
   removeChatMessage,
   removePendingUserMessageId,
+  resolvePromptSubmitStatus,
   resolveTurnSubmissionMethod,
   shouldIgnoreNotificationAfterInterrupt
 } from '../utils/chat-turn-engagement'
@@ -98,14 +99,25 @@ const {
 const selectedProject = computed(() => getProject(props.projectId))
 const composerError = computed(() => attachmentError.value ?? error.value)
 const submitError = computed(() => composerError.value ? new Error(composerError.value) : undefined)
+const interruptRequested = ref(false)
 const isBusy = computed(() =>
   status.value === 'submitted'
   || status.value === 'streaming'
   || isUploading.value
 )
+const hasDraftContent = computed(() =>
+  input.value.trim().length > 0
+  || attachments.value.length > 0
+)
 const isComposerDisabled = computed(() =>
   isUploading.value
-  || currentLiveStream()?.interruptRequested === true
+  || interruptRequested.value
+)
+const promptSubmitStatus = computed(() =>
+  resolvePromptSubmitStatus({
+    status: status.value,
+    hasDraftContent: hasDraftContent.value
+  })
 )
 const routeThreadId = computed(() => props.threadId ?? null)
 const projectTitle = computed(() => selectedProject.value?.projectId ?? props.projectId)
@@ -176,6 +188,19 @@ const createLiveStreamState = (
   unsubscribe: null
 })
 
+const setSessionLiveStream = (liveStream: LiveStream | null) => {
+  session.liveStream = liveStream
+  interruptRequested.value = liveStream?.interruptRequested === true
+}
+
+const setLiveStreamInterruptRequested = (liveStream: LiveStream, nextValue: boolean) => {
+  liveStream.interruptRequested = nextValue
+
+  if (session.liveStream === liveStream) {
+    interruptRequested.value = nextValue
+  }
+}
+
 const setLiveStreamTurnId = (liveStream: LiveStream, turnId: string | null) => {
   liveStream.turnId = turnId
 
@@ -203,12 +228,13 @@ const waitForLiveStreamTurnId = async (liveStream: LiveStream) => {
 const clearLiveStream = (reason?: Error) => {
   const liveStream = session.liveStream
   if (!liveStream) {
+    interruptRequested.value = false
     return null
   }
 
   liveStream.unsubscribe?.()
   rejectLiveStreamTurnWaiters(liveStream, reason ?? new Error('The active turn is no longer available.'))
-  session.liveStream = null
+  setSessionLiveStream(null)
   return liveStream
 }
 
@@ -256,7 +282,7 @@ const ensurePendingLiveStream = async () => {
       applyNotification(notification)
     })
 
-    session.liveStream = liveStream
+    setSessionLiveStream(liveStream)
 
     if (created && !routeThreadId.value) {
       pendingThreadId.value = threadId
@@ -515,9 +541,13 @@ const hydrateThread = async (threadId: string) => {
     const client = getClient(props.projectId)
     activeThreadId.value = threadId
 
-    const existingLiveStream = currentLiveStream()
+    const existingLiveStream = session.liveStream
 
-    if (!existingLiveStream) {
+    if (existingLiveStream && existingLiveStream.threadId !== threadId) {
+      clearLiveStream()
+    }
+
+    if (!session.liveStream) {
       const nextLiveStream = createLiveStreamState(threadId)
 
       nextLiveStream.unsubscribe = client.subscribe((notification) => {
@@ -546,7 +576,7 @@ const hydrateThread = async (threadId: string) => {
         applyNotification(notification)
       })
 
-      session.liveStream = nextLiveStream
+      setSessionLiveStream(nextLiveStream)
     }
 
     await client.request<ThreadResumeResponse>('thread/resume', {
@@ -1221,7 +1251,7 @@ const applyNotification = (notification: CodexRpcNotification) => {
     case 'turn/started': {
       if (liveStream) {
         setLiveStreamTurnId(liveStream, notificationTurnId(notification))
-        liveStream.interruptRequested = false
+        setLiveStreamInterruptRequested(liveStream, false)
       }
       messages.value = upsertStreamingMessage(
         messages.value,
@@ -1529,13 +1559,15 @@ const stopActiveTurn = async () => {
     return
   }
 
+  let liveStream: LiveStream | null = null
+
   try {
-    const liveStream = await ensurePendingLiveStream()
+    liveStream = await ensurePendingLiveStream()
     if (liveStream.interruptRequested) {
       return
     }
 
-    liveStream.interruptRequested = true
+    setLiveStreamInterruptRequested(liveStream, true)
     error.value = null
     const client = getClient(props.projectId)
     const turnId = await waitForLiveStreamTurnId(liveStream)
@@ -1545,9 +1577,8 @@ const stopActiveTurn = async () => {
     })
     liveStream.interruptAcknowledged = true
   } catch (caughtError) {
-    const liveStream = currentLiveStream()
     if (liveStream) {
-      liveStream.interruptRequested = false
+      setLiveStreamInterruptRequested(liveStream, false)
     }
     error.value = caughtError instanceof Error ? caughtError.message : String(caughtError)
   }
@@ -1749,7 +1780,7 @@ watch(status, (nextStatus, previousStatus) => {
             @paste="onPaste"
           >
             <UChatPromptSubmit
-              :status="status"
+              :status="promptSubmitStatus"
               @stop="stopActiveTurn"
             />
 

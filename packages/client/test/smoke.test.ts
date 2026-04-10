@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   reconcileOptimisticUserMessage,
   removePendingUserMessageId,
+  resolvePromptSubmitStatus,
   resolveTurnSubmissionMethod,
   shouldIgnoreNotificationAfterInterrupt
 } from '../app/utils/chat-turn-engagement'
@@ -254,6 +255,18 @@ describe('client package', () => {
   it('routes submissions to turn start or same-turn steering', () => {
     expect(resolveTurnSubmissionMethod(false)).toBe('turn/start')
     expect(resolveTurnSubmissionMethod(true)).toBe('turn/steer')
+  })
+
+  it('keeps the prompt submit button in send mode while a draft exists', () => {
+    expect(resolvePromptSubmitStatus({
+      status: 'streaming',
+      hasDraftContent: true
+    })).toBe('ready')
+
+    expect(resolvePromptSubmitStatus({
+      status: 'submitted',
+      hasDraftContent: false
+    })).toBe('submitted')
   })
 
   it('reconciles a pending optimistic user message in place', () => {

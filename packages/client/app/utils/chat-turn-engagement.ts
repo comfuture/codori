@@ -1,5 +1,7 @@
 import { upsertStreamingMessage, type ChatMessage } from '../../shared/codex-chat'
 
+export type PromptSubmitStatus = 'ready' | 'submitted' | 'streaming' | 'error'
+
 const interruptIgnoredMethods = new Set([
   'item/started',
   'item/agentMessage/delta',
@@ -13,6 +15,11 @@ const interruptIgnoredMethods = new Set([
 
 export const resolveTurnSubmissionMethod = (hasActiveTurn: boolean) =>
   hasActiveTurn ? 'turn/steer' : 'turn/start'
+
+export const resolvePromptSubmitStatus = (input: {
+  status: PromptSubmitStatus
+  hasDraftContent: boolean
+}) => input.hasDraftContent ? 'ready' : input.status
 
 export const shouldIgnoreNotificationAfterInterrupt = (method: string) =>
   interruptIgnoredMethods.has(method)
