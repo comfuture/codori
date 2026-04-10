@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { useRoute, useRouter } from '#imports'
 import { computed, onMounted, ref, watch } from 'vue'
-import { useChatSession } from '../../../../composables/useChatSession.js'
-import { useProjects } from '../../../../composables/useProjects.js'
-import { useThreadPanel } from '../../../../composables/useThreadPanel.js'
-import { useVisualSubagentPanels } from '../../../../composables/useVisualSubagentPanels.js'
-import { normalizeProjectIdParam, toProjectRoute } from '~~/shared/codori.js'
+import { useChatSession } from '../../../../composables/useChatSession'
+import { useProjects } from '../../../../composables/useProjects'
+import { useThreadPanel } from '../../../../composables/useThreadPanel'
+import { useVisualSubagentPanels } from '../../../../composables/useVisualSubagentPanels'
+import { normalizeProjectIdParam, toProjectRoute } from '~~/shared/codori'
 
 const route = useRoute()
 const router = useRouter()

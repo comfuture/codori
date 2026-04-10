@@ -2,10 +2,10 @@
 import { useRouter } from '#imports'
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import MessageContent from './MessageContent.vue'
-import { useChatSession, type SubagentPanelState } from '../composables/useChatSession.js'
-import { useProjects } from '../composables/useProjects.js'
-import { useRpc } from '../composables/useRpc.js'
-import { useChatSubmitGuard } from '../composables/useChatSubmitGuard.js'
+import { useChatSession, type SubagentPanelState } from '../composables/useChatSession'
+import { useProjects } from '../composables/useProjects'
+import { useRpc } from '../composables/useRpc'
+import { useChatSubmitGuard } from '../composables/useChatSubmitGuard'
 import {
   ITEM_PART,
   eventToMessage,
@@ -18,7 +18,7 @@ import {
   type FileChangeItem,
   type ItemData,
   type McpToolCallItem
-} from '~~/shared/codex-chat.js'
+} from '~~/shared/codex-chat'
 import {
   notificationThreadId,
   notificationTurnId,
@@ -29,8 +29,8 @@ import {
   type ThreadResumeResponse,
   type ThreadStartResponse,
   type TurnStartResponse
-} from '~~/shared/codex-rpc.js'
-import { toProjectThreadRoute } from '~~/shared/codori.js'
+} from '~~/shared/codex-rpc'
+import { toProjectThreadRoute } from '~~/shared/codori'
 
 const props = defineProps<{
   projectId: string

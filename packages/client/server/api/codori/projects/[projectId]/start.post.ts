@@ -1,7 +1,7 @@
 import { defineEventHandler, getRouterParam } from 'h3'
-import { encodeProjectIdSegment } from '~~/shared/codori.js'
-import type { ProjectResponse } from '~~/shared/codori.js'
-import { proxyServerRequest } from '../../../../utils/server-proxy.js'
+import { encodeProjectIdSegment } from '~~/shared/codori'
+import type { ProjectResponse } from '~~/shared/codori'
+import { proxyServerRequest } from '../../../../utils/server-proxy'
 
 export default defineEventHandler(async (event) => {
   const projectId = getRouterParam(event, 'projectId')

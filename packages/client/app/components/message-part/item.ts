@@ -3,7 +3,7 @@ import {
   ITEM_PART,
   type ChatPart,
   type ItemData
-} from '~~/shared/codex-chat.js'
+} from '~~/shared/codex-chat'
 import MessageItemCommandExecution from '../message-item/CommandExecution.vue'
 import MessageItemContextCompaction from '../message-item/ContextCompaction.vue'
 import MessageItemDynamicToolCall from '../message-item/DynamicToolCall.vue'

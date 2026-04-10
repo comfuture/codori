@@ -1,5 +1,5 @@
 import { computed, toValue, type MaybeRefOrGetter } from 'vue'
-import { isSubagentActiveStatus, type VisualSubagentPanel } from '~~/shared/codex-chat.js'
+import { isSubagentActiveStatus, type VisualSubagentPanel } from '~~/shared/codex-chat'
 
 export const useVisualSubagentPanels = (
   panels: MaybeRefOrGetter<VisualSubagentPanel[] | null | undefined>

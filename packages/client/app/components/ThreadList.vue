@@ -2,11 +2,11 @@
 import type { NavigationMenuItem } from '@nuxt/ui'
 import { useRoute } from '#imports'
 import { computed, onMounted, ref, watch } from 'vue'
-import { useProjects } from '../composables/useProjects.js'
-import { useRpc } from '../composables/useRpc.js'
-import { useThreadPanel } from '../composables/useThreadPanel.js'
-import type { ThreadListResponse } from '~~/shared/codex-rpc.js'
-import { toProjectThreadRoute } from '~~/shared/codori.js'
+import { useProjects } from '../composables/useProjects'
+import { useRpc } from '../composables/useRpc'
+import { useThreadPanel } from '../composables/useThreadPanel'
+import type { ThreadListResponse } from '~~/shared/codex-rpc'
+import { toProjectThreadRoute } from '~~/shared/codori'
 
 const props = defineProps<{
   projectId: string | null

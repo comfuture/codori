@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, watch, type ComponentPublicInstance, type VNodeRef } from 'vue'
-import type { VisualSubagentPanel } from '~~/shared/codex-chat.js'
+import type { VisualSubagentPanel } from '~~/shared/codex-chat'
 
 const props = defineProps<{
   agents: VisualSubagentPanel[]

@@ -1,8 +1,8 @@
 import { defineComponent, h, type PropType } from 'vue'
 import { UChatReasoning } from '#components'
-import { EVENT_PART, ITEM_PART, type ChatMessage, type ChatPart } from '~~/shared/codex-chat.js'
+import { EVENT_PART, ITEM_PART, type ChatMessage, type ChatPart } from '~~/shared/codex-chat'
 import MessagePartEvent from './message-part/Event.vue'
-import MessagePartItem from './message-part/Item.js'
+import MessagePartItem from './message-part/Item'
 import MessagePartText from './message-part/Text.vue'
 
 export default defineComponent({

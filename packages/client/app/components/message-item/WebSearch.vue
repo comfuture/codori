@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import type { CodexThreadItem } from '~~/shared/codex-rpc.js'
-import { useChatToolState } from './use-chat-tool-state.js'
+import type { CodexThreadItem } from '~~/shared/codex-rpc'
+import { useChatToolState } from './use-chat-tool-state'
 
 const props = defineProps<{
   item: Extract<CodexThreadItem, { type: 'webSearch' }>

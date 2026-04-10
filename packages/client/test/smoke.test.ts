@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { ITEM_PART, isSubagentActiveStatus, itemToMessages } from '../shared/codex-chat.js'
+import { ITEM_PART, isSubagentActiveStatus, itemToMessages } from '../shared/codex-chat'
 import {
   encodeProjectIdSegment,
   normalizeProjectIdParam,
   projectStatusMeta,
   toProjectRoute,
   toProjectThreadRoute
-} from '../shared/codori.js'
-import { resolveApiUrl, resolveWsBase, shouldUseServerProxy } from '../shared/network.js'
+} from '../shared/codori'
+import { resolveApiUrl, resolveWsBase, shouldUseServerProxy } from '../shared/network'
 
 describe('client package', () => {
   it('normalizes project routes and thread routes', () => {

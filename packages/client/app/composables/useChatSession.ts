@@ -1,6 +1,6 @@
 import { ref, type Ref } from 'vue'
-import type { ChatMessage, SubagentAgentStatus, VisualSubagentPanel } from '~~/shared/codex-chat.js'
-import type { CodexRpcNotification } from '~~/shared/codex-rpc.js'
+import type { ChatMessage, SubagentAgentStatus, VisualSubagentPanel } from '~~/shared/codex-chat'
+import type { CodexRpcNotification } from '~~/shared/codex-rpc'
 
 export type ChatStatus = 'ready' | 'submitted' | 'streaming' | 'error'
 

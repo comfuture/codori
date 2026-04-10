@@ -2,8 +2,8 @@
 import type { NavigationMenuItem } from '@nuxt/ui'
 import { useRoute } from '#imports'
 import { computed, onMounted } from 'vue'
-import { useProjects } from '../composables/useProjects.js'
-import { toProjectRoute } from '~~/shared/codori.js'
+import { useProjects } from '../composables/useProjects'
+import { toProjectRoute } from '~~/shared/codori'
 
 const props = defineProps<{
   collapsed?: boolean

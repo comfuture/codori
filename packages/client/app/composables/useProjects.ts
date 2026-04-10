@@ -1,13 +1,13 @@
 import { useRuntimeConfig, useState } from '#imports'
 import { $fetch } from 'ofetch'
-import { encodeProjectIdSegment } from '~~/shared/codori.js'
-import { resolveApiUrl, shouldUseServerProxy } from '~~/shared/network.js'
+import { encodeProjectIdSegment } from '~~/shared/codori'
+import { resolveApiUrl, shouldUseServerProxy } from '~~/shared/network'
 import type {
   ProjectRecord,
   ProjectResponse,
   ProjectsResponse,
   StartProjectResult
-} from '~~/shared/codori.js'
+} from '~~/shared/codori'
 
 const mergeProject = (projects: ProjectRecord[], nextProject: ProjectRecord) => {
   const filtered = projects.filter(project => project.projectId !== nextProject.projectId)

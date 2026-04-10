@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { McpToolCallItem } from '~~/shared/codex-chat.js'
-import { useChatToolState } from './use-chat-tool-state.js'
+import type { McpToolCallItem } from '~~/shared/codex-chat'
+import { useChatToolState } from './use-chat-tool-state'
 
 const props = defineProps<{
   item: McpToolCallItem

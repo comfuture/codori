@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { EVENT_PART, type ThreadEventData } from '~~/shared/codex-chat.js'
+import { EVENT_PART, type ThreadEventData } from '~~/shared/codex-chat'
 
 const props = defineProps<{
   part?: {

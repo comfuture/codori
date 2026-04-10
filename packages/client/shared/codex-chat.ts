@@ -1,4 +1,4 @@
-import type { CodexThread, CodexThreadItem, CodexUserInput } from './codex-rpc.js'
+import type { CodexThread, CodexThreadItem, CodexUserInput } from './codex-rpc'
 
 export const EVENT_PART = 'data-thread-event' as const
 export const ITEM_PART = 'data-thread-item' as const

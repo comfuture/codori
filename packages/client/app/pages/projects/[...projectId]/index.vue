@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { useRoute, useRouter } from '#imports'
 import { computed, onMounted } from 'vue'
-import { useProjects } from '../../../composables/useProjects.js'
-import { useThreadPanel } from '../../../composables/useThreadPanel.js'
-import { normalizeProjectIdParam } from '~~/shared/codori.js'
+import { useProjects } from '../../../composables/useProjects'
+import { useThreadPanel } from '../../../composables/useThreadPanel'
+import { normalizeProjectIdParam } from '~~/shared/codori'
 
 const route = useRoute()
 const router = useRouter()
