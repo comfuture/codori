@@ -4,11 +4,20 @@ import type { CodexRpcNotification } from '~~/shared/codex-rpc'
 
 export type ChatStatus = 'ready' | 'submitted' | 'streaming' | 'error'
 
+export type LiveStreamTurnIdWaiter = {
+  resolve: (turnId: string) => void
+  reject: (error: Error) => void
+}
+
 export type LiveStream = {
   threadId: string
   turnId: string | null
   bufferedNotifications: CodexRpcNotification[]
   observedSubagentThreadIds: Set<string>
+  pendingUserMessageIds: string[]
+  turnIdWaiters: LiveStreamTurnIdWaiter[]
+  interruptRequested: boolean
+  interruptAcknowledged: boolean
   unsubscribe: (() => void) | null
 }
 
@@ -29,6 +38,7 @@ export type ChatSession = {
   pendingThreadId: Ref<string | null>
   autoRedirectThreadId: Ref<string | null>
   loadVersion: Ref<number>
+  pendingLiveStream: Promise<LiveStream> | null
   liveStream: LiveStream | null
 }
 
@@ -44,6 +54,7 @@ const createSession = (): ChatSession => ({
   pendingThreadId: ref<string | null>(null),
   autoRedirectThreadId: ref<string | null>(null),
   loadVersion: ref(0),
+  pendingLiveStream: null,
   liveStream: null
 })
 
