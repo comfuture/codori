@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
 import { createServer as createNetServer } from 'node:net'
 import os from 'node:os'
@@ -298,12 +298,54 @@ describe('createHttpServer', () => {
 
     const fileResponse = await app.inject({
       method: 'GET',
-      url: `/api/projects/demo/attachments/file?path=${encodeURIComponent(uploadJson.files[0]!.path)}&mediaType=image%2Fpng`
+      url: `/api/projects/demo/attachments/file?path=${encodeURIComponent(uploadJson.files[0]!.path)}`
     })
 
     expect(fileResponse.statusCode).toBe(200)
     expect(fileResponse.headers['content-type']).toContain('image/png')
     expect(fileResponse.body).toBe('PNGDATA')
+  })
+
+  it('rejects non-image attachments before persisting', async () => {
+    const attachmentsRoot = mkdtempSync(join(os.tmpdir(), 'codori-attachments-'))
+    attachmentsRoots.push(attachmentsRoot)
+    const app = await createHttpServer(createManager(), {
+      attachmentsRootDir: attachmentsRoot
+    })
+    startedApps.push(app)
+
+    const boundary = '----codori-test-boundary'
+    const body = [
+      `--${boundary}`,
+      'Content-Disposition: form-data; name="threadId"',
+      '',
+      'thread-123',
+      `--${boundary}`,
+      'Content-Disposition: form-data; name="file"; filename="payload.html"',
+      'Content-Type: text/html',
+      '',
+      '<script>alert(1)</script>',
+      `--${boundary}--`,
+      ''
+    ].join('\r\n')
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/projects/demo/attachments',
+      headers: {
+        'content-type': `multipart/form-data; boundary=${boundary}`
+      },
+      payload: body
+    })
+
+    expect(response.statusCode).toBe(400)
+    expect(response.json()).toEqual({
+      error: {
+        code: 'INVALID_ATTACHMENT',
+        message: 'Only image attachments are supported.',
+        details: null
+      }
+    })
   })
 
   it('rejects attachment preview paths outside the project attachment root', async () => {
@@ -324,6 +366,33 @@ describe('createHttpServer', () => {
       error: {
         code: 'FORBIDDEN',
         message: 'Invalid attachment path.'
+      }
+    })
+  })
+
+  it('rejects inline previews for non-image files even when stored under the attachment root', async () => {
+    const attachmentsRoot = mkdtempSync(join(os.tmpdir(), 'codori-attachments-'))
+    attachmentsRoots.push(attachmentsRoot)
+    const projectRoot = resolveProjectAttachmentsDir('/tmp/demo', attachmentsRoot)
+    const filePath = join(projectRoot, 'thread', 'payload.html')
+    mkdirSync(join(projectRoot, 'thread'), { recursive: true })
+    writeFileSync(filePath, '<script>alert(1)</script>', { encoding: 'utf8', flag: 'w' })
+
+    const app = await createHttpServer(createManager(), {
+      attachmentsRootDir: attachmentsRoot
+    })
+    startedApps.push(app)
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/projects/demo/attachments/file?path=${encodeURIComponent(filePath)}`
+    })
+
+    expect(response.statusCode).toBe(415)
+    expect(response.json()).toEqual({
+      error: {
+        code: 'UNSUPPORTED_MEDIA_TYPE',
+        message: 'Attachment preview is only available for image files.'
       }
     })
   })

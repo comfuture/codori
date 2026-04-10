@@ -104,16 +104,11 @@ export const buildTurnStartInput = (
 export const resolveAttachmentPreviewUrl = (input: {
   projectId: string
   path: string
-  mediaType?: string | null
   configuredBase?: string | null
 }) => {
   const query = new URLSearchParams({
     path: input.path
   })
-
-  if (input.mediaType) {
-    query.set('mediaType', input.mediaType)
-  }
 
   return resolveApiUrl(
     `/projects/${encodeProjectIdSegment(input.projectId)}/attachments/file?${query.toString()}`,

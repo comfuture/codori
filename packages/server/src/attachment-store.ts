@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto'
-import { access, mkdir, writeFile } from 'node:fs/promises'
+import { createWriteStream } from 'node:fs'
+import { access, mkdir, readFile, writeFile } from 'node:fs/promises'
 import os from 'node:os'
+import { pipeline } from 'node:stream/promises'
 import { basename, extname, isAbsolute, join, relative, resolve } from 'node:path'
 import { resolveCodoriHome } from './config.js'
 
@@ -10,10 +12,8 @@ export type PersistedAttachment = {
   path: string
 }
 
-type AttachmentFileInput = {
-  filename: string
+type AttachmentMetadata = {
   mediaType: string | null
-  data: Buffer
 }
 
 const hashSegment = (value: string) =>
@@ -47,6 +47,8 @@ const ensureUniqueFilePath = async (directory: string, filename: string) => {
   return candidate
 }
 
+const attachmentMetadataPath = (filePath: string) => `${filePath}.metadata.json`
+
 export const resolveAttachmentsRootDir = (rootDir?: string | null) =>
   resolve(rootDir ?? join(resolveCodoriHome(os.homedir()), 'attachments'))
 
@@ -66,26 +68,64 @@ export const isPathInsideDirectory = (targetPath: string, directory: string) => 
   return relativePath === '' || (!relativePath.startsWith('..') && !isAbsolute(relativePath))
 }
 
-export const persistThreadAttachments = async (input: {
+export const writeAttachmentMetadata = async (filePath: string, metadata: AttachmentMetadata) => {
+  await writeFile(
+    attachmentMetadataPath(filePath),
+    `${JSON.stringify(metadata, null, 2)}\n`,
+    'utf8'
+  )
+}
+
+export const readAttachmentMetadata = async (filePath: string): Promise<AttachmentMetadata | null> => {
+  try {
+    const source = await readFile(attachmentMetadataPath(filePath), 'utf8')
+    const parsed: unknown = JSON.parse(source)
+    if (
+      typeof parsed === 'object'
+      && parsed !== null
+      && 'mediaType' in parsed
+      && (typeof parsed.mediaType === 'string' || parsed.mediaType === null)
+    ) {
+      return {
+        mediaType: parsed.mediaType
+      }
+    }
+
+    return null
+  } catch {
+    return null
+  }
+}
+
+export const createThreadAttachmentTarget = async (input: {
   projectPath: string
   threadId: string
-  files: AttachmentFileInput[]
+  filename: string
   rootDir?: string | null
-}): Promise<PersistedAttachment[]> => {
+}) => {
   const directory = resolveThreadAttachmentsDir(input.projectPath, input.threadId, input.rootDir)
   await mkdir(directory, { recursive: true })
+  const filename = sanitizeFilename(input.filename)
+  return await ensureUniqueFilePath(directory, filename)
+}
 
-  const persisted: PersistedAttachment[] = []
-  for (const file of input.files) {
-    const filename = sanitizeFilename(file.filename)
-    const filePath = await ensureUniqueFilePath(directory, filename)
-    await writeFile(filePath, file.data)
-    persisted.push({
-      filename: basename(filePath),
-      mediaType: file.mediaType,
-      path: filePath
-    })
+export const persistThreadAttachmentStream = async (input: {
+  projectPath: string
+  threadId: string
+  filename: string
+  mediaType: string | null
+  stream: NodeJS.ReadableStream
+  rootDir?: string | null
+}): Promise<PersistedAttachment> => {
+  const filePath = await createThreadAttachmentTarget(input)
+  await pipeline(input.stream, createWriteStream(filePath))
+  await writeAttachmentMetadata(filePath, {
+    mediaType: input.mediaType
+  })
+
+  return {
+    filename: basename(filePath),
+    mediaType: input.mediaType,
+    path: filePath
   }
-
-  return persisted
 }

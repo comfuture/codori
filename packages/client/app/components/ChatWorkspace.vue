@@ -144,8 +144,13 @@ const clearLiveStream = () => {
   session.liveStream = null
 }
 
+const createOptimisticMessageId = () =>
+  typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+    ? `local-user-${crypto.randomUUID()}`
+    : `local-user-${Date.now()}-${Math.random().toString(16).slice(2)}`
+
 const buildOptimisticMessage = (text: string, submittedAttachments: DraftAttachment[]): ChatMessage => ({
-  id: `local-user-${Date.now()}`,
+  id: createOptimisticMessageId(),
   role: 'user',
   parts: [
     ...(text.trim()

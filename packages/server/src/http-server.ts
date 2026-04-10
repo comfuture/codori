@@ -11,10 +11,13 @@ import Fastify, {
   type FastifyReply,
   type FastifyRequest
 } from 'fastify'
+import { lookup as lookupMimeType } from 'mime-types'
 import WebSocket from 'ws'
 import {
   isPathInsideDirectory,
-  persistThreadAttachments,
+  persistThreadAttachmentStream,
+  type PersistedAttachment,
+  readAttachmentMetadata,
   resolveProjectAttachmentsDir
 } from './attachment-store.js'
 import { CodoriError } from './errors.js'
@@ -72,6 +75,9 @@ const toRequestPath = (url: string) => url.split('?')[0]?.split('#')[0] ?? url
 const isAssetRequest = (pathname: string) =>
   /\.[a-z0-9]+$/i.test(pathname)
 
+const MAX_ATTACHMENTS_PER_MESSAGE = 8
+const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
+
 const toStatusCode = (error: CodoriError) => {
   switch (error.code) {
     case 'PROJECT_NOT_FOUND':
@@ -95,6 +101,26 @@ const getProjectIdFromRequest = (value: string | undefined) => {
 }
 
 const resolveValue = async <T>(value: MaybePromise<T>) => value
+
+const isStatusCodeCarrier = (error: unknown): error is { statusCode: number, message?: string, code?: string } =>
+  typeof error === 'object'
+  && error !== null
+  && 'statusCode' in error
+  && typeof (error as { statusCode?: unknown }).statusCode === 'number'
+
+const normalizeImageMediaType = (input: { filename: string, declaredMediaType: string | null }) => {
+  const declared = input.declaredMediaType?.trim().toLowerCase() ?? null
+  if (declared?.startsWith('image/')) {
+    return declared
+  }
+
+  const inferred = lookupMimeType(input.filename)
+  if (typeof inferred === 'string' && inferred.toLowerCase().startsWith('image/')) {
+    return inferred.toLowerCase()
+  }
+
+  return null
+}
 
 const wait = async (ms: number) =>
   new Promise<void>((resolvePromise) => {
@@ -147,7 +173,13 @@ export const createHttpServer = async (
     ? resolveBundledClientDir()
     : options.clientBundleDir
 
-  await app.register(multipart)
+  await app.register(multipart, {
+    limits: {
+      files: MAX_ATTACHMENTS_PER_MESSAGE,
+      fields: 4,
+      fileSize: MAX_ATTACHMENT_BYTES
+    }
+  })
   await app.register(websocket)
 
   if (clientBundleDir) {
@@ -168,21 +200,22 @@ export const createHttpServer = async (
       return
     }
 
+    if (isStatusCodeCarrier(error)) {
+      reply.status(error.statusCode).send({
+        error: {
+          code: error.code ?? 'REQUEST_ERROR',
+          message: error.message ?? 'Request failed.'
+        }
+      })
+      return
+    }
+
     reply.status(500).send({
       error: {
         code: 'INTERNAL_ERROR',
         message: error instanceof Error ? error.message : 'Unknown error.'
       }
     })
-  })
-
-  app.addHook('onSend', async (request, reply, payload) => {
-    if (/^\/api\/projects\/[^/]+\/attachments(?:\/file)?(?:$|\?)/.test(request.url)) {
-      reply.header('access-control-allow-origin', '*')
-      reply.header('cross-origin-resource-policy', 'cross-origin')
-    }
-
-    return payload
   })
 
   app.get('/api/projects', async (): Promise<ProjectsResponse> => ({
@@ -222,16 +255,34 @@ export const createHttpServer = async (
     async (request, reply) => {
       const projectId = getProjectIdFromRequest(request.params.projectId)
       const project = await resolveValue(manager.getProjectStatus(projectId))
-      const files: Array<{ filename: string, mediaType: string | null, data: Buffer }> = []
+      const files: PersistedAttachment[] = []
       let threadId: string | null = null
 
       for await (const part of request.parts()) {
         if (part.type === 'file') {
-          files.push({
+          if (!threadId) {
+            throw new CodoriError('MISSING_THREAD_ID', 'Thread id must be provided before file parts.')
+          }
+
+          const mediaType = normalizeImageMediaType({
             filename: part.filename ?? 'attachment',
-            mediaType: part.mimetype || null,
-            data: await part.toBuffer()
+            declaredMediaType: part.mimetype || null
           })
+
+          if (!mediaType) {
+            throw new CodoriError('INVALID_ATTACHMENT', 'Only image attachments are supported.')
+          }
+
+          const attachment = await persistThreadAttachmentStream({
+            projectPath: project.projectPath,
+            threadId,
+            filename: part.filename ?? 'attachment',
+            mediaType,
+            stream: part.file,
+            rootDir: options.attachmentsRootDir
+          })
+
+          files.push(attachment)
           continue
         }
 
@@ -248,17 +299,10 @@ export const createHttpServer = async (
         throw new CodoriError('INVALID_ATTACHMENT', 'No files provided.')
       }
 
-      const persisted = await persistThreadAttachments({
-        projectPath: project.projectPath,
-        threadId,
-        files,
-        rootDir: options.attachmentsRootDir
-      })
-
       reply.header('cache-control', 'no-store')
       return {
         threadId,
-        files: persisted
+        files
       }
     }
   )
@@ -312,11 +356,26 @@ export const createHttpServer = async (
         }
       }
 
-      const mediaType = typeof request.query.mediaType === 'string' && request.query.mediaType.trim().length > 0
-        ? request.query.mediaType.trim()
-        : 'application/octet-stream'
+      const attachmentMetadata = await readAttachmentMetadata(resolvedPath)
+      const inferredMediaType = typeof lookupMimeType(resolvedPath) === 'string'
+        ? String(lookupMimeType(resolvedPath)).toLowerCase()
+        : null
+      const mediaType = attachmentMetadata?.mediaType?.toLowerCase()
+        ?? inferredMediaType
+        ?? null
+
+      if (!mediaType?.startsWith('image/')) {
+        reply.status(415)
+        return {
+          error: {
+            code: 'UNSUPPORTED_MEDIA_TYPE',
+            message: 'Attachment preview is only available for image files.'
+          }
+        }
+      }
 
       reply.header('cache-control', 'private, max-age=3600')
+      reply.header('cross-origin-resource-policy', 'cross-origin')
       reply.header('content-type', mediaType)
       reply.header('content-disposition', `inline; filename="${basename(resolvedPath).replace(/"/g, '')}"`)
 

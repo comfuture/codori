@@ -36,7 +36,6 @@ const previewUrl = computed(() => {
   return resolveAttachmentPreviewUrl({
     projectId: props.projectId,
     path: attachment.localPath,
-    mediaType: attachment.mediaType,
     configuredBase: String(runtimeConfig.public.serverBase ?? '')
   })
 })
