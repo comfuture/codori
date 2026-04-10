@@ -1,7 +1,9 @@
+import { readFile, stat } from 'node:fs/promises'
 import net from 'node:net'
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { basename, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import multipart from '@fastify/multipart'
 import fastifyStatic from '@fastify/static'
 import websocket from '@fastify/websocket'
 import Fastify, {
@@ -10,6 +12,11 @@ import Fastify, {
   type FastifyRequest
 } from 'fastify'
 import WebSocket from 'ws'
+import {
+  isPathInsideDirectory,
+  persistThreadAttachments,
+  resolveProjectAttachmentsDir
+} from './attachment-store.js'
 import { CodoriError } from './errors.js'
 import { createRuntimeManager } from './process-manager.js'
 import type { ProjectStatusRecord, StartProjectResult } from './types.js'
@@ -39,6 +46,7 @@ type ProjectsResponse = {
 
 export type HttpServerOptions = {
   clientBundleDir?: string | null
+  attachmentsRootDir?: string | null
 }
 
 const isCodoriError = (error: unknown): error is CodoriError =>
@@ -70,6 +78,8 @@ const toStatusCode = (error: CodoriError) => {
       return 404
     case 'INVALID_CONFIG':
     case 'MISSING_PROJECT_ID':
+    case 'MISSING_THREAD_ID':
+    case 'INVALID_ATTACHMENT':
     case 'MISSING_ROOT':
       return 400
     default:
@@ -137,6 +147,7 @@ export const createHttpServer = async (
     ? resolveBundledClientDir()
     : options.clientBundleDir
 
+  await app.register(multipart)
   await app.register(websocket)
 
   if (clientBundleDir) {
@@ -163,6 +174,15 @@ export const createHttpServer = async (
         message: error instanceof Error ? error.message : 'Unknown error.'
       }
     })
+  })
+
+  app.addHook('onSend', async (request, reply, payload) => {
+    if (/^\/api\/projects\/[^/]+\/attachments(?:\/file)?(?:$|\?)/.test(request.url)) {
+      reply.header('access-control-allow-origin', '*')
+      reply.header('cross-origin-resource-policy', 'cross-origin')
+    }
+
+    return payload
   })
 
   app.get('/api/projects', async (): Promise<ProjectsResponse> => ({
@@ -195,6 +215,113 @@ export const createHttpServer = async (
     async (request: FastifyRequest<{ Params: { projectId: string } }>): Promise<ProjectResponse> => ({
       project: await resolveValue(manager.stopProject(getProjectIdFromRequest(request.params.projectId)))
     })
+  )
+
+  app.post<{ Params: { projectId: string } }>(
+    '/api/projects/:projectId/attachments',
+    async (request, reply) => {
+      const projectId = getProjectIdFromRequest(request.params.projectId)
+      const project = await resolveValue(manager.getProjectStatus(projectId))
+      const files: Array<{ filename: string, mediaType: string | null, data: Buffer }> = []
+      let threadId: string | null = null
+
+      for await (const part of request.parts()) {
+        if (part.type === 'file') {
+          files.push({
+            filename: part.filename ?? 'attachment',
+            mediaType: part.mimetype || null,
+            data: await part.toBuffer()
+          })
+          continue
+        }
+
+        if (part.fieldname === 'threadId' && typeof part.value === 'string') {
+          threadId = part.value.trim() || null
+        }
+      }
+
+      if (!threadId) {
+        throw new CodoriError('MISSING_THREAD_ID', 'Missing thread id.')
+      }
+
+      if (!files.length) {
+        throw new CodoriError('INVALID_ATTACHMENT', 'No files provided.')
+      }
+
+      const persisted = await persistThreadAttachments({
+        projectPath: project.projectPath,
+        threadId,
+        files,
+        rootDir: options.attachmentsRootDir
+      })
+
+      reply.header('cache-control', 'no-store')
+      return {
+        threadId,
+        files: persisted
+      }
+    }
+  )
+
+  app.get<{ Params: { projectId: string }, Querystring: { path?: string, mediaType?: string } }>(
+    '/api/projects/:projectId/attachments/file',
+    async (request, reply) => {
+      const projectId = getProjectIdFromRequest(request.params.projectId)
+      const requestedPath = typeof request.query.path === 'string'
+        ? request.query.path.trim()
+        : ''
+
+      if (!requestedPath) {
+        throw new CodoriError('INVALID_ATTACHMENT', 'Missing attachment path.')
+      }
+
+      const project = await resolveValue(manager.getProjectStatus(projectId))
+      const allowedRoot = resolveProjectAttachmentsDir(project.projectPath, options.attachmentsRootDir)
+      const resolvedPath = resolve(requestedPath)
+
+      if (!isPathInsideDirectory(resolvedPath, allowedRoot)) {
+        reply.status(403)
+        return {
+          error: {
+            code: 'FORBIDDEN',
+            message: 'Invalid attachment path.'
+          }
+        }
+      }
+
+      let fileStat
+      try {
+        fileStat = await stat(resolvedPath)
+      } catch {
+        reply.status(404)
+        return {
+          error: {
+            code: 'NOT_FOUND',
+            message: 'Attachment not found.'
+          }
+        }
+      }
+
+      if (!fileStat.isFile()) {
+        reply.status(404)
+        return {
+          error: {
+            code: 'NOT_FOUND',
+            message: 'Attachment not found.'
+          }
+        }
+      }
+
+      const mediaType = typeof request.query.mediaType === 'string' && request.query.mediaType.trim().length > 0
+        ? request.query.mediaType.trim()
+        : 'application/octet-stream'
+
+      reply.header('cache-control', 'private, max-age=3600')
+      reply.header('content-type', mediaType)
+      reply.header('content-disposition', `inline; filename="${basename(resolvedPath).replace(/"/g, '')}"`)
+
+      return await readFile(resolvedPath)
+    }
   )
 
   app.get<{ Params: { projectId: string } }>(

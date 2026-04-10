@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { ITEM_PART, isSubagentActiveStatus, itemToMessages } from '../shared/codex-chat'
 import {
+  buildTurnStartInput,
+  validateAttachmentSelection
+} from '../shared/chat-attachments'
+import {
   encodeProjectIdSegment,
   normalizeProjectIdParam,
   projectStatusMeta,
@@ -44,6 +48,85 @@ describe('client package', () => {
         type: 'text',
         text: 'Working on it',
         state: 'done'
+      }]
+    }])
+  })
+
+  it('builds turn input for text with image attachments', () => {
+    expect(buildTurnStartInput('Investigate this UI bug', [
+      { path: '/tmp/screenshot.png' }
+    ])).toEqual([
+      {
+        type: 'text',
+        text: 'Investigate this UI bug',
+        text_elements: []
+      },
+      {
+        type: 'localImage',
+        path: '/tmp/screenshot.png'
+      }
+    ])
+    expect(buildTurnStartInput('', [
+      { path: '/tmp/screenshot.png' }
+    ])).toEqual([{
+      type: 'localImage',
+      path: '/tmp/screenshot.png'
+    }])
+  })
+
+  it('validates attachment selections before submit', () => {
+    const result = validateAttachmentSelection([
+      {
+        name: 'diagram.png',
+        size: 10,
+        type: 'image/png'
+      },
+      {
+        name: 'notes.txt',
+        size: 10,
+        type: 'text/plain'
+      }
+    ], 0)
+
+    expect(result.accepted).toEqual([{
+      name: 'diagram.png',
+      size: 10,
+      type: 'image/png'
+    }])
+    expect(result.issues).toEqual([{
+      code: 'unsupportedType',
+      fileName: 'notes.txt',
+      message: 'Only image attachments are currently supported.'
+    }])
+  })
+
+  it('renders local image user inputs as attachment parts', () => {
+    expect(itemToMessages({
+      type: 'userMessage',
+      id: 'user-1',
+      content: [{
+        type: 'text',
+        text: 'Please inspect this screenshot.',
+        text_elements: []
+      }, {
+        type: 'localImage',
+        path: '/tmp/screenshot.png'
+      }]
+    })).toEqual([{
+      id: 'user-1',
+      role: 'user',
+      parts: [{
+        type: 'text',
+        text: 'Please inspect this screenshot.',
+        state: 'done'
+      }, {
+        type: 'attachment',
+        attachment: {
+          kind: 'image',
+          name: 'screenshot.png',
+          mediaType: 'image/*',
+          localPath: '/tmp/screenshot.png'
+        }
       }]
     }])
   })

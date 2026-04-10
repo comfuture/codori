@@ -4,6 +4,7 @@ import type { ChatMessage, ChatPart } from '~~/shared/codex-chat'
 
 defineProps<{
   message?: ChatMessage | null
+  projectId?: string
 }>()
 
 const partKey = (messageId: string | undefined, part: ChatPart, index: number) => {
@@ -21,6 +22,7 @@ const partKey = (messageId: string | undefined, part: ChatPart, index: number) =
       v-for="(part, index) in message?.parts ?? []"
       :key="partKey(message?.id, part, index)"
       :message="message"
+      :project-id="projectId"
       :part="part"
     />
   </div>

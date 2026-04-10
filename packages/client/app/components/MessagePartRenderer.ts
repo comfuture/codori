@@ -1,6 +1,7 @@
 import { defineComponent, h, type PropType } from 'vue'
 import { UChatReasoning } from '#components'
 import { EVENT_PART, ITEM_PART, type ChatMessage, type ChatPart } from '~~/shared/codex-chat'
+import MessagePartAttachment from './message-part/Attachment.vue'
 import MessagePartEvent from './message-part/Event.vue'
 import MessagePartItem from './message-part/Item'
 import MessagePartText from './message-part/Text.vue'
@@ -11,6 +12,10 @@ export default defineComponent({
     message: {
       type: Object as PropType<ChatMessage | null>,
       default: null
+    },
+    projectId: {
+      type: String as PropType<string | undefined>,
+      default: undefined
     },
     part: {
       type: Object as PropType<ChatPart | null>,
@@ -36,6 +41,11 @@ export default defineComponent({
             streaming: props.part.state === 'streaming',
             defaultOpen: props.part.state === 'streaming',
             autoCloseDelay: 600
+          })
+        case 'attachment':
+          return h(MessagePartAttachment, {
+            projectId: props.projectId,
+            part: props.part
           })
         case EVENT_PART:
           return h(MessagePartEvent, {

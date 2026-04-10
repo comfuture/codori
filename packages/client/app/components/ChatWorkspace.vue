@@ -2,6 +2,7 @@
 import { useRouter } from '#imports'
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import MessageContent from './MessageContent.vue'
+import { useChatAttachments, type DraftAttachment } from '../composables/useChatAttachments'
 import { useChatSession, type SubagentPanelState } from '../composables/useChatSession'
 import { useProjects } from '../composables/useProjects'
 import { useRpc } from '../composables/useRpc'
@@ -19,6 +20,7 @@ import {
   type ItemData,
   type McpToolCallItem
 } from '~~/shared/codex-chat'
+import { buildTurnStartInput } from '~~/shared/chat-attachments'
 import {
   notificationThreadId,
   notificationTurnId,
@@ -50,6 +52,25 @@ const {
   onCompositionEnd,
   shouldSubmit
 } = useChatSubmitGuard()
+const {
+  attachments,
+  isDragging,
+  isUploading,
+  error: attachmentError,
+  fileInput,
+  removeAttachment,
+  replaceAttachments,
+  clearAttachments,
+  discardSnapshot,
+  openFilePicker,
+  onFileInputChange,
+  onPaste,
+  onDragEnter,
+  onDragLeave,
+  onDragOver,
+  onDrop,
+  uploadAttachments
+} = useChatAttachments(props.projectId)
 
 const input = ref('')
 const scrollViewport = ref<HTMLElement | null>(null)
@@ -68,8 +89,13 @@ const {
 } = session
 
 const selectedProject = computed(() => getProject(props.projectId))
-const submitError = computed(() => error.value ? new Error(error.value) : undefined)
-const isBusy = computed(() => status.value === 'submitted' || status.value === 'streaming')
+const composerError = computed(() => attachmentError.value ?? error.value)
+const submitError = computed(() => composerError.value ? new Error(composerError.value) : undefined)
+const isBusy = computed(() =>
+  status.value === 'submitted'
+  || status.value === 'streaming'
+  || isUploading.value
+)
 const routeThreadId = computed(() => props.threadId ?? null)
 const projectTitle = computed(() => selectedProject.value?.projectId ?? props.projectId)
 const showWelcomeState = computed(() =>
@@ -116,6 +142,41 @@ const currentLiveStream = () =>
 const clearLiveStream = () => {
   session.liveStream?.unsubscribe?.()
   session.liveStream = null
+}
+
+const buildOptimisticMessage = (text: string, submittedAttachments: DraftAttachment[]): ChatMessage => ({
+  id: `local-user-${Date.now()}`,
+  role: 'user',
+  parts: [
+    ...(text.trim()
+      ? [{
+          type: 'text' as const,
+          text,
+          state: 'done' as const
+        }]
+      : []),
+    ...submittedAttachments.map((attachment) => ({
+      type: 'attachment' as const,
+      attachment: {
+        kind: 'image' as const,
+        name: attachment.name,
+        mediaType: attachment.mediaType,
+        url: attachment.previewUrl
+      }
+    }))
+  ]
+})
+
+const formatAttachmentSize = (size: number) => {
+  if (size >= 1024 * 1024) {
+    return `${(size / (1024 * 1024)).toFixed(1)} MB`
+  }
+
+  if (size >= 1024) {
+    return `${Math.round(size / 1024)} KB`
+  }
+
+  return `${size} B`
 }
 
 const stripOptimisticDraftMessages = () => {
@@ -1150,34 +1211,25 @@ const applyNotification = (notification: CodexRpcNotification) => {
 
 const sendMessage = async () => {
   const text = input.value.trim()
-  if (!text) {
+  const submittedAttachments = attachments.value.slice()
+
+  if (!text && submittedAttachments.length === 0) {
     return
   }
 
   pinnedToBottom.value = true
   error.value = null
+  attachmentError.value = null
   status.value = 'submitted'
   input.value = ''
-  const shouldRenderOptimisticDraft = !routeThreadId.value
-
-  if (shouldRenderOptimisticDraft) {
-    const optimisticMessage: ChatMessage = {
-      id: `local-user-${Date.now()}`,
-      role: 'user',
-      parts: [{
-        type: 'text',
-        text,
-        state: 'done'
-      }]
-    }
-
-    messages.value = [...messages.value, optimisticMessage]
-  }
+  clearAttachments({ revoke: false })
+  messages.value = [...messages.value, buildOptimisticMessage(text, submittedAttachments)]
   let unsubscribe: (() => void) | null = null
 
   try {
     await ensureProjectRuntime()
     const { threadId, created } = await ensureThread()
+    const uploadedAttachments = await uploadAttachments(threadId, submittedAttachments)
     const client = getClient(props.projectId)
     const buffered: CodexRpcNotification[] = []
     let currentTurnId: string | null = null
@@ -1277,11 +1329,7 @@ const sendMessage = async () => {
 
     const turnStart = await client.request<TurnStartResponse>('turn/start', {
       threadId,
-      input: [{
-        type: 'text',
-        text,
-        text_elements: []
-      }],
+      input: buildTurnStartInput(text, uploadedAttachments),
       cwd: selectedProject.value?.projectPath ?? null,
       approvalPolicy: 'never'
     })
@@ -1296,6 +1344,7 @@ const sendMessage = async () => {
     }
 
     await completion
+    discardSnapshot(submittedAttachments)
     status.value = 'ready'
 
     if (routeThreadId.value) {
@@ -1307,6 +1356,9 @@ const sendMessage = async () => {
     if (session.liveStream?.unsubscribe === unsubscribe) {
       session.liveStream = null
     }
+    stripOptimisticDraftMessages()
+    replaceAttachments(submittedAttachments)
+    input.value = text
     error.value = caughtError instanceof Error ? caughtError.message : String(caughtError)
     status.value = 'error'
   }
@@ -1461,7 +1513,10 @@ watch(status, (nextStatus, previousStatus) => {
         compact
       >
         <template #content="{ message }">
-          <MessageContent :message="message as ChatMessage" />
+          <MessageContent
+            :message="message as ChatMessage"
+            :project-id="projectId"
+          />
         </template>
       </UChatMessages>
     </div>
@@ -1469,30 +1524,108 @@ watch(status, (nextStatus, previousStatus) => {
     <div class="sticky bottom-0 shrink-0 border-t border-default bg-default/95 px-4 py-3 backdrop-blur md:px-6">
       <div class="mx-auto w-full max-w-5xl">
         <TunnelNotice class="mb-3" />
-      <UAlert
-        v-if="error"
-        color="error"
-        variant="soft"
-        icon="i-lucide-circle-alert"
-        :title="error"
-        class="mb-3"
-      />
-
-      <UChatPrompt
-        v-model="input"
-        placeholder="Describe the change you want Codex to make"
-        :error="submitError"
-        :disabled="isBusy"
-        autoresize
-        @submit.prevent="sendMessage"
-        @keydown.enter="onPromptEnter"
-        @compositionstart="onCompositionStart"
-        @compositionend="onCompositionEnd"
-      >
-        <UChatPromptSubmit
-          :status="status"
+        <UAlert
+          v-if="composerError"
+          color="error"
+          variant="soft"
+          icon="i-lucide-circle-alert"
+          :title="composerError"
+          class="mb-3"
         />
-      </UChatPrompt>
+
+        <div
+          class="relative"
+          @dragenter="onDragEnter"
+          @dragleave="onDragLeave"
+          @dragover="onDragOver"
+          @drop="onDrop"
+        >
+          <div
+            v-if="isDragging"
+            class="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-3xl border border-dashed border-primary/50 bg-primary/10 text-sm font-medium text-primary backdrop-blur-sm"
+          >
+            Drop images to attach them
+          </div>
+
+          <UChatPrompt
+            v-model="input"
+            placeholder="Describe the change you want Codex to make"
+            :error="submitError"
+            :disabled="isBusy"
+            autoresize
+            @submit.prevent="sendMessage"
+            @keydown.enter="onPromptEnter"
+            @compositionstart="onCompositionStart"
+            @compositionend="onCompositionEnd"
+            @paste="onPaste"
+          >
+            <UChatPromptSubmit
+              :status="status"
+            />
+
+            <template #footer>
+              <div class="flex flex-wrap items-center gap-2 pt-1">
+                <input
+                  ref="fileInput"
+                  type="file"
+                  accept="image/*"
+                  class="hidden"
+                  :disabled="isBusy"
+                  @change="onFileInputChange"
+                >
+                <UButton
+                  type="button"
+                  color="neutral"
+                  variant="soft"
+                  size="sm"
+                  icon="i-lucide-paperclip"
+                  :disabled="isBusy"
+                  @click="openFilePicker"
+                >
+                  Attach image
+                </UButton>
+                <span class="text-xs text-muted">
+                  Drag and drop or paste an image
+                </span>
+              </div>
+
+              <div
+                v-if="attachments.length"
+                class="mt-3 flex flex-wrap gap-2"
+              >
+                <div
+                  v-for="attachment in attachments"
+                  :key="attachment.id"
+                  class="flex max-w-full items-center gap-3 rounded-2xl border border-default bg-elevated/35 px-3 py-2"
+                >
+                  <img
+                    :src="attachment.previewUrl"
+                    :alt="attachment.name"
+                    class="size-10 rounded-xl object-cover"
+                  >
+                  <div class="min-w-0">
+                    <div class="truncate text-sm font-medium text-highlighted">
+                      {{ attachment.name }}
+                    </div>
+                    <div class="text-xs text-muted">
+                      {{ formatAttachmentSize(attachment.size) }}
+                    </div>
+                  </div>
+                  <UButton
+                    type="button"
+                    color="neutral"
+                    variant="ghost"
+                    size="xs"
+                    icon="i-lucide-x"
+                    :disabled="isBusy"
+                    :aria-label="`Remove ${attachment.name}`"
+                    @click="removeAttachment(attachment.id)"
+                  />
+                </div>
+              </div>
+            </template>
+          </UChatPrompt>
+        </div>
       </div>
     </div>
   </section>
