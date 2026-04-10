@@ -18,6 +18,7 @@ const tagArg = process.argv
   .slice(2)
   .find((argument) => argument.startsWith('--tag='))
   ?.slice('--tag='.length);
+const npmPublishArgs = ['--yes', 'npm@11.6.2', 'publish', '--access', 'public'];
 
 async function readJson(filePath) {
   const source = await readFile(filePath, 'utf8');
@@ -87,7 +88,7 @@ async function main() {
     }
 
     console.log(`Publishing ${packageJson.name}@${packageJson.version}...`);
-    await run('npm', ['publish', '--access', 'public'], { cwd: packageDir });
+    await run('npx', npmPublishArgs, { cwd: packageDir });
   }
 }
 
