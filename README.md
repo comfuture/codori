@@ -172,6 +172,28 @@ Build the workspace:
 pnpm build
 ```
 
+## Release
+
+Codori publishes `@codori/client` and `@codori/server` from GitHub Actions when a GitHub release is published.
+
+Trusted publishing setup is required once per package on npm:
+
+1. Open the npm package settings for `@codori/client`.
+2. Add a Trusted Publisher for GitHub Actions.
+3. Set the GitHub owner to `comfuture`, repository to `codori`, and workflow filename to `publish-release.yml`.
+4. Repeat the same setup for `@codori/server`.
+
+The workflow uses npm trusted publishing with GitHub OIDC, so no long-lived npm automation token is required once that relationship is configured.
+
+Release flow:
+
+1. Bump the workspace and package versions together.
+2. Push the commit to GitHub.
+3. Create and publish a GitHub release with the matching tag, for example `v0.0.3`.
+4. GitHub Actions runs `.github/workflows/publish-release.yml` and publishes both npm packages.
+
+The release workflow checks that the Git tag matches the workspace version and skips packages that were already published, so rerunning the workflow is safe after partial failures.
+
 ## Monorepo Structure
 
 This repository is a pnpm workspace with two packages:
