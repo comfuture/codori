@@ -43,7 +43,21 @@ Start the Codori management server:
 npx @codori/server --root ~/Project
 ```
 
-By default this binds Codori to `127.0.0.1:4310`. `--host` and `--port` are optional.
+If you do not pass `--root`, Codori uses the current working directory as the project root:
+
+```bash
+cd ~/Project
+npx @codori/server
+```
+
+On startup Codori prints the directory it selected, for example:
+
+```text
+Running codori server with project root directory: /Users/comfuture/Project
+Codori listening on http://127.0.0.1:4310
+```
+
+By default this binds Codori to `127.0.0.1:4310`. `--host` and `--port` are optional. Use `--root` whenever you want to override the current directory and point Codori at another parent directory.
 
 If you need different bind settings:
 

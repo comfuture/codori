@@ -52,6 +52,8 @@ const coercePort = (value: string | undefined) => {
   return Number.isFinite(parsed) ? parsed : undefined
 }
 
+const resolveCliRoot = (value: string | undefined) => value ?? process.cwd()
+
 const main = async () => {
   const parsed = parseArgs({
     allowPositionals: true,
@@ -61,7 +63,7 @@ const main = async () => {
   const [command = 'serve', maybeProjectId] = parsed.positionals
   const manager = createRuntimeManager({
     configOverrides: {
-      root: parsed.values.root,
+      root: resolveCliRoot(parsed.values.root),
       host: parsed.values.host,
       port: coercePort(parsed.values.port)
     }
@@ -123,6 +125,7 @@ const main = async () => {
     }
     case 'serve': {
       const app = await startHttpServer(manager)
+      process.stdout.write(`Running codori server with project root directory: ${manager.config.root}\n`)
       process.stdout.write(`Codori listening on http://${manager.config.server.host}:${manager.config.server.port}\n`)
       await app.ready()
       return
