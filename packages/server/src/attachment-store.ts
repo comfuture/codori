@@ -1,6 +1,5 @@
 import { createHash } from 'node:crypto'
-import { createWriteStream } from 'node:fs'
-import { access, mkdir, readFile, writeFile } from 'node:fs/promises'
+import { open, readFile, writeFile, mkdir } from 'node:fs/promises'
 import os from 'node:os'
 import { pipeline } from 'node:stream/promises'
 import { basename, extname, isAbsolute, join, relative, resolve } from 'node:path'
@@ -24,27 +23,10 @@ const sanitizeFilename = (value: string) => {
   return normalized || 'attachment'
 }
 
-const pathExists = async (value: string) => {
-  try {
-    await access(value)
-    return true
-  } catch {
-    return false
-  }
-}
-
-const ensureUniqueFilePath = async (directory: string, filename: string) => {
+const createFileNameCandidate = (directory: string, filename: string, index: number) => {
   const extension = extname(filename)
   const base = extension ? filename.slice(0, -extension.length) : filename
-  let candidate = join(directory, filename)
-  let index = 1
-
-  while (await pathExists(candidate)) {
-    candidate = join(directory, `${base}-${index}${extension}`)
-    index += 1
-  }
-
-  return candidate
+  return join(directory, index === 0 ? filename : `${base}-${index}${extension}`)
 }
 
 const attachmentMetadataPath = (filePath: string) => `${filePath}.metadata.json`
@@ -106,7 +88,26 @@ export const createThreadAttachmentTarget = async (input: {
   const directory = resolveThreadAttachmentsDir(input.projectPath, input.threadId, input.rootDir)
   await mkdir(directory, { recursive: true })
   const filename = sanitizeFilename(input.filename)
-  return await ensureUniqueFilePath(directory, filename)
+
+  for (let index = 0; index < 10_000; index += 1) {
+    const candidate = createFileNameCandidate(directory, filename, index)
+
+    try {
+      const handle = await open(candidate, 'wx')
+      return {
+        filePath: candidate,
+        handle
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+        continue
+      }
+
+      throw error
+    }
+  }
+
+  throw new Error(`Failed to allocate a unique attachment path for ${filename}.`)
 }
 
 export const persistThreadAttachmentStream = async (input: {
@@ -117,15 +118,20 @@ export const persistThreadAttachmentStream = async (input: {
   stream: NodeJS.ReadableStream
   rootDir?: string | null
 }): Promise<PersistedAttachment> => {
-  const filePath = await createThreadAttachmentTarget(input)
-  await pipeline(input.stream, createWriteStream(filePath))
-  await writeAttachmentMetadata(filePath, {
-    mediaType: input.mediaType
-  })
+  const target = await createThreadAttachmentTarget(input)
 
-  return {
-    filename: basename(filePath),
-    mediaType: input.mediaType,
-    path: filePath
+  try {
+    await pipeline(input.stream, target.handle.createWriteStream())
+    await writeAttachmentMetadata(target.filePath, {
+      mediaType: input.mediaType
+    })
+
+    return {
+      filename: basename(target.filePath),
+      mediaType: input.mediaType,
+      path: target.filePath
+    }
+  } finally {
+    await target.handle.close().catch(() => {})
   }
 }

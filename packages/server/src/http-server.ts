@@ -114,6 +114,10 @@ const normalizeImageMediaType = (input: { filename: string, declaredMediaType: s
     return declared
   }
 
+  if (declared) {
+    return null
+  }
+
   const inferred = lookupMimeType(input.filename)
   if (typeof inferred === 'string' && inferred.toLowerCase().startsWith('image/')) {
     return inferred.toLowerCase()

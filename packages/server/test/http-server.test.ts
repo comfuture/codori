@@ -348,6 +348,48 @@ describe('createHttpServer', () => {
     })
   })
 
+  it('rejects uploads that declare a non-image mime type even if the filename looks like an image', async () => {
+    const attachmentsRoot = mkdtempSync(join(os.tmpdir(), 'codori-attachments-'))
+    attachmentsRoots.push(attachmentsRoot)
+    const app = await createHttpServer(createManager(), {
+      attachmentsRootDir: attachmentsRoot
+    })
+    startedApps.push(app)
+
+    const boundary = '----codori-test-boundary'
+    const body = [
+      `--${boundary}`,
+      'Content-Disposition: form-data; name="threadId"',
+      '',
+      'thread-123',
+      `--${boundary}`,
+      'Content-Disposition: form-data; name="file"; filename="diagram.png"',
+      'Content-Type: text/html',
+      '',
+      '<script>alert(1)</script>',
+      `--${boundary}--`,
+      ''
+    ].join('\r\n')
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/projects/demo/attachments',
+      headers: {
+        'content-type': `multipart/form-data; boundary=${boundary}`
+      },
+      payload: body
+    })
+
+    expect(response.statusCode).toBe(400)
+    expect(response.json()).toEqual({
+      error: {
+        code: 'INVALID_ATTACHMENT',
+        message: 'Only image attachments are supported.',
+        details: null
+      }
+    })
+  })
+
   it('rejects attachment preview paths outside the project attachment root', async () => {
     const attachmentsRoot = mkdtempSync(join(os.tmpdir(), 'codori-attachments-'))
     attachmentsRoots.push(attachmentsRoot)
