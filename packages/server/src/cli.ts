@@ -127,6 +127,7 @@ const main = async () => {
       const app = await startHttpServer(manager)
       process.stdout.write(`Running codori server with project root directory: ${manager.config.root}\n`)
       process.stdout.write(`Codori listening on http://${manager.config.server.host}:${manager.config.server.port}\n`)
+      process.stdout.write('Private tunnel is not included. Expose Codori through your own network layer such as Tailscale or Cloudflare Tunnel when you need remote access.\n')
       await app.ready()
       return
     }

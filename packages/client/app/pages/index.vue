@@ -54,7 +54,6 @@
             </div>
           </div>
 
-          <TunnelNotice class="w-full text-left" />
         </div>
       </div>
     </template>

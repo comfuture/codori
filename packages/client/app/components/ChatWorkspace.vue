@@ -1932,7 +1932,6 @@ watch([selectedModel, availableModels], () => {
 
     <div class="sticky bottom-0 shrink-0 border-t border-default bg-default/95 px-4 py-3 backdrop-blur md:px-6">
       <div class="mx-auto w-full max-w-5xl">
-        <TunnelNotice class="mb-3" />
         <UAlert
           v-if="composerError"
           color="error"

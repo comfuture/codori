@@ -303,7 +303,7 @@ Required states:
 
 Required messaging:
 
-- UI must explicitly state that Codori does not provide a private tunnel.
+- Server startup CLI output must explicitly state that Codori does not provide a private tunnel.
 - The note should recommend user-managed solutions such as Tailscale or Cloudflare Tunnel.
 
 ## 11. Client Thread Behavior
