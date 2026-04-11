@@ -26,7 +26,7 @@ const paneSize = computed(() => {
       v-for="(agent, index) in agents"
       :key="agent.threadId"
       :agent="agent"
-      :accent-class="resolveSubagentAccent(index).textClass"
+      :accent="resolveSubagentAccent(index)"
       show-expand-button
       class="min-h-0 flex-1"
       :style="{ flexBasis: `${paneSize}%` }"

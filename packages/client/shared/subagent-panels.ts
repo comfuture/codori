@@ -1,5 +1,12 @@
 import type { SubagentAgentStatus, VisualSubagentPanel } from './codex-chat'
 
+export type SubagentAccent = {
+  textClass: string
+  avatarClass: string
+  dotClass: string
+  headerClass: string
+}
+
 export type SubagentPanelAutoOpenInput = {
   isMobile: boolean
   hasAvailableSubagents: boolean
@@ -18,39 +25,55 @@ export type SubagentPanelAutoOpenResult = {
 const SUBAGENT_ACCENT_STYLES = [
   {
     textClass: 'text-emerald-700 dark:text-emerald-300',
-    avatarClass: 'bg-emerald-500/15 text-emerald-700 ring-1 ring-inset ring-emerald-500/30 dark:text-emerald-300'
+    avatarClass: 'bg-emerald-500/15 text-emerald-700 ring-1 ring-inset ring-emerald-500/30 dark:text-emerald-300',
+    dotClass: 'bg-emerald-500 ring-emerald-500/25',
+    headerClass: 'border-s-2 border-emerald-500/45 bg-emerald-500/6'
   },
   {
     textClass: 'text-sky-700 dark:text-sky-300',
-    avatarClass: 'bg-sky-500/15 text-sky-700 ring-1 ring-inset ring-sky-500/30 dark:text-sky-300'
+    avatarClass: 'bg-sky-500/15 text-sky-700 ring-1 ring-inset ring-sky-500/30 dark:text-sky-300',
+    dotClass: 'bg-sky-500 ring-sky-500/25',
+    headerClass: 'border-s-2 border-sky-500/45 bg-sky-500/6'
   },
   {
     textClass: 'text-amber-800 dark:text-amber-300',
-    avatarClass: 'bg-amber-500/15 text-amber-800 ring-1 ring-inset ring-amber-500/35 dark:text-amber-300'
+    avatarClass: 'bg-amber-500/15 text-amber-800 ring-1 ring-inset ring-amber-500/35 dark:text-amber-300',
+    dotClass: 'bg-amber-500 ring-amber-500/25',
+    headerClass: 'border-s-2 border-amber-500/45 bg-amber-500/6'
   },
   {
     textClass: 'text-rose-700 dark:text-rose-300',
-    avatarClass: 'bg-rose-500/15 text-rose-700 ring-1 ring-inset ring-rose-500/30 dark:text-rose-300'
+    avatarClass: 'bg-rose-500/15 text-rose-700 ring-1 ring-inset ring-rose-500/30 dark:text-rose-300',
+    dotClass: 'bg-rose-500 ring-rose-500/25',
+    headerClass: 'border-s-2 border-rose-500/45 bg-rose-500/6'
   },
   {
     textClass: 'text-violet-700 dark:text-violet-300',
-    avatarClass: 'bg-violet-500/15 text-violet-700 ring-1 ring-inset ring-violet-500/30 dark:text-violet-300'
+    avatarClass: 'bg-violet-500/15 text-violet-700 ring-1 ring-inset ring-violet-500/30 dark:text-violet-300',
+    dotClass: 'bg-violet-500 ring-violet-500/25',
+    headerClass: 'border-s-2 border-violet-500/45 bg-violet-500/6'
   },
   {
     textClass: 'text-cyan-700 dark:text-cyan-300',
-    avatarClass: 'bg-cyan-500/15 text-cyan-700 ring-1 ring-inset ring-cyan-500/30 dark:text-cyan-300'
+    avatarClass: 'bg-cyan-500/15 text-cyan-700 ring-1 ring-inset ring-cyan-500/30 dark:text-cyan-300',
+    dotClass: 'bg-cyan-500 ring-cyan-500/25',
+    headerClass: 'border-s-2 border-cyan-500/45 bg-cyan-500/6'
   },
   {
     textClass: 'text-lime-800 dark:text-lime-300',
-    avatarClass: 'bg-lime-500/15 text-lime-800 ring-1 ring-inset ring-lime-500/35 dark:text-lime-300'
+    avatarClass: 'bg-lime-500/15 text-lime-800 ring-1 ring-inset ring-lime-500/35 dark:text-lime-300',
+    dotClass: 'bg-lime-500 ring-lime-500/25',
+    headerClass: 'border-s-2 border-lime-500/45 bg-lime-500/6'
   },
   {
     textClass: 'text-orange-700 dark:text-orange-300',
-    avatarClass: 'bg-orange-500/15 text-orange-700 ring-1 ring-inset ring-orange-500/30 dark:text-orange-300'
+    avatarClass: 'bg-orange-500/15 text-orange-700 ring-1 ring-inset ring-orange-500/30 dark:text-orange-300',
+    dotClass: 'bg-orange-500 ring-orange-500/25',
+    headerClass: 'border-s-2 border-orange-500/45 bg-orange-500/6'
   }
 ] as const
 
-export const resolveSubagentAccent = (index: number) =>
+export const resolveSubagentAccent = (index: number): SubagentAccent =>
   SUBAGENT_ACCENT_STYLES[index % SUBAGENT_ACCENT_STYLES.length] ?? SUBAGENT_ACCENT_STYLES[0]!
 
 export const toSubagentAvatarText = (name: string) => {
