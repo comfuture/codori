@@ -16,7 +16,7 @@ import {
 
 const route = useRoute()
 const router = useRouter()
-const { openPanel } = useThreadPanel()
+const { togglePanel } = useThreadPanel()
 const { loaded, refreshProjects, getProject, pendingProjectId } = useProjects()
 
 const projectId = computed(() => normalizeProjectIdParam(route.params.projectId as string | string[] | undefined))
@@ -290,7 +290,7 @@ watch(
                   color="neutral"
                   variant="outline"
                   square
-                  @click="openPanel"
+                  @click="togglePanel"
                 />
               </UTooltip>
               <UTooltip
