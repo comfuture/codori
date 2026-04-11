@@ -92,13 +92,13 @@ const subagentAvatarItems = computed(() =>
 const expandedSubagentPanel = computed(() =>
   resolveExpandedSubagentPanel(availablePanels.value, expandedSubagentThreadId.value)
 )
-const expandedSubagentAccentClass = computed(() => {
+const expandedSubagentAccent = computed(() => {
   if (!expandedSubagentPanel.value) {
-    return ''
+    return null
   }
 
   const index = availablePanels.value.findIndex(panel => panel.threadId === expandedSubagentPanel.value?.threadId)
-  return index >= 0 ? resolveSubagentAccent(index).textClass : ''
+  return index >= 0 ? resolveSubagentAccent(index) : null
 })
 const isExpandedSubagentOpen = computed({
   get: () => expandedSubagentPanel.value !== null,
@@ -435,6 +435,8 @@ watch(
       v-model:open="isExpandedSubagentOpen"
       fullscreen
       :ui="{
+        header: 'hidden',
+        close: 'hidden',
         content: 'overflow-hidden bg-default',
         body: '!h-full !p-0'
       }"
@@ -443,7 +445,7 @@ watch(
         <SubagentTranscriptPanel
           v-if="expandedSubagentPanel"
           :agent="expandedSubagentPanel"
-          :accent-class="expandedSubagentAccentClass"
+          :accent="expandedSubagentAccent"
           expanded
           show-collapse-button
           class="h-full"

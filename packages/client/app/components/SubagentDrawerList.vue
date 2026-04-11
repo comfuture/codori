@@ -33,8 +33,8 @@ const emit = defineEmits<{
         class="flex items-center gap-3 px-4 py-3"
       >
         <div
-          class="size-2.5 shrink-0 rounded-full"
-          :class="resolveSubagentAccent(index).avatarClass"
+          class="size-2.5 shrink-0 rounded-full ring-4"
+          :class="resolveSubagentAccent(index).dotClass"
         />
 
         <div class="min-w-0 flex-1">

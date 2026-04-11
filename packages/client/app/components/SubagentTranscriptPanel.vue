@@ -6,16 +6,16 @@ const sharedStickToBottomStates = new Map<string, boolean>()
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import type { VisualSubagentPanel } from '~~/shared/codex-chat'
-import { resolveSubagentStatusMeta } from '~~/shared/subagent-panels'
+import { resolveSubagentStatusMeta, type SubagentAccent } from '~~/shared/subagent-panels'
 
 const props = withDefaults(defineProps<{
   agent: VisualSubagentPanel
-  accentClass?: string
+  accent?: SubagentAccent | null
   expanded?: boolean
   showExpandButton?: boolean
   showCollapseButton?: boolean
 }>(), {
-  accentClass: '',
+  accent: null,
   expanded: false,
   showExpandButton: false,
   showCollapseButton: false
@@ -151,11 +151,14 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="flex h-full min-h-0 flex-col bg-elevated/25">
-    <header class="flex items-center justify-between gap-2 border-b border-default px-3 py-2">
+    <header
+      class="flex items-center justify-between gap-2 border-b border-default px-3 py-2"
+      :class="props.accent?.headerClass"
+    >
       <div class="min-w-0">
         <p
           class="truncate text-sm font-semibold"
-          :class="accentClass || 'text-highlighted'"
+          :class="props.accent?.textClass || 'text-highlighted'"
         >
           {{ agent.name }}
         </p>
@@ -187,12 +190,12 @@ onBeforeUnmount(() => {
         />
         <UButton
           v-if="showCollapseButton"
-          icon="i-lucide-arrow-left"
+          icon="i-lucide-shrink"
           color="neutral"
           variant="ghost"
           size="xs"
           square
-          aria-label="Close expanded subagent"
+          aria-label="Collapse subagent"
           @click="emit('collapse')"
         />
       </div>
