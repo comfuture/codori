@@ -14,11 +14,13 @@ const props = withDefaults(defineProps<{
   expanded?: boolean
   showExpandButton?: boolean
   showCollapseButton?: boolean
+  scrollScope?: string
 }>(), {
   accent: null,
   expanded: false,
   showExpandButton: false,
-  showCollapseButton: false
+  showCollapseButton: false,
+  scrollScope: 'default'
 })
 
 const emit = defineEmits<{
@@ -32,11 +34,44 @@ const SCROLL_STICKY_THRESHOLD_PX = 24
 
 const scrollContainer = ref<HTMLElement | null>(null)
 let scrollRetryTimer: number | null = null
+let isTickPending = false
 
 const statusMeta = computed(() => resolveSubagentStatusMeta(props.agent.status))
+const scrollStateKey = computed(() => `${props.scrollScope}:${props.agent.threadId}`)
+const lastMessageSignature = computed(() => {
+  const lastMessage = props.agent.messages.at(-1)
+  if (!lastMessage) {
+    return ''
+  }
+
+  return JSON.stringify({
+    id: lastMessage.id,
+    pending: lastMessage.pending ?? false,
+    parts: lastMessage.parts.map((part) => {
+      if (part.type === 'text') {
+        return [part.type, part.state ?? '', part.text.length]
+      }
+
+      if (part.type === 'reasoning') {
+        return [
+          part.type,
+          part.state ?? '',
+          part.summary.join('\n').length,
+          part.content.join('\n').length
+        ]
+      }
+
+      if (part.type === 'attachment') {
+        return [part.type, part.attachment.name, part.attachment.url ?? part.attachment.localPath ?? '']
+      }
+
+      return [part.type, JSON.stringify(part.data).length]
+    })
+  })
+})
 const panelSignature = computed(() => [
   props.agent.messages.length,
-  props.agent.messages.at(-1)?.id ?? '',
+  lastMessageSignature.value,
   props.agent.status ?? ''
 ].join(':'))
 
@@ -55,8 +90,8 @@ const rememberScrollState = () => {
     return
   }
 
-  sharedScrollPositions.set(props.agent.threadId, scrollContainer.value.scrollTop)
-  sharedStickToBottomStates.set(props.agent.threadId, isNearBottom(scrollContainer.value))
+  sharedScrollPositions.set(scrollStateKey.value, scrollContainer.value.scrollTop)
+  sharedStickToBottomStates.set(scrollStateKey.value, isNearBottom(scrollContainer.value))
 }
 
 const restoreScrollState = () => {
@@ -64,13 +99,13 @@ const restoreScrollState = () => {
     return
   }
 
-  const savedTop = sharedScrollPositions.get(props.agent.threadId)
+  const savedTop = sharedScrollPositions.get(scrollStateKey.value)
   if (savedTop !== undefined) {
     scrollContainer.value.scrollTop = savedTop
   }
 
   sharedStickToBottomStates.set(
-    props.agent.threadId,
+    scrollStateKey.value,
     savedTop === undefined || isNearBottom(scrollContainer.value)
   )
 }
@@ -91,9 +126,17 @@ const queueScrollToBottom = (attempt = 0) => {
 
   if (attempt === 0) {
     clearScrollRetry()
+    if (isTickPending) {
+      return
+    }
+    isTickPending = true
   }
 
   void nextTick(() => {
+    if (attempt === 0) {
+      isTickPending = false
+    }
+
     scrollToBottom()
     if (attempt >= SCROLL_RETRY_COUNT) {
       return
@@ -116,7 +159,7 @@ watch(scrollContainer, (container) => {
   }
 
   restoreScrollState()
-  if (!sharedScrollPositions.has(props.agent.threadId)) {
+  if (!sharedScrollPositions.has(scrollStateKey.value)) {
     queueScrollToBottom()
   }
 }, { immediate: true })
@@ -129,19 +172,19 @@ watch(() => props.agent.threadId, (_, previousThreadId) => {
   clearScrollRetry()
   void nextTick(() => {
     restoreScrollState()
-    if (!sharedScrollPositions.has(props.agent.threadId)) {
+    if (!sharedScrollPositions.has(scrollStateKey.value)) {
       queueScrollToBottom()
     }
   })
 })
 
 watch(panelSignature, () => {
-  if (sharedStickToBottomStates.get(props.agent.threadId) === false) {
+  if (sharedStickToBottomStates.get(scrollStateKey.value) === false) {
     return
   }
 
   queueScrollToBottom()
-}, { immediate: true })
+})
 
 onBeforeUnmount(() => {
   rememberScrollState()

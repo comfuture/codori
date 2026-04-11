@@ -442,6 +442,7 @@ watch(
           v-if="expandedSubagentPanel"
           :agent="expandedSubagentPanel"
           :accent="expandedSubagentAccent"
+          scroll-scope="expanded"
           expanded
           show-collapse-button
           class="h-full"
