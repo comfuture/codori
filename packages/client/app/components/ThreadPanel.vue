@@ -7,9 +7,12 @@ defineProps<{
   projectId: string | null
 }>()
 
+const readDesktopViewport = () =>
+  import.meta.client ? window.matchMedia('(min-width: 1280px)').matches : false
+
 const { open, closePanel } = useThreadPanel()
 const threadListKey = ref(0)
-const isDesktopViewport = ref(false)
+const isDesktopViewport = ref(readDesktopViewport())
 
 let viewportQuery: MediaQueryList | null = null
 let removeViewportListener: (() => void) | null = null

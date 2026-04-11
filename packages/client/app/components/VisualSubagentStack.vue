@@ -27,6 +27,7 @@ const paneSize = computed(() => {
       :key="agent.threadId"
       :agent="agent"
       :accent="resolveSubagentAccent(index)"
+      scroll-scope="stack"
       show-expand-button
       class="min-h-0 flex-1"
       :style="{ flexBasis: `${paneSize}%` }"
