@@ -6,7 +6,12 @@ import {
   resolveTurnSubmissionMethod,
   shouldIgnoreNotificationAfterInterrupt
 } from '../app/utils/chat-turn-engagement'
-import { ITEM_PART, isSubagentActiveStatus, itemToMessages } from '../shared/codex-chat'
+import {
+  ITEM_PART,
+  isSubagentActiveStatus,
+  itemToMessages,
+  type VisualSubagentPanel
+} from '../shared/codex-chat'
 import {
   buildTurnStartInput,
   resolveAttachmentPreviewUrl,
@@ -531,7 +536,7 @@ describe('client package', () => {
   })
 
   it('drops the expanded subagent selection when the target panel disappears', () => {
-    const panels = [{
+    const panels: VisualSubagentPanel[] = [{
       threadId: 'agent-1',
       name: 'Planner',
       status: 'running',
@@ -545,7 +550,7 @@ describe('client package', () => {
       messages: [],
       firstSeenAt: 3,
       lastSeenAt: 4
-    }] as const
+    }]
 
     expect(resolveExpandedSubagentPanel([...panels], 'agent-2')?.name).toBe('Reviewer')
     expect(pruneExpandedSubagentThreadId([...panels], 'agent-3')).toBeNull()
