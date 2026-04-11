@@ -24,6 +24,13 @@ import {
   resolveEffortOptions
 } from '../shared/chat-prompt-controls'
 import {
+  pruneExpandedSubagentThreadId,
+  resolveExpandedSubagentPanel,
+  resolveSubagentPanelAutoOpen,
+  resolveSubagentStatusMeta,
+  toSubagentAvatarText
+} from '../shared/subagent-panels'
+import {
   encodeProjectIdSegment,
   normalizeProjectIdParam,
   projectStatusMeta,
@@ -476,5 +483,83 @@ describe('client package', () => {
       remainingPercent: 56.25
     })
     expect(formatCompactTokenCount(12800)).toBe('13k')
+  })
+
+  it('keeps the subagent panel closed by default on mobile even with active agents', () => {
+    expect(resolveSubagentPanelAutoOpen({
+      isMobile: true,
+      hasAvailableSubagents: true,
+      hasResolvedState: false,
+      hasUserToggled: false,
+      previousActiveCount: 0,
+      nextActiveCount: 1
+    })).toEqual({
+      hasResolvedState: true,
+      previousActiveCount: 1,
+      nextOpen: false
+    })
+  })
+
+  it('auto-opens the subagent panel on desktop when the first active agent appears', () => {
+    expect(resolveSubagentPanelAutoOpen({
+      isMobile: false,
+      hasAvailableSubagents: true,
+      hasResolvedState: true,
+      hasUserToggled: false,
+      previousActiveCount: 0,
+      nextActiveCount: 2
+    })).toEqual({
+      hasResolvedState: true,
+      previousActiveCount: 2,
+      nextOpen: true
+    })
+  })
+
+  it('preserves manual desktop visibility decisions after the user toggles the panel', () => {
+    expect(resolveSubagentPanelAutoOpen({
+      isMobile: false,
+      hasAvailableSubagents: true,
+      hasResolvedState: true,
+      hasUserToggled: true,
+      previousActiveCount: 0,
+      nextActiveCount: 1
+    })).toEqual({
+      hasResolvedState: true,
+      previousActiveCount: 1,
+      nextOpen: null
+    })
+  })
+
+  it('drops the expanded subagent selection when the target panel disappears', () => {
+    const panels = [{
+      threadId: 'agent-1',
+      name: 'Planner',
+      status: 'running',
+      messages: [],
+      firstSeenAt: 1,
+      lastSeenAt: 2
+    }, {
+      threadId: 'agent-2',
+      name: 'Reviewer',
+      status: 'completed',
+      messages: [],
+      firstSeenAt: 3,
+      lastSeenAt: 4
+    }] as const
+
+    expect(resolveExpandedSubagentPanel([...panels], 'agent-2')?.name).toBe('Reviewer')
+    expect(pruneExpandedSubagentThreadId([...panels], 'agent-3')).toBeNull()
+  })
+
+  it('formats subagent identity helpers for compact UI labels', () => {
+    expect(toSubagentAvatarText('Code Reviewer')).toBe('Co')
+    expect(resolveSubagentStatusMeta('pendingInit')).toEqual({
+      color: 'primary',
+      label: 'pending'
+    })
+    expect(resolveSubagentStatusMeta(null)).toEqual({
+      color: 'neutral',
+      label: 'active'
+    })
   })
 })
