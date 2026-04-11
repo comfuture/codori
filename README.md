@@ -65,6 +65,12 @@ If you need different bind settings:
 npx @codori/server --root ~/Project --host 0.0.0.0 --port 4310
 ```
 
+If you are exposing Codori only inside a Tailscale tailnet, prefer binding to the machine's Tailscale IP instead of `0.0.0.0` so the server is not opened on every network interface:
+
+```bash
+npx @codori/server --host "$(tailscale ip -4 | head -n1)" --port 4310
+```
+
 Then open:
 
 ```text
@@ -89,8 +95,10 @@ Example:
 1. Run Codori on a host in your tailnet:
 
 ```bash
-npx @codori/server --root ~/Project --host 0.0.0.0 --port 4310
+npx @codori/server --host "$(tailscale ip -4 | head -n1)" --port 4310
 ```
+
+Binding to the Tailscale IP is a better default than `0.0.0.0` when the service only needs to be reachable from the tailnet.
 
 2. From another machine in the same tailnet, connect to either:
 
