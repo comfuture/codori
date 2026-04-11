@@ -7,7 +7,7 @@ import { normalizeProjectIdParam } from '~~/shared/codori'
 
 const route = useRoute()
 const router = useRouter()
-const { openPanel } = useThreadPanel()
+const { togglePanel } = useThreadPanel()
 const { loaded, refreshProjects, getProject, pendingProjectId } = useProjects()
 
 const projectId = computed(() => normalizeProjectIdParam(route.params.projectId as string | string[] | undefined))
@@ -83,7 +83,7 @@ onMounted(() => {
                   color="neutral"
                   variant="outline"
                   square
-                  @click="openPanel"
+                  @click="togglePanel"
                 />
               </UTooltip>
             </div>
