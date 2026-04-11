@@ -265,10 +265,13 @@ watch(
       :min-size="20"
       :max-size="40"
       resizable
-      :ui="{ body: '!p-0' }"
+      :ui="{ header: '!p-0 bg-[var(--ui-bg)]', body: '!p-0' }"
     >
       <template #header>
-        <div class="flex items-center justify-between gap-2 px-4 py-3">
+        <div
+          class="flex items-center justify-between gap-2 border-b border-default px-4 py-3"
+          style="background-color: var(--ui-bg);"
+        >
           <div class="flex items-center gap-2">
             <span class="text-sm font-semibold text-highlighted">Subagents</span>
             <UBadge
