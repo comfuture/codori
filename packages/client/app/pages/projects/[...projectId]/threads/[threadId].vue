@@ -71,11 +71,7 @@ const isDesktopSubagentsPanelVisible = computed(() =>
 const isSubagentsSurfaceOpen = computed(() =>
   isMobileViewport.value ? isMobileSubagentsDrawerOpen.value : isDesktopSubagentsPanelVisible.value
 )
-const subagentsToggleIcon = computed(() =>
-  isMobileViewport.value
-    ? (isMobileSubagentsDrawerOpen.value ? 'i-lucide-x' : 'i-lucide-list-tree')
-    : (isDesktopSubagentsPanelVisible.value ? 'i-lucide-panel-right-close' : 'i-lucide-panel-right-open')
-)
+const subagentsToggleIcon = computed(() => 'i-lucide-bot')
 const subagentsToggleLabel = computed(() =>
   isMobileViewport.value
     ? (isMobileSubagentsDrawerOpen.value ? 'Hide subagents' : 'Show subagents')
@@ -272,6 +268,31 @@ watch(
           </template>
           <template #right>
             <div class="flex items-center gap-1.5 lg:gap-2">
+              <UTooltip :text="`RPC ${rpcStatus}`">
+                <ProjectStatusDot
+                  :status="rpcStatus"
+                  pulse
+                  padded
+                />
+              </UTooltip>
+              <UTooltip text="New thread">
+                <UButton
+                  icon="i-lucide-plus"
+                  color="primary"
+                  variant="soft"
+                  square
+                  @click="onNewThread"
+                />
+              </UTooltip>
+              <UTooltip text="Previous threads">
+                <UButton
+                  icon="i-lucide-history"
+                  color="neutral"
+                  variant="outline"
+                  square
+                  @click="openPanel"
+                />
+              </UTooltip>
               <UTooltip
                 v-if="hasAvailableSubagents"
                 text="Subagents"
@@ -300,31 +321,6 @@ watch(
                     />
                   </UAvatarGroup>
                 </UButton>
-              </UTooltip>
-              <UTooltip :text="`RPC ${rpcStatus}`">
-                <ProjectStatusDot
-                  :status="rpcStatus"
-                  pulse
-                  padded
-                />
-              </UTooltip>
-              <UTooltip text="New thread">
-                <UButton
-                  icon="i-lucide-plus"
-                  color="primary"
-                  variant="soft"
-                  square
-                  @click="onNewThread"
-                />
-              </UTooltip>
-              <UTooltip text="Previous threads">
-                <UButton
-                  icon="i-lucide-history"
-                  color="neutral"
-                  variant="outline"
-                  square
-                  @click="openPanel"
-                />
               </UTooltip>
             </div>
           </template>
