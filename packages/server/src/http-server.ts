@@ -37,7 +37,10 @@ export type RuntimeManagerLike = {
   startProject: (projectId: string) => MaybePromise<StartProjectResult>
   stopProject: (projectId: string) => MaybePromise<ProjectStatusRecord>
   noteProjectActivity?: (projectId: string) => MaybePromise<ProjectStatusRecord | void>
-  acquireProjectSession?: (projectId: string) => { release: () => void }
+  acquireProjectSession?: (projectId: string) => {
+    touchActivity?: (at?: number) => MaybePromise<ProjectStatusRecord | void>
+    release: () => void
+  }
   dispose?: () => MaybePromise<void>
   config?: {
     server: {
@@ -148,6 +151,18 @@ const touchProjectActivity = async (manager: RuntimeManagerLike, projectId: stri
   }
 
   await resolveValue(manager.noteProjectActivity(projectId))
+}
+
+const touchProjectActivityInBackground = (
+  manager: RuntimeManagerLike,
+  projectId: string,
+  session?: { touchActivity?: (at?: number) => MaybePromise<ProjectStatusRecord | void> } | null
+) => {
+  const task = session?.touchActivity
+    ? resolveValue(session.touchActivity())
+    : touchProjectActivity(manager, projectId)
+
+  void task.catch(() => {})
 }
 
 const wait = async (ms: number) =>
@@ -473,7 +488,7 @@ export const createHttpServer = async (
       }
 
       clientSocket.on('message', (message: WebSocket.RawData, isBinary: boolean) => {
-        void touchProjectActivity(manager, projectId)
+        touchProjectActivityInBackground(manager, projectId, session)
         if (upstream?.readyState === WebSocket.OPEN) {
           upstream.send(message, { binary: isBinary })
           return
@@ -515,7 +530,7 @@ export const createHttpServer = async (
         })
 
         upstream.on('message', (message: WebSocket.RawData, isBinary: boolean) => {
-          void touchProjectActivity(manager, projectId)
+          touchProjectActivityInBackground(manager, projectId, session)
           clientSocket.send(message, { binary: isBinary })
         })
 

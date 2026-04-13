@@ -81,6 +81,7 @@ const createManager = (overrides: Partial<RuntimeManagerLike> = {}): RuntimeMana
   }),
   noteProjectActivity: () => {},
   acquireProjectSession: () => ({
+    touchActivity: () => {},
     release: () => {}
   }),
   ...overrides
@@ -365,16 +366,19 @@ describe('createHttpServer', () => {
         port: backendPort,
         reusedExisting: true
       } satisfies StartProjectResult),
-      noteProjectActivity: () => {
-        events.push('touch')
-      },
       acquireProjectSession: () => {
         events.push('acquire')
         return {
+          touchActivity: () => {
+            events.push('touch')
+          },
           release: () => {
             events.push('release')
           }
         }
+      },
+      noteProjectActivity: () => {
+        throw new Error('websocket activity should use the cached session context')
       }
     })
     const app = await createHttpServer(manager)
@@ -402,6 +406,89 @@ describe('createHttpServer', () => {
           resolvePromise()
         } catch (error) {
           reject(error instanceof Error ? error : new Error(String(error)))
+        }
+      })
+      client.once('error', reject)
+    })
+  })
+
+  it('swallows rejected background activity updates in websocket handlers', async () => {
+    const tcpServer = createNetServer()
+    await new Promise<void>((resolvePromise, reject) => {
+      tcpServer.listen(0, '127.0.0.1', (error?: Error) => {
+        if (error) {
+          reject(error)
+          return
+        }
+        resolvePromise()
+      })
+    })
+    const address = tcpServer.address()
+    if (!address || typeof address === 'string') {
+      throw new Error('Failed to get test server address.')
+    }
+    const backendPort = address.port
+    await new Promise<void>((resolvePromise, reject) => {
+      tcpServer.close((error) => {
+        if (error) {
+          reject(error)
+          return
+        }
+        resolvePromise()
+      })
+    })
+
+    const backend = new WebSocketServer({
+      host: '127.0.0.1',
+      port: backendPort
+    })
+    startedSocketServers.push(backend)
+    await new Promise<void>((resolvePromise) => {
+      backend.once('listening', () => {
+        resolvePromise()
+      })
+    })
+    backend.on('connection', (socket: WebSocket) => {
+      socket.on('message', (message: WebSocket.RawData) => {
+        socket.send(rawDataToString(message).toUpperCase())
+      })
+    })
+
+    const manager = createManager({
+      startProject: () => ({
+        ...createProjectRecord(),
+        port: backendPort,
+        reusedExisting: true
+      } satisfies StartProjectResult),
+      acquireProjectSession: () => ({
+        touchActivity: async () => {
+          throw new Error('disk write failed')
+        },
+        release: () => {}
+      })
+    })
+    const app = await createHttpServer(manager)
+    startedApps.push(app)
+    await app.listen({
+      host: '127.0.0.1',
+      port: 0
+    })
+
+    const serverAddress = app.addresses()[0]
+    const client = new WebSocket(`ws://127.0.0.1:${serverAddress.port}/api/projects/demo/rpc`)
+
+    await new Promise<void>((resolvePromise, reject) => {
+      client.once('open', () => {
+        client.send('ping')
+      })
+      client.once('message', (data: WebSocket.RawData) => {
+        try {
+          expect(rawDataToString(data)).toBe('PING')
+          resolvePromise()
+        } catch (error) {
+          reject(error instanceof Error ? error : new Error(String(error)))
+        } finally {
+          client.close()
         }
       })
       client.once('error', reject)

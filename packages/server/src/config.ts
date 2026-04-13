@@ -110,21 +110,20 @@ export const resolveConfig = (
   const resolvedPort = ensureValidPort(port, 'server.port')
   const resolvedPortStart = ensureValidPort(portStart, 'ports.start')
   const resolvedPortEnd = ensureValidPort(portEnd, 'ports.end')
-  const idleShutdownEnabled = overrides.idleShutdownEnabled
-    ?? (fileConfig.idleShutdown?.enabled === undefined
-      ? undefined
-      : ensureValidBoolean(fileConfig.idleShutdown.enabled, 'idleShutdown.enabled'))
-    ?? true
-  const idleShutdownTimeoutMs = overrides.idleShutdownTimeoutMs
-    ?? (fileConfig.idleShutdown?.timeoutMs === undefined
-      ? undefined
-      : ensureValidDurationMs(fileConfig.idleShutdown.timeoutMs, 'idleShutdown.timeoutMs'))
-    ?? DEFAULT_IDLE_TIMEOUT_MS
-  const idleShutdownSweepIntervalMs = overrides.idleShutdownSweepIntervalMs
-    ?? (fileConfig.idleShutdown?.sweepIntervalMs === undefined
-      ? undefined
-      : ensureValidDurationMs(fileConfig.idleShutdown.sweepIntervalMs, 'idleShutdown.sweepIntervalMs'))
-    ?? DEFAULT_IDLE_SWEEP_INTERVAL_MS
+  const idleShutdownEnabled = ensureValidBoolean(
+    overrides.idleShutdownEnabled ?? fileConfig.idleShutdown?.enabled ?? true,
+    'idleShutdown.enabled'
+  )
+  const idleShutdownTimeoutMs = ensureValidDurationMs(
+    overrides.idleShutdownTimeoutMs ?? fileConfig.idleShutdown?.timeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS,
+    'idleShutdown.timeoutMs'
+  )
+  const idleShutdownSweepIntervalMs = ensureValidDurationMs(
+    overrides.idleShutdownSweepIntervalMs
+      ?? fileConfig.idleShutdown?.sweepIntervalMs
+      ?? DEFAULT_IDLE_SWEEP_INTERVAL_MS,
+    'idleShutdown.sweepIntervalMs'
+  )
 
   if (resolvedPortStart > resolvedPortEnd) {
     throw new CodoriError('INVALID_CONFIG', 'ports.start must be less than or equal to ports.end.')

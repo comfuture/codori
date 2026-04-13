@@ -102,4 +102,17 @@ describe('resolveConfig', () => {
       sweepIntervalMs: 15_000
     })
   })
+
+  it('validates idle shutdown overrides the same way as file config', () => {
+    const homeDir = createHome()
+
+    expect(() => resolveConfig({
+      root: '/tmp/from-cli',
+      idleShutdownTimeoutMs: 0 as number
+    }, homeDir)).toThrow(/idleShutdown\.timeoutMs/)
+    expect(() => resolveConfig({
+      root: '/tmp/from-cli',
+      idleShutdownEnabled: 'yes' as unknown as boolean
+    }, homeDir)).toThrow(/idleShutdown\.enabled/)
+  })
 })
