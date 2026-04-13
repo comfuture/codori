@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { realpathSync } from 'node:fs'
 import { resolve as resolvePath } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
@@ -121,6 +122,25 @@ export const CLI_USAGE = [
 
 const printUsage = (stdout: NodeJS.WritableStream = process.stdout) => {
   stdout.write(`${CLI_USAGE}\n`)
+}
+
+export const resolveCliEntrypointPath = (value: string | undefined) => {
+  if (!value) {
+    return null
+  }
+
+  const resolved = resolvePath(value)
+  try {
+    return realpathSync(resolved)
+  } catch {
+    return resolved
+  }
+}
+
+export const isCliEntrypointPath = (argvPath: string | undefined, moduleUrl: string) => {
+  const entryPath = resolveCliEntrypointPath(argvPath)
+  const modulePath = resolveCliEntrypointPath(fileURLToPath(moduleUrl))
+  return entryPath !== null && entryPath === modulePath
 }
 
 const executeServiceCommand = async (
@@ -295,9 +315,7 @@ export const runCli = async (
   }
 }
 
-const isEntrypoint = process.argv[1]
-  ? resolvePath(process.argv[1]) === fileURLToPath(import.meta.url)
-  : false
+const isEntrypoint = isCliEntrypointPath(process.argv[1], import.meta.url)
 
 if (isEntrypoint) {
   void runCli().catch((error) => {

@@ -1,9 +1,9 @@
-import { mkdirSync, mkdtempSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import { join } from 'node:path'
 import { PassThrough } from 'node:stream'
 import { describe, expect, it } from 'vitest'
-import { CLI_USAGE, runCli } from '../src/cli.js'
+import { CLI_USAGE, isCliEntrypointPath, runCli } from '../src/cli.js'
 
 const createOutput = () => {
   const stream = new PassThrough()
@@ -64,5 +64,15 @@ describe('cli service commands', () => {
 
     expect(stdout.read()).toContain('Usage:')
     expect(stdout.read()).toContain('restart-service')
+  })
+
+  it('treats symlinked bin paths as the cli entrypoint', () => {
+    const tempDir = mkdtempSync(join(os.tmpdir(), 'codori-cli-'))
+    const realPath = join(tempDir, 'cli.js')
+    const symlinkPath = join(tempDir, 'codori')
+    writeFileSync(realPath, '#!/usr/bin/env node\n', 'utf8')
+    symlinkSync(realPath, symlinkPath)
+
+    expect(isCliEntrypointPath(symlinkPath, new URL(`file://${realPath}`).href)).toBe(true)
   })
 })
