@@ -1696,7 +1696,6 @@ const sendMessage = async () => {
 
   try {
     const client = getClient(props.projectId)
-    tokenUsage.value = null
 
     if (submissionMethod === 'turn/steer') {
       const liveStream = await ensurePendingLiveStream()
@@ -1710,6 +1709,7 @@ const sendMessage = async () => {
         input: buildTurnStartInput(text, uploadedAttachments),
         ...buildTurnOverrides(selectedModel.value, selectedEffort.value)
       })
+      tokenUsage.value = null
       return
     }
 
@@ -1727,6 +1727,7 @@ const sendMessage = async () => {
       ...buildTurnOverrides(selectedModel.value, selectedEffort.value)
     })
 
+    tokenUsage.value = null
     setLiveStreamTurnId(liveStream, turnStart.turn.id)
 
     for (const notification of liveStream.bufferedNotifications.splice(0, liveStream.bufferedNotifications.length)) {
