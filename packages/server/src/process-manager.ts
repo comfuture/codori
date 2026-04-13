@@ -20,6 +20,7 @@ type CommandFactory = (port: number, project: ProjectRecord) => {
 }
 
 type ProjectSessionLease = {
+  touchActivity: (at?: number) => ProjectStatusRecord
   release: () => void
 }
 
@@ -210,8 +211,7 @@ export class RuntimeManager {
     return this.normalizeStatus(project, loaded.record, null)
   }
 
-  noteProjectActivity(projectId: string, at = Date.now()) {
-    const project = this.resolveProject(projectId)
+  private touchProjectRuntime(project: ProjectRecord, at = Date.now()) {
     const runtime = this.loadActiveRuntime(project)
     if (!runtime) {
       return this.normalizeStatus(project, null, null)
@@ -220,13 +220,18 @@ export class RuntimeManager {
     return this.normalizeStatus(project, this.touchRuntimeRecord(runtime, at), null)
   }
 
+  noteProjectActivity(projectId: string, at = Date.now()) {
+    return this.touchProjectRuntime(this.resolveProject(projectId), at)
+  }
+
   acquireProjectSession(projectId: string): ProjectSessionLease {
     const project = this.resolveProject(projectId)
     this.incrementActiveSessions(project.id)
-    this.noteProjectActivity(project.id)
+    this.touchProjectRuntime(project)
 
     let released = false
     return {
+      touchActivity: (at = Date.now()) => this.touchProjectRuntime(project, at),
       release: () => {
         if (released) {
           return
