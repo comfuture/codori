@@ -3,6 +3,7 @@ import type { NavigationMenuItem } from '@nuxt/ui'
 import { useRoute } from '#imports'
 import { computed, onMounted } from 'vue'
 import { useProjects } from '../composables/useProjects'
+import { sortSidebarProjects } from '../utils/project-sidebar-order'
 import { toProjectRoute } from '~~/shared/codori'
 
 const props = defineProps<{
@@ -38,7 +39,7 @@ onMounted(() => {
 })
 
 const projectItems = computed<ProjectNavigationItem[][]>(() => [
-  projects.value.map(project => ({
+  sortSidebarProjects(projects.value, activeProjectId.value).map(project => ({
     label: project.projectId,
     icon: 'i-lucide-folder-git-2',
     to: toProjectRoute(project.projectId),
