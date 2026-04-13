@@ -19,6 +19,10 @@ type CommandFactory = (port: number, project: ProjectRecord) => {
   args: string[]
 }
 
+type ProjectSessionLease = {
+  release: () => void
+}
+
 type RuntimeManagerOptions = {
   homeDir?: string
   configOverrides?: ConfigOverrides
@@ -82,10 +86,23 @@ export class RuntimeManager {
 
   private readonly commandFactory: CommandFactory
 
+  private readonly activeSessions = new Map<string, number>()
+
+  private idleReaper: NodeJS.Timeout | null = null
+
+  private idleSweepInFlight = false
+
   constructor(options: RuntimeManagerOptions = {}) {
     this.config = options.config ?? resolveConfig(options.configOverrides, options.homeDir)
     this.store = new RuntimeStore(options.homeDir)
     this.commandFactory = options.commandFactory ?? defaultCommandFactory
+
+    if (this.config.idleShutdown.enabled) {
+      this.idleReaper = setInterval(() => {
+        void this.reapIdleRuntimes()
+      }, this.config.idleShutdown.sweepIntervalMs)
+      this.idleReaper.unref?.()
+    }
   }
 
   listProjects() {
@@ -101,6 +118,7 @@ export class RuntimeManager {
   }
 
   private normalizeStatus(project: ProjectRecord, runtime: RuntimeRecord | null, error: string | null): ProjectStatusRecord {
+    const activeSessionCount = this.getActiveSessionCount(project.id)
     return {
       projectId: project.id,
       projectPath: project.path,
@@ -108,8 +126,70 @@ export class RuntimeManager {
       pid: runtime?.pid ?? null,
       port: runtime?.port ?? null,
       startedAt: runtime?.startedAt ?? null,
+      lastActivityAt: runtime?.lastActivityAt ?? null,
+      activeSessionCount,
+      idleTimeoutMs: this.config.idleShutdown.enabled ? this.config.idleShutdown.timeoutMs : null,
+      idleDeadlineAt: this.resolveIdleDeadline(runtime, activeSessionCount),
       error
     }
+  }
+
+  private getActiveSessionCount(projectId: string) {
+    return this.activeSessions.get(projectId) ?? 0
+  }
+
+  private resolveIdleDeadline(runtime: RuntimeRecord | null, activeSessionCount: number) {
+    if (!runtime || !this.config.idleShutdown.enabled || activeSessionCount > 0) {
+      return null
+    }
+
+    return runtime.lastActivityAt + this.config.idleShutdown.timeoutMs
+  }
+
+  private writeRuntime(record: RuntimeRecord) {
+    this.store.write(record)
+    return record
+  }
+
+  private touchRuntimeRecord(record: RuntimeRecord, at = Date.now()) {
+    return this.writeRuntime({
+      ...record,
+      lastActivityAt: Math.max(record.lastActivityAt, at)
+    })
+  }
+
+  private incrementActiveSessions(projectId: string) {
+    this.activeSessions.set(projectId, this.getActiveSessionCount(projectId) + 1)
+  }
+
+  private decrementActiveSessions(projectId: string) {
+    const next = this.getActiveSessionCount(projectId) - 1
+    if (next > 0) {
+      this.activeSessions.set(projectId, next)
+      return
+    }
+
+    this.activeSessions.delete(projectId)
+  }
+
+  private loadActiveRuntime(project: ProjectRecord) {
+    const loaded = this.store.load(project.path)
+
+    if (loaded.kind === 'missing') {
+      return null
+    }
+
+    if (loaded.kind === 'invalid') {
+      this.store.remove(project.path)
+      return null
+    }
+
+    if (!isProcessAlive(loaded.record.pid)) {
+      this.store.remove(project.path)
+      return null
+    }
+
+    return loaded.record
   }
 
   private readRunningRuntime(project: ProjectRecord) {
@@ -130,6 +210,34 @@ export class RuntimeManager {
     return this.normalizeStatus(project, loaded.record, null)
   }
 
+  noteProjectActivity(projectId: string, at = Date.now()) {
+    const project = this.resolveProject(projectId)
+    const runtime = this.loadActiveRuntime(project)
+    if (!runtime) {
+      return this.normalizeStatus(project, null, null)
+    }
+
+    return this.normalizeStatus(project, this.touchRuntimeRecord(runtime, at), null)
+  }
+
+  acquireProjectSession(projectId: string): ProjectSessionLease {
+    const project = this.resolveProject(projectId)
+    this.incrementActiveSessions(project.id)
+    this.noteProjectActivity(project.id)
+
+    let released = false
+    return {
+      release: () => {
+        if (released) {
+          return
+        }
+
+        released = true
+        this.decrementActiveSessions(project.id)
+      }
+    }
+  }
+
   listProjectStatuses() {
     return this.listProjects().map(project => this.readRunningRuntime(project))
   }
@@ -143,8 +251,9 @@ export class RuntimeManager {
     const loaded = this.store.load(project.path)
 
     if (loaded.kind === 'valid' && isProcessAlive(loaded.record.pid)) {
+      const runtime = this.touchRuntimeRecord(loaded.record)
       return {
-        ...this.normalizeStatus(project, loaded.record, null),
+        ...this.normalizeStatus(project, runtime, null),
         reusedExisting: true
       }
     }
@@ -161,14 +270,16 @@ export class RuntimeManager {
       throw new CodoriError('PROCESS_START_FAILED', `Failed to determine PID for project "${projectId}".`)
     }
 
+    const now = Date.now()
     const runtime: RuntimeRecord = {
       projectId: project.id,
       projectPath: project.path,
       pid: child.pid,
       port,
-      startedAt: Date.now()
+      startedAt: now,
+      lastActivityAt: now
     }
-    this.store.write(runtime)
+    this.writeRuntime(runtime)
 
     return {
       ...this.normalizeStatus(project, runtime, null),
@@ -200,6 +311,49 @@ export class RuntimeManager {
 
     this.store.remove(project.path)
     return this.normalizeStatus(project, null, null)
+  }
+
+  async reapIdleRuntimes() {
+    if (!this.config.idleShutdown.enabled || this.idleSweepInFlight) {
+      return 0
+    }
+
+    this.idleSweepInFlight = true
+    let stopped = 0
+
+    try {
+      const now = Date.now()
+      for (const project of this.listProjects()) {
+        const runtime = this.loadActiveRuntime(project)
+        if (!runtime) {
+          continue
+        }
+
+        if (this.getActiveSessionCount(project.id) > 0) {
+          continue
+        }
+
+        if (now - runtime.lastActivityAt < this.config.idleShutdown.timeoutMs) {
+          continue
+        }
+
+        await this.stopProject(project.id)
+        stopped += 1
+      }
+
+      return stopped
+    } finally {
+      this.idleSweepInFlight = false
+    }
+  }
+
+  dispose() {
+    if (!this.idleReaper) {
+      return
+    }
+
+    clearInterval(this.idleReaper)
+    this.idleReaper = null
   }
 }
 

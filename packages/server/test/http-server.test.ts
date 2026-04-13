@@ -79,6 +79,10 @@ const createManager = (overrides: Partial<RuntimeManagerLike> = {}): RuntimeMana
     lastActivityAt: null,
     idleDeadlineAt: null
   }),
+  noteProjectActivity: () => {},
+  acquireProjectSession: () => ({
+    release: () => {}
+  }),
   ...overrides
 })
 
@@ -306,6 +310,98 @@ describe('createHttpServer', () => {
           reject(error instanceof Error ? error : new Error(String(error)))
         } finally {
           client.close()
+        }
+      })
+      client.once('error', reject)
+    })
+  })
+
+  it('marks websocket sessions active while the proxy is connected', async () => {
+    const tcpServer = createNetServer()
+    await new Promise<void>((resolvePromise, reject) => {
+      tcpServer.listen(0, '127.0.0.1', (error?: Error) => {
+        if (error) {
+          reject(error)
+          return
+        }
+        resolvePromise()
+      })
+    })
+    const address = tcpServer.address()
+    if (!address || typeof address === 'string') {
+      throw new Error('Failed to get test server address.')
+    }
+    const backendPort = address.port
+    await new Promise<void>((resolvePromise, reject) => {
+      tcpServer.close((error) => {
+        if (error) {
+          reject(error)
+          return
+        }
+        resolvePromise()
+      })
+    })
+
+    const backend = new WebSocketServer({
+      host: '127.0.0.1',
+      port: backendPort
+    })
+    startedSocketServers.push(backend)
+    await new Promise<void>((resolvePromise) => {
+      backend.once('listening', () => {
+        resolvePromise()
+      })
+    })
+    backend.on('connection', (socket: WebSocket) => {
+      socket.on('message', (message: WebSocket.RawData) => {
+        socket.send(rawDataToString(message))
+      })
+    })
+
+    const events: string[] = []
+    const manager = createManager({
+      startProject: () => ({
+        ...createProjectRecord(),
+        port: backendPort,
+        reusedExisting: true
+      } satisfies StartProjectResult),
+      noteProjectActivity: () => {
+        events.push('touch')
+      },
+      acquireProjectSession: () => {
+        events.push('acquire')
+        return {
+          release: () => {
+            events.push('release')
+          }
+        }
+      }
+    })
+    const app = await createHttpServer(manager)
+    startedApps.push(app)
+    await app.listen({
+      host: '127.0.0.1',
+      port: 0
+    })
+
+    const serverAddress = app.addresses()[0]
+    const client = new WebSocket(`ws://127.0.0.1:${serverAddress.port}/api/projects/demo/rpc`)
+
+    await new Promise<void>((resolvePromise, reject) => {
+      client.once('open', () => {
+        client.send('ping')
+      })
+      client.once('message', () => {
+        client.close()
+      })
+      client.once('close', () => {
+        try {
+          expect(events[0]).toBe('acquire')
+          expect(events).toContain('touch')
+          expect(events.at(-1)).toBe('release')
+          resolvePromise()
+        } catch (error) {
+          reject(error instanceof Error ? error : new Error(String(error)))
         }
       })
       client.once('error', reject)
