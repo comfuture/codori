@@ -48,6 +48,7 @@ import {
   toProjectRoute,
   toProjectThreadRoute
 } from '../shared/codori'
+import { sortSidebarProjects } from '../app/utils/project-sidebar-order'
 import { resolveApiUrl, resolveWsBase, shouldUseServerProxy } from '../shared/network'
 
 describe('client package', () => {
@@ -63,6 +64,32 @@ describe('client package', () => {
       color: 'success',
       label: 'Running'
     })
+  })
+
+  it('orders the active project first while preserving alphabetical order for the rest', () => {
+    expect(sortSidebarProjects([
+      { projectId: 'gamma-worker' },
+      { projectId: 'alpha-api' },
+      { projectId: 'zeta-service' },
+      { projectId: 'beta-web' }
+    ], 'zeta-service').map(project => project.projectId)).toEqual([
+      'zeta-service',
+      'alpha-api',
+      'beta-web',
+      'gamma-worker'
+    ])
+  })
+
+  it('keeps alphabetical order when no active project is present', () => {
+    expect(sortSidebarProjects([
+      { projectId: 'gamma-worker' },
+      { projectId: 'alpha-api' },
+      { projectId: 'beta-web' }
+    ], null).map(project => project.projectId)).toEqual([
+      'alpha-api',
+      'beta-web',
+      'gamma-worker'
+    ])
   })
 
   it('resolves standalone proxy mode and websocket protocol correctly', () => {
