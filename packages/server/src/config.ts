@@ -4,8 +4,8 @@ import { join, resolve } from 'node:path'
 import { CodoriError } from './errors.js'
 import type { CodoriConfig, ConfigOverrides } from './types.js'
 
-const DEFAULT_SERVER_HOST = '127.0.0.1'
-const DEFAULT_SERVER_PORT = 4310
+export const DEFAULT_SERVER_HOST = '127.0.0.1'
+export const DEFAULT_SERVER_PORT = 4310
 const DEFAULT_PORT_START = 46000
 const DEFAULT_PORT_END = 46999
 
