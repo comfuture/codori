@@ -46,9 +46,19 @@ export const useProjects = () => {
     loading.value = true
     error.value = null
     try {
-      const response = await $fetch<ProjectsResponse>(toApiUrl('/projects'))
-      projects.value = response.projects
-      serviceUpdate.value = response.serviceUpdate
+      const [projectsResult, serviceUpdateResult] = await Promise.allSettled([
+        $fetch<ProjectsResponse>(toApiUrl('/projects')),
+        $fetch<ServiceUpdateResponse>(toApiUrl('/service/update'))
+      ])
+
+      if (projectsResult.status === 'rejected') {
+        throw projectsResult.reason
+      }
+
+      projects.value = projectsResult.value.projects
+      if (serviceUpdateResult.status === 'fulfilled') {
+        serviceUpdate.value = serviceUpdateResult.value.serviceUpdate
+      }
       loaded.value = true
     } catch (caughtError) {
       error.value = caughtError instanceof Error ? caughtError.message : String(caughtError)

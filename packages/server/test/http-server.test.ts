@@ -103,14 +103,7 @@ describe('createHttpServer', () => {
     })
     expect(listResponse.statusCode).toBe(200)
     expect(listResponse.json()).toEqual({
-      projects: [createProjectRecord()],
-      serviceUpdate: {
-        enabled: false,
-        updateAvailable: false,
-        updating: false,
-        installedVersion: null,
-        latestVersion: null
-      }
+      projects: [createProjectRecord()]
     })
 
     const startResponse = await app.inject({
@@ -150,11 +143,10 @@ describe('createHttpServer', () => {
 
     const listResponse = await app.inject({
       method: 'GET',
-      url: '/api/projects'
+      url: '/api/service/update'
     })
     expect(listResponse.statusCode).toBe(200)
     expect(listResponse.json()).toEqual({
-      projects: [createProjectRecord()],
       serviceUpdate: {
         enabled: true,
         updateAvailable: true,
