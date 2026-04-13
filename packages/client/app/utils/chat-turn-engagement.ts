@@ -25,14 +25,22 @@ export const hasSteerableTurn = (input: {
   && input.liveStreamThreadId === input.activeThreadId
   && input.liveStreamTurnId !== null
 
+export const shouldSubmitViaTurnSteer = (input: {
+  activeThreadId: string | null
+  liveStreamThreadId: string | null
+  liveStreamTurnId: string | null
+  status: PromptSubmitStatus
+}) =>
+  input.activeThreadId !== null
+  && input.liveStreamThreadId === input.activeThreadId
+  && (input.liveStreamTurnId !== null || input.status === 'submitted' || input.status === 'streaming')
+
 export const shouldAwaitThreadHydration = (input: {
   hasPendingThreadHydration: boolean
   routeThreadId: string | null
-  activeThreadId: string | null
 }) =>
   input.hasPendingThreadHydration
   && input.routeThreadId !== null
-  && input.activeThreadId === input.routeThreadId
 
 export const shouldRetrySteerWithTurnStart = (message: string) =>
   /no active turn to steer/i.test(message)
