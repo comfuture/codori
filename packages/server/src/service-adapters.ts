@@ -42,6 +42,9 @@ const getLaunchctlDomain = (scope: ServiceScope, userId = getCurrentUserId()) =>
 const getSystemdPrefix = (scope: ServiceScope) =>
   scope === 'system' ? [] : ['--user']
 
+const quoteSystemdValue = (value: string) =>
+  `"${value.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`
+
 export const resolveServicePlatform = (platform = process.platform): ServicePlatform => {
   if (platform === 'darwin' || platform === 'linux') {
     return platform
@@ -93,8 +96,8 @@ export const renderSystemdUnit = ({ serviceName, launcherPath, root }: Omit<Serv
   '',
   '[Service]',
   'Type=simple',
-  `WorkingDirectory=${root}`,
-  `ExecStart=${launcherPath}`,
+  `WorkingDirectory=${quoteSystemdValue(root)}`,
+  `ExecStart=${quoteSystemdValue(launcherPath)}`,
   'Restart=always',
   'RestartSec=5',
   '',
