@@ -7,6 +7,10 @@ export type ProjectRecord = {
   pid: number | null
   port: number | null
   startedAt: number | null
+  lastActivityAt: number | null
+  activeSessionCount: number
+  idleTimeoutMs: number | null
+  idleDeadlineAt: number | null
   error: string | null
 }
 

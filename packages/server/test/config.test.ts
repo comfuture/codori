@@ -26,6 +26,11 @@ describe('resolveConfig', () => {
 
     expect(config.server.host).toBe('127.0.0.1')
     expect(config.server.port).toBe(4310)
+    expect(config.idleShutdown).toEqual({
+      enabled: true,
+      timeoutMs: 30 * 60 * 1000,
+      sweepIntervalMs: 60 * 1000
+    })
   })
 
   it('uses overrides ahead of file config', () => {
@@ -48,5 +53,53 @@ describe('resolveConfig', () => {
     expect(config.root).toBe('/tmp/from-cli')
     expect(config.server.host).toBe('127.0.0.1')
     expect(config.server.port).toBe(4100)
+  })
+
+  it('reads idle shutdown configuration from the user config file', () => {
+    const homeDir = createHome()
+    const codoriDir = join(homeDir, '.codori')
+    mkdirSync(codoriDir, { recursive: true })
+    writeFileSync(join(codoriDir, 'config.json'), JSON.stringify({
+      root: '/tmp/from-file',
+      idleShutdown: {
+        enabled: false,
+        timeoutMs: 5_000,
+        sweepIntervalMs: 2_000
+      }
+    }))
+
+    const config = resolveConfig({}, homeDir)
+
+    expect(config.idleShutdown).toEqual({
+      enabled: false,
+      timeoutMs: 5_000,
+      sweepIntervalMs: 2_000
+    })
+  })
+
+  it('lets cli overrides replace idle shutdown config values', () => {
+    const homeDir = createHome()
+    const codoriDir = join(homeDir, '.codori')
+    mkdirSync(codoriDir, { recursive: true })
+    writeFileSync(join(codoriDir, 'config.json'), JSON.stringify({
+      root: '/tmp/from-file',
+      idleShutdown: {
+        enabled: true,
+        timeoutMs: 10_000,
+        sweepIntervalMs: 5_000
+      }
+    }))
+
+    const config = resolveConfig({
+      idleShutdownEnabled: false,
+      idleShutdownTimeoutMs: 45_000,
+      idleShutdownSweepIntervalMs: 15_000
+    }, homeDir)
+
+    expect(config.idleShutdown).toEqual({
+      enabled: false,
+      timeoutMs: 45_000,
+      sweepIntervalMs: 15_000
+    })
   })
 })
