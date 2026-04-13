@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
+  hideThinkingPlaceholder,
   replaceStreamingMessage,
+  showThinkingPlaceholder,
   upsertStreamingMessage,
   type ChatMessage
 } from '../shared/codex-chat'
@@ -76,6 +78,72 @@ describe('chat transcript stability', () => {
         summary: ['Plan'],
         content: ['Final explanation'],
         state: 'done'
+      }]
+    }])
+  })
+
+  it('adds a single thinking placeholder while the assistant has not produced content yet', () => {
+    const withPlaceholder = showThinkingPlaceholder([{
+      id: 'user-1',
+      role: 'user',
+      pending: false,
+      parts: [{
+        type: 'text',
+        text: 'Investigate the bug.',
+        state: 'done'
+      }]
+    }])
+
+    expect(showThinkingPlaceholder(withPlaceholder)).toEqual(withPlaceholder)
+    expect(withPlaceholder.at(-1)).toEqual<ChatMessage>({
+      id: 'assistant-thinking-placeholder',
+      role: 'assistant',
+      pending: true,
+      parts: [{
+        type: 'reasoning',
+        summary: ['Thinking...'],
+        content: [],
+        state: 'streaming'
+      }]
+    })
+  })
+
+  it('removes the thinking placeholder once real assistant content starts', () => {
+    expect(hideThinkingPlaceholder(showThinkingPlaceholder([{
+      id: 'user-1',
+      role: 'user',
+      pending: false,
+      parts: [{
+        type: 'text',
+        text: 'Investigate the bug.',
+        state: 'done'
+      }]
+    }, {
+      id: 'agent-1',
+      role: 'assistant',
+      pending: true,
+      parts: [{
+        type: 'text',
+        text: 'Looking into it',
+        state: 'streaming'
+      }]
+    }]))).toEqual<ChatMessage[]>([{
+      id: 'user-1',
+      role: 'user',
+      pending: false,
+      parts: [{
+        type: 'text',
+        text: 'Investigate the bug.',
+        state: 'done'
+      }]
+    }, {
+      id: 'agent-1',
+      role: 'assistant',
+      pending: true,
+      parts: [{
+        type: 'text',
+        text: 'Looking into it',
+        state: 'streaming'
       }]
     }])
   })

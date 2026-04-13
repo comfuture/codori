@@ -16,11 +16,13 @@ import { useProjects } from '../composables/useProjects'
 import { useRpc } from '../composables/useRpc'
 import { useChatSubmitGuard } from '../composables/useChatSubmitGuard'
 import {
+  hideThinkingPlaceholder,
   ITEM_PART,
   eventToMessage,
   isSubagentActiveStatus,
   itemToMessages,
   replaceStreamingMessage,
+  showThinkingPlaceholder,
   threadToMessages,
   upsertStreamingMessage,
   type ChatMessage,
@@ -504,6 +506,14 @@ const formatAttachmentSize = (size: number) => {
 const removeOptimisticMessage = (messageId: string) => {
   messages.value = removeChatMessage(messages.value, messageId)
   optimisticAttachmentSnapshots.delete(messageId)
+}
+
+const clearThinkingPlaceholder = () => {
+  messages.value = hideThinkingPlaceholder(messages.value)
+}
+
+const ensureThinkingPlaceholder = () => {
+  messages.value = showThinkingPlaceholder(messages.value)
 }
 
 const restoreDraftIfPristine = (text: string, submittedAttachments: DraftAttachment[]) => {
@@ -1443,6 +1453,9 @@ const applyNotification = (notification: CodexRpcNotification) => {
       if (params.item.type === 'collabAgentToolCall') {
         applySubagentActivityItem(params.item)
       }
+      if (params.item.type === 'agentMessage' || params.item.type === 'plan' || params.item.type === 'reasoning') {
+        clearThinkingPlaceholder()
+      }
       for (const nextMessage of itemToMessages(params.item)) {
         const confirmedMessage = {
           ...nextMessage,
@@ -1459,6 +1472,7 @@ const applyNotification = (notification: CodexRpcNotification) => {
     }
     case 'item/agentMessage/delta': {
       const params = notification.params as { itemId: string, delta: string }
+      clearThinkingPlaceholder()
       appendTextPartDelta(params.itemId, params.delta, {
         id: params.itemId,
         role: 'assistant',
@@ -1474,6 +1488,7 @@ const applyNotification = (notification: CodexRpcNotification) => {
     }
     case 'item/plan/delta': {
       const params = notification.params as { itemId: string, delta: string }
+      clearThinkingPlaceholder()
       appendTextPartDelta(params.itemId, params.delta, {
         id: params.itemId,
         role: 'assistant',
@@ -1490,6 +1505,7 @@ const applyNotification = (notification: CodexRpcNotification) => {
     case 'item/reasoning/textDelta':
     case 'item/reasoning/summaryTextDelta': {
       const params = notification.params as { itemId: string, delta: string }
+      clearThinkingPlaceholder()
       updateMessage(params.itemId, {
         id: params.itemId,
         role: 'assistant',
@@ -1597,6 +1613,7 @@ const applyNotification = (notification: CodexRpcNotification) => {
     case 'error': {
       const params = notification.params as { error?: { message?: string } }
       const messageText = params.error?.message ?? 'The stream failed.'
+      clearThinkingPlaceholder()
       pushEventMessage('stream.error', messageText)
       clearPendingOptimisticMessages(liveStream, { discardSnapshots: true })
       clearLiveStream(new Error(messageText))
@@ -1607,6 +1624,7 @@ const applyNotification = (notification: CodexRpcNotification) => {
     case 'turn/failed': {
       const params = notification.params as { error?: { message?: string } }
       const messageText = params.error?.message ?? 'The turn failed.'
+      clearThinkingPlaceholder()
       pushEventMessage('turn.failed', messageText)
       clearPendingOptimisticMessages(liveStream, { discardSnapshots: true })
       clearLiveStream(new Error(messageText))
@@ -1617,6 +1635,7 @@ const applyNotification = (notification: CodexRpcNotification) => {
     case 'stream/error': {
       const params = notification.params as { message?: string }
       const messageText = params.message ?? 'The stream failed.'
+      clearThinkingPlaceholder()
       pushEventMessage('stream.error', messageText)
       clearPendingOptimisticMessages(liveStream, { discardSnapshots: true })
       clearLiveStream(new Error(messageText))
@@ -1625,6 +1644,7 @@ const applyNotification = (notification: CodexRpcNotification) => {
       return
     }
     case 'turn/completed': {
+      clearThinkingPlaceholder()
       clearPendingOptimisticMessages(liveStream, { discardSnapshots: true })
       error.value = null
       status.value = 'ready'
@@ -1665,6 +1685,7 @@ const sendMessage = async () => {
   const optimisticMessageId = optimisticMessage.id
   rememberOptimisticAttachments(optimisticMessageId, submittedAttachments)
   messages.value = [...messages.value, optimisticMessage]
+  ensureThinkingPlaceholder()
   let startedLiveStream: LiveStream | null = null
 
   try {
@@ -1712,6 +1733,7 @@ const sendMessage = async () => {
   } catch (caughtError) {
     const messageText = caughtError instanceof Error ? caughtError.message : String(caughtError)
 
+    clearThinkingPlaceholder()
     untrackPendingUserMessage(optimisticMessageId)
     removeOptimisticMessage(optimisticMessageId)
 

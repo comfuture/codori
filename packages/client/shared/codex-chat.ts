@@ -2,6 +2,7 @@ import type { CodexThread, CodexThreadItem, CodexUserInput } from './codex-rpc'
 
 export const EVENT_PART = 'data-thread-event' as const
 export const ITEM_PART = 'data-thread-item' as const
+export const THINKING_PLACEHOLDER_MESSAGE_ID = 'assistant-thinking-placeholder'
 
 export type ThreadEventData =
   | {
@@ -376,3 +377,21 @@ export const replaceStreamingMessage = (messages: ChatMessage[], nextMessage: Ch
   nextMessages.splice(existingIndex, 1, normalizedMessage)
   return nextMessages
 }
+
+export const buildThinkingPlaceholderMessage = (): ChatMessage => ({
+  id: THINKING_PLACEHOLDER_MESSAGE_ID,
+  role: 'assistant',
+  pending: true,
+  parts: [{
+    type: 'reasoning',
+    summary: ['Thinking...'],
+    content: [],
+    state: 'streaming'
+  }]
+})
+
+export const showThinkingPlaceholder = (messages: ChatMessage[]) =>
+  upsertStreamingMessage(messages, buildThinkingPlaceholderMessage())
+
+export const hideThinkingPlaceholder = (messages: ChatMessage[]) =>
+  messages.filter(message => message.id !== THINKING_PLACEHOLDER_MESSAGE_ID)
