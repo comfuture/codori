@@ -1,6 +1,6 @@
 {
   "name": "@codori/client",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "private": false,
   "description": "Codori Nuxt dashboard for project browsing, Codex chat, and thread resume.",
   "type": "module",
