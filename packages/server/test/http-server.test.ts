@@ -56,6 +56,10 @@ const createProjectRecord = (): ProjectStatusRecord => ({
   pid: 123,
   port: 46000,
   startedAt: 1,
+  lastActivityAt: 1,
+  activeSessionCount: 0,
+  idleTimeoutMs: 30 * 60 * 1000,
+  idleDeadlineAt: 30 * 60 * 1000 + 1,
   error: null
 })
 
@@ -71,7 +75,9 @@ const createManager = (overrides: Partial<RuntimeManagerLike> = {}): RuntimeMana
     status: 'stopped',
     pid: null,
     port: null,
-    startedAt: null
+    startedAt: null,
+    lastActivityAt: null,
+    idleDeadlineAt: null
   }),
   ...overrides
 })

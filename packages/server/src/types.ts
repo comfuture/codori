@@ -8,12 +8,20 @@ export type CodoriConfig = {
     start: number
     end: number
   }
+  idleShutdown: {
+    enabled: boolean
+    timeoutMs: number
+    sweepIntervalMs: number
+  }
 }
 
 export type ConfigOverrides = {
   root?: string
   host?: string
   port?: number
+  idleShutdownEnabled?: boolean
+  idleShutdownTimeoutMs?: number
+  idleShutdownSweepIntervalMs?: number
 }
 
 export type ProjectRecord = {
@@ -27,6 +35,7 @@ export type RuntimeRecord = {
   pid: number
   port: number
   startedAt: number
+  lastActivityAt: number
 }
 
 export type ProjectRuntimeStatus = 'running' | 'stopped' | 'error'
@@ -38,10 +47,13 @@ export type ProjectStatusRecord = {
   pid: number | null
   port: number | null
   startedAt: number | null
+  lastActivityAt: number | null
+  activeSessionCount: number
+  idleTimeoutMs: number | null
+  idleDeadlineAt: number | null
   error: string | null
 }
 
 export type StartProjectResult = ProjectStatusRecord & {
   reusedExisting: boolean
 }
-

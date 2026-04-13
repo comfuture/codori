@@ -13,7 +13,7 @@ const normalizeRuntimeRecord = (value: unknown): RuntimeRecord | null => {
     return null
   }
 
-  const { projectId, projectPath, pid, port, startedAt } = value
+  const { projectId, projectPath, pid, port, startedAt, lastActivityAt } = value
   if (
     typeof projectId !== 'string'
     || typeof projectPath !== 'string'
@@ -22,6 +22,7 @@ const normalizeRuntimeRecord = (value: unknown): RuntimeRecord | null => {
     || typeof port !== 'number'
     || !Number.isInteger(port)
     || typeof startedAt !== 'number'
+    || (lastActivityAt !== undefined && typeof lastActivityAt !== 'number')
   ) {
     return null
   }
@@ -31,7 +32,8 @@ const normalizeRuntimeRecord = (value: unknown): RuntimeRecord | null => {
     projectPath,
     pid,
     port,
-    startedAt
+    startedAt,
+    lastActivityAt: typeof lastActivityAt === 'number' ? lastActivityAt : startedAt
   }
 }
 

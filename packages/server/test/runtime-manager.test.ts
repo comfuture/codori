@@ -119,7 +119,8 @@ describe('RuntimeManager', () => {
       projectPath: join(fixture.root, 'demo'),
       pid: 999999,
       port: 46000,
-      startedAt: Date.now()
+      startedAt: Date.now(),
+      lastActivityAt: Date.now()
     })
 
     const manager = createRuntimeManager({
