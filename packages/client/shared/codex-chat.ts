@@ -336,11 +336,13 @@ const normalizeParts = (message: ChatMessage): ChatPart[] =>
     return part
   })
 
+const normalizeMessage = (message: ChatMessage): ChatMessage => ({
+  ...message,
+  parts: normalizeParts(message)
+})
+
 export const upsertStreamingMessage = (messages: ChatMessage[], nextMessage: ChatMessage) => {
-  const normalizedMessage = {
-    ...nextMessage,
-    parts: normalizeParts(nextMessage)
-  }
+  const normalizedMessage = normalizeMessage(nextMessage)
   const nextMessages = messages.slice()
   const existingIndex = nextMessages.findIndex(message => message.id === normalizedMessage.id)
 
@@ -358,5 +360,19 @@ export const upsertStreamingMessage = (messages: ChatMessage[], nextMessage: Cha
     })
   })
 
+  return nextMessages
+}
+
+export const replaceStreamingMessage = (messages: ChatMessage[], nextMessage: ChatMessage) => {
+  const normalizedMessage = normalizeMessage(nextMessage)
+  const nextMessages = messages.slice()
+  const existingIndex = nextMessages.findIndex(message => message.id === normalizedMessage.id)
+
+  if (existingIndex === -1) {
+    nextMessages.push(normalizedMessage)
+    return nextMessages
+  }
+
+  nextMessages.splice(existingIndex, 1, normalizedMessage)
   return nextMessages
 }
