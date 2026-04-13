@@ -18,14 +18,14 @@ import { useChatSession, type LiveStream, type SubagentPanelState } from '../com
 import { useProjects } from '../composables/useProjects'
 import { useRpc } from '../composables/useRpc'
 import { useChatSubmitGuard } from '../composables/useChatSubmitGuard'
+import { resolveThreadSummaryTitle, useThreadSummaries } from '../composables/useThreadSummaries'
+import { resolveChatMessagesStatus } from '../utils/chat-messages-status'
 import {
-  hideThinkingPlaceholder,
   ITEM_PART,
   eventToMessage,
   isSubagentActiveStatus,
   itemToMessages,
   replaceStreamingMessage,
-  showThinkingPlaceholder,
   threadToMessages,
   upsertStreamingMessage,
   type ChatMessage,
@@ -38,7 +38,9 @@ import { buildTurnStartInput, type PersistedProjectAttachment } from '~~/shared/
 import {
   type ConfigReadResponse,
   type ModelListResponse,
+  notificationThreadName,
   notificationThreadId,
+  notificationThreadUpdatedAt,
   notificationTurnId,
   type CodexRpcNotification,
   type CodexThread,
@@ -108,6 +110,7 @@ const input = ref('')
 const scrollViewport = ref<HTMLElement | null>(null)
 const pinnedToBottom = ref(true)
 const session = useChatSession(props.projectId)
+const { syncThreadSummary, updateThreadSummaryTitle } = useThreadSummaries(props.projectId)
 const {
   messages,
   subagentPanels,
@@ -131,6 +134,7 @@ const selectedProject = computed(() => getProject(props.projectId))
 const composerError = computed(() => attachmentError.value ?? error.value)
 const submitError = computed(() => composerError.value ? new Error(composerError.value) : undefined)
 const interruptRequested = ref(false)
+const awaitingAssistantOutput = ref(false)
 const isBusy = computed(() =>
   status.value === 'submitted'
   || status.value === 'streaming'
@@ -152,6 +156,9 @@ const promptSubmitStatus = computed(() =>
 )
 const routeThreadId = computed(() => props.threadId ?? null)
 const projectTitle = computed(() => selectedProject.value?.projectId ?? props.projectId)
+const chatMessagesStatus = computed(() =>
+  resolveChatMessagesStatus(status.value, awaitingAssistantOutput.value)
+)
 const showWelcomeState = computed(() =>
   !routeThreadId.value
   && !activeThreadId.value
@@ -540,17 +547,13 @@ const removeOptimisticMessage = (messageId: string) => {
   optimisticAttachmentSnapshots.delete(messageId)
 }
 
-const clearThinkingPlaceholder = () => {
-  messages.value = hideThinkingPlaceholder(messages.value)
+const markAwaitingAssistantOutput = (nextValue: boolean) => {
+  awaitingAssistantOutput.value = nextValue
 }
 
-const ensureThinkingPlaceholder = () => {
-  messages.value = showThinkingPlaceholder(messages.value)
-}
-
-const clearThinkingPlaceholderForVisibleItem = (item: CodexThreadItem) => {
+const markAssistantOutputStartedForItem = (item: CodexThreadItem) => {
   if (item.type !== 'userMessage') {
-    clearThinkingPlaceholder()
+    markAwaitingAssistantOutput(false)
   }
 }
 
@@ -643,11 +646,6 @@ const submitTurnStart = async (input: {
   tokenUsage.value = null
   setLiveStreamTurnId(liveStream, turnStart.turn.id)
   replayBufferedNotifications(liveStream)
-}
-
-const resolveThreadTitle = (thread: { name: string | null, preview: string, id: string }) => {
-  const nextTitle = thread.name?.trim() || thread.preview.trim()
-  return nextTitle || `Thread ${thread.id}`
 }
 
 const shortThreadId = (value: string) => value.slice(0, 8)
@@ -838,9 +836,11 @@ const hydrateThread = async (threadId: string) => {
         (resumeResponse.reasoningEffort as ReasoningEffort | null | undefined) ?? null
       )
       activeThreadId.value = response.thread.id
-      threadTitle.value = resolveThreadTitle(response.thread)
+      threadTitle.value = resolveThreadSummaryTitle(response.thread)
+      syncThreadSummary(response.thread)
       messages.value = threadToMessages(response.thread)
       rebuildSubagentPanelsFromThread(response.thread)
+      markAwaitingAssistantOutput(false)
       const activeTurn = [...response.thread.turns].reverse().find(turn => isActiveTurnStatus(turn.status))
 
       if (!activeTurn) {
@@ -895,6 +895,7 @@ const resetDraftThread = () => {
   subagentPanels.value = []
   error.value = null
   tokenUsage.value = null
+  markAwaitingAssistantOutput(false)
   status.value = 'ready'
 }
 
@@ -916,7 +917,8 @@ const ensureThread = async () => {
   })
 
   activeThreadId.value = response.thread.id
-  threadTitle.value = resolveThreadTitle(response.thread)
+  threadTitle.value = resolveThreadSummaryTitle(response.thread)
+  syncThreadSummary(response.thread)
   return {
     threadId: response.thread.id,
     created: true
@@ -1503,6 +1505,24 @@ const applyNotification = (notification: CodexRpcNotification) => {
       pendingThreadId.value = pendingThreadId.value ?? nextThreadId
       return
     }
+    case 'thread/name/updated': {
+      const nextThreadId = notificationThreadId(notification)
+      const nextThreadName = notificationThreadName(notification)
+      if (!nextThreadId || !nextThreadName) {
+        return
+      }
+      const nextTitle = nextThreadName.trim()
+      if (!nextTitle) {
+        return
+      }
+
+      if (activeThreadId.value === nextThreadId) {
+        threadTitle.value = nextTitle
+      }
+
+      updateThreadSummaryTitle(nextThreadId, nextTitle, notificationThreadUpdatedAt(notification))
+      return
+    }
     case 'turn/started': {
       if (liveStream) {
         setLiveStreamTurnId(liveStream, notificationTurnId(notification))
@@ -1532,7 +1552,7 @@ const applyNotification = (notification: CodexRpcNotification) => {
         status.value = 'streaming'
         return
       }
-      clearThinkingPlaceholderForVisibleItem(params.item)
+      markAssistantOutputStartedForItem(params.item)
       seedStreamingMessage(params.item)
       status.value = 'streaming'
       return
@@ -1542,7 +1562,7 @@ const applyNotification = (notification: CodexRpcNotification) => {
       if (params.item.type === 'collabAgentToolCall') {
         applySubagentActivityItem(params.item)
       }
-      clearThinkingPlaceholderForVisibleItem(params.item)
+      markAssistantOutputStartedForItem(params.item)
       for (const nextMessage of itemToMessages(params.item)) {
         const confirmedMessage = {
           ...nextMessage,
@@ -1559,7 +1579,7 @@ const applyNotification = (notification: CodexRpcNotification) => {
     }
     case 'item/agentMessage/delta': {
       const params = notification.params as { itemId: string, delta: string }
-      clearThinkingPlaceholder()
+      markAwaitingAssistantOutput(false)
       appendTextPartDelta(params.itemId, params.delta, {
         id: params.itemId,
         role: 'assistant',
@@ -1575,7 +1595,7 @@ const applyNotification = (notification: CodexRpcNotification) => {
     }
     case 'item/plan/delta': {
       const params = notification.params as { itemId: string, delta: string }
-      clearThinkingPlaceholder()
+      markAwaitingAssistantOutput(false)
       appendTextPartDelta(params.itemId, params.delta, {
         id: params.itemId,
         role: 'assistant',
@@ -1592,7 +1612,7 @@ const applyNotification = (notification: CodexRpcNotification) => {
     case 'item/reasoning/textDelta':
     case 'item/reasoning/summaryTextDelta': {
       const params = notification.params as { itemId: string, delta: string }
-      clearThinkingPlaceholder()
+      markAwaitingAssistantOutput(false)
       updateMessage(params.itemId, {
         id: params.itemId,
         role: 'assistant',
@@ -1700,7 +1720,7 @@ const applyNotification = (notification: CodexRpcNotification) => {
     case 'error': {
       const params = notification.params as { error?: { message?: string } }
       const messageText = params.error?.message ?? 'The stream failed.'
-      clearThinkingPlaceholder()
+      markAwaitingAssistantOutput(false)
       pushEventMessage('stream.error', messageText)
       clearPendingOptimisticMessages(liveStream, { discardSnapshots: true })
       clearLiveStream(new Error(messageText))
@@ -1711,7 +1731,7 @@ const applyNotification = (notification: CodexRpcNotification) => {
     case 'turn/failed': {
       const params = notification.params as { error?: { message?: string } }
       const messageText = params.error?.message ?? 'The turn failed.'
-      clearThinkingPlaceholder()
+      markAwaitingAssistantOutput(false)
       pushEventMessage('turn.failed', messageText)
       clearPendingOptimisticMessages(liveStream, { discardSnapshots: true })
       clearLiveStream(new Error(messageText))
@@ -1722,7 +1742,7 @@ const applyNotification = (notification: CodexRpcNotification) => {
     case 'stream/error': {
       const params = notification.params as { message?: string }
       const messageText = params.message ?? 'The stream failed.'
-      clearThinkingPlaceholder()
+      markAwaitingAssistantOutput(false)
       pushEventMessage('stream.error', messageText)
       clearPendingOptimisticMessages(liveStream, { discardSnapshots: true })
       clearLiveStream(new Error(messageText))
@@ -1731,7 +1751,7 @@ const applyNotification = (notification: CodexRpcNotification) => {
       return
     }
     case 'turn/completed': {
-      clearThinkingPlaceholder()
+      markAwaitingAssistantOutput(false)
       clearPendingOptimisticMessages(liveStream, { discardSnapshots: true })
       error.value = null
       status.value = 'ready'
@@ -1779,7 +1799,7 @@ const sendMessage = async () => {
   const optimisticMessageId = optimisticMessage.id
   rememberOptimisticAttachments(optimisticMessageId, submittedAttachments)
   messages.value = [...messages.value, optimisticMessage]
-  ensureThinkingPlaceholder()
+  markAwaitingAssistantOutput(true)
   let startedLiveStream: LiveStream | null = null
   let executedSubmissionMethod = submissionMethod
 
@@ -1839,7 +1859,7 @@ const sendMessage = async () => {
   } catch (caughtError) {
     const messageText = caughtError instanceof Error ? caughtError.message : String(caughtError)
 
-    clearThinkingPlaceholder()
+    markAwaitingAssistantOutput(false)
     untrackPendingUserMessage(optimisticMessageId)
     removeOptimisticMessage(optimisticMessageId)
 
@@ -2031,7 +2051,7 @@ watch([selectedModel, availableModels], () => {
       <UChatMessages
         v-else
         :messages="messages"
-        :status="status"
+        :status="chatMessagesStatus"
         :should-auto-scroll="false"
         :should-scroll-to-bottom="false"
         :auto-scroll="false"
@@ -2055,6 +2075,21 @@ watch([selectedModel, availableModels], () => {
             :message="message as ChatMessage"
             :project-id="projectId"
           />
+        </template>
+        <template #indicator>
+          <div
+            v-if="awaitingAssistantOutput"
+            class="flex items-center gap-3 px-1 py-2 text-sm text-muted"
+          >
+            <UIcon
+              name="i-lucide-loader-circle"
+              class="size-4 animate-spin text-primary"
+            />
+            <div class="flex flex-col gap-1">
+              <UChatShimmer text="Waiting for response…" />
+              <span class="text-xs text-toned">Real reasoning will appear separately when streaming starts.</span>
+            </div>
+          </div>
         </template>
       </UChatMessages>
     </div>

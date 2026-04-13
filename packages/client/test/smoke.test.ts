@@ -10,6 +10,7 @@ import {
   shouldRetrySteerWithTurnStart,
   shouldIgnoreNotificationAfterInterrupt
 } from '../app/utils/chat-turn-engagement'
+import { resolveChatMessagesStatus } from '../app/utils/chat-messages-status'
 import {
   ITEM_PART,
   isSubagentActiveStatus,
@@ -90,6 +91,11 @@ describe('client package', () => {
       'beta-web',
       'gamma-worker'
     ])
+  })
+
+  it('keeps waiting indicators separate from transcript streaming state', () => {
+    expect(resolveChatMessagesStatus('submitted', true)).toBe('submitted')
+    expect(resolveChatMessagesStatus('streaming', false)).toBe('streaming')
   })
 
   it('resolves standalone proxy mode and websocket protocol correctly', () => {

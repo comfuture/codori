@@ -16,5 +16,9 @@ export const sortSidebarProjects = <T extends { projectId: string }>(
   }
 
   const [activeProject] = alphabeticalProjects.splice(activeIndex, 1)
+  if (!activeProject) {
+    return alphabeticalProjects
+  }
+
   return [activeProject, ...alphabeticalProjects]
 }

@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
-  hideThinkingPlaceholder,
   replaceStreamingMessage,
-  showThinkingPlaceholder,
   upsertStreamingMessage,
   type ChatMessage
 } from '../shared/codex-chat'
+import { mergeThreadSummary, renameThreadSummary } from '../app/composables/useThreadSummaries'
+import { resolveChatMessagesStatus } from '../app/utils/chat-messages-status'
 
 describe('chat transcript stability', () => {
   it('replaces a streamed text message with the completed server payload', () => {
@@ -82,84 +82,54 @@ describe('chat transcript stability', () => {
     }])
   })
 
-  it('adds a single thinking placeholder while the assistant has not produced content yet', () => {
-    const withPlaceholder = showThinkingPlaceholder([{
-      id: 'user-1',
-      role: 'user',
-      pending: false,
-      parts: [{
-        type: 'text',
-        text: 'Investigate the bug.',
-        state: 'done'
-      }]
-    }])
-
-    expect(showThinkingPlaceholder(withPlaceholder)).toEqual(withPlaceholder)
-    expect(withPlaceholder.at(-1)).toEqual<ChatMessage>({
-      id: 'assistant-thinking-placeholder',
-      role: 'assistant',
-      pending: true,
-      parts: [{
-        type: 'reasoning',
-        summary: ['Thinking...'],
-        content: [],
-        state: 'streaming'
-      }]
-    })
+  it('keeps chat loading state in submitted mode until real assistant output appears', () => {
+    expect(resolveChatMessagesStatus('submitted', true)).toBe('submitted')
+    expect(resolveChatMessagesStatus('streaming', true)).toBe('submitted')
+    expect(resolveChatMessagesStatus('streaming', false)).toBe('streaming')
+    expect(resolveChatMessagesStatus('ready', true)).toBe('ready')
   })
 
-  it('removes the thinking placeholder once real assistant content starts', () => {
-    expect(hideThinkingPlaceholder(showThinkingPlaceholder([{
-      id: 'user-1',
-      role: 'user',
-      pending: false,
-      parts: [{
-        type: 'text',
-        text: 'Investigate the bug.',
-        state: 'done'
-      }]
+  it('updates cached thread summaries in place when a live title arrives', () => {
+    expect(renameThreadSummary([{
+      id: 'thread-1',
+      title: 'Thread abc123',
+      updatedAt: 1
     }, {
-      id: 'agent-1',
-      role: 'assistant',
-      pending: true,
-      parts: [{
-        type: 'text',
-        text: 'Looking into it',
-        state: 'streaming'
-      }]
-    }]))).toEqual<ChatMessage[]>([{
-      id: 'user-1',
-      role: 'user',
-      pending: false,
-      parts: [{
-        type: 'text',
-        text: 'Investigate the bug.',
-        state: 'done'
-      }]
+      id: 'thread-2',
+      title: 'Older thread',
+      updatedAt: 0
+    }], {
+      threadId: 'thread-1',
+      title: 'Investigate optimistic submit bug',
+      updatedAt: 2
+    })).toEqual([{
+      id: 'thread-1',
+      title: 'Investigate optimistic submit bug',
+      updatedAt: 2
     }, {
-      id: 'agent-1',
-      role: 'assistant',
-      pending: true,
-      parts: [{
-        type: 'text',
-        text: 'Looking into it',
-        state: 'streaming'
-      }]
+      id: 'thread-2',
+      title: 'Older thread',
+      updatedAt: 0
     }])
   })
 
-  it('returns the original message array when no thinking placeholder is present', () => {
-    const messages: ChatMessage[] = [{
-      id: 'agent-1',
-      role: 'assistant',
-      pending: true,
-      parts: [{
-        type: 'text',
-        text: 'Working on it',
-        state: 'streaming'
-      }]
-    }]
-
-    expect(hideThinkingPlaceholder(messages)).toBe(messages)
+  it('keeps thread summaries ordered by recency when inserting new threads', () => {
+    expect(mergeThreadSummary([{
+      id: 'thread-1',
+      title: 'Existing thread',
+      updatedAt: 1
+    }], {
+      id: 'thread-2',
+      title: 'Newest thread',
+      updatedAt: 3
+    })).toEqual([{
+      id: 'thread-2',
+      title: 'Newest thread',
+      updatedAt: 3
+    }, {
+      id: 'thread-1',
+      title: 'Existing thread',
+      updatedAt: 1
+    }])
   })
 })
