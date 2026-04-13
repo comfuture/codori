@@ -941,8 +941,8 @@ export const uninstallService = async (
         (command, result) => shouldIgnoreCommandFailure('uninstall', metadata, command) && result.exitCode !== 0
       )
       rmSync(definition.serviceFilePath, { force: true })
-      rmSync(getServiceMetadataDirectory(metadata.installId, homeDir), { recursive: true, force: true })
       await runCommandSequence(rest, runCommand)
+      rmSync(getServiceMetadataDirectory(metadata.installId, homeDir), { recursive: true, force: true })
     }
 
     return {
