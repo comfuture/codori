@@ -1,5 +1,9 @@
 import type { ChatStatus } from '../composables/useChatSession'
 
+export const shouldAwaitAssistantOutput = (
+  submissionMethod: 'turn/start' | 'turn/steer'
+) => submissionMethod === 'turn/start'
+
 export const resolveChatMessagesStatus = (
   status: ChatStatus,
   awaitingAssistantOutput: boolean

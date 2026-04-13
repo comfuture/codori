@@ -19,7 +19,7 @@ import { useProjects } from '../composables/useProjects'
 import { useRpc } from '../composables/useRpc'
 import { useChatSubmitGuard } from '../composables/useChatSubmitGuard'
 import { resolveThreadSummaryTitle, useThreadSummaries } from '../composables/useThreadSummaries'
-import { resolveChatMessagesStatus } from '../utils/chat-messages-status'
+import { resolveChatMessagesStatus, shouldAwaitAssistantOutput } from '../utils/chat-messages-status'
 import {
   ITEM_PART,
   eventToMessage,
@@ -1799,7 +1799,7 @@ const sendMessage = async () => {
   const optimisticMessageId = optimisticMessage.id
   rememberOptimisticAttachments(optimisticMessageId, submittedAttachments)
   messages.value = [...messages.value, optimisticMessage]
-  markAwaitingAssistantOutput(true)
+  markAwaitingAssistantOutput(shouldAwaitAssistantOutput(submissionMethod))
   let startedLiveStream: LiveStream | null = null
   let executedSubmissionMethod = submissionMethod
 
