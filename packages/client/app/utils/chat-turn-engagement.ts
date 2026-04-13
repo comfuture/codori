@@ -25,6 +25,15 @@ export const hasSteerableTurn = (input: {
   && input.liveStreamThreadId === input.activeThreadId
   && input.liveStreamTurnId !== null
 
+export const shouldAwaitThreadHydration = (input: {
+  hasPendingThreadHydration: boolean
+  routeThreadId: string | null
+  activeThreadId: string | null
+}) =>
+  input.hasPendingThreadHydration
+  && input.routeThreadId !== null
+  && input.activeThreadId === input.routeThreadId
+
 export const resolvePromptSubmitStatus = (input: {
   status: PromptSubmitStatus
   hasDraftContent: boolean

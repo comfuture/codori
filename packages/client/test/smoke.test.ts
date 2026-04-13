@@ -5,6 +5,7 @@ import {
   removePendingUserMessageId,
   resolvePromptSubmitStatus,
   resolveTurnSubmissionMethod,
+  shouldAwaitThreadHydration,
   shouldIgnoreNotificationAfterInterrupt
 } from '../app/utils/chat-turn-engagement'
 import {
@@ -319,6 +320,26 @@ describe('client package', () => {
       liveStreamThreadId: 'thread-1',
       liveStreamTurnId: 'turn-1'
     }))).toBe('turn/steer')
+  })
+
+  it('waits for thread hydration before deciding the submission mode on a resumed thread', () => {
+    expect(shouldAwaitThreadHydration({
+      hasPendingThreadHydration: true,
+      routeThreadId: 'thread-1',
+      activeThreadId: 'thread-1'
+    })).toBe(true)
+
+    expect(shouldAwaitThreadHydration({
+      hasPendingThreadHydration: true,
+      routeThreadId: null,
+      activeThreadId: 'thread-1'
+    })).toBe(false)
+
+    expect(shouldAwaitThreadHydration({
+      hasPendingThreadHydration: false,
+      routeThreadId: 'thread-1',
+      activeThreadId: 'thread-1'
+    })).toBe(false)
   })
 
   it('keeps the prompt submit button in send mode while a draft exists', () => {
