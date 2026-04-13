@@ -3,6 +3,7 @@ import { useRouter } from '#imports'
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import MessageContent from './MessageContent.vue'
 import {
+  hasSteerableTurn,
   reconcileOptimisticUserMessage,
   removeChatMessage,
   removePendingUserMessageId,
@@ -320,6 +321,16 @@ const currentLiveStream = () =>
 const hasActiveTurnEngagement = () =>
   Boolean(currentLiveStream() || session.pendingLiveStream)
 
+const hasSteerableActiveTurn = () =>
+  hasSteerableTurn({
+    activeThreadId: activeThreadId.value,
+    liveStreamThreadId: session.liveStream?.threadId ?? null,
+    liveStreamTurnId: session.liveStream?.turnId ?? null
+  })
+
+const shouldRetryTurnStart = (error: Error) =>
+  /no active turn to steer|active turn is no longer available/i.test(error.message)
+
 const rejectLiveStreamTurnWaiters = (liveStream: LiveStream, error: Error) => {
   const waiters = liveStream.turnIdWaiters.splice(0, liveStream.turnIdWaiters.length)
   for (const waiter of waiters) {
@@ -377,6 +388,25 @@ const waitForLiveStreamTurnId = async (liveStream: LiveStream) => {
   return await new Promise<string>((resolve, reject) => {
     liveStream.turnIdWaiters.push({ resolve, reject })
   })
+}
+
+const queuePendingUserMessage = (liveStream: LiveStream, messageId: string) => {
+  if (liveStream.pendingUserMessageIds.includes(messageId)) {
+    return
+  }
+
+  liveStream.pendingUserMessageIds.push(messageId)
+}
+
+const replayBufferedNotifications = (liveStream: LiveStream) => {
+  for (const notification of liveStream.bufferedNotifications.splice(0, liveStream.bufferedNotifications.length)) {
+    const turnId = notificationTurnId(notification)
+    if (turnId && turnId !== liveStream.turnId) {
+      continue
+    }
+
+    applyNotification(notification)
+  }
 }
 
 const clearLiveStream = (reason?: Error) => {
@@ -574,6 +604,41 @@ const clearPendingOptimisticMessages = (liveStream: LiveStream | null, options?:
   }
 
   liveStream.pendingUserMessageIds = []
+}
+
+const submitTurnStart = async (input: {
+  client: ReturnType<typeof getClient>
+  liveStream: LiveStream
+  text: string
+  submittedAttachments: DraftAttachment[]
+  optimisticMessageId: string
+  queueOptimisticMessage?: boolean
+}) => {
+  const {
+    client,
+    liveStream,
+    text,
+    submittedAttachments,
+    optimisticMessageId,
+    queueOptimisticMessage: shouldQueueOptimisticMessage = true
+  } = input
+
+  if (shouldQueueOptimisticMessage) {
+    queuePendingUserMessage(liveStream, optimisticMessageId)
+  }
+
+  const uploadedAttachments = await uploadAttachments(liveStream.threadId, submittedAttachments)
+  const turnStart = await client.request<TurnStartResponse>('turn/start', {
+    threadId: liveStream.threadId,
+    input: buildTurnStartInput(text, uploadedAttachments),
+    cwd: selectedProject.value?.projectPath ?? null,
+    approvalPolicy: 'never',
+    ...buildTurnOverrides(selectedModel.value, selectedEffort.value)
+  })
+
+  tokenUsage.value = null
+  setLiveStreamTurnId(liveStream, turnStart.turn.id)
+  replayBufferedNotifications(liveStream)
 }
 
 const resolveThreadTitle = (thread: { name: string | null, preview: string, id: string }) => {
@@ -1681,7 +1746,7 @@ const sendMessage = async () => {
   pinnedToBottom.value = true
   error.value = null
   attachmentError.value = null
-  const submissionMethod = resolveTurnSubmissionMethod(hasActiveTurnEngagement())
+  const submissionMethod = resolveTurnSubmissionMethod(hasSteerableActiveTurn())
   if (submissionMethod === 'turn/start') {
     status.value = 'submitted'
   }
@@ -1693,51 +1758,59 @@ const sendMessage = async () => {
   messages.value = [...messages.value, optimisticMessage]
   ensureThinkingPlaceholder()
   let startedLiveStream: LiveStream | null = null
+  let executedSubmissionMethod = submissionMethod
 
   try {
     const client = getClient(props.projectId)
 
     if (submissionMethod === 'turn/steer') {
       const liveStream = await ensurePendingLiveStream()
-      const uploadedAttachments = await uploadAttachments(liveStream.threadId, submittedAttachments)
-      liveStream.pendingUserMessageIds.push(optimisticMessageId)
-      const turnId = await waitForLiveStreamTurnId(liveStream)
+      queuePendingUserMessage(liveStream, optimisticMessageId)
 
-      await client.request<TurnStartResponse>('turn/steer', {
-        threadId: liveStream.threadId,
-        expectedTurnId: turnId,
-        input: buildTurnStartInput(text, uploadedAttachments),
-        ...buildTurnOverrides(selectedModel.value, selectedEffort.value)
-      })
-      tokenUsage.value = null
+      try {
+        const uploadedAttachments = await uploadAttachments(liveStream.threadId, submittedAttachments)
+        const turnId = await waitForLiveStreamTurnId(liveStream)
+
+        await client.request<TurnStartResponse>('turn/steer', {
+          threadId: liveStream.threadId,
+          expectedTurnId: turnId,
+          input: buildTurnStartInput(text, uploadedAttachments),
+          ...buildTurnOverrides(selectedModel.value, selectedEffort.value)
+        })
+        tokenUsage.value = null
+      } catch (caughtError) {
+        const errorToHandle = caughtError instanceof Error ? caughtError : new Error(String(caughtError))
+        if (!shouldRetryTurnStart(errorToHandle)) {
+          throw errorToHandle
+        }
+
+        executedSubmissionMethod = 'turn/start'
+        startedLiveStream = liveStream
+        status.value = 'submitted'
+        setLiveStreamTurnId(liveStream, null)
+        setLiveStreamInterruptRequested(liveStream, false)
+
+        await submitTurnStart({
+          client,
+          liveStream,
+          text,
+          submittedAttachments,
+          optimisticMessageId,
+          queueOptimisticMessage: false
+        })
+      }
       return
     }
 
     const liveStream = await ensurePendingLiveStream()
     startedLiveStream = liveStream
-    const threadId = liveStream.threadId
-    const uploadedAttachments = await uploadAttachments(threadId, submittedAttachments)
-    liveStream.pendingUserMessageIds.push(optimisticMessageId)
-
-    const turnStart = await client.request<TurnStartResponse>('turn/start', {
-      threadId,
-      input: buildTurnStartInput(text, uploadedAttachments),
-      cwd: selectedProject.value?.projectPath ?? null,
-      approvalPolicy: 'never',
-      ...buildTurnOverrides(selectedModel.value, selectedEffort.value)
+    await submitTurnStart({
+      client,
+      liveStream,
+      text,
+      submittedAttachments,
+      optimisticMessageId
     })
-
-    tokenUsage.value = null
-    setLiveStreamTurnId(liveStream, turnStart.turn.id)
-
-    for (const notification of liveStream.bufferedNotifications.splice(0, liveStream.bufferedNotifications.length)) {
-      const turnId = notificationTurnId(notification)
-      if (turnId && turnId !== liveStream.turnId) {
-        continue
-      }
-
-      applyNotification(notification)
-    }
   } catch (caughtError) {
     const messageText = caughtError instanceof Error ? caughtError.message : String(caughtError)
 
@@ -1745,7 +1818,7 @@ const sendMessage = async () => {
     untrackPendingUserMessage(optimisticMessageId)
     removeOptimisticMessage(optimisticMessageId)
 
-    if (submissionMethod === 'turn/start') {
+    if (executedSubmissionMethod === 'turn/start') {
       if (startedLiveStream && session.liveStream === startedLiveStream) {
         clearPendingOptimisticMessages(clearLiveStream(new Error(messageText)))
       }

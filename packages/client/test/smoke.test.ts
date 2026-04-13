@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  hasSteerableTurn,
   reconcileOptimisticUserMessage,
   removePendingUserMessageId,
   resolvePromptSubmitStatus,
@@ -281,6 +282,45 @@ describe('client package', () => {
     expect(resolveTurnSubmissionMethod(true)).toBe('turn/steer')
   })
 
+  it('uses turn/start for the first send in a new thread', () => {
+    expect(hasSteerableTurn({
+      activeThreadId: null,
+      liveStreamThreadId: null,
+      liveStreamTurnId: null
+    })).toBe(false)
+    expect(resolveTurnSubmissionMethod(hasSteerableTurn({
+      activeThreadId: null,
+      liveStreamThreadId: null,
+      liveStreamTurnId: null
+    }))).toBe('turn/start')
+  })
+
+  it('uses turn/start for the first send after resuming a thread with no active turn', () => {
+    expect(hasSteerableTurn({
+      activeThreadId: 'thread-1',
+      liveStreamThreadId: 'thread-1',
+      liveStreamTurnId: null
+    })).toBe(false)
+    expect(resolveTurnSubmissionMethod(hasSteerableTurn({
+      activeThreadId: 'thread-1',
+      liveStreamThreadId: 'thread-1',
+      liveStreamTurnId: null
+    }))).toBe('turn/start')
+  })
+
+  it('uses turn/steer only when an active turn id is known for the current thread', () => {
+    expect(hasSteerableTurn({
+      activeThreadId: 'thread-1',
+      liveStreamThreadId: 'thread-1',
+      liveStreamTurnId: 'turn-1'
+    })).toBe(true)
+    expect(resolveTurnSubmissionMethod(hasSteerableTurn({
+      activeThreadId: 'thread-1',
+      liveStreamThreadId: 'thread-1',
+      liveStreamTurnId: 'turn-1'
+    }))).toBe('turn/steer')
+  })
+
   it('keeps the prompt submit button in send mode while a draft exists', () => {
     expect(resolvePromptSubmitStatus({
       status: 'streaming',
@@ -336,6 +376,80 @@ describe('client package', () => {
         type: 'text',
         text: 'Working on it',
         state: 'streaming'
+      }]
+    }])
+  })
+
+  it('reconciles a matching optimistic user message even when the pending id queue is stale', () => {
+    expect(reconcileOptimisticUserMessage([{
+      id: 'local-user-1',
+      role: 'user',
+      pending: true,
+      parts: [{
+        type: 'text',
+        text: 'Start a fresh turn.',
+        state: 'done'
+      }]
+    }], 'missing-optimistic-id', {
+      id: 'user-1',
+      role: 'user',
+      pending: false,
+      parts: [{
+        type: 'text',
+        text: 'Start a fresh turn.',
+        state: 'done'
+      }]
+    })).toEqual([{
+      id: 'user-1',
+      role: 'user',
+      pending: false,
+      parts: [{
+        type: 'text',
+        text: 'Start a fresh turn.',
+        state: 'done'
+      }]
+    }])
+  })
+
+  it('reconciles attachment-only optimistic user messages by attachment identity', () => {
+    expect(reconcileOptimisticUserMessage([{
+      id: 'local-user-1',
+      role: 'user',
+      pending: true,
+      parts: [{
+        type: 'attachment',
+        attachment: {
+          kind: 'image',
+          name: 'diagram.png',
+          mediaType: 'image/png',
+          url: 'blob:diagram'
+        }
+      }]
+    }], 'missing-optimistic-id', {
+      id: 'user-1',
+      role: 'user',
+      pending: false,
+      parts: [{
+        type: 'attachment',
+        attachment: {
+          kind: 'image',
+          name: 'diagram.png',
+          mediaType: 'image/*',
+          localPath: '/tmp/diagram.png'
+        }
+      }]
+    })).toEqual([{
+      id: 'user-1',
+      role: 'user',
+      pending: false,
+      parts: [{
+        type: 'attachment',
+        attachment: {
+          kind: 'image',
+          name: 'diagram.png',
+          mediaType: 'image/*',
+          localPath: '/tmp/diagram.png'
+        }
       }]
     }])
   })
