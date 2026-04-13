@@ -3,11 +3,15 @@ import os from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
+  buildLauncherScript,
+  detectTailscaleIpv4,
   detectRootPromptDefault,
   getServiceLauncherPath,
   getServiceMetadataDirectory,
   getServiceMetadataPath,
+  getWildcardHostWarning,
   parseServicePort,
+  resolveHostPromptDefault,
   resolveDefaultServicePort,
   resolveServiceScope,
   toServiceInstallId
@@ -101,5 +105,83 @@ describe('service helpers', () => {
   it('falls back to the default service port when one is not provided', () => {
     expect(resolveDefaultServicePort(undefined)).toBe(4310)
     expect(resolveDefaultServicePort(8080)).toBe(8080)
+  })
+
+  it('uses the running tailscale IPv4 address as the default host', async () => {
+    const tailscaleIpv4 = await detectTailscaleIpv4(async () => ({
+      exitCode: 0,
+      stdout: JSON.stringify({
+        BackendState: 'Running',
+        Self: {
+          TailscaleIPs: ['100.100.100.100', 'fd7a:115c:a1e0::1']
+        }
+      }),
+      stderr: ''
+    }))
+
+    expect(tailscaleIpv4).toBe('100.100.100.100')
+  })
+
+  it('falls back to tailscale ip when status output is unavailable', async () => {
+    const calls: string[] = []
+    const tailscaleIpv4 = await detectTailscaleIpv4(async (command, args) => {
+      calls.push(`${command} ${args.join(' ')}`)
+      if (args[0] === 'status') {
+        throw new Error('tailscale missing')
+      }
+
+      return {
+        exitCode: 0,
+        stdout: '100.64.0.10\n',
+        stderr: ''
+      }
+    })
+
+    expect(tailscaleIpv4).toBe('100.64.0.10')
+    expect(calls).toEqual([
+      'tailscale status --json',
+      'tailscale ip -4'
+    ])
+  })
+
+  it('returns the wildcard host and warning when tailscale is unavailable', async () => {
+    const hostDefault = await resolveHostPromptDefault(undefined, async () => ({
+      exitCode: 1,
+      stdout: '',
+      stderr: 'not running'
+    }))
+
+    expect(hostDefault).toEqual({
+      value: '0.0.0.0',
+      source: 'wildcard',
+      warning: getWildcardHostWarning()
+    })
+  })
+
+  it('retains explicit hosts and warns on explicit wildcard hosts', async () => {
+    await expect(resolveHostPromptDefault('127.0.0.1')).resolves.toEqual({
+      value: '127.0.0.1',
+      source: 'explicit',
+      warning: null
+    })
+    await expect(resolveHostPromptDefault('0.0.0.0')).resolves.toEqual({
+      value: '0.0.0.0',
+      source: 'explicit',
+      warning: getWildcardHostWarning()
+    })
+  })
+
+  it('builds a launcher script that pins the current node and npx paths', () => {
+    const script = buildLauncherScript({
+      root: '/tmp/workspace',
+      host: '100.64.0.10',
+      port: 4310,
+      nodePath: '/opt/node/bin/node',
+      npxPath: '/opt/node/bin/npx'
+    })
+
+    expect(script).toContain('#!/bin/sh')
+    expect(script).toContain("export PATH='/opt/node/bin':$PATH")
+    expect(script).toContain("exec '/opt/node/bin/npx' --yes @codori/server serve --root '/tmp/workspace' --host '100.64.0.10' --port 4310")
   })
 })
