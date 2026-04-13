@@ -67,9 +67,11 @@ export type CommandResult = {
 export type CommandRunner = (command: string, args: string[]) => Promise<CommandResult>
 
 export type LauncherScriptInput = {
+  installId: string
   root: string
   host: string
   port: number
+  scope: ServiceScope
   nodePath: string
   npxPath: string
 }
@@ -124,6 +126,10 @@ const WILDCARD_HOST_WARNING = [
   'Binding Codori to 0.0.0.0 can expose it without authentication.',
   'Set up a firewall or use a private network such as Tailscale before continuing.'
 ].join(' ')
+
+export const CODORI_SERVICE_MANAGED_ENV = 'CODORI_SERVICE_MANAGED'
+export const CODORI_SERVICE_INSTALL_ID_ENV = 'CODORI_SERVICE_INSTALL_ID'
+export const CODORI_SERVICE_SCOPE_ENV = 'CODORI_SERVICE_SCOPE'
 
 const defaultCommandRunner: CommandRunner = (command, args) =>
   new Promise((resolvePromise, reject) => {
@@ -527,9 +533,11 @@ const writeLauncherAndServiceFiles = (
   ensureDirectory(dirname(definition.serviceFilePath))
 
   const launcherScript = buildLauncherScript({
+    installId: metadata.installId,
     root: metadata.root,
     host: metadata.host,
     port: metadata.port,
+    scope: metadata.scope,
     nodePath,
     npxPath
   })
@@ -740,9 +748,11 @@ export const resolveHostPromptDefault = async (
 }
 
 export const buildLauncherScript = ({
+  installId,
   root,
   host,
   port,
+  scope,
   nodePath,
   npxPath
 }: LauncherScriptInput) => {
@@ -753,6 +763,9 @@ export const buildLauncherScript = ({
     '#!/bin/sh',
     'set -eu',
     `export PATH=${exportPath}`,
+    `export ${CODORI_SERVICE_MANAGED_ENV}=1`,
+    `export ${CODORI_SERVICE_INSTALL_ID_ENV}=${shellEscape(installId)}`,
+    `export ${CODORI_SERVICE_SCOPE_ENV}=${shellEscape(scope)}`,
     `exec ${shellEscape(npxPath)} --yes @codori/server serve --root ${shellEscape(resolve(root))} --host ${shellEscape(host)} --port ${port}`
   ].join('\n')
 }

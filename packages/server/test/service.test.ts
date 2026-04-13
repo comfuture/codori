@@ -173,15 +173,20 @@ describe('service helpers', () => {
 
   it('builds a launcher script that pins the current node and npx paths', () => {
     const script = buildLauncherScript({
+      installId: 'abc123def456',
       root: '/tmp/workspace',
       host: '100.64.0.10',
       port: 4310,
+      scope: 'user',
       nodePath: '/opt/node/bin/node',
       npxPath: '/opt/node/bin/npx'
     })
 
     expect(script).toContain('#!/bin/sh')
     expect(script).toContain("export PATH='/opt/node/bin':$PATH")
+    expect(script).toContain('export CODORI_SERVICE_MANAGED=1')
+    expect(script).toContain("export CODORI_SERVICE_INSTALL_ID='abc123def456'")
+    expect(script).toContain("export CODORI_SERVICE_SCOPE='user'")
     expect(script).toContain("exec '/opt/node/bin/npx' --yes @codori/server serve --root '/tmp/workspace' --host '100.64.0.10' --port 4310")
   })
 })

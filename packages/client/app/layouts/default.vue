@@ -1,7 +1,27 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { useProjects } from '../composables/useProjects'
 
 const sidebarCollapsed = ref(false)
+const { serviceUpdate, serviceUpdatePending, triggerServiceUpdate } = useProjects()
+
+const showServiceUpdateButton = computed(() =>
+  serviceUpdate.value.enabled && (serviceUpdate.value.updateAvailable || serviceUpdate.value.updating)
+)
+
+const serviceUpdateLabel = computed(() =>
+  serviceUpdate.value.updating ? 'Updating' : 'Update'
+)
+
+const serviceUpdateTooltip = computed(() => {
+  if (!serviceUpdate.value.latestVersion || !serviceUpdate.value.installedVersion) {
+    return serviceUpdate.value.updating ? 'Applying the latest server package update.' : 'Install the latest @codori/server package.'
+  }
+
+  return serviceUpdate.value.updating
+    ? `Updating @codori/server ${serviceUpdate.value.installedVersion} -> ${serviceUpdate.value.latestVersion}`
+    : `Update @codori/server ${serviceUpdate.value.installedVersion} -> ${serviceUpdate.value.latestVersion}`
+})
 
 const sidebarUi = computed(() =>
   sidebarCollapsed.value
@@ -46,13 +66,44 @@ const sidebarUi = computed(() =>
               class="size-5"
             />
           </div>
-          <div v-if="!collapsed">
-            <div class="text-sm font-semibold">
+          <div
+            v-if="!collapsed"
+            class="flex min-w-0 flex-1 items-start justify-between gap-3"
+          >
+            <div class="min-w-0">
+              <div class="text-sm font-semibold">
+                Codori
+              </div>
+              <div class="text-xs text-muted">
+                Codex project control
+              </div>
+            </div>
+            <UTooltip
+              v-if="showServiceUpdateButton"
+              :text="serviceUpdateTooltip"
+            >
+              <UButton
+                color="neutral"
+                variant="outline"
+                size="xs"
+                :loading="serviceUpdatePending || serviceUpdate.updating"
+                :disabled="serviceUpdatePending || serviceUpdate.updating"
+                @click="triggerServiceUpdate"
+              >
+                {{ serviceUpdateLabel }}
+              </UButton>
+            </UTooltip>
+          </div>
+          <div
+            v-else-if="collapsed"
+            class="sr-only"
+          >
+            <span>
               Codori
-            </div>
-            <div class="text-xs text-muted">
+            </span>
+            <span>
               Codex project control
-            </div>
+            </span>
           </div>
         </div>
       </template>

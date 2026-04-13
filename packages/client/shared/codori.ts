@@ -14,12 +14,25 @@ export type StartProjectResult = ProjectRecord & {
   reusedExisting: boolean
 }
 
+export type ServiceUpdateStatus = {
+  enabled: boolean
+  updateAvailable: boolean
+  updating: boolean
+  installedVersion: string | null
+  latestVersion: string | null
+}
+
 export type ProjectsResponse = {
   projects: ProjectRecord[]
+  serviceUpdate: ServiceUpdateStatus
 }
 
 export type ProjectResponse = {
   project: ProjectRecord | StartProjectResult
+}
+
+export type ServiceUpdateResponse = {
+  serviceUpdate: ServiceUpdateStatus
 }
 
 export const normalizeProjectIdParam = (value: string | string[] | undefined) => {
