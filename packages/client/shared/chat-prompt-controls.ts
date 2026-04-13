@@ -24,6 +24,7 @@ export type TokenUsageSnapshot = {
   totalInputTokens: number
   totalCachedInputTokens: number
   totalOutputTokens: number
+  lastUsageKnown: boolean
   lastTotalTokens: number | null
   lastInputTokens: number
   lastCachedInputTokens: number
@@ -260,17 +261,18 @@ export const normalizeThreadTokenUsage = (value: unknown): TokenUsageSnapshot | 
   }
 
   const total = isObjectRecord(tokenUsage.total) ? tokenUsage.total : {}
-  const last = isObjectRecord(tokenUsage.last) ? tokenUsage.last : {}
+  const last = isObjectRecord(tokenUsage.last) ? tokenUsage.last : null
 
   return {
     totalTokens: toFiniteNumber(total.totalTokens),
     totalInputTokens: toFiniteNumber(total.inputTokens) ?? 0,
     totalCachedInputTokens: toFiniteNumber(total.cachedInputTokens) ?? 0,
     totalOutputTokens: toFiniteNumber(total.outputTokens) ?? 0,
-    lastTotalTokens: toFiniteNumber(last.totalTokens),
-    lastInputTokens: toFiniteNumber(last.inputTokens) ?? 0,
-    lastCachedInputTokens: toFiniteNumber(last.cachedInputTokens) ?? 0,
-    lastOutputTokens: toFiniteNumber(last.outputTokens) ?? 0,
+    lastUsageKnown: last !== null,
+    lastTotalTokens: toFiniteNumber(last?.totalTokens),
+    lastInputTokens: toFiniteNumber(last?.inputTokens) ?? 0,
+    lastCachedInputTokens: toFiniteNumber(last?.cachedInputTokens) ?? 0,
+    lastOutputTokens: toFiniteNumber(last?.outputTokens) ?? 0,
     modelContextWindow: toFiniteNumber(tokenUsage.modelContextWindow)
   }
 }
@@ -324,7 +326,9 @@ export const resolveContextWindowState = (
   // App-server exposes cumulative thread totals separately; the latest turn total
   // is the closest match to current context occupancy.
   const usedTokens = tokenUsage
-    ? (tokenUsage.lastTotalTokens ?? (tokenUsage.lastInputTokens + tokenUsage.lastOutputTokens))
+    ? tokenUsage.lastTotalTokens ?? (tokenUsage.lastUsageKnown
+        ? tokenUsage.lastInputTokens + tokenUsage.lastOutputTokens
+        : null)
     : null
 
   if (!contextWindow || usedTokens == null) {
