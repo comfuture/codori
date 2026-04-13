@@ -22,6 +22,11 @@ import {
 } from './attachment-store.js'
 import { CodoriError } from './errors.js'
 import { createRuntimeManager } from './process-manager.js'
+import {
+  createServiceUpdateController,
+  type ServiceUpdateController,
+  type ServiceUpdateStatus
+} from './service-update.js'
 import type { ProjectStatusRecord, StartProjectResult } from './types.js'
 
 type MaybePromise<T> = T | Promise<T>
@@ -45,11 +50,17 @@ type ProjectResponse = {
 
 type ProjectsResponse = {
   projects: ProjectStatusRecord[]
+  serviceUpdate: ServiceUpdateStatus
+}
+
+type ServiceUpdateResponse = {
+  serviceUpdate: ServiceUpdateStatus
 }
 
 export type HttpServerOptions = {
   clientBundleDir?: string | null
   attachmentsRootDir?: string | null
+  serviceUpdateController?: ServiceUpdateController | null
 }
 
 const isCodoriError = (error: unknown): error is CodoriError =>
@@ -88,6 +99,9 @@ const toStatusCode = (error: CodoriError) => {
     case 'INVALID_ATTACHMENT':
     case 'MISSING_ROOT':
       return 400
+    case 'SERVICE_UPDATE_UNAVAILABLE':
+    case 'SERVICE_UPDATE_IN_PROGRESS':
+      return 409
     default:
       return 500
   }
@@ -176,6 +190,7 @@ export const createHttpServer = async (
   const clientBundleDir = options.clientBundleDir === undefined
     ? resolveBundledClientDir()
     : options.clientBundleDir
+  const serviceUpdateController = options.serviceUpdateController ?? null
 
   await app.register(multipart, {
     limits: {
@@ -223,8 +238,31 @@ export const createHttpServer = async (
   })
 
   app.get('/api/projects', async (): Promise<ProjectsResponse> => ({
-    projects: await resolveValue(manager.listProjectStatuses())
+    projects: await resolveValue(manager.listProjectStatuses()),
+    serviceUpdate: serviceUpdateController
+      ? await serviceUpdateController.getStatus()
+      : {
+          enabled: false,
+          updateAvailable: false,
+          updating: false,
+          installedVersion: null,
+          latestVersion: null
+        }
   }))
+
+  app.post('/api/service/update', async (_request, reply): Promise<ServiceUpdateResponse> => {
+    if (!serviceUpdateController) {
+      throw new CodoriError(
+        'SERVICE_UPDATE_UNAVAILABLE',
+        'Self-update is only available while Codori is running as a registered service.'
+      )
+    }
+
+    reply.status(202)
+    return {
+      serviceUpdate: await serviceUpdateController.requestUpdate()
+    }
+  })
 
   app.get<{ Params: { projectId: string } }>(
     '/api/projects/:projectId',
@@ -503,10 +541,14 @@ export const createHttpServer = async (
 }
 
 export const startHttpServer = async (manager = createRuntimeManager()) => {
-  const app = await createHttpServer(manager)
   if (!manager.config) {
     throw new CodoriError('INVALID_CONFIG', 'Manager config is required to start the HTTP server.')
   }
+  const app = await createHttpServer(manager, {
+    serviceUpdateController: createServiceUpdateController({
+      root: manager.config.root
+    })
+  })
   await app.listen({
     host: manager.config.server.host,
     port: manager.config.server.port

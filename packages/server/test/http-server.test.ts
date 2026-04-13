@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import WebSocket, { WebSocketServer } from 'ws'
 import { resolveProjectAttachmentsDir } from '../src/attachment-store.js'
 import { createHttpServer, type RuntimeManagerLike } from '../src/http-server.js'
+import type { ServiceUpdateController } from '../src/service-update.js'
 import type { ProjectStatusRecord, StartProjectResult } from '../src/types.js'
 
 const startedApps: Array<Awaited<ReturnType<typeof createHttpServer>>> = []
@@ -102,7 +103,14 @@ describe('createHttpServer', () => {
     })
     expect(listResponse.statusCode).toBe(200)
     expect(listResponse.json()).toEqual({
-      projects: [createProjectRecord()]
+      projects: [createProjectRecord()],
+      serviceUpdate: {
+        enabled: false,
+        updateAvailable: false,
+        updating: false,
+        installedVersion: null,
+        latestVersion: null
+      }
     })
 
     const startResponse = await app.inject({
@@ -114,6 +122,60 @@ describe('createHttpServer', () => {
       project: {
         ...createProjectRecord(),
         reusedExisting: true
+      }
+    })
+  })
+
+  it('returns service update status and accepts update requests for managed services', async () => {
+    const serviceUpdateController: ServiceUpdateController = {
+      getStatus: async () => ({
+        enabled: true,
+        updateAvailable: true,
+        updating: false,
+        installedVersion: '0.0.3',
+        latestVersion: '0.0.4'
+      }),
+      requestUpdate: async () => ({
+        enabled: true,
+        updateAvailable: true,
+        updating: true,
+        installedVersion: '0.0.3',
+        latestVersion: '0.0.4'
+      })
+    }
+    const app = await createHttpServer(createManager(), {
+      serviceUpdateController
+    })
+    startedApps.push(app)
+
+    const listResponse = await app.inject({
+      method: 'GET',
+      url: '/api/projects'
+    })
+    expect(listResponse.statusCode).toBe(200)
+    expect(listResponse.json()).toEqual({
+      projects: [createProjectRecord()],
+      serviceUpdate: {
+        enabled: true,
+        updateAvailable: true,
+        updating: false,
+        installedVersion: '0.0.3',
+        latestVersion: '0.0.4'
+      }
+    })
+
+    const updateResponse = await app.inject({
+      method: 'POST',
+      url: '/api/service/update'
+    })
+    expect(updateResponse.statusCode).toBe(202)
+    expect(updateResponse.json()).toEqual({
+      serviceUpdate: {
+        enabled: true,
+        updateAvailable: true,
+        updating: true,
+        installedVersion: '0.0.3',
+        latestVersion: '0.0.4'
       }
     })
   })
