@@ -197,7 +197,7 @@ Release flow:
 
 1. Bump the workspace and package versions together.
 2. Push the commit to GitHub.
-3. Create and publish a GitHub release with the matching tag, for example `v0.0.3`.
+3. Create and publish a GitHub release with the matching tag, for example `v0.0.4`.
 4. GitHub Actions runs `.github/workflows/publish-release.yml` and publishes both npm packages.
 
 The release workflow checks that the Git tag matches the workspace version and skips packages that were already published, so rerunning the workflow is safe after partial failures.

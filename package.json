@@ -1,7 +1,7 @@
 {
   "name": "codori",
   "private": true,
-  "version": "0.0.3",
+  "version": "0.0.4",
   "packageManager": "pnpm@10.33.0",
   "scripts": {
     "build": "pnpm --filter @codori/client build && pnpm --filter @codori/server build",
