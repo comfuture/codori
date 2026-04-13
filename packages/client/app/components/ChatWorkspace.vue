@@ -34,7 +34,7 @@ import {
   type ItemData,
   type McpToolCallItem
 } from '~~/shared/codex-chat'
-import { buildTurnStartInput } from '~~/shared/chat-attachments'
+import { buildTurnStartInput, type PersistedProjectAttachment } from '~~/shared/chat-attachments'
 import {
   type ConfigReadResponse,
   type ModelListResponse,
@@ -611,6 +611,7 @@ const submitTurnStart = async (input: {
   liveStream: LiveStream
   text: string
   submittedAttachments: DraftAttachment[]
+  uploadedAttachments?: PersistedProjectAttachment[]
   optimisticMessageId: string
   queueOptimisticMessage?: boolean
 }) => {
@@ -619,6 +620,7 @@ const submitTurnStart = async (input: {
     liveStream,
     text,
     submittedAttachments,
+    uploadedAttachments: existingUploadedAttachments,
     optimisticMessageId,
     queueOptimisticMessage: shouldQueueOptimisticMessage = true
   } = input
@@ -627,7 +629,8 @@ const submitTurnStart = async (input: {
     queuePendingUserMessage(liveStream, optimisticMessageId)
   }
 
-  const uploadedAttachments = await uploadAttachments(liveStream.threadId, submittedAttachments)
+  const uploadedAttachments = existingUploadedAttachments
+    ?? await uploadAttachments(liveStream.threadId, submittedAttachments)
   const turnStart = await client.request<TurnStartResponse>('turn/start', {
     threadId: liveStream.threadId,
     input: buildTurnStartInput(text, uploadedAttachments),
@@ -1786,9 +1789,10 @@ const sendMessage = async () => {
     if (submissionMethod === 'turn/steer') {
       const liveStream = await ensurePendingLiveStream()
       queuePendingUserMessage(liveStream, optimisticMessageId)
+      let uploadedAttachments: PersistedProjectAttachment[] | undefined
 
       try {
-        const uploadedAttachments = await uploadAttachments(liveStream.threadId, submittedAttachments)
+        uploadedAttachments = await uploadAttachments(liveStream.threadId, submittedAttachments)
         const turnId = await waitForLiveStreamTurnId(liveStream)
 
         await client.request<TurnStartResponse>('turn/steer', {
@@ -1815,6 +1819,7 @@ const sendMessage = async () => {
           liveStream,
           text,
           submittedAttachments,
+          uploadedAttachments,
           optimisticMessageId,
           queueOptimisticMessage: false
         })
