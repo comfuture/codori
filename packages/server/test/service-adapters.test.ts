@@ -39,13 +39,13 @@ describe('service adapters', () => {
   it('renders a systemd unit for linux services', () => {
     const unit = renderSystemdUnit({
       serviceName: 'codori-abc123def456.service',
-      launcherPath: '/home/test/My Projects/.codori/services/abc/run-service.sh',
-      root: '/home/test/My Projects'
+      launcherPath: '/home/test/My $Projects/.codori/%services/abc/run-service.sh',
+      root: '/home/test/My $Projects'
     })
 
     expect(unit).toContain('Description=Codori service (codori-abc123def456.service)')
-    expect(unit).toContain('WorkingDirectory="/home/test/My Projects"')
-    expect(unit).toContain('ExecStart="/home/test/My Projects/.codori/services/abc/run-service.sh"')
+    expect(unit).toContain('WorkingDirectory="/home/test/My $Projects"')
+    expect(unit).toContain('ExecStart="/home/test/My $$Projects/.codori/%%services/abc/run-service.sh"')
     expect(unit).toContain('WantedBy=default.target')
   })
 
