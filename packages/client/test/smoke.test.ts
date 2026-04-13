@@ -25,7 +25,9 @@ import {
   formatCompactTokenCount,
   normalizeConfigDefaults,
   normalizeModelList,
+  normalizeThreadTokenUsage,
   resolveContextWindowState,
+  shouldShowContextWindowIndicator,
   resolveEffortOptions
 } from '../shared/chat-prompt-controls'
 import {
@@ -473,21 +475,78 @@ describe('client package', () => {
       effort: 'high'
     })
     expect(resolveContextWindowState({
+      totalTokens: 28000,
       totalInputTokens: 24000,
       totalCachedInputTokens: 6000,
       totalOutputTokens: 4000,
+      lastTotalTokens: 6400,
       lastInputTokens: 2000,
       lastCachedInputTokens: 500,
       lastOutputTokens: 700,
       modelContextWindow: 64000
     }, null)).toEqual({
       contextWindow: 64000,
-      usedTokens: 28000,
-      remainingTokens: 36000,
-      usedPercent: 43.75,
-      remainingPercent: 56.25
+      usedTokens: 6400,
+      remainingTokens: 57600,
+      usedPercent: 10,
+      remainingPercent: 90
     })
     expect(formatCompactTokenCount(12800)).toBe('13k')
+  })
+
+  it('normalizes live thread token usage notifications with last-turn totals intact', () => {
+    expect(normalizeThreadTokenUsage({
+      tokenUsage: {
+        total: {
+          totalTokens: 28000,
+          inputTokens: 24000,
+          cachedInputTokens: 6000,
+          outputTokens: 4000
+        },
+        last: {
+          totalTokens: 6400,
+          inputTokens: 2000,
+          cachedInputTokens: 500,
+          outputTokens: 700
+        },
+        modelContextWindow: 64000
+      }
+    })).toEqual({
+      totalTokens: 28000,
+      totalInputTokens: 24000,
+      totalCachedInputTokens: 6000,
+      totalOutputTokens: 4000,
+      lastTotalTokens: 6400,
+      lastInputTokens: 2000,
+      lastCachedInputTokens: 500,
+      lastOutputTokens: 700,
+      modelContextWindow: 64000
+    })
+  })
+
+  it('hides the context indicator until live token usage is known', () => {
+    const unknownUsage = resolveContextWindowState(null, 258000)
+    expect(unknownUsage).toEqual({
+      contextWindow: 258000,
+      usedTokens: null,
+      remainingTokens: null,
+      usedPercent: null,
+      remainingPercent: null
+    })
+    expect(shouldShowContextWindowIndicator(unknownUsage)).toBe(false)
+
+    const knownUsage = resolveContextWindowState({
+      totalTokens: 32000,
+      totalInputTokens: 28000,
+      totalCachedInputTokens: 6000,
+      totalOutputTokens: 4000,
+      lastTotalTokens: 12000,
+      lastInputTokens: 9000,
+      lastCachedInputTokens: 2000,
+      lastOutputTokens: 3000,
+      modelContextWindow: 258000
+    }, null)
+    expect(shouldShowContextWindowIndicator(knownUsage)).toBe(true)
   })
 
   it('keeps the subagent panel closed by default on mobile even with active agents', () => {

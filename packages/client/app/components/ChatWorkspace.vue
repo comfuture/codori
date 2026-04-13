@@ -57,6 +57,7 @@ import {
   normalizeThreadTokenUsage,
   resolveContextWindowState,
   resolveEffortOptions,
+  shouldShowContextWindowIndicator,
   visibleModelOptions,
   type ReasoningEffort
 } from '~~/shared/chat-prompt-controls'
@@ -174,7 +175,6 @@ const starterPrompts = computed(() => {
   ]
 })
 
-const hasKnownThreadUsage = computed(() => !activeThreadId.value || tokenUsage.value !== null)
 const effectiveModelList = computed(() => {
   const withSelected = ensureModelOption(
     availableModels.value.length > 0 ? availableModels.value : FALLBACK_MODELS,
@@ -202,8 +202,9 @@ const effortSelectItems = computed(() =>
   }))
 )
 const contextWindowState = computed(() =>
-  resolveContextWindowState(tokenUsage.value, modelContextWindow.value, hasKnownThreadUsage.value)
+  resolveContextWindowState(tokenUsage.value, modelContextWindow.value)
 )
+const showContextIndicator = computed(() => shouldShowContextWindowIndicator(contextWindowState.value))
 const contextUsedPercent = computed(() => contextWindowState.value.usedPercent ?? 0)
 const contextIndicatorLabel = computed(() => {
   const remainingPercent = contextWindowState.value.remainingPercent
@@ -1695,6 +1696,7 @@ const sendMessage = async () => {
 
   try {
     const client = getClient(props.projectId)
+    tokenUsage.value = null
 
     if (submissionMethod === 'turn/steer') {
       const liveStream = await ensurePendingLiveStream()
@@ -2089,6 +2091,7 @@ watch([selectedModel, availableModels], () => {
 
                 <div class="ml-auto flex shrink-0 items-center">
                   <UPopover
+                    v-if="showContextIndicator"
                     :content="{ side: 'top', align: 'end' }"
                     arrow
                   >
@@ -2128,8 +2131,6 @@ watch([selectedModel, availableModels], () => {
                           {{ contextIndicatorLabel }}
                         </span>
                       </span>
-
-                      <span class="text-[11px] leading-none text-muted">context window</span>
                     </button>
 
                     <template #content>
@@ -2143,10 +2144,7 @@ watch([selectedModel, availableModels], () => {
                           </div>
                         </div>
 
-                        <div
-                          v-if="contextWindowState.contextWindow && contextWindowState.usedTokens !== null"
-                          class="grid grid-cols-2 gap-3 text-sm"
-                        >
+                        <div class="grid grid-cols-2 gap-3 text-sm">
                           <div class="rounded-2xl border border-default bg-elevated/35 px-3 py-2">
                             <div class="text-[11px] uppercase tracking-[0.18em] text-muted">
                               Remaining
@@ -2166,20 +2164,8 @@ watch([selectedModel, availableModels], () => {
                               {{ formatCompactTokenCount(contextWindowState.usedTokens ?? 0) }}
                             </div>
                             <div class="text-xs text-muted">
-                              of {{ formatCompactTokenCount(contextWindowState.contextWindow) }}
+                              of {{ formatCompactTokenCount(contextWindowState.contextWindow ?? 0) }}
                             </div>
-                          </div>
-                        </div>
-
-                        <div
-                          v-else
-                          class="rounded-2xl border border-default bg-elevated/35 px-3 py-2 text-sm text-muted"
-                        >
-                          <div v-if="contextWindowState.contextWindow">
-                            Live token usage will appear after the next turn completes.
-                          </div>
-                          <div v-else>
-                            Context window details are not available from the runtime yet.
                           </div>
                         </div>
 
