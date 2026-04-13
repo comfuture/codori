@@ -10,6 +10,7 @@ import {
   resolvePromptSubmitStatus,
   resolveTurnSubmissionMethod,
   shouldAwaitThreadHydration,
+  shouldRetrySteerWithTurnStart,
   shouldIgnoreNotificationAfterInterrupt
 } from '../utils/chat-turn-engagement'
 import { useChatAttachments, type DraftAttachment } from '../composables/useChatAttachments'
@@ -329,9 +330,6 @@ const hasSteerableActiveTurn = () =>
     liveStreamThreadId: session.liveStream?.threadId ?? null,
     liveStreamTurnId: session.liveStream?.turnId ?? null
   })
-
-const shouldRetryTurnStart = (error: Error) =>
-  /no active turn to steer|active turn is no longer available/i.test(error.message)
 
 const rejectLiveStreamTurnWaiters = (liveStream: LiveStream, error: Error) => {
   const waiters = liveStream.turnIdWaiters.splice(0, liveStream.turnIdWaiters.length)
@@ -1802,7 +1800,7 @@ const sendMessage = async () => {
         tokenUsage.value = null
       } catch (caughtError) {
         const errorToHandle = caughtError instanceof Error ? caughtError : new Error(String(caughtError))
-        if (!shouldRetryTurnStart(errorToHandle)) {
+        if (!shouldRetrySteerWithTurnStart(errorToHandle.message)) {
           throw errorToHandle
         }
 

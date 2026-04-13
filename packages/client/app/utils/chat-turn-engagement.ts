@@ -34,6 +34,9 @@ export const shouldAwaitThreadHydration = (input: {
   && input.routeThreadId !== null
   && input.activeThreadId === input.routeThreadId
 
+export const shouldRetrySteerWithTurnStart = (message: string) =>
+  /no active turn to steer/i.test(message)
+
 export const resolvePromptSubmitStatus = (input: {
   status: PromptSubmitStatus
   hasDraftContent: boolean

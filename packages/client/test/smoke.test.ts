@@ -6,6 +6,7 @@ import {
   resolvePromptSubmitStatus,
   resolveTurnSubmissionMethod,
   shouldAwaitThreadHydration,
+  shouldRetrySteerWithTurnStart,
   shouldIgnoreNotificationAfterInterrupt
 } from '../app/utils/chat-turn-engagement'
 import {
@@ -340,6 +341,11 @@ describe('client package', () => {
       routeThreadId: 'thread-1',
       activeThreadId: 'thread-1'
     })).toBe(false)
+  })
+
+  it('retries with turn/start only for steer rejection messages from the server', () => {
+    expect(shouldRetrySteerWithTurnStart('no active turn to steer')).toBe(true)
+    expect(shouldRetrySteerWithTurnStart('The active turn is no longer available.')).toBe(false)
   })
 
   it('keeps the prompt submit button in send mode while a draft exists', () => {
