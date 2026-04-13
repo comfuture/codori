@@ -231,9 +231,16 @@ Example:
   "ports": {
     "start": 46000,
     "end": 46999
+  },
+  "idleShutdown": {
+    "enabled": true,
+    "timeoutMs": 1800000,
+    "sweepIntervalMs": 60000
   }
 }
 ```
+
+`idleShutdown.enabled` can disable automatic cleanup entirely. When enabled, `timeoutMs` controls how long a runtime may stay inactive before Codori stops it, and `sweepIntervalMs` controls how often the server checks for idle runtimes.
 
 ## Project Discovery Rules
 
@@ -250,6 +257,9 @@ Codori ignores common heavy directories during recursive scanning such as `node_
 
 - Each project gets at most one active Codex app-server.
 - If a PID/runtime file points to a live process, Codori reuses it instead of spawning another runtime.
+- Codori records `startedAt` and `lastActivityAt` for each runtime under `~/.codori/run/`.
+- Idle runtimes are stopped automatically after the configured inactivity timeout.
+- Runtimes with an active proxied WebSocket session are never reaped as idle.
 - If a PID/runtime file is stale, Codori cleans it up and starts a fresh runtime.
 - Runtime metadata is stored under `~/.codori/run/`.
 
@@ -286,7 +296,6 @@ Codori v1 does not provide:
 - built-in authentication
 - SSO
 - multi-root project indexing
-- automatic idle shutdown
 - a separate Codori-owned thread database
 
 If you want to access Codori from another machine, you must provide your own private network path with something like Tailscale or Cloudflare Tunnel.
