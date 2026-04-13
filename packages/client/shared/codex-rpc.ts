@@ -259,6 +259,22 @@ export const notificationTurnId = (notification: CodexRpcNotification) => {
   return null
 }
 
+export const notificationThreadName = (notification: CodexRpcNotification) => {
+  const params = isObjectRecord(notification.params) ? notification.params : null
+  const thread = isObjectRecord(params?.thread) ? params.thread : null
+  const directName = thread?.name ?? params?.name ?? params?.title
+
+  return typeof directName === 'string' ? directName : null
+}
+
+export const notificationThreadUpdatedAt = (notification: CodexRpcNotification) => {
+  const params = isObjectRecord(notification.params) ? notification.params : null
+  const thread = isObjectRecord(params?.thread) ? params.thread : null
+  const directUpdatedAt = thread?.updatedAt ?? params?.updatedAt
+
+  return typeof directUpdatedAt === 'number' ? directUpdatedAt : undefined
+}
+
 export class CodexRpcClient {
   private readonly url: string
 

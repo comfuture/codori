@@ -1,10 +1,15 @@
 <script setup lang="ts">
 import type { NavigationMenuItem } from '@nuxt/ui'
 import { useRoute } from '#imports'
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, watch } from 'vue'
 import { useProjects } from '../composables/useProjects'
 import { useRpc } from '../composables/useRpc'
 import { useThreadPanel } from '../composables/useThreadPanel'
+import {
+  resolveThreadSummaryTitle,
+  useThreadSummaries,
+  type ThreadSummary
+} from '../composables/useThreadSummaries'
 import type { ThreadListResponse } from '~~/shared/codex-rpc'
 import { toProjectThreadRoute } from '~~/shared/codori'
 
@@ -12,12 +17,6 @@ const props = defineProps<{
   projectId: string | null
   autoCloseOnSelect?: boolean
 }>()
-
-type ThreadSummary = {
-  id: string
-  title: string
-  updatedAt: number
-}
 
 type ThreadNavigationItem = NavigationMenuItem & {
   updatedAt: number
@@ -27,20 +26,21 @@ const route = useRoute()
 const { loaded, refreshProjects, startProject, getProject } = useProjects()
 const { getClient } = useRpc()
 const { closePanel } = useThreadPanel()
-
-const threads = ref<ThreadSummary[]>([])
-const loading = ref(false)
-const error = ref<string | null>(null)
+const currentThreadSummaries = () => useThreadSummaries(props.projectId ?? '__missing-project__')
+const threads = computed(() => currentThreadSummaries().threads.value)
+const loading = computed(() => currentThreadSummaries().loading.value)
+const error = computed(() => currentThreadSummaries().error.value)
 
 const project = computed(() => getProject(props.projectId))
 
 const fetchThreads = async () => {
-  if (!props.projectId || loading.value) {
+  const threadSummaries = currentThreadSummaries()
+  if (!props.projectId || threadSummaries.loading.value) {
     return
   }
 
-  loading.value = true
-  error.value = null
+  threadSummaries.setLoading(true)
+  threadSummaries.setError(null)
 
   try {
     if (!loaded.value) {
@@ -57,17 +57,17 @@ const fetchThreads = async () => {
       cwd: project.value?.projectPath ?? null
     })
 
-    threads.value = response.data
+    threadSummaries.setThreads(response.data
       .map(thread => ({
         id: thread.id,
-        title: (thread.name ?? thread.preview.trim()) || thread.id,
+        title: resolveThreadSummaryTitle(thread),
         updatedAt: thread.updatedAt
       }))
-      .sort((left, right) => right.updatedAt - left.updatedAt)
+    )
   } catch (caughtError) {
-    error.value = caughtError instanceof Error ? caughtError.message : String(caughtError)
+    threadSummaries.setError(caughtError instanceof Error ? caughtError.message : String(caughtError))
   } finally {
-    loading.value = false
+    threadSummaries.setLoading(false)
   }
 }
 const activeThreadId = computed(() => {
@@ -80,7 +80,7 @@ const threadItems = computed<ThreadNavigationItem[][]>(() => {
     return [[]]
   }
 
-  return [threads.value.map(thread => ({
+  return [threads.value.map((thread: ThreadSummary) => ({
     label: thread.title,
     icon: 'i-lucide-message-square-text',
     to: toProjectThreadRoute(props.projectId!, thread.id),
@@ -104,7 +104,7 @@ onMounted(() => {
 })
 
 watch(() => props.projectId, () => {
-  threads.value = []
+  currentThreadSummaries().setThreads([])
   void fetchThreads()
 }, { immediate: true })
 
