@@ -20,13 +20,23 @@ export type ModelOption = {
 }
 
 export type TokenUsageSnapshot = {
+  totalTokens: number | null
   totalInputTokens: number
   totalCachedInputTokens: number
   totalOutputTokens: number
+  lastTotalTokens: number | null
   lastInputTokens: number
   lastCachedInputTokens: number
   lastOutputTokens: number
   modelContextWindow: number | null
+}
+
+export type ContextWindowState = {
+  contextWindow: number | null
+  usedTokens: number | null
+  remainingTokens: number | null
+  usedPercent: number | null
+  remainingPercent: number | null
 }
 
 type ReasoningEffortOptionRecord = {
@@ -253,9 +263,11 @@ export const normalizeThreadTokenUsage = (value: unknown): TokenUsageSnapshot | 
   const last = isObjectRecord(tokenUsage.last) ? tokenUsage.last : {}
 
   return {
+    totalTokens: toFiniteNumber(total.totalTokens),
     totalInputTokens: toFiniteNumber(total.inputTokens) ?? 0,
     totalCachedInputTokens: toFiniteNumber(total.cachedInputTokens) ?? 0,
     totalOutputTokens: toFiniteNumber(total.outputTokens) ?? 0,
+    lastTotalTokens: toFiniteNumber(last.totalTokens),
     lastInputTokens: toFiniteNumber(last.inputTokens) ?? 0,
     lastCachedInputTokens: toFiniteNumber(last.cachedInputTokens) ?? 0,
     lastOutputTokens: toFiniteNumber(last.outputTokens) ?? 0,
@@ -306,15 +318,14 @@ export const formatCompactTokenCount = (value: number) => {
 
 export const resolveContextWindowState = (
   tokenUsage: TokenUsageSnapshot | null,
-  fallbackContextWindow: number | null,
-  usageKnown = true
-) => {
+  fallbackContextWindow: number | null
+): ContextWindowState => {
   const contextWindow = tokenUsage?.modelContextWindow ?? fallbackContextWindow
+  // App-server exposes cumulative thread totals separately; the latest turn total
+  // is the closest match to current context occupancy.
   const usedTokens = tokenUsage
-    ? tokenUsage.totalInputTokens + tokenUsage.totalOutputTokens
-    : usageKnown
-      ? 0
-      : null
+    ? (tokenUsage.lastTotalTokens ?? (tokenUsage.lastInputTokens + tokenUsage.lastOutputTokens))
+    : null
 
   if (!contextWindow || usedTokens == null) {
     return {
@@ -337,3 +348,6 @@ export const resolveContextWindowState = (
     remainingPercent: Math.max(0, 100 - usedPercent)
   }
 }
+
+export const shouldShowContextWindowIndicator = (state: ContextWindowState) =>
+  state.contextWindow !== null && state.usedTokens !== null
