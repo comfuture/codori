@@ -3,12 +3,12 @@ import { useRouter } from '#imports'
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import MessageContent from './MessageContent.vue'
 import {
-  hasSteerableTurn,
   reconcileOptimisticUserMessage,
   removeChatMessage,
   removePendingUserMessageId,
   resolvePromptSubmitStatus,
   resolveTurnSubmissionMethod,
+  shouldSubmitViaTurnSteer,
   shouldAwaitThreadHydration,
   shouldRetrySteerWithTurnStart,
   shouldIgnoreNotificationAfterInterrupt
@@ -324,11 +324,12 @@ const currentLiveStream = () =>
 const hasActiveTurnEngagement = () =>
   Boolean(currentLiveStream() || session.pendingLiveStream)
 
-const hasSteerableActiveTurn = () =>
-  hasSteerableTurn({
+const shouldSubmitWithTurnSteer = () =>
+  shouldSubmitViaTurnSteer({
     activeThreadId: activeThreadId.value,
     liveStreamThreadId: session.liveStream?.threadId ?? null,
-    liveStreamTurnId: session.liveStream?.turnId ?? null
+    liveStreamTurnId: session.liveStream?.turnId ?? null,
+    status: status.value
   })
 
 const rejectLiveStreamTurnWaiters = (liveStream: LiveStream, error: Error) => {
@@ -1760,8 +1761,7 @@ const sendMessage = async () => {
 
   if (pendingThreadHydration && shouldAwaitThreadHydration({
     hasPendingThreadHydration: true,
-    routeThreadId: routeThreadId.value,
-    activeThreadId: activeThreadId.value
+    routeThreadId: routeThreadId.value
   })) {
     await pendingThreadHydration
   }
@@ -1769,7 +1769,7 @@ const sendMessage = async () => {
   pinnedToBottom.value = true
   error.value = null
   attachmentError.value = null
-  const submissionMethod = resolveTurnSubmissionMethod(hasSteerableActiveTurn())
+  const submissionMethod = resolveTurnSubmissionMethod(shouldSubmitWithTurnSteer())
   if (submissionMethod === 'turn/start') {
     status.value = 'submitted'
   }

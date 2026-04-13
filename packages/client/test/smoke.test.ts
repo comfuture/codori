@@ -5,6 +5,7 @@ import {
   removePendingUserMessageId,
   resolvePromptSubmitStatus,
   resolveTurnSubmissionMethod,
+  shouldSubmitViaTurnSteer,
   shouldAwaitThreadHydration,
   shouldRetrySteerWithTurnStart,
   shouldIgnoreNotificationAfterInterrupt
@@ -326,20 +327,33 @@ describe('client package', () => {
   it('waits for thread hydration before deciding the submission mode on a resumed thread', () => {
     expect(shouldAwaitThreadHydration({
       hasPendingThreadHydration: true,
-      routeThreadId: 'thread-1',
-      activeThreadId: 'thread-1'
+      routeThreadId: 'thread-1'
     })).toBe(true)
 
     expect(shouldAwaitThreadHydration({
       hasPendingThreadHydration: true,
-      routeThreadId: null,
-      activeThreadId: 'thread-1'
+      routeThreadId: null
     })).toBe(false)
 
     expect(shouldAwaitThreadHydration({
       hasPendingThreadHydration: false,
-      routeThreadId: 'thread-1',
-      activeThreadId: 'thread-1'
+      routeThreadId: 'thread-1'
+    })).toBe(false)
+  })
+
+  it('routes follow-up sends through turn/steer while the current turn is still being submitted', () => {
+    expect(shouldSubmitViaTurnSteer({
+      activeThreadId: 'thread-1',
+      liveStreamThreadId: 'thread-1',
+      liveStreamTurnId: null,
+      status: 'submitted'
+    })).toBe(true)
+
+    expect(shouldSubmitViaTurnSteer({
+      activeThreadId: 'thread-1',
+      liveStreamThreadId: 'thread-1',
+      liveStreamTurnId: null,
+      status: 'ready'
     })).toBe(false)
   })
 
