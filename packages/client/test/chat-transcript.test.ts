@@ -147,4 +147,19 @@ describe('chat transcript stability', () => {
       }]
     }])
   })
+
+  it('returns the original message array when no thinking placeholder is present', () => {
+    const messages: ChatMessage[] = [{
+      id: 'agent-1',
+      role: 'assistant',
+      pending: true,
+      parts: [{
+        type: 'text',
+        text: 'Working on it',
+        state: 'streaming'
+      }]
+    }]
+
+    expect(hideThinkingPlaceholder(messages)).toBe(messages)
+  })
 })
