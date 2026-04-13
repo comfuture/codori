@@ -393,5 +393,13 @@ export const buildThinkingPlaceholderMessage = (): ChatMessage => ({
 export const showThinkingPlaceholder = (messages: ChatMessage[]) =>
   upsertStreamingMessage(messages, buildThinkingPlaceholderMessage())
 
-export const hideThinkingPlaceholder = (messages: ChatMessage[]) =>
-  messages.filter(message => message.id !== THINKING_PLACEHOLDER_MESSAGE_ID)
+export const hideThinkingPlaceholder = (messages: ChatMessage[]) => {
+  const index = messages.findIndex(message => message.id === THINKING_PLACEHOLDER_MESSAGE_ID)
+  if (index === -1) {
+    return messages
+  }
+
+  const nextMessages = messages.slice()
+  nextMessages.splice(index, 1)
+  return nextMessages
+}

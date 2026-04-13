@@ -516,6 +516,12 @@ const ensureThinkingPlaceholder = () => {
   messages.value = showThinkingPlaceholder(messages.value)
 }
 
+const clearThinkingPlaceholderForVisibleItem = (item: CodexThreadItem) => {
+  if (item.type !== 'userMessage') {
+    clearThinkingPlaceholder()
+  }
+}
+
 const restoreDraftIfPristine = (text: string, submittedAttachments: DraftAttachment[]) => {
   if (!input.value.trim()) {
     input.value = text
@@ -1444,6 +1450,7 @@ const applyNotification = (notification: CodexRpcNotification) => {
         status.value = 'streaming'
         return
       }
+      clearThinkingPlaceholderForVisibleItem(params.item)
       seedStreamingMessage(params.item)
       status.value = 'streaming'
       return
@@ -1453,9 +1460,7 @@ const applyNotification = (notification: CodexRpcNotification) => {
       if (params.item.type === 'collabAgentToolCall') {
         applySubagentActivityItem(params.item)
       }
-      if (params.item.type === 'agentMessage' || params.item.type === 'plan' || params.item.type === 'reasoning') {
-        clearThinkingPlaceholder()
-      }
+      clearThinkingPlaceholderForVisibleItem(params.item)
       for (const nextMessage of itemToMessages(params.item)) {
         const confirmedMessage = {
           ...nextMessage,
