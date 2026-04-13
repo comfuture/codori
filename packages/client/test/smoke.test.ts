@@ -479,6 +479,7 @@ describe('client package', () => {
       totalInputTokens: 24000,
       totalCachedInputTokens: 6000,
       totalOutputTokens: 4000,
+      lastUsageKnown: true,
       lastTotalTokens: 6400,
       lastInputTokens: 2000,
       lastCachedInputTokens: 500,
@@ -516,6 +517,7 @@ describe('client package', () => {
       totalInputTokens: 24000,
       totalCachedInputTokens: 6000,
       totalOutputTokens: 4000,
+      lastUsageKnown: true,
       lastTotalTokens: 6400,
       lastInputTokens: 2000,
       lastCachedInputTokens: 500,
@@ -540,6 +542,7 @@ describe('client package', () => {
       totalInputTokens: 28000,
       totalCachedInputTokens: 6000,
       totalOutputTokens: 4000,
+      lastUsageKnown: true,
       lastTotalTokens: 12000,
       lastInputTokens: 9000,
       lastCachedInputTokens: 2000,
@@ -547,6 +550,45 @@ describe('client package', () => {
       modelContextWindow: 258000
     }, null)
     expect(shouldShowContextWindowIndicator(knownUsage)).toBe(true)
+  })
+
+  it('keeps context usage hidden when live notifications omit last-turn usage', () => {
+    expect(normalizeThreadTokenUsage({
+      tokenUsage: {
+        total: {
+          totalTokens: 28000,
+          inputTokens: 24000,
+          cachedInputTokens: 6000,
+          outputTokens: 4000
+        },
+        modelContextWindow: 64000
+      }
+    })).toEqual({
+      totalTokens: 28000,
+      totalInputTokens: 24000,
+      totalCachedInputTokens: 6000,
+      totalOutputTokens: 4000,
+      lastUsageKnown: false,
+      lastTotalTokens: null,
+      lastInputTokens: 0,
+      lastCachedInputTokens: 0,
+      lastOutputTokens: 0,
+      modelContextWindow: 64000
+    })
+
+    const unknownLastUsage = resolveContextWindowState({
+      totalTokens: 28000,
+      totalInputTokens: 24000,
+      totalCachedInputTokens: 6000,
+      totalOutputTokens: 4000,
+      lastUsageKnown: false,
+      lastTotalTokens: null,
+      lastInputTokens: 0,
+      lastCachedInputTokens: 0,
+      lastOutputTokens: 0,
+      modelContextWindow: 64000
+    }, null)
+    expect(shouldShowContextWindowIndicator(unknownLastUsage)).toBe(false)
   })
 
   it('keeps the subagent panel closed by default on mobile even with active agents', () => {
