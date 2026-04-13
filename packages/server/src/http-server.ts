@@ -50,7 +50,6 @@ type ProjectResponse = {
 
 type ProjectsResponse = {
   projects: ProjectStatusRecord[]
-  serviceUpdate: ServiceUpdateStatus
 }
 
 type ServiceUpdateResponse = {
@@ -238,7 +237,10 @@ export const createHttpServer = async (
   })
 
   app.get('/api/projects', async (): Promise<ProjectsResponse> => ({
-    projects: await resolveValue(manager.listProjectStatuses()),
+    projects: await resolveValue(manager.listProjectStatuses())
+  }))
+
+  app.get('/api/service/update', async (): Promise<ServiceUpdateResponse> => ({
     serviceUpdate: serviceUpdateController
       ? await serviceUpdateController.getStatus()
       : {

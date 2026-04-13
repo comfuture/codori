@@ -24,7 +24,6 @@ export type ServiceUpdateStatus = {
 
 export type ProjectsResponse = {
   projects: ProjectRecord[]
-  serviceUpdate: ServiceUpdateStatus
 }
 
 export type ProjectResponse = {
