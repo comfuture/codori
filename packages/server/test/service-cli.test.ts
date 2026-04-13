@@ -148,4 +148,68 @@ describe('service lifecycle orchestration', () => {
       stdout: createOutput().stream
     })).rejects.toThrow(/systemd user services are unavailable/)
   })
+
+  it('keeps service metadata when uninstall fails after the first command', async () => {
+    const homeDir = mkdtempSync(join(os.tmpdir(), 'codori-home-'))
+    const root = mkdtempSync(join(os.tmpdir(), 'codori-root-'))
+    mkdirSync(join(root, '.git'), { recursive: true })
+
+    const stdout = createOutput()
+    const failingCommand = 'launchctl disable'
+    const runCommand = async (command: string, args: string[]) => {
+      if (command === 'tailscale') {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            BackendState: 'Running',
+            Self: {
+              TailscaleIPs: ['100.88.1.2']
+            }
+          }),
+          stderr: ''
+        }
+      }
+
+      const rendered = `${command} ${args.join(' ')}`
+      if (rendered.startsWith(failingCommand)) {
+        return {
+          exitCode: 1,
+          stdout: '',
+          stderr: 'disable failed'
+        }
+      }
+
+      return {
+        exitCode: 0,
+        stdout: '',
+        stderr: ''
+      }
+    }
+
+    const installed = await installService({
+      root,
+      yes: true
+    }, {
+      homeDir,
+      cwd: root,
+      platform: 'darwin',
+      nodePath: '/opt/node/bin/node',
+      npxPath: '/opt/node/bin/npx',
+      runCommand,
+      stdout: stdout.stream
+    })
+
+    await expect(uninstallService({
+      root,
+      yes: true
+    }, {
+      homeDir,
+      cwd: root,
+      platform: 'darwin',
+      runCommand,
+      stdout: stdout.stream
+    })).rejects.toThrow(/Command failed: launchctl disable/)
+
+    expect(existsSync(join(homeDir, '.codori', 'services', installed.metadata.installId, 'service.json'))).toBe(true)
+  })
 })
