@@ -46,19 +46,16 @@ export const useProjects = () => {
     loading.value = true
     error.value = null
     try {
-      const [projectsResult, serviceUpdateResult] = await Promise.allSettled([
-        $fetch<ProjectsResponse>(toApiUrl('/projects')),
-        $fetch<ServiceUpdateResponse>(toApiUrl('/service/update'))
-      ])
+      void $fetch<ServiceUpdateResponse>(toApiUrl('/service/update'))
+        .then((response) => {
+          serviceUpdate.value = response.serviceUpdate
+        })
+        .catch(() => {
+          // Keep project discovery responsive even if the update check stalls or fails.
+        })
 
-      if (projectsResult.status === 'rejected') {
-        throw projectsResult.reason
-      }
-
-      projects.value = projectsResult.value.projects
-      if (serviceUpdateResult.status === 'fulfilled') {
-        serviceUpdate.value = serviceUpdateResult.value.serviceUpdate
-      }
+      const response = await $fetch<ProjectsResponse>(toApiUrl('/projects'))
+      projects.value = response.projects
       loaded.value = true
     } catch (caughtError) {
       error.value = caughtError instanceof Error ? caughtError.message : String(caughtError)
