@@ -15,6 +15,7 @@ afterEach(async () => {
     for (const project of manager.listProjects()) {
       await manager.stopProject(project.id)
     }
+    manager.dispose()
   }
 
   for (const server of occupiedServers.splice(0, occupiedServers.length)) {
@@ -163,5 +164,90 @@ describe('RuntimeManager', () => {
 
     const started = await manager.startProject('demo')
     expect(started.port).toBe(startPort + 1)
+  })
+
+  it('tracks runtime activity and reaps only idle runtimes without active sessions', async () => {
+    const fixture = createFixture()
+    const manager = createRuntimeManager({
+      homeDir: fixture.homeDir,
+      config: {
+        ...fixture.config,
+        idleShutdown: {
+          enabled: true,
+          timeoutMs: 50,
+          sweepIntervalMs: 10_000
+        }
+      },
+      commandFactory: () => ({
+        command: process.execPath,
+        args: ['-e', 'setInterval(() => {}, 1000)']
+      })
+    })
+    runningManagers.push(manager)
+
+    const started = await manager.startProject('demo')
+    expect(started.lastActivityAt).not.toBeNull()
+
+    const store = new RuntimeStore(fixture.homeDir)
+    const loaded = store.load(join(fixture.root, 'demo'))
+    expect(loaded.kind).toBe('valid')
+    if (loaded.kind !== 'valid') {
+      throw new Error('Expected a valid runtime record.')
+    }
+
+    const session = manager.acquireProjectSession('demo')
+    const refreshed = store.load(join(fixture.root, 'demo'))
+    expect(refreshed.kind).toBe('valid')
+    if (refreshed.kind !== 'valid') {
+      throw new Error('Expected a refreshed runtime record.')
+    }
+
+    store.write({
+      ...refreshed.record,
+      lastActivityAt: Date.now() - 5_000
+    })
+
+    const skipped = await manager.reapIdleRuntimes()
+    expect(skipped).toBe(0)
+    expect(manager.getProjectStatus('demo').status).toBe('running')
+
+    session.release()
+    const reaped = await manager.reapIdleRuntimes()
+    expect(reaped).toBe(1)
+    expect(manager.getProjectStatus('demo').status).toBe('stopped')
+  })
+
+  it('updates the last activity timestamp when project activity is noted', async () => {
+    const fixture = createFixture()
+    const manager = createRuntimeManager({
+      homeDir: fixture.homeDir,
+      config: fixture.config,
+      commandFactory: () => ({
+        command: process.execPath,
+        args: ['-e', 'setInterval(() => {}, 1000)']
+      })
+    })
+    runningManagers.push(manager)
+
+    await manager.startProject('demo')
+    const store = new RuntimeStore(fixture.homeDir)
+    const loaded = store.load(join(fixture.root, 'demo'))
+    expect(loaded.kind).toBe('valid')
+    if (loaded.kind !== 'valid') {
+      throw new Error('Expected a valid runtime record.')
+    }
+
+    store.write({
+      ...loaded.record,
+      lastActivityAt: loaded.record.startedAt - 1_000
+    })
+
+    const touched = manager.noteProjectActivity('demo')
+    expect(touched.lastActivityAt).toBeGreaterThan(loaded.record.startedAt - 1_000)
+    expect(touched.idleDeadlineAt).toBe(
+      touched.lastActivityAt === null
+        ? null
+        : touched.lastActivityAt + fixture.config.idleShutdown.timeoutMs
+    )
   })
 })

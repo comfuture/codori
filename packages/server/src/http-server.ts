@@ -36,6 +36,9 @@ export type RuntimeManagerLike = {
   getProjectStatus: (projectId: string) => MaybePromise<ProjectStatusRecord>
   startProject: (projectId: string) => MaybePromise<StartProjectResult>
   stopProject: (projectId: string) => MaybePromise<ProjectStatusRecord>
+  noteProjectActivity?: (projectId: string) => MaybePromise<ProjectStatusRecord | void>
+  acquireProjectSession?: (projectId: string) => { release: () => void }
+  dispose?: () => MaybePromise<void>
   config?: {
     server: {
       host: string
@@ -139,6 +142,14 @@ const normalizeImageMediaType = (input: { filename: string, declaredMediaType: s
   return null
 }
 
+const touchProjectActivity = async (manager: RuntimeManagerLike, projectId: string) => {
+  if (!manager.noteProjectActivity) {
+    return
+  }
+
+  await resolveValue(manager.noteProjectActivity(projectId))
+}
+
 const wait = async (ms: number) =>
   new Promise<void>((resolvePromise) => {
     setTimeout(resolvePromise, ms)
@@ -185,6 +196,10 @@ export const createHttpServer = async (
 ): Promise<FastifyInstance> => {
   const app = Fastify({
     logger: false
+  })
+
+  app.addHook('onClose', async () => {
+    await resolveValue(manager.dispose?.())
   })
   const clientBundleDir = options.clientBundleDir === undefined
     ? resolveBundledClientDir()
@@ -299,6 +314,7 @@ export const createHttpServer = async (
     async (request, reply) => {
       const projectId = getProjectIdFromRequest(request.params.projectId)
       const project = await resolveValue(manager.getProjectStatus(projectId))
+      await touchProjectActivity(manager, projectId)
       const files: PersistedAttachment[] = []
       let threadId: string | null = null
 
@@ -364,6 +380,7 @@ export const createHttpServer = async (
       }
 
       const project = await resolveValue(manager.getProjectStatus(projectId))
+      await touchProjectActivity(manager, projectId)
       const allowedRoot = resolveProjectAttachmentsDir(project.projectPath, options.attachmentsRootDir)
       const resolvedPath = resolve(requestedPath)
 
@@ -433,7 +450,18 @@ export const createHttpServer = async (
     async (clientSocket: WebSocket, request: FastifyRequest<{ Params: { projectId: string } }>) => {
       const projectId = getProjectIdFromRequest(request.params.projectId)
       const pendingClientMessages: Array<{ message: WebSocket.RawData, isBinary: boolean }> = []
+      const session = manager.acquireProjectSession?.(projectId) ?? null
       let upstream: WebSocket | null = null
+      let sessionReleased = false
+
+      const releaseSession = () => {
+        if (sessionReleased) {
+          return
+        }
+
+        sessionReleased = true
+        session?.release()
+      }
 
       const closeBoth = (code = 1011, reason = 'proxy error') => {
         if (clientSocket.readyState === clientSocket.OPEN || clientSocket.readyState === clientSocket.CONNECTING) {
@@ -445,6 +473,7 @@ export const createHttpServer = async (
       }
 
       clientSocket.on('message', (message: WebSocket.RawData, isBinary: boolean) => {
+        void touchProjectActivity(manager, projectId)
         if (upstream?.readyState === WebSocket.OPEN) {
           upstream.send(message, { binary: isBinary })
           return
@@ -458,6 +487,7 @@ export const createHttpServer = async (
       })
 
       clientSocket.on('close', () => {
+        releaseSession()
         if (upstream && (upstream.readyState === WebSocket.OPEN || upstream.readyState === WebSocket.CONNECTING)) {
           upstream.close()
         }
@@ -485,6 +515,7 @@ export const createHttpServer = async (
         })
 
         upstream.on('message', (message: WebSocket.RawData, isBinary: boolean) => {
+          void touchProjectActivity(manager, projectId)
           clientSocket.send(message, { binary: isBinary })
         })
 
