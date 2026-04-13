@@ -22,7 +22,6 @@ Codori is a self-hosted remote coding control plane for Codex app-server.
 - No built-in authentication or identity layer in v1.
 - No tunnel, reverse proxy, or ingress automation in v1.
 - No multi-root support in v1.
-- No automatic app-server idle shutdown in v1.
 - No Codori-owned thread database in v1.
 - No direct browser connection to raw project app-server ports.
 
@@ -61,6 +60,11 @@ Config shape:
   "ports": {
     "start": 46000,
     "end": 46999
+  },
+  "idleShutdown": {
+    "enabled": true,
+    "timeoutMs": 1800000,
+    "sweepIntervalMs": 60000
   }
 }
 ```
@@ -69,6 +73,9 @@ Rules:
 
 - `root` is required at runtime after precedence resolution.
 - `ports.start` and `ports.end` define the inclusive port allocation range for project app-servers.
+- `idleShutdown.enabled` controls whether idle runtimes are reaped automatically.
+- `idleShutdown.timeoutMs` defines the inactivity window before a runtime becomes eligible for automatic stop.
+- `idleShutdown.sweepIntervalMs` defines how often Codori evaluates running runtimes for idle cleanup.
 - Invalid config should produce a startup error with a precise message.
 
 ## 6. Project Discovery
@@ -128,9 +135,18 @@ PID/runtime file requirements:
   "projectPath": "/Users/comfuture/Project/codori",
   "pid": 12345,
   "port": 46001,
-  "startedAt": 1760000000000
+  "startedAt": 1760000000000,
+  "lastActivityAt": 1760000000000
 }
 ```
+
+Idle lifecycle behavior:
+
+- Codori updates `lastActivityAt` when it starts or reuses a runtime.
+- Proxied WebSocket traffic counts as activity.
+- A runtime with at least one active proxied WebSocket session is not considered idle.
+- When `Date.now() - lastActivityAt >= idleShutdown.timeoutMs` and there are no active sessions, Codori stops the runtime automatically.
+- The next project interaction follows the same on-demand start path and transparently recreates the runtime.
 
 Stop behavior:
 
@@ -253,6 +269,7 @@ Returns:
 Returns:
 
 - same runtime envelope used by list/detail responses
+- includes `startedAt`, `lastActivityAt`, `activeSessionCount`, and `idleDeadlineAt` when the runtime is running
 
 ### `WS /api/projects/:projectId/rpc`
 
@@ -408,6 +425,9 @@ Automated coverage must include:
 - root-relative id generation
 - stale PID cleanup
 - existing process reuse
+- last-activity tracking
+- idle runtime reaping
+- skipping idle reaping while a proxied session is active
 - free-port selection
 - stop semantics
 - REST status envelopes
