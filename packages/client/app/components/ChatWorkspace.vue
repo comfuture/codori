@@ -9,6 +9,7 @@ import {
   removePendingUserMessageId,
   resolvePromptSubmitStatus,
   resolveTurnSubmissionMethod,
+  shouldAwaitThreadHydration,
   shouldIgnoreNotificationAfterInterrupt
 } from '../utils/chat-turn-engagement'
 import { useChatAttachments, type DraftAttachment } from '../composables/useChatAttachments'
@@ -304,6 +305,7 @@ const loadPromptControls = async () => {
 const subagentBootstrapPromises = new Map<string, Promise<void>>()
 const optimisticAttachmentSnapshots = new Map<string, DraftAttachment[]>()
 let promptControlsPromise: Promise<void> | null = null
+let pendingThreadHydration: Promise<void> | null = null
 
 const isActiveTurnStatus = (value: string | null | undefined) => {
   if (!value) {
@@ -765,106 +767,118 @@ const ensureProjectRuntime = async () => {
 }
 
 const hydrateThread = async (threadId: string) => {
-  const requestVersion = loadVersion.value + 1
-  loadVersion.value = requestVersion
-  error.value = null
-  tokenUsage.value = null
+  const hydratePromise = (async () => {
+    const requestVersion = loadVersion.value + 1
+    loadVersion.value = requestVersion
+    error.value = null
+    tokenUsage.value = null
 
-  try {
-    await ensureProjectRuntime()
-    const client = getClient(props.projectId)
-    activeThreadId.value = threadId
+    try {
+      await ensureProjectRuntime()
+      const client = getClient(props.projectId)
+      activeThreadId.value = threadId
 
-    const existingLiveStream = session.liveStream
+      const existingLiveStream = session.liveStream
 
-    if (existingLiveStream && existingLiveStream.threadId !== threadId) {
-      clearLiveStream()
-    }
+      if (existingLiveStream && existingLiveStream.threadId !== threadId) {
+        clearLiveStream()
+      }
 
-    if (!session.liveStream) {
-      const nextLiveStream = createLiveStreamState(threadId)
+      if (!session.liveStream) {
+        const nextLiveStream = createLiveStreamState(threadId)
 
-      nextLiveStream.unsubscribe = client.subscribe((notification) => {
-        const targetThreadId = notificationThreadId(notification)
-        if (!targetThreadId) {
-          return
-        }
-
-        if (targetThreadId !== threadId) {
-          if (nextLiveStream.observedSubagentThreadIds.has(targetThreadId)) {
-            applySubagentNotification(targetThreadId, notification)
+        nextLiveStream.unsubscribe = client.subscribe((notification) => {
+          const targetThreadId = notificationThreadId(notification)
+          if (!targetThreadId) {
+            return
           }
-          return
-        }
 
-        if (!nextLiveStream.turnId) {
-          nextLiveStream.bufferedNotifications.push(notification)
-          return
-        }
+          if (targetThreadId !== threadId) {
+            if (nextLiveStream.observedSubagentThreadIds.has(targetThreadId)) {
+              applySubagentNotification(targetThreadId, notification)
+            }
+            return
+          }
 
+          if (!nextLiveStream.turnId) {
+            nextLiveStream.bufferedNotifications.push(notification)
+            return
+          }
+
+          const turnId = notificationTurnId(notification)
+          if (turnId && turnId !== nextLiveStream.turnId) {
+            return
+          }
+
+          applyNotification(notification)
+        })
+
+        setSessionLiveStream(nextLiveStream)
+      }
+
+      const resumeResponse = await client.request<ThreadResumeResponse>('thread/resume', {
+        threadId,
+        cwd: selectedProject.value?.projectPath ?? null,
+        approvalPolicy: 'never',
+        persistExtendedHistory: true
+      })
+      const response = await client.request<ThreadReadResponse>('thread/read', {
+        threadId,
+        includeTurns: true
+      })
+
+      if (loadVersion.value !== requestVersion) {
+        return
+      }
+
+      syncPromptSelectionFromThread(
+        resumeResponse.model ?? null,
+        (resumeResponse.reasoningEffort as ReasoningEffort | null | undefined) ?? null
+      )
+      activeThreadId.value = response.thread.id
+      threadTitle.value = resolveThreadTitle(response.thread)
+      messages.value = threadToMessages(response.thread)
+      rebuildSubagentPanelsFromThread(response.thread)
+      const activeTurn = [...response.thread.turns].reverse().find(turn => isActiveTurnStatus(turn.status))
+
+      if (!activeTurn) {
+        clearLiveStream()
+        status.value = 'ready'
+        return
+      }
+
+      if (!session.liveStream) {
+        status.value = 'streaming'
+        return
+      }
+
+      setLiveStreamTurnId(session.liveStream, activeTurn.id)
+      status.value = 'streaming'
+
+      const pendingNotifications = session.liveStream.bufferedNotifications.splice(0, session.liveStream.bufferedNotifications.length)
+      for (const notification of pendingNotifications) {
         const turnId = notificationTurnId(notification)
-        if (turnId && turnId !== nextLiveStream.turnId) {
-          return
+        if (turnId && turnId !== activeTurn.id) {
+          continue
         }
 
         applyNotification(notification)
-      })
-
-      setSessionLiveStream(nextLiveStream)
-    }
-
-    const resumeResponse = await client.request<ThreadResumeResponse>('thread/resume', {
-      threadId,
-      cwd: selectedProject.value?.projectPath ?? null,
-      approvalPolicy: 'never',
-      persistExtendedHistory: true
-    })
-    const response = await client.request<ThreadReadResponse>('thread/read', {
-      threadId,
-      includeTurns: true
-    })
-
-    if (loadVersion.value !== requestVersion) {
-      return
-    }
-
-    syncPromptSelectionFromThread(
-      resumeResponse.model ?? null,
-      (resumeResponse.reasoningEffort as ReasoningEffort | null | undefined) ?? null
-    )
-    activeThreadId.value = response.thread.id
-    threadTitle.value = resolveThreadTitle(response.thread)
-    messages.value = threadToMessages(response.thread)
-    rebuildSubagentPanelsFromThread(response.thread)
-    const activeTurn = [...response.thread.turns].reverse().find(turn => isActiveTurnStatus(turn.status))
-
-    if (!activeTurn) {
-      clearLiveStream()
-      status.value = 'ready'
-      return
-    }
-
-    if (!session.liveStream) {
-      status.value = 'streaming'
-      return
-    }
-
-    setLiveStreamTurnId(session.liveStream, activeTurn.id)
-    status.value = 'streaming'
-
-    const pendingNotifications = session.liveStream.bufferedNotifications.splice(0, session.liveStream.bufferedNotifications.length)
-    for (const notification of pendingNotifications) {
-      const turnId = notificationTurnId(notification)
-      if (turnId && turnId !== activeTurn.id) {
-        continue
       }
-
-      applyNotification(notification)
+    } catch (caughtError) {
+      clearLiveStream()
+      error.value = caughtError instanceof Error ? caughtError.message : String(caughtError)
+      status.value = 'error'
     }
-  } catch (caughtError) {
-    clearLiveStream()
-    error.value = caughtError instanceof Error ? caughtError.message : String(caughtError)
-    status.value = 'error'
+  })()
+
+  pendingThreadHydration = hydratePromise
+
+  try {
+    await hydratePromise
+  } finally {
+    if (pendingThreadHydration === hydratePromise) {
+      pendingThreadHydration = null
+    }
   }
 }
 
@@ -1741,6 +1755,14 @@ const sendMessage = async () => {
     error.value = caughtError instanceof Error ? caughtError.message : String(caughtError)
     status.value = 'error'
     return
+  }
+
+  if (pendingThreadHydration && shouldAwaitThreadHydration({
+    hasPendingThreadHydration: true,
+    routeThreadId: routeThreadId.value,
+    activeThreadId: activeThreadId.value
+  })) {
+    await pendingThreadHydration
   }
 
   pinnedToBottom.value = true
