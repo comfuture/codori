@@ -20,6 +20,7 @@ import {
   eventToMessage,
   isSubagentActiveStatus,
   itemToMessages,
+  replaceStreamingMessage,
   threadToMessages,
   upsertStreamingMessage,
   type ChatMessage,
@@ -1231,7 +1232,7 @@ const applySubagentNotification = (threadId: string, notification: CodexRpcNotif
       }
       for (const nextMessage of itemToMessages(params.item)) {
         updateSubagentPanelMessages(threadId, (panelMessages) =>
-          upsertStreamingMessage(panelMessages, {
+          replaceStreamingMessage(panelMessages, {
             ...nextMessage,
             pending: false
           })
@@ -1452,7 +1453,7 @@ const applyNotification = (notification: CodexRpcNotification) => {
           continue
         }
 
-        messages.value = upsertStreamingMessage(messages.value, confirmedMessage)
+        messages.value = replaceStreamingMessage(messages.value, confirmedMessage)
       }
       return
     }
