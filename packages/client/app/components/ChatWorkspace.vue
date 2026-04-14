@@ -108,13 +108,6 @@ const {
   onDrop,
   uploadAttachments
 } = useChatAttachments(props.projectId)
-const {
-  pendingRequest,
-  hasPendingRequest,
-  handleServerRequest,
-  resolveCurrentRequest
-} = usePendingUserRequest(props.projectId)
-
 const input = ref('')
 const scrollViewport = ref<HTMLElement | null>(null)
 const pinnedToBottom = ref(true)
@@ -138,6 +131,12 @@ const {
   modelContextWindow,
   tokenUsage
 } = session
+const {
+  pendingRequest,
+  hasPendingRequest,
+  handleServerRequest,
+  resolveCurrentRequest
+} = usePendingUserRequest(props.projectId, activeThreadId)
 
 const selectedProject = computed(() => getProject(props.projectId))
 const composerError = computed(() => attachmentError.value ?? error.value)
