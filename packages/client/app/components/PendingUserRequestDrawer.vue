@@ -56,11 +56,11 @@ const handleOpenChange = (nextOpen: boolean) => {
     direction="bottom"
     :handle="true"
     :ui="{
-      content: 'inset-x-auto right-auto bottom-0 left-1/2 w-[calc(100vw-0.75rem)] max-w-[52rem] -translate-x-1/2 rounded-t-2xl rounded-b-none border-x border-t border-default bg-default shadow-2xl md:w-[min(50vw,52rem)]',
+      content: 'inset-x-auto right-auto bottom-0 left-1/2 w-[90vw] max-w-[52rem] -translate-x-1/2 rounded-t-2xl rounded-b-none border-x border-t border-default bg-default shadow-2xl md:w-[min(50vw,52rem)]',
       container: 'gap-0 p-0',
       handle: 'mt-2 !h-1 !w-10 rounded-full',
       header: isRequestUserInput ? 'hidden' : 'px-4 pb-1 pt-3 md:px-5',
-      body: isRequestUserInput ? 'px-4 pb-4 pt-4 md:px-5' : 'px-4 pb-4 pt-2 md:px-5',
+      body: isRequestUserInput ? 'px-3 pb-3 pt-3 md:px-4 md:pb-4 md:pt-4' : 'px-4 pb-4 pt-2 md:px-5',
       footer: 'hidden'
     }"
     @update:open="handleOpenChange"
