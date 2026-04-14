@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { useRouter } from '#imports'
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import MessageContent from './MessageContent.vue'
+import PendingUserRequestDrawer from './PendingUserRequestDrawer.vue'
 import {
   reconcileOptimisticUserMessage,
   removeChatMessage,
@@ -15,6 +16,7 @@ import {
   shouldIgnoreNotificationAfterInterrupt
 } from '../utils/chat-turn-engagement'
 import { useChatAttachments, type DraftAttachment } from '../composables/useChatAttachments'
+import { usePendingUserRequest } from '../composables/usePendingUserRequest'
 import { useChatSession, type LiveStream, type SubagentPanelState } from '../composables/useChatSession'
 import { useProjects } from '../composables/useProjects'
 import { useRpc } from '../composables/useRpc'
@@ -106,6 +108,12 @@ const {
   onDrop,
   uploadAttachments
 } = useChatAttachments(props.projectId)
+const {
+  pendingRequest,
+  hasPendingRequest,
+  handleServerRequest,
+  resolveCurrentRequest
+} = usePendingUserRequest(props.projectId)
 
 const input = ref('')
 const scrollViewport = ref<HTMLElement | null>(null)
@@ -149,6 +157,12 @@ const hasDraftContent = computed(() =>
 const isComposerDisabled = computed(() =>
   isUploading.value
   || interruptRequested.value
+  || hasPendingRequest.value
+)
+const composerPlaceholder = computed(() =>
+  hasPendingRequest.value
+    ? 'Respond to the pending request below to let Codex continue'
+    : 'Describe the change you want Codex to make'
 )
 const promptSubmitStatus = computed(() =>
   resolvePromptSubmitStatus({
@@ -316,6 +330,7 @@ const subagentBootstrapPromises = new Map<string, Promise<void>>()
 const optimisticAttachmentSnapshots = new Map<string, DraftAttachment[]>()
 let promptControlsPromise: Promise<void> | null = null
 let pendingThreadHydration: Promise<void> | null = null
+let releaseServerRequestHandler: (() => void) | null = null
 
 const isActiveTurnStatus = (value: string | null | undefined) => {
   if (!value) {
@@ -1774,7 +1789,7 @@ const applyNotification = (notification: CodexRpcNotification) => {
 }
 
 const sendMessage = async () => {
-  if (sendMessageLocked.value) {
+  if (sendMessageLocked.value || hasPendingRequest.value) {
     return
   }
 
@@ -1933,12 +1948,17 @@ const stopActiveTurn = async () => {
 }
 
 const sendStarterPrompt = async (text: string) => {
-  if (isBusy.value) {
+  if (isBusy.value || hasPendingRequest.value) {
     return
   }
 
   input.value = text
   await sendMessage()
+}
+
+const respondToPendingRequest = (response: unknown) => {
+  error.value = null
+  resolveCurrentRequest(response)
 }
 
 const onPromptEnter = (event: KeyboardEvent) => {
@@ -1951,12 +1971,18 @@ const onPromptEnter = (event: KeyboardEvent) => {
 }
 
 onMounted(() => {
+  releaseServerRequestHandler = getClient(props.projectId).setServerRequestHandler(handleServerRequest)
   if (!loaded.value) {
     void refreshProjects()
   }
 
   void loadPromptControls()
   void scheduleScrollToBottom('auto')
+})
+
+onBeforeUnmount(() => {
+  releaseServerRequestHandler?.()
+  releaseServerRequestHandler = null
 })
 
 watch(() => props.threadId ?? null, (threadId) => {
@@ -2121,6 +2147,13 @@ watch([selectedModel, availableModels], () => {
         />
 
         <div
+          v-if="pendingRequest"
+          class="mb-3 rounded-2xl border border-primary/30 bg-primary/8 px-4 py-3 text-sm text-default"
+        >
+          Codex is waiting for the response in the drawer below. Normal chat sending is paused until you answer it.
+        </div>
+
+        <div
           class="relative"
           @dragenter="onDragEnter"
           @dragleave="onDragLeave"
@@ -2136,7 +2169,7 @@ watch([selectedModel, availableModels], () => {
 
           <UChatPrompt
             v-model="input"
-            placeholder="Describe the change you want Codex to make"
+            :placeholder="composerPlaceholder"
             :error="submitError"
             :disabled="isComposerDisabled"
             autoresize
@@ -2353,4 +2386,9 @@ watch([selectedModel, availableModels], () => {
       </div>
     </div>
   </section>
+
+  <PendingUserRequestDrawer
+    :request="pendingRequest"
+    @respond="respondToPendingRequest"
+  />
 </template>
