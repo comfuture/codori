@@ -31,9 +31,10 @@ export const shouldSubmitViaTurnSteer = (input: {
   liveStreamTurnId: string | null
   status: PromptSubmitStatus
 }) =>
-  input.activeThreadId !== null
-  && input.liveStreamThreadId === input.activeThreadId
-  && (input.liveStreamTurnId !== null || input.status === 'submitted' || input.status === 'streaming')
+  (input.activeThreadId !== null
+    && input.liveStreamThreadId === input.activeThreadId
+    && input.status === 'submitted')
+  || hasSteerableTurn(input)
 
 export const shouldAwaitThreadHydration = (input: {
   hasPendingThreadHydration: boolean
@@ -43,7 +44,17 @@ export const shouldAwaitThreadHydration = (input: {
   && input.routeThreadId !== null
 
 export const shouldRetrySteerWithTurnStart = (message: string) =>
-  /no active turn to steer/i.test(message)
+  /no active turn to steer|active turn is no longer available/i.test(message)
+
+export const shouldApplyNotificationToCurrentTurn = (input: {
+  liveStreamTurnId: string | null
+  notificationMethod: string
+  notificationTurnId: string | null
+}) =>
+  input.liveStreamTurnId === null
+  || input.notificationTurnId === null
+  || input.notificationTurnId === input.liveStreamTurnId
+  || input.notificationMethod === 'turn/started'
 
 export const resolvePromptSubmitStatus = (input: {
   status: PromptSubmitStatus

@@ -5,6 +5,7 @@ import {
   removePendingUserMessageId,
   resolvePromptSubmitStatus,
   resolveTurnSubmissionMethod,
+  shouldApplyNotificationToCurrentTurn,
   shouldSubmitViaTurnSteer,
   shouldAwaitThreadHydration,
   shouldRetrySteerWithTurnStart,
@@ -376,7 +377,7 @@ describe('client package', () => {
     })).toBe(false)
   })
 
-  it('routes follow-up sends through turn/steer while the current turn is still being submitted', () => {
+  it('uses turn/steer while the current thread is still being submitted', () => {
     expect(shouldSubmitViaTurnSteer({
       activeThreadId: 'thread-1',
       liveStreamThreadId: 'thread-1',
@@ -390,11 +391,39 @@ describe('client package', () => {
       liveStreamTurnId: null,
       status: 'ready'
     })).toBe(false)
+
+    expect(shouldSubmitViaTurnSteer({
+      activeThreadId: 'thread-1',
+      liveStreamThreadId: 'thread-1',
+      liveStreamTurnId: 'turn-1',
+      status: 'streaming'
+    })).toBe(true)
   })
 
-  it('retries with turn/start only for steer rejection messages from the server', () => {
+  it('retries with turn/start for steer rejection messages from the server', () => {
     expect(shouldRetrySteerWithTurnStart('no active turn to steer')).toBe(true)
-    expect(shouldRetrySteerWithTurnStart('The active turn is no longer available.')).toBe(false)
+    expect(shouldRetrySteerWithTurnStart('The active turn is no longer available.')).toBe(true)
+    expect(shouldRetrySteerWithTurnStart('permission denied')).toBe(false)
+  })
+
+  it('allows turn/started to advance the tracked turn id before later deltas arrive', () => {
+    expect(shouldApplyNotificationToCurrentTurn({
+      liveStreamTurnId: 'turn-1',
+      notificationMethod: 'turn/started',
+      notificationTurnId: 'turn-2'
+    })).toBe(true)
+
+    expect(shouldApplyNotificationToCurrentTurn({
+      liveStreamTurnId: 'turn-1',
+      notificationMethod: 'item/agentMessage/delta',
+      notificationTurnId: 'turn-2'
+    })).toBe(false)
+
+    expect(shouldApplyNotificationToCurrentTurn({
+      liveStreamTurnId: 'turn-1',
+      notificationMethod: 'item/agentMessage/delta',
+      notificationTurnId: 'turn-1'
+    })).toBe(true)
   })
 
   it('keeps the prompt submit button in send mode while a draft exists', () => {

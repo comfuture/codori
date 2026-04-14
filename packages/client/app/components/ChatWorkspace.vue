@@ -8,6 +8,7 @@ import {
   removePendingUserMessageId,
   resolvePromptSubmitStatus,
   resolveTurnSubmissionMethod,
+  shouldApplyNotificationToCurrentTurn,
   shouldSubmitViaTurnSteer,
   shouldAwaitThreadHydration,
   shouldRetrySteerWithTurnStart,
@@ -467,7 +468,11 @@ const ensurePendingLiveStream = async () => {
       }
 
       const turnId = notificationTurnId(notification)
-      if (turnId && turnId !== liveStream.turnId) {
+      if (!shouldApplyNotificationToCurrentTurn({
+        liveStreamTurnId: liveStream.turnId,
+        notificationMethod: notification.method,
+        notificationTurnId: turnId
+      })) {
         return
       }
 
@@ -806,7 +811,11 @@ const hydrateThread = async (threadId: string) => {
           }
 
           const turnId = notificationTurnId(notification)
-          if (turnId && turnId !== nextLiveStream.turnId) {
+          if (!shouldApplyNotificationToCurrentTurn({
+            liveStreamTurnId: nextLiveStream.turnId,
+            notificationMethod: notification.method,
+            notificationTurnId: turnId
+          })) {
             return
           }
 
