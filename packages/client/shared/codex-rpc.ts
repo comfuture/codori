@@ -24,12 +24,16 @@ type JsonRpcNotification = {
   params?: unknown
 }
 
-type JsonRpcServerRequest = JsonRpcRequest
+export type CodexRpcServerRequest = JsonRpcRequest
+
+type JsonRpcServerRequest = CodexRpcServerRequest
 
 type PendingRequest = {
   resolve: (value: unknown) => void
   reject: (error: unknown) => void
 }
+
+export type CodexRpcServerRequestHandler = (request: CodexRpcServerRequest) => Promise<unknown> | unknown
 
 export type CodexUserInput =
   | {
@@ -209,7 +213,12 @@ const isObjectRecord = (value: unknown): value is Record<string, unknown> =>
 const asError = (value: unknown) =>
   value instanceof Error ? value : new Error(typeof value === 'string' ? value : 'Unknown RPC error.')
 
-const toServerRequestResponse = async (request: JsonRpcServerRequest) => {
+export const toServerRequestResponse = async (
+  request: JsonRpcServerRequest,
+  options?: {
+    handler?: CodexRpcServerRequestHandler | null
+  }
+) => {
   switch (request.method) {
     case 'item/commandExecution/requestApproval':
     case 'item/fileChange/requestApproval':
@@ -217,8 +226,20 @@ const toServerRequestResponse = async (request: JsonRpcServerRequest) => {
     case 'item/permissions/requestApproval':
       return { permissions: {}, scope: 'turn' }
     case 'item/tool/requestUserInput':
+      if (options?.handler) {
+        const handled = await options.handler(request)
+        if (handled != null) {
+          return handled
+        }
+      }
       return { answers: {} }
     case 'mcpServer/elicitation/request':
+      if (options?.handler) {
+        const handled = await options.handler(request)
+        if (handled != null) {
+          return handled
+        }
+      }
       return { action: 'decline', content: null, _meta: null }
     case 'applyPatchApproval':
     case 'execCommandApproval':
@@ -290,6 +311,8 @@ export class CodexRpcClient {
 
   private listeners = new Set<(notification: CodexRpcNotification) => void>()
 
+  private serverRequestHandler: CodexRpcServerRequestHandler | null = null
+
   constructor(url: string) {
     this.url = url
   }
@@ -298,6 +321,16 @@ export class CodexRpcClient {
     this.listeners.add(listener)
     return () => {
       this.listeners.delete(listener)
+    }
+  }
+
+  setServerRequestHandler(handler: CodexRpcServerRequestHandler | null) {
+    this.serverRequestHandler = handler
+
+    return () => {
+      if (this.serverRequestHandler === handler) {
+        this.serverRequestHandler = null
+      }
     }
   }
 
@@ -389,7 +422,9 @@ export class CodexRpcClient {
     }
 
     if ('id' in payload && 'method' in payload) {
-      const result = await toServerRequestResponse(payload)
+      const result = await toServerRequestResponse(payload, {
+        handler: this.serverRequestHandler
+      })
       this.sendRaw({
         id: payload.id,
         result
