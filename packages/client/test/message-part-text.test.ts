@@ -5,6 +5,22 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { defineComponent, h, nextTick, type Component } from 'vue'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+vi.mock('beautiful-mermaid', () => {
+  return {
+    THEMES: {
+      'tokyo-night': { bg: '#1a1b26', fg: '#a9b1d6' },
+      'tokyo-night-light': { bg: '#d5d6db', fg: '#343b58' }
+    },
+    renderMermaidSVG: (content: string) => {
+      if (/^(gantt|pie title|gitGraph)/m.test(content.trim())) {
+        throw new Error(`Unsupported Mermaid diagram: ${content.trim().split('\n')[0]}`)
+      }
+
+      return `<svg data-mermaid="true"><text>${content}</text></svg>`
+    }
+  }
+})
+
 vi.mock('@comark/vue', () => {
   return {
     Comark: defineComponent({
@@ -37,7 +53,7 @@ vi.mock('@comark/vue', () => {
         return () => {
           const text = props.markdown
           const components = props.components as Record<string, Component>
-          const mermaidMatch = text.match(/^([\s\S]*?)```mermaid\n([\s\S]*?)(?:\n```)?([\s\S]*)$/)
+          const mermaidMatch = text.match(/^([\s\S]*?)```mermaid\n([\s\S]*?)(?:\n```([\s\S]*))?$/)
 
           if (mermaidMatch && hasPlugin('mermaid') && components.mermaid) {
             return h('div', { class: 'mock-comark', 'data-streaming': String(props.streaming) }, [
@@ -46,7 +62,7 @@ vi.mock('@comark/vue', () => {
                 content: mermaidMatch[2],
                 class: ''
               }),
-              mermaidMatch[3]
+              mermaidMatch[3] ?? ''
             ])
           }
 
@@ -122,26 +138,7 @@ vi.mock('@comark/vue/plugins/math', () => {
 
 vi.mock('@comark/vue/plugins/mermaid', () => {
   return {
-    default: () => ({ name: 'mermaid' }),
-    Mermaid: defineComponent({
-      name: 'MockComarkMermaid',
-      props: {
-        content: {
-          type: String,
-          required: true
-        },
-        class: {
-          type: String,
-          default: ''
-        }
-      },
-      setup(props) {
-        return () => h('div', {
-          class: `mermaid ${props.class}`.trim(),
-          innerHTML: `<svg data-mermaid="true"><text>${props.content}</text></svg>`
-        })
-      }
-    })
+    default: () => ({ name: 'mermaid' })
   }
 })
 
@@ -231,5 +228,18 @@ describe('message part text markdown rendering', () => {
     expect(wrapper.text()).toContain('Diagram:')
     expect(wrapper.text()).toContain('Looks good so far.')
     expect(wrapper.html()).not.toContain('<code class="language-mermaid">')
+  })
+
+  it('falls back unsupported Mermaid blocks to plain code blocks', async () => {
+    const wrapper = await mountAssistantText([
+      '```mermaid',
+      'gantt',
+      '  title Unsupported here',
+      '```'
+    ].join('\n'))
+
+    expect(wrapper.find('.cd-markdown-mermaid-fallback').exists()).toBe(true)
+    expect(wrapper.find('pre code.language-mermaid').exists()).toBe(true)
+    expect(wrapper.find('.mermaid svg').exists()).toBe(false)
   })
 })
