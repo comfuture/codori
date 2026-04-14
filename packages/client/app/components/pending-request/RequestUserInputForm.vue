@@ -34,13 +34,6 @@ const questionAllowsCustomAnswer = (question: PendingRequestUserInputQuestion) =
 
 const resolveSelectedAnswers = (questionId: string) => selectedAnswers[questionId] ?? []
 
-const toggleOption = (questionId: string, label: string) => {
-  const current = resolveSelectedAnswers(questionId)
-  selectedAnswers[questionId] = current.includes(label)
-    ? current.filter(option => option !== label)
-    : [...current, label]
-}
-
 const resolveAnswerList = (question: PendingRequestUserInputQuestion) => {
   const selected = resolveSelectedAnswers(question.id)
   const custom = customAnswers[question.id]?.trim()

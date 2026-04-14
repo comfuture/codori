@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import {
   buildMcpElicitationResponse,
+  buildPendingUserRequestDismissResponse,
   buildRequestUserInputResponse,
   type PendingUserRequest
 } from '../../shared/pending-user-request'
@@ -42,11 +43,11 @@ const description = computed(() => {
 })
 
 const handleOpenChange = (nextOpen: boolean) => {
-  if (nextOpen || !props.request || props.request.kind === 'requestUserInput') {
+  if (nextOpen || !props.request) {
     return
   }
 
-  emit('respond', buildMcpElicitationResponse('cancel'))
+  emit('respond', buildPendingUserRequestDismissResponse(props.request))
 }
 </script>
 

@@ -200,6 +200,34 @@ describe('pending user request drawer', () => {
     })
   })
 
+  it('dismisses request-user-input when the drawer is manually closed', async () => {
+    const wrapper = mountDrawer({
+      kind: 'requestUserInput',
+      requestId: 101,
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      itemId: 'item-1',
+      questions: [{
+        header: null,
+        id: 'plan',
+        question: 'Which direction should Codex take?',
+        options: [{
+          label: 'Use drawer',
+          description: null
+        }],
+        isOther: false,
+        isSecret: false
+      }]
+    })
+
+    wrapper.getComponent(DrawerStub).vm.$emit('update:open', false)
+    await nextTick()
+
+    expect(wrapper.emitted('respond')?.[0]?.[0]).toEqual({
+      answers: {}
+    })
+  })
+
   it('advances across multiple questions and submits from the final custom answer step', async () => {
     const wrapper = mountDrawer({
       kind: 'requestUserInput',
