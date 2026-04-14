@@ -17,10 +17,10 @@ const emit = defineEmits<{
   respond: [response: unknown]
 }>()
 
+const isRequestUserInput = computed(() => props.request?.kind === 'requestUserInput')
+
 const title = computed(() => {
   switch (props.request?.kind) {
-    case 'requestUserInput':
-      return 'Codex needs your input'
     case 'mcpElicitationForm':
       return 'Tool confirmation required'
     case 'mcpElicitationUrl':
@@ -32,8 +32,6 @@ const title = computed(() => {
 
 const description = computed(() => {
   switch (props.request?.kind) {
-    case 'requestUserInput':
-      return 'This reply will be sent back to the in-flight Codex request, not as a new chat message.'
     case 'mcpElicitationForm':
       return props.request.message ?? 'A connected MCP server asked for structured input.'
     case 'mcpElicitationUrl':
@@ -61,20 +59,17 @@ const handleOpenChange = (nextOpen: boolean) => {
       content: 'inset-x-auto right-auto bottom-0 left-1/2 w-[calc(100vw-0.75rem)] max-w-[52rem] -translate-x-1/2 rounded-t-2xl rounded-b-none border-x border-t border-default bg-default shadow-2xl md:w-[min(50vw,52rem)]',
       container: 'gap-0 p-0',
       handle: 'mt-2 !h-1 !w-10 rounded-full',
-      header: 'px-4 pb-1 pt-3 md:px-5',
-      body: 'px-4 pb-4 pt-2 md:px-5',
+      header: isRequestUserInput ? 'hidden' : 'px-4 pb-1 pt-3 md:px-5',
+      body: isRequestUserInput ? 'px-4 pb-4 pt-4 md:px-5' : 'px-4 pb-4 pt-2 md:px-5',
       footer: 'hidden'
     }"
     @update:open="handleOpenChange"
   >
     <template #header>
       <div
-        v-if="request"
+        v-if="request && !isRequestUserInput"
         class="space-y-1.5"
       >
-        <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-primary">
-          Pending request
-        </p>
         <h2 class="text-sm font-semibold text-highlighted md:text-base">
           {{ title }}
         </h2>
@@ -87,6 +82,7 @@ const handleOpenChange = (nextOpen: boolean) => {
     <template #body>
       <RequestUserInputForm
         v-if="request?.kind === 'requestUserInput'"
+        :key="request.requestId"
         :request="request"
         @submit="emit('respond', buildRequestUserInputResponse($event))"
       />
