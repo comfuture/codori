@@ -89,6 +89,7 @@ const handleOpenChange = (nextOpen: boolean) => {
 
       <McpElicitationForm
         v-else-if="request?.kind === 'mcpElicitationForm'"
+        :key="request.requestId"
         :request="request"
         @accept="emit('respond', buildMcpElicitationResponse('accept', $event))"
         @decline="emit('respond', buildMcpElicitationResponse('decline'))"
