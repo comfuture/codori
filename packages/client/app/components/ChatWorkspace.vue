@@ -136,6 +136,7 @@ const composerError = computed(() => attachmentError.value ?? error.value)
 const submitError = computed(() => composerError.value ? new Error(composerError.value) : undefined)
 const interruptRequested = ref(false)
 const awaitingAssistantOutput = ref(false)
+const sendMessageLocked = ref(false)
 const isBusy = computed(() =>
   status.value === 'submitted'
   || status.value === 'streaming'
@@ -1773,118 +1774,131 @@ const applyNotification = (notification: CodexRpcNotification) => {
 }
 
 const sendMessage = async () => {
+  if (sendMessageLocked.value) {
+    return
+  }
+
+  sendMessageLocked.value = true
   const text = input.value.trim()
   const submittedAttachments = attachments.value.slice()
 
   if (!text && submittedAttachments.length === 0) {
+    sendMessageLocked.value = false
     return
   }
+
+  input.value = ''
+  clearAttachments({ revoke: false })
 
   try {
     await loadPromptControls()
   } catch (caughtError) {
+    restoreDraftIfPristine(text, submittedAttachments)
     error.value = caughtError instanceof Error ? caughtError.message : String(caughtError)
     status.value = 'error'
+    sendMessageLocked.value = false
     return
   }
 
-  if (pendingThreadHydration && shouldAwaitThreadHydration({
-    hasPendingThreadHydration: true,
-    routeThreadId: routeThreadId.value
-  })) {
-    await pendingThreadHydration
-  }
-
-  pinnedToBottom.value = true
-  error.value = null
-  attachmentError.value = null
-  const submissionMethod = resolveTurnSubmissionMethod(shouldSubmitWithTurnSteer())
-  if (submissionMethod === 'turn/start') {
-    status.value = 'submitted'
-  }
-  input.value = ''
-  clearAttachments({ revoke: false })
-  const optimisticMessage = buildOptimisticMessage(text, submittedAttachments)
-  const optimisticMessageId = optimisticMessage.id
-  rememberOptimisticAttachments(optimisticMessageId, submittedAttachments)
-  messages.value = [...messages.value, optimisticMessage]
-  markAwaitingAssistantOutput(shouldAwaitAssistantOutput(submissionMethod))
-  let startedLiveStream: LiveStream | null = null
-  let executedSubmissionMethod = submissionMethod
-
   try {
-    const client = getClient(props.projectId)
-
-    if (submissionMethod === 'turn/steer') {
-      const liveStream = await ensurePendingLiveStream()
-      queuePendingUserMessage(liveStream, optimisticMessageId)
-      let uploadedAttachments: PersistedProjectAttachment[] | undefined
-
-      try {
-        uploadedAttachments = await uploadAttachments(liveStream.threadId, submittedAttachments)
-        const turnId = await waitForLiveStreamTurnId(liveStream)
-
-        await client.request<TurnStartResponse>('turn/steer', {
-          threadId: liveStream.threadId,
-          expectedTurnId: turnId,
-          input: buildTurnStartInput(text, uploadedAttachments),
-          ...buildTurnOverrides(selectedModel.value, selectedEffort.value)
-        })
-        tokenUsage.value = null
-      } catch (caughtError) {
-        const errorToHandle = caughtError instanceof Error ? caughtError : new Error(String(caughtError))
-        if (!shouldRetrySteerWithTurnStart(errorToHandle.message)) {
-          throw errorToHandle
-        }
-
-        executedSubmissionMethod = 'turn/start'
-        startedLiveStream = liveStream
-        status.value = 'submitted'
-        setLiveStreamTurnId(liveStream, null)
-        setLiveStreamInterruptRequested(liveStream, false)
-
-        await submitTurnStart({
-          client,
-          liveStream,
-          text,
-          submittedAttachments,
-          uploadedAttachments,
-          optimisticMessageId,
-          queueOptimisticMessage: false
-        })
-      }
-      return
+    if (pendingThreadHydration && shouldAwaitThreadHydration({
+      hasPendingThreadHydration: true,
+      routeThreadId: routeThreadId.value
+    })) {
+      await pendingThreadHydration
     }
 
-    const liveStream = await ensurePendingLiveStream()
-    startedLiveStream = liveStream
-    await submitTurnStart({
-      client,
-      liveStream,
-      text,
-      submittedAttachments,
-      optimisticMessageId
-    })
-  } catch (caughtError) {
-    const messageText = caughtError instanceof Error ? caughtError.message : String(caughtError)
+    pinnedToBottom.value = true
+    error.value = null
+    attachmentError.value = null
+    const submissionMethod = resolveTurnSubmissionMethod(shouldSubmitWithTurnSteer())
+    if (submissionMethod === 'turn/start') {
+      status.value = 'submitted'
+    }
+    const optimisticMessage = buildOptimisticMessage(text, submittedAttachments)
+    const optimisticMessageId = optimisticMessage.id
+    rememberOptimisticAttachments(optimisticMessageId, submittedAttachments)
+    messages.value = [...messages.value, optimisticMessage]
+    markAwaitingAssistantOutput(shouldAwaitAssistantOutput(submissionMethod))
+    let startedLiveStream: LiveStream | null = null
+    let executedSubmissionMethod = submissionMethod
 
-    markAwaitingAssistantOutput(false)
-    untrackPendingUserMessage(optimisticMessageId)
-    removeOptimisticMessage(optimisticMessageId)
+    try {
+      const client = getClient(props.projectId)
 
-    if (executedSubmissionMethod === 'turn/start') {
-      if (startedLiveStream && session.liveStream === startedLiveStream) {
-        clearPendingOptimisticMessages(clearLiveStream(new Error(messageText)))
+      if (submissionMethod === 'turn/steer') {
+        const liveStream = await ensurePendingLiveStream()
+        queuePendingUserMessage(liveStream, optimisticMessageId)
+        let uploadedAttachments: PersistedProjectAttachment[] | undefined
+
+        try {
+          uploadedAttachments = await uploadAttachments(liveStream.threadId, submittedAttachments)
+          const turnId = await waitForLiveStreamTurnId(liveStream)
+
+          await client.request<TurnStartResponse>('turn/steer', {
+            threadId: liveStream.threadId,
+            expectedTurnId: turnId,
+            input: buildTurnStartInput(text, uploadedAttachments),
+            ...buildTurnOverrides(selectedModel.value, selectedEffort.value)
+          })
+          tokenUsage.value = null
+        } catch (caughtError) {
+          const errorToHandle = caughtError instanceof Error ? caughtError : new Error(String(caughtError))
+          if (!shouldRetrySteerWithTurnStart(errorToHandle.message)) {
+            throw errorToHandle
+          }
+
+          executedSubmissionMethod = 'turn/start'
+          startedLiveStream = liveStream
+          status.value = 'submitted'
+          setLiveStreamTurnId(liveStream, null)
+          setLiveStreamInterruptRequested(liveStream, false)
+
+          await submitTurnStart({
+            client,
+            liveStream,
+            text,
+            submittedAttachments,
+            uploadedAttachments,
+            optimisticMessageId,
+            queueOptimisticMessage: false
+          })
+        }
+        return
       }
-      session.pendingLiveStream = null
+
+      const liveStream = await ensurePendingLiveStream()
+      startedLiveStream = liveStream
+      await submitTurnStart({
+        client,
+        liveStream,
+        text,
+        submittedAttachments,
+        optimisticMessageId
+      })
+    } catch (caughtError) {
+      const messageText = caughtError instanceof Error ? caughtError.message : String(caughtError)
+
+      markAwaitingAssistantOutput(false)
+      untrackPendingUserMessage(optimisticMessageId)
+      removeOptimisticMessage(optimisticMessageId)
+
+      if (executedSubmissionMethod === 'turn/start') {
+        if (startedLiveStream && session.liveStream === startedLiveStream) {
+          clearPendingOptimisticMessages(clearLiveStream(new Error(messageText)))
+        }
+        session.pendingLiveStream = null
+        restoreDraftIfPristine(text, submittedAttachments)
+        error.value = messageText
+        status.value = 'error'
+        return
+      }
+
       restoreDraftIfPristine(text, submittedAttachments)
       error.value = messageText
-      status.value = 'error'
-      return
     }
-
-    restoreDraftIfPristine(text, submittedAttachments)
-    error.value = messageText
+  } finally {
+    sendMessageLocked.value = false
   }
 }
 
@@ -2086,19 +2100,11 @@ watch([selectedModel, availableModels], () => {
           />
         </template>
         <template #indicator>
-          <div
+          <UChatShimmer
             v-if="awaitingAssistantOutput"
-            class="flex items-center gap-3 px-1 py-2 text-sm text-muted"
-          >
-            <UIcon
-              name="i-lucide-loader-circle"
-              class="size-4 animate-spin text-primary"
-            />
-            <div class="flex flex-col gap-1">
-              <UChatShimmer text="Waiting for response…" />
-              <span class="text-xs text-toned">Real reasoning will appear separately when streaming starts.</span>
-            </div>
-          </div>
+            text="Thinking..."
+            class="px-1 py-2"
+          />
         </template>
       </UChatMessages>
     </div>
