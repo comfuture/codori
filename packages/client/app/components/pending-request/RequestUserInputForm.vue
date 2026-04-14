@@ -50,15 +50,7 @@ const resolveAnswerList = (question: PendingRequestUserInputQuestion) => {
 
 const totalQuestions = computed(() => props.request.questions.length)
 const currentQuestion = computed(() => props.request.questions[activeQuestionIndex.value] ?? null)
-const isReviewStep = computed(() => activeQuestionIndex.value >= totalQuestions.value)
 const isLastQuestion = computed(() => activeQuestionIndex.value === totalQuestions.value - 1)
-const reviewItems = computed(() =>
-  props.request.questions.map(question => ({
-    id: question.id,
-    question: question.question,
-    answers: resolveAnswerList(question)
-  }))
-)
 
 const questionOptionItems = (question: PendingRequestUserInputQuestion): NavigationMenuItem[] =>
   question.options.map(option => ({
@@ -69,7 +61,12 @@ const questionOptionItems = (question: PendingRequestUserInputQuestion): Navigat
       event.preventDefault()
       selectedAnswers[question.id] = [option.label]
       delete customAnswers[question.id]
-      activeQuestionIndex.value = isLastQuestion.value ? totalQuestions.value : activeQuestionIndex.value + 1
+      if (isLastQuestion.value) {
+        submit()
+        return
+      }
+
+      activeQuestionIndex.value += 1
     }
   }))
 
@@ -87,11 +84,6 @@ const canSubmit = computed(() =>
 )
 
 const goBack = () => {
-  if (isReviewStep.value) {
-    activeQuestionIndex.value = Math.max(totalQuestions.value - 1, 0)
-    return
-  }
-
   activeQuestionIndex.value = Math.max(activeQuestionIndex.value - 1, 0)
 }
 
@@ -107,7 +99,12 @@ const continueWithCustomAnswer = () => {
 
   selectedAnswers[currentQuestion.value.id] = []
   customAnswers[currentQuestion.value.id] = customAnswer
-  activeQuestionIndex.value = isLastQuestion.value ? totalQuestions.value : activeQuestionIndex.value + 1
+  if (isLastQuestion.value) {
+    submit()
+    return
+  }
+
+  activeQuestionIndex.value += 1
 }
 
 const submit = () => {
@@ -123,14 +120,14 @@ const submit = () => {
 
 <template>
   <form
-    class="space-y-3"
-    @submit.prevent="isReviewStep ? submit() : continueWithCustomAnswer()"
+    class="space-y-2"
+    @submit.prevent="continueWithCustomAnswer()"
   >
     <div
       v-if="currentQuestion"
-      class="rounded-lg border border-default/70 bg-elevated/20 p-3"
+      class="space-y-2"
     >
-      <div class="mb-3 flex items-center justify-between gap-3">
+      <div class="flex items-center justify-between gap-3">
         <p class="text-xs text-muted">
           {{ activeQuestionIndex + 1 }} / {{ totalQuestions }}
         </p>
@@ -148,19 +145,17 @@ const submit = () => {
         </UButton>
       </div>
 
-      <div class="space-y-3">
-        <div class="space-y-1.5">
-          <h3 class="text-base font-semibold text-highlighted">
-            {{ currentQuestion.question }}
-          </h3>
+      <div class="space-y-2">
+        <h3 class="text-base font-semibold text-highlighted">
+          {{ currentQuestion.question }}
+        </h3>
 
-          <p
-            v-if="currentQuestion.isSecret"
-            class="text-xs text-muted"
-          >
-            The response will be treated as sensitive input.
-          </p>
-        </div>
+        <p
+          v-if="currentQuestion.isSecret"
+          class="text-xs text-muted"
+        >
+          The response will be treated as sensitive input.
+        </p>
 
         <UNavigationMenu
           v-if="currentQuestion.options.length"
@@ -175,7 +170,7 @@ const submit = () => {
             root: 'w-full',
             list: 'gap-1',
             item: 'w-full',
-            link: 'w-full min-h-11 items-start rounded-lg px-3 py-2 text-left text-sm',
+            link: 'w-full min-h-10 items-start rounded-lg px-3 py-2 text-left text-sm',
             linkLabel: 'min-w-0 flex-1',
             linkTrailing: 'ms-2 shrink-0',
             linkLeadingIcon: 'hidden'
@@ -222,7 +217,7 @@ const submit = () => {
             size="sm"
             class="w-full"
             :ui="{
-              base: 'min-h-11 rounded-lg px-3 text-sm'
+              base: 'min-h-10 rounded-lg px-3 text-sm'
             }"
           />
         </UFormField>
@@ -238,63 +233,9 @@ const submit = () => {
             class="rounded-lg"
             :disabled="!canAdvanceWithCustom"
           >
-            {{ isLastQuestion ? 'Review answers' : 'Continue' }}
+            {{ isLastQuestion ? 'Send response' : 'Continue' }}
           </UButton>
         </div>
-      </div>
-    </div>
-
-    <div
-      v-else
-      class="space-y-3"
-    >
-      <div class="rounded-lg border border-default/70 bg-elevated/20 p-3">
-        <div class="space-y-1.5">
-          <h3 class="text-base font-semibold text-highlighted">
-            Ready to send
-          </h3>
-          <p class="text-sm leading-5 text-muted">
-            Review the answers below, then send them back to Codex.
-          </p>
-        </div>
-
-        <div class="mt-3 space-y-2">
-          <div
-            v-for="item in reviewItems"
-            :key="item.id"
-            class="rounded-lg border border-default/60 bg-default/60 px-3 py-2"
-          >
-            <p class="text-sm font-medium text-highlighted">
-              {{ item.question }}
-            </p>
-            <p class="mt-1 text-sm text-muted">
-              {{ item.answers.join(', ') }}
-            </p>
-          </div>
-        </div>
-      </div>
-
-      <div class="flex items-center justify-between gap-2">
-        <UButton
-          type="button"
-          color="neutral"
-          variant="ghost"
-          size="sm"
-          class="rounded-lg"
-          @click="goBack"
-        >
-          Back
-        </UButton>
-
-      <UButton
-        type="submit"
-        color="primary"
-        size="sm"
-        class="rounded-lg"
-        :disabled="!canSubmit"
-      >
-        Send response
-      </UButton>
       </div>
     </div>
   </form>

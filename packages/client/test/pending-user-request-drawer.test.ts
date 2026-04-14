@@ -165,7 +165,7 @@ const mountDrawer = (request: PendingUserRequest | null) =>
   })
 
 describe('pending user request drawer', () => {
-  it('renders request-user-input as a sequential flow and emits structured answers at the end', async () => {
+  it('renders request-user-input as a sequential flow and emits structured answers on the last answer', async () => {
     const wrapper = mountDrawer({
       kind: 'requestUserInput',
       requestId: 1,
@@ -193,11 +193,6 @@ describe('pending user request drawer', () => {
 
     await wrapper.get('button[type="button"]').trigger('click')
 
-    expect(wrapper.text()).toContain('Ready to send')
-    expect(wrapper.text()).toContain('Use drawer')
-
-    await wrapper.get('form').trigger('submit')
-
     expect(wrapper.emitted('respond')?.[0]?.[0]).toEqual({
       answers: {
         plan: ['Use drawer']
@@ -205,7 +200,7 @@ describe('pending user request drawer', () => {
     })
   })
 
-  it('advances across multiple questions and supports custom answers before submission', async () => {
+  it('advances across multiple questions and submits from the final custom answer step', async () => {
     const wrapper = mountDrawer({
       kind: 'requestUserInput',
       requestId: 11,
@@ -241,12 +236,6 @@ describe('pending user request drawer', () => {
     expect(wrapper.text()).not.toContain('Choose the drawer layout.')
 
     await wrapper.get('input[type="text"]').setValue('Keep the controls left aligned.')
-    await wrapper.get('form').trigger('submit')
-
-    expect(wrapper.text()).toContain('Ready to send')
-    expect(wrapper.text()).toContain('Compact')
-    expect(wrapper.text()).toContain('Keep the controls left aligned.')
-
     await wrapper.get('form').trigger('submit')
 
     expect(wrapper.emitted('respond')?.[0]?.[0]).toEqual({
