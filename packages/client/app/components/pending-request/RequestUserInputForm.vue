@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, reactive } from 'vue'
+import type { NavigationMenuItem } from '@nuxt/ui'
 import type { PendingRequestUserInput, PendingRequestUserInputQuestion } from '../../../shared/pending-user-request'
 
 const props = defineProps<{
@@ -32,6 +33,17 @@ const resolveAnswerList = (question: PendingRequestUserInputQuestion) => {
   return custom ? [...selected, custom] : selected
 }
 
+const questionOptionItems = (question: PendingRequestUserInputQuestion): NavigationMenuItem[] =>
+  question.options.map(option => ({
+    label: option.label,
+    description: option.description ?? undefined,
+    active: resolveSelectedAnswers(question.id).includes(option.label),
+    onSelect: (event: Event) => {
+      event.preventDefault()
+      toggleOption(question.id, option.label)
+    }
+  }))
+
 const canSubmit = computed(() =>
   props.request.questions.every(question => resolveAnswerList(question).length > 0)
 )
@@ -49,95 +61,108 @@ const submit = () => {
 
 <template>
   <form
-    class="space-y-4"
+    class="space-y-3"
     @submit.prevent="submit"
   >
-    <section
+    <div
       v-for="question in request.questions"
       :key="question.id"
-      class="rounded-3xl border border-default bg-elevated/30 p-4"
+      class="rounded-lg border border-default/70 bg-elevated/20 p-3"
     >
-      <div class="space-y-2">
-        <p
-          v-if="question.header"
-          class="text-[11px] font-semibold uppercase tracking-[0.18em] text-primary"
+      <UFormField
+        :label="question.question"
+        :description="question.header ?? undefined"
+        :help="question.isSecret ? 'The response will be treated as sensitive input.' : undefined"
+        size="sm"
+        :ui="{
+          root: 'space-y-2',
+          container: 'mt-2',
+          label: 'text-sm font-semibold text-highlighted',
+          description: 'text-[11px] font-semibold uppercase tracking-[0.16em] text-primary',
+          help: 'mt-2 text-xs text-muted'
+        }"
         >
-          {{ question.header }}
-        </p>
-        <h3 class="text-sm font-semibold text-highlighted">
-          {{ question.question }}
-        </h3>
-        <p
-          v-if="question.isSecret"
-          class="text-xs text-muted"
+        <UNavigationMenu
+          v-if="question.options.length"
+          :items="questionOptionItems(question)"
+          orientation="vertical"
+          variant="pill"
+          color="neutral"
+          :highlight="false"
+          :popover="false"
+          class="w-full"
+          :ui="{
+            root: 'w-full',
+            list: 'gap-1',
+            item: 'w-full',
+            link: 'w-full rounded-lg px-3 py-2 text-sm',
+            linkLabel: 'min-w-0 flex-1',
+            linkTrailing: 'ms-2 shrink-0',
+            linkLeadingIcon: 'hidden'
+          }"
         >
-          The response will be treated as sensitive input.
-        </p>
-      </div>
+          <template #item-label="{ item }">
+            <div class="min-w-0">
+              <div class="truncate font-medium text-highlighted">
+                {{ item.label }}
+              </div>
+              <div
+                v-if="item.description"
+                class="truncate text-xs text-muted"
+              >
+                {{ item.description }}
+              </div>
+            </div>
+          </template>
 
-      <div
-        v-if="question.options.length"
-        class="mt-4 flex flex-wrap gap-2"
-      >
-        <button
-          v-for="option in question.options"
-          :key="option.label"
-          type="button"
-          class="rounded-full border px-3 py-2 text-left text-sm transition"
-          :class="resolveSelectedAnswers(question.id).includes(option.label)
-            ? 'border-primary bg-primary/10 text-primary'
-            : 'border-default bg-default text-default hover:border-primary/40 hover:text-highlighted'"
-          @click="toggleOption(question.id, option.label)"
+          <template #item-trailing="{ item }">
+            <UIcon
+              v-if="item.active"
+              name="i-lucide-check"
+              class="size-4 text-primary"
+            />
+          </template>
+        </UNavigationMenu>
+
+        <UFormField
+          v-if="questionAllowsCustomAnswer(question)"
+          :label="question.options.length ? 'Custom answer' : 'Answer'"
+          size="sm"
+          :ui="{
+            root: question.options.length ? 'pt-2' : '',
+            container: 'mt-1.5',
+            label: 'text-xs font-medium uppercase tracking-[0.14em] text-muted'
+          }"
         >
-          <span class="font-medium">{{ option.label }}</span>
-          <span
-            v-if="option.description"
-            class="block text-xs text-muted"
-          >
-            {{ option.description }}
-          </span>
-        </button>
-      </div>
+          <UInput
+            :id="`request-user-input-${question.id}`"
+            v-model="customAnswers[question.id]"
+            :type="question.isSecret ? 'password' : 'text'"
+            :placeholder="question.options.length ? 'Add anything else Codex should know' : 'Type your answer'"
+            color="neutral"
+            variant="subtle"
+            size="sm"
+            class="w-full"
+            :ui="{
+              base: 'rounded-lg'
+            }"
+          />
+        </UFormField>
+      </UFormField>
+    </div>
 
-      <div
-        v-if="questionAllowsCustomAnswer(question)"
-        class="mt-4"
-      >
-        <label
-          :for="`request-user-input-${question.id}`"
-          class="mb-2 block text-xs font-medium uppercase tracking-[0.16em] text-muted"
-        >
-          {{ question.options.length ? 'Custom answer' : 'Answer' }}
-        </label>
-
-        <textarea
-          v-if="!question.isSecret && question.options.length === 0"
-          :id="`request-user-input-${question.id}`"
-          v-model="customAnswers[question.id]"
-          rows="4"
-          class="min-h-28 w-full rounded-2xl border border-default bg-default px-3 py-2 text-sm text-default outline-none transition focus:border-primary/50"
-          :placeholder="question.options.length ? 'Add anything else Codex should know' : 'Type your answer'"
-        />
-
-        <input
-          v-else
-          :id="`request-user-input-${question.id}`"
-          v-model="customAnswers[question.id]"
-          class="w-full rounded-2xl border border-default bg-default px-3 py-2 text-sm text-default outline-none transition focus:border-primary/50"
-          :type="question.isSecret ? 'password' : 'text'"
-          :placeholder="question.options.length ? 'Add anything else Codex should know' : 'Type your answer'"
-        >
-      </div>
-    </section>
-
-    <div class="flex items-center justify-end">
-      <button
+    <div
+      class="flex items-center justify-end pt-1"
+    >
+      <UButton
         type="submit"
-        class="rounded-full bg-primary px-4 py-2 text-sm font-semibold text-inverted transition disabled:cursor-not-allowed disabled:opacity-50"
+        color="primary"
+        size="sm"
+        class="rounded-lg"
         :disabled="!canSubmit"
       >
         Send response
-      </button>
+      </UButton>
     </div>
   </form>
 </template>

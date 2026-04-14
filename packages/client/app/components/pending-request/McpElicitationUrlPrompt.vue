@@ -30,45 +30,53 @@ const openUrl = () => {
 </script>
 
 <template>
-  <div class="space-y-4">
-    <section class="rounded-3xl border border-default bg-elevated/30 p-4">
+  <div class="space-y-3">
+    <section class="rounded-lg border border-default/70 bg-elevated/20 p-3">
       <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-primary">
         External action
       </p>
-      <h3 class="mt-2 text-sm font-semibold text-highlighted">
+      <h3 class="mt-1.5 text-sm font-semibold text-highlighted">
         Open {{ urlHostname }}
       </h3>
-      <p class="mt-2 text-sm leading-6 text-muted">
+      <p class="mt-1.5 text-sm leading-5 text-muted">
         {{ request.message ?? 'Codex needs you to complete a step in the browser before it can continue.' }}
       </p>
 
-      <div class="mt-4 rounded-2xl border border-default bg-default px-3 py-2 text-sm text-default">
+      <div class="mt-3 rounded-lg border border-default/70 bg-elevated px-3 py-2 text-sm text-default">
         {{ request.url }}
       </div>
     </section>
 
-    <div class="flex flex-wrap items-center justify-end gap-2">
-      <button
+    <div class="flex flex-wrap items-center justify-end gap-2 pt-1">
+      <UButton
         type="button"
-        class="rounded-full border border-default px-4 py-2 text-sm font-medium text-default transition hover:border-error/40 hover:text-error"
+        color="error"
+        variant="ghost"
+        size="sm"
+        class="rounded-lg"
         @click="emit('decline')"
       >
         Decline
-      </button>
-      <button
+      </UButton>
+      <UButton
         type="button"
-        class="rounded-full border border-default px-4 py-2 text-sm font-medium text-default transition hover:border-default/80 hover:text-highlighted"
+        color="neutral"
+        variant="ghost"
+        size="sm"
+        class="rounded-lg"
         @click="emit('cancel')"
       >
         Cancel
-      </button>
-      <button
+      </UButton>
+      <UButton
         type="button"
-        class="rounded-full bg-primary px-4 py-2 text-sm font-semibold text-inverted transition"
+        color="primary"
+        size="sm"
+        class="rounded-lg"
         @click="openUrl"
       >
         Open link
-      </button>
+      </UButton>
     </div>
   </div>
 </template>
