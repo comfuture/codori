@@ -1,6 +1,10 @@
 import { computed, ref, type Ref } from 'vue'
 import type { CodexRpcServerRequest } from '../../shared/codex-rpc'
-import { parsePendingUserRequest, type PendingUserRequest } from '../../shared/pending-user-request'
+import {
+  buildPendingUserRequestDismissResponse,
+  parsePendingUserRequest,
+  type PendingUserRequest
+} from '../../shared/pending-user-request'
 
 type PendingUserRequestQueueEntry = {
   request: PendingUserRequest
@@ -35,6 +39,19 @@ const getSession = (projectId: string, threadId: string | null): PendingUserRequ
 
 const promoteNextRequest = (session: PendingUserRequestSession) => {
   session.current.value = session.queue[0]?.request ?? null
+}
+
+const resolveQueuedRequest = (session: PendingUserRequestSession, responseFactory: (request: PendingUserRequest) => unknown) => {
+  while (session.queue.length > 0) {
+    const entry = session.queue.shift()
+    if (!entry) {
+      continue
+    }
+
+    entry.resolve(responseFactory(entry.request))
+  }
+
+  session.current.value = null
 }
 
 export const usePendingUserRequest = (projectId: string, activeThreadId: Ref<string | null>) => {
@@ -83,11 +100,25 @@ export const usePendingUserRequest = (projectId: string, activeThreadId: Ref<str
     promoteNextRequest(session)
   }
 
+  const cancelAllPendingRequests = () => {
+    const projectSessionPrefix = `${projectId}::`
+
+    for (const [key, session] of sessions.entries()) {
+      if (!key.startsWith(projectSessionPrefix)) {
+        continue
+      }
+
+      resolveQueuedRequest(session, buildPendingUserRequestDismissResponse)
+      sessions.delete(key)
+    }
+  }
+
   return {
     pendingRequest: computed(() => resolveSession(activeThreadId.value).current.value),
     hasPendingRequest: computed(() => resolveSession(activeThreadId.value).current.value !== null),
     handleServerRequest,
     resolveCurrentRequest,
-    rejectCurrentRequest
+    rejectCurrentRequest,
+    cancelAllPendingRequests
   }
 }
