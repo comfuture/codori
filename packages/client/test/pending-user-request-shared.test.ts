@@ -241,4 +241,49 @@ describe('pending user request shared helpers', () => {
       }
     })
   })
+
+  it('cancels pending requests on teardown with protocol-specific responses', async () => {
+    const projectId = `project-${Date.now()}`
+    const activeThreadId = ref('thread-a')
+    const manager = usePendingUserRequest(projectId, activeThreadId)
+
+    const userInputPromise = manager.handleServerRequest({
+      id: 15,
+      method: 'item/tool/requestUserInput',
+      params: {
+        threadId: 'thread-a',
+        questions: [{
+          id: 'choice',
+          question: 'Pick one'
+        }]
+      }
+    })
+    const mcpPromise = manager.handleServerRequest({
+      id: 16,
+      method: 'mcpServer/elicitation/request',
+      params: {
+        threadId: 'thread-b',
+        mode: 'form',
+        requestedSchema: {
+          type: 'object',
+          properties: {
+            email: {
+              type: 'string',
+              title: 'Email'
+            }
+          }
+        }
+      }
+    })
+
+    manager.cancelAllPendingRequests()
+
+    await expect(userInputPromise).resolves.toEqual({
+      answers: {}
+    })
+    await expect(mcpPromise).resolves.toEqual({
+      action: 'cancel'
+    })
+    expect(manager.pendingRequest.value).toBeNull()
+  })
 })

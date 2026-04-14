@@ -135,7 +135,8 @@ const {
   pendingRequest,
   hasPendingRequest,
   handleServerRequest,
-  resolveCurrentRequest
+  resolveCurrentRequest,
+  cancelAllPendingRequests
 } = usePendingUserRequest(props.projectId, activeThreadId)
 
 const selectedProject = computed(() => getProject(props.projectId))
@@ -1980,6 +1981,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  cancelAllPendingRequests()
   releaseServerRequestHandler?.()
   releaseServerRequestHandler = null
 })

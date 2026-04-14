@@ -362,3 +362,13 @@ export const buildMcpElicitationResponse = (
 
   return content ? { action, content } : { action }
 }
+
+export const buildPendingUserRequestDismissResponse = (request: PendingUserRequest) => {
+  switch (request.kind) {
+    case 'requestUserInput':
+      return buildRequestUserInputResponse({})
+    case 'mcpElicitationForm':
+    case 'mcpElicitationUrl':
+      return buildMcpElicitationResponse('cancel')
+  }
+}
