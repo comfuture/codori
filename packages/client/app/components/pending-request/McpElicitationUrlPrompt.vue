@@ -20,9 +20,27 @@ const urlHostname = computed(() => {
   }
 })
 
+const safeUrl = computed(() => {
+  try {
+    const parsed = new URL(props.request.url)
+    if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
+      return parsed.toString()
+    }
+
+    return null
+  } catch {
+    return null
+  }
+})
+
 const openUrl = () => {
+  if (!safeUrl.value) {
+    emit('cancel')
+    return
+  }
+
   if (typeof window !== 'undefined') {
-    window.open(props.request.url, '_blank', 'noopener,noreferrer')
+    window.open(safeUrl.value, '_blank', 'noopener,noreferrer')
   }
 
   emit('accept')

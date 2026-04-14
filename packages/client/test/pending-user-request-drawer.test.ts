@@ -409,4 +409,24 @@ describe('pending user request drawer', () => {
     }])
     expect(openSpy).toHaveBeenCalledWith('https://example.com/oauth', '_blank', 'noopener,noreferrer')
   })
+
+  it('cancels url-mode requests with unsafe URL schemes', async () => {
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null)
+    const wrapper = mountDrawer({
+      kind: 'mcpElicitationUrl',
+      requestId: 5,
+      threadId: null,
+      message: 'Authorize the connector.',
+      url: 'javascript:alert(1)',
+      elicitationId: 'elic-3'
+    })
+
+    const buttons = wrapper.findAll('button')
+    await buttons[2]!.trigger('click')
+
+    expect(wrapper.emitted('respond')?.[0]?.[0]).toEqual({
+      action: 'cancel'
+    })
+    expect(openSpy).not.toHaveBeenCalled()
+  })
 })
