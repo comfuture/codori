@@ -310,6 +310,51 @@ describe('pending user request drawer', () => {
     })
   })
 
+  it('resets elicitation form state when a new request replaces the current one', async () => {
+    const wrapper = mountDrawer({
+      kind: 'mcpElicitationForm',
+      requestId: 21,
+      threadId: null,
+      message: 'Provide the release metadata.',
+      fields: [{
+        kind: 'string',
+        key: 'email',
+        label: 'Email',
+        description: null,
+        required: true,
+        minLength: null,
+        maxLength: 80,
+        format: 'email',
+        defaultValue: null
+      }]
+    })
+
+    await wrapper.get('input[type="email"]').setValue('octocat@example.com')
+
+    await wrapper.setProps({
+      request: {
+        kind: 'mcpElicitationForm',
+        requestId: 22,
+        threadId: null,
+        message: 'Need a fresh value.',
+        fields: [{
+          kind: 'string',
+          key: 'email',
+          label: 'Email',
+          description: null,
+          required: true,
+          minLength: null,
+          maxLength: 80,
+          format: 'email',
+          defaultValue: null
+        }]
+      }
+    })
+    await nextTick()
+
+    expect(wrapper.get('input[type="email"]').element).toHaveProperty('value', '')
+  })
+
   it('supports url-mode accept, decline, and cancel actions', async () => {
     const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null)
     const wrapper = mountDrawer({
