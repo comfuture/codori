@@ -37,25 +37,29 @@ vi.mock('@comark/vue', () => {
         return () => {
           const text = props.markdown
           const components = props.components as Record<string, Component>
-          const mermaidMatch = text.match(/^```mermaid\n([\s\S]*?)(?:\n```)?$/)
+          const mermaidMatch = text.match(/^([\s\S]*?)```mermaid\n([\s\S]*?)(?:\n```)?([\s\S]*)$/)
 
           if (mermaidMatch && hasPlugin('mermaid') && components.mermaid) {
             return h('div', { class: 'mock-comark', 'data-streaming': String(props.streaming) }, [
+              mermaidMatch[1],
               h(components.mermaid, {
-                content: mermaidMatch[1],
+                content: mermaidMatch[2],
                 class: ''
-              })
+              }),
+              mermaidMatch[3]
             ])
           }
 
-          const displayMatch = text.match(/^\$\$([\s\S]*?)\$\$$/)
+          const displayMatch = text.match(/^([\s\S]*?)\$\$([\s\S]*?)\$\$([\s\S]*)$/)
 
           if (displayMatch && hasPlugin('math') && components.math) {
             return h('div', { class: 'mock-comark', 'data-streaming': String(props.streaming) }, [
+              displayMatch[1],
               h(components.math, {
-                content: displayMatch[1],
+                content: displayMatch[2],
                 class: 'block'
-              })
+              }),
+              displayMatch[3]
             ])
           }
 
@@ -183,28 +187,39 @@ describe('message part text markdown rendering', () => {
   })
 
   it('renders block LaTeX formulas with display math markup', async () => {
-    const wrapper = await mountAssistantText('$$x = \\\\frac{-b \\\\pm \\\\sqrt{b^2 - 4ac}}{2a}$$')
+    const wrapper = await mountAssistantText(
+      'Solve this first.\n\n$$x = \\\\frac{-b \\\\pm \\\\sqrt{b^2 - 4ac}}{2a}$$\n\nThen continue.'
+    )
 
     expect(wrapper.find('.math.block').exists()).toBe(true)
     expect(wrapper.find('.math.block .katex-display').exists()).toBe(true)
-    expect(wrapper.html()).not.toContain('$$x =')
+    expect(wrapper.text()).toContain('Solve this first.')
+    expect(wrapper.text()).toContain('Then continue.')
   })
 
   it('renders Mermaid code fences as diagrams while streaming', async () => {
     const wrapper = await mountAssistantText([
+      'Diagram:',
+      '',
       '```mermaid',
       'graph TD',
-      '  A[Start] --> B[End]'
+      '  A[Start] --> B[End]',
+      '',
+      'Looks good so far.'
     ].join('\n'), 'streaming')
 
     await wrapper.setProps({
       part: {
         type: 'text',
         text: [
+          'Diagram:',
+          '',
           '```mermaid',
           'graph TD',
           '  A[Start] --> B[End]',
-          '```'
+          '```',
+          '',
+          'Looks good so far.'
         ].join('\n'),
         state: 'streaming'
       }
@@ -213,6 +228,8 @@ describe('message part text markdown rendering', () => {
 
     expect(wrapper.find('.mermaid').exists()).toBe(true)
     expect(wrapper.find('.mermaid svg').exists()).toBe(true)
+    expect(wrapper.text()).toContain('Diagram:')
+    expect(wrapper.text()).toContain('Looks good so far.')
     expect(wrapper.html()).not.toContain('<code class="language-mermaid">')
   })
 })
