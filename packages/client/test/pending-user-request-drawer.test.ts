@@ -165,7 +165,7 @@ const mountDrawer = (request: PendingUserRequest | null) =>
   })
 
 describe('pending user request drawer', () => {
-  it('renders request-user-input flows and emits structured answers', async () => {
+  it('renders request-user-input as a sequential flow and emits structured answers at the end', async () => {
     const wrapper = mountDrawer({
       kind: 'requestUserInput',
       requestId: 1,
@@ -186,20 +186,78 @@ describe('pending user request drawer', () => {
     })
 
     expect(wrapper.find('.drawer-stub').attributes('data-open')).toBe('true')
-    expect(wrapper.text()).toContain('Codex needs your input')
+    expect(wrapper.text()).toContain('Which direction should Codex take?')
+    expect(wrapper.text()).not.toContain('Implementation')
+    expect(wrapper.text()).not.toContain('Pending request')
+    expect(wrapper.text()).not.toContain('Custom answer')
 
     await wrapper.get('button[type="button"]').trigger('click')
-    await wrapper.get('input[type="text"]').setValue('Keep ChatWorkspace slim')
-    await wrapper.get('button[type="submit"]').trigger('submit')
+
+    expect(wrapper.text()).toContain('Ready to send')
+    expect(wrapper.text()).toContain('Use drawer')
+
+    await wrapper.get('form').trigger('submit')
 
     expect(wrapper.emitted('respond')?.[0]?.[0]).toEqual({
       answers: {
-        plan: ['Use drawer', 'Keep ChatWorkspace slim']
+        plan: ['Use drawer']
       }
     })
   })
 
-  it('renders secret input fields as password controls', () => {
+  it('advances across multiple questions and supports custom answers before submission', async () => {
+    const wrapper = mountDrawer({
+      kind: 'requestUserInput',
+      requestId: 11,
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      itemId: 'item-1',
+      questions: [{
+        header: 'Layout',
+        id: 'layout',
+        question: 'Choose the drawer layout.',
+        options: [{
+          label: 'Compact',
+          description: 'Keep the layout dense.'
+        }],
+        isOther: false,
+        isSecret: false
+      }, {
+        header: 'Notes',
+        id: 'notes',
+        question: 'Add any final guidance.',
+        options: [],
+        isOther: false,
+        isSecret: false
+      }]
+    })
+
+    expect(wrapper.text()).toContain('Choose the drawer layout.')
+    expect(wrapper.text()).not.toContain('Add any final guidance.')
+
+    await wrapper.get('button[type="button"]').trigger('click')
+
+    expect(wrapper.text()).toContain('Add any final guidance.')
+    expect(wrapper.text()).not.toContain('Choose the drawer layout.')
+
+    await wrapper.get('input[type="text"]').setValue('Keep the controls left aligned.')
+    await wrapper.get('form').trigger('submit')
+
+    expect(wrapper.text()).toContain('Ready to send')
+    expect(wrapper.text()).toContain('Compact')
+    expect(wrapper.text()).toContain('Keep the controls left aligned.')
+
+    await wrapper.get('form').trigger('submit')
+
+    expect(wrapper.emitted('respond')?.[0]?.[0]).toEqual({
+      answers: {
+        layout: ['Compact'],
+        notes: ['Keep the controls left aligned.']
+      }
+    })
+  })
+
+  it('renders secret input fields as password controls', async () => {
     const wrapper = mountDrawer({
       kind: 'requestUserInput',
       requestId: 2,
@@ -216,6 +274,7 @@ describe('pending user request drawer', () => {
       }]
     })
 
+    expect(wrapper.text()).not.toContain('Answer')
     expect(wrapper.find('input[type="password"]').exists()).toBe(true)
   })
 
