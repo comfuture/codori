@@ -99,7 +99,9 @@ const buildContent = () => {
 
     switch (field.kind) {
       case 'boolean':
-        content[field.key] = rawValue === true
+        if (field.required || field.defaultValue === true || rawValue === true) {
+          content[field.key] = rawValue === true
+        }
         break
       case 'string': {
         const value = typeof rawValue === 'string' ? rawValue.trim() : ''

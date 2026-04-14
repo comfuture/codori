@@ -338,6 +338,30 @@ describe('pending user request drawer', () => {
     })
   })
 
+  it('omits unchecked optional boolean fields from elicitation form payloads', async () => {
+    const wrapper = mountDrawer({
+      kind: 'mcpElicitationForm',
+      requestId: 31,
+      threadId: null,
+      message: 'Provide the release metadata.',
+      fields: [{
+        kind: 'boolean',
+        key: 'approved',
+        label: 'Approved',
+        description: null,
+        required: false,
+        defaultValue: false
+      }]
+    })
+
+    await wrapper.get('button[type="submit"]').trigger('submit')
+
+    expect(wrapper.emitted('respond')?.[0]?.[0]).toEqual({
+      action: 'accept',
+      content: {}
+    })
+  })
+
   it('resets elicitation form state when a new request replaces the current one', async () => {
     const wrapper = mountDrawer({
       kind: 'mcpElicitationForm',
