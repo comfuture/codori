@@ -145,60 +145,61 @@ const submit = () => {
 
 <template>
   <form
-    class="space-y-4"
+    class="space-y-3"
     @submit.prevent="submit"
   >
-    <section
+    <div
       v-for="field in request.fields"
       :key="field.key"
-      class="rounded-3xl border border-default bg-elevated/30 p-4"
+      class="rounded-lg border border-default/70 bg-elevated/20 p-3"
     >
-      <div class="space-y-1">
-        <h3 class="text-sm font-semibold text-highlighted">
-          {{ field.label }}
-        </h3>
-        <p
-          v-if="field.description"
-          class="text-sm text-muted"
-        >
-          {{ field.description }}
-        </p>
-      </div>
-
-      <div class="mt-4">
-        <textarea
-          v-if="field.kind === 'string' && (field.maxLength == null || field.maxLength > 120)"
+      <UFormField
+        :name="field.key"
+        :label="field.label"
+        :description="field.description ?? undefined"
+        :required="field.required"
+        :error="attemptedSubmit ? (resolveFieldError(field) ?? undefined) : undefined"
+        size="sm"
+        :ui="{
+          root: 'space-y-2',
+          container: 'mt-2',
+          label: 'text-sm font-semibold text-highlighted',
+          description: 'text-xs text-muted',
+          error: 'mt-2 text-xs font-medium text-error'
+        }"
+      >
+        <UInput
+          v-if="field.kind === 'string'"
           :id="`elicitation-field-${field.key}`"
-          :value="String(values[field.key] ?? '')"
-          rows="4"
-          class="min-h-28 w-full rounded-2xl border border-default bg-default px-3 py-2 text-sm text-default outline-none transition focus:border-primary/50"
-          @input="values[field.key] = ($event.target as HTMLTextAreaElement).value"
+          :model-value="String(values[field.key] ?? '')"
+          color="neutral"
+          variant="subtle"
+          size="sm"
+          class="w-full"
+          :type="field.format === 'email' ? 'email' : field.format === 'uri' ? 'url' : field.format === 'date' ? 'date' : field.format === 'date-time' ? 'datetime-local' : 'text'"
+          :ui="{ base: 'rounded-lg' }"
+          @update:model-value="values[field.key] = String($event ?? '')"
         />
 
-        <input
-          v-else-if="field.kind === 'string'"
-          :id="`elicitation-field-${field.key}`"
-          :value="String(values[field.key] ?? '')"
-          class="w-full rounded-2xl border border-default bg-default px-3 py-2 text-sm text-default outline-none transition focus:border-primary/50"
-          :type="field.format === 'email' ? 'email' : field.format === 'uri' ? 'url' : field.format === 'date' ? 'date' : field.format === 'date-time' ? 'datetime-local' : 'text'"
-          @input="values[field.key] = ($event.target as HTMLInputElement).value"
-        >
-
-        <input
+        <UInput
           v-else-if="field.kind === 'number'"
           :id="`elicitation-field-${field.key}`"
-          :value="String(values[field.key] ?? '')"
-          class="w-full rounded-2xl border border-default bg-default px-3 py-2 text-sm text-default outline-none transition focus:border-primary/50"
+          :model-value="String(values[field.key] ?? '')"
+          color="neutral"
+          variant="subtle"
+          size="sm"
+          class="w-full"
           :step="field.numericType === 'integer' ? '1' : 'any'"
           type="number"
-          @input="values[field.key] = ($event.target as HTMLInputElement).value"
-        >
+          :ui="{ base: 'rounded-lg' }"
+          @update:model-value="values[field.key] = String($event ?? '')"
+        />
 
         <select
           v-else-if="field.kind === 'enum'"
           :id="`elicitation-field-${field.key}`"
           :value="String(values[field.key] ?? '')"
-          class="w-full rounded-2xl border border-default bg-default px-3 py-2 text-sm text-default outline-none transition focus:border-primary/50"
+          class="w-full rounded-lg border border-default/70 bg-elevated px-3 py-2 text-sm text-default outline-none transition focus:border-primary/50"
           @change="values[field.key] = ($event.target as HTMLSelectElement).value"
         >
           <option value="">
@@ -215,7 +216,7 @@ const submit = () => {
 
         <label
           v-else
-          class="flex items-center gap-3 rounded-2xl border border-default bg-default px-3 py-2 text-sm text-default"
+          class="flex items-center gap-2 rounded-lg border border-default/70 bg-elevated px-3 py-2 text-sm text-default"
         >
           <input
             :checked="values[field.key] === true"
@@ -224,37 +225,38 @@ const submit = () => {
           >
           <span>Enabled</span>
         </label>
-      </div>
+      </UFormField>
+    </div>
 
-      <p
-        v-if="attemptedSubmit && resolveFieldError(field)"
-        class="mt-2 text-xs font-medium text-error"
-      >
-        {{ resolveFieldError(field) }}
-      </p>
-    </section>
-
-    <div class="flex flex-wrap items-center justify-end gap-2">
-      <button
+    <div class="flex flex-wrap items-center justify-end gap-2 pt-1">
+      <UButton
         type="button"
-        class="rounded-full border border-default px-4 py-2 text-sm font-medium text-default transition hover:border-error/40 hover:text-error"
+        color="error"
+        variant="ghost"
+        size="sm"
+        class="rounded-lg"
         @click="emit('decline')"
       >
         Decline
-      </button>
-      <button
+      </UButton>
+      <UButton
         type="button"
-        class="rounded-full border border-default px-4 py-2 text-sm font-medium text-default transition hover:border-default/80 hover:text-highlighted"
+        color="neutral"
+        variant="ghost"
+        size="sm"
+        class="rounded-lg"
         @click="emit('cancel')"
       >
         Cancel
-      </button>
-      <button
+      </UButton>
+      <UButton
         type="submit"
-        class="rounded-full bg-primary px-4 py-2 text-sm font-semibold text-inverted transition"
+        color="primary"
+        size="sm"
+        class="rounded-lg"
       >
         Continue
-      </button>
+      </UButton>
     </div>
   </form>
 </template>

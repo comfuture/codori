@@ -27,12 +27,139 @@ const DrawerStub = defineComponent({
   }
 })
 
+const ButtonStub = defineComponent({
+  name: 'ButtonStub',
+  props: {
+    type: {
+      type: String,
+      default: 'button'
+    },
+    disabled: {
+      type: Boolean,
+      default: false
+    }
+  },
+  emits: ['click'],
+  setup(props, { emit, slots }) {
+    return () => h('button', {
+      type: props.type,
+      disabled: props.disabled,
+      onClick: (event: MouseEvent) => emit('click', event)
+    }, slots.default?.())
+  }
+})
+
+const InputStub = defineComponent({
+  name: 'InputStub',
+  props: {
+    modelValue: {
+      type: [String, Number],
+      default: ''
+    },
+    type: {
+      type: String,
+      default: 'text'
+    },
+    id: {
+      type: String,
+      default: undefined
+    },
+    placeholder: {
+      type: String,
+      default: undefined
+    },
+    size: {
+      type: String,
+      default: undefined
+    }
+  },
+  emits: ['update:modelValue'],
+  setup(props, { emit }) {
+    return () => h('input', {
+      id: props.id,
+      type: props.type,
+      placeholder: props.placeholder,
+      value: props.modelValue,
+      onInput: (event: Event) => emit('update:modelValue', (event.target as HTMLInputElement).value)
+    })
+  }
+})
+
+const FormFieldStub = defineComponent({
+  name: 'FormFieldStub',
+  props: {
+    label: {
+      type: String,
+      default: undefined
+    },
+    description: {
+      type: String,
+      default: undefined
+    },
+    help: {
+      type: String,
+      default: undefined
+    },
+    error: {
+      type: [String, Boolean],
+      default: undefined
+    }
+  },
+  setup(props, { slots }) {
+    return () => h('div', { class: 'form-field-stub' }, [
+      props.label ? h('label', props.label) : null,
+      props.description ? h('p', props.description) : null,
+      slots.default?.(),
+      typeof props.error === 'string' ? h('p', props.error) : null,
+      props.help ? h('p', props.help) : null
+    ])
+  }
+})
+
+const NavigationMenuStub = defineComponent({
+  name: 'NavigationMenuStub',
+  props: {
+    items: {
+      type: Array,
+      default: () => []
+    }
+  },
+  setup(props, { slots }) {
+    return () => h('div', { class: 'navigation-menu-stub' }, (props.items as Array<Record<string, unknown>>).map((item, index) =>
+      h('button', {
+        key: `${String(item.label)}-${index}`,
+        type: 'button',
+        'data-active': String(item.active === true),
+        onClick: (event: Event) => {
+          const onSelect = item.onSelect
+          if (typeof onSelect === 'function') {
+            onSelect(event)
+          }
+        }
+      }, [
+        slots['item-label']?.({ item }),
+        slots['item-trailing']?.({ item })
+      ])
+    ))
+  }
+})
+
 const mountDrawer = (request: PendingUserRequest | null) =>
   mount(PendingUserRequestDrawer, {
     props: { request },
     global: {
       stubs: {
-        UDrawer: DrawerStub
+        UDrawer: DrawerStub,
+        UButton: ButtonStub,
+        UInput: InputStub,
+        UFormField: FormFieldStub,
+        UNavigationMenu: NavigationMenuStub,
+        UIcon: defineComponent({
+          name: 'IconStub',
+          setup() {
+            return () => h('span', { class: 'icon-stub' })
+          }
+        })
       }
     }
   })

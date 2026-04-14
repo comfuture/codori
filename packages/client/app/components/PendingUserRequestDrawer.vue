@@ -58,10 +58,11 @@ const handleOpenChange = (nextOpen: boolean) => {
     direction="bottom"
     :handle="true"
     :ui="{
-      content: 'max-h-[88dvh] rounded-t-3xl',
+      content: 'inset-x-auto right-auto bottom-0 left-1/2 w-[calc(100vw-0.75rem)] max-w-[52rem] -translate-x-1/2 rounded-t-2xl rounded-b-none border-x border-t border-default bg-default shadow-2xl md:w-[min(50vw,52rem)]',
       container: 'gap-0 p-0',
-      header: 'px-4 pb-2 pt-4 md:px-6',
-      body: 'px-4 pb-5 pt-1 md:px-6',
+      handle: 'mt-2 !h-1 !w-10 rounded-full',
+      header: 'px-4 pb-1 pt-3 md:px-5',
+      body: 'px-4 pb-4 pt-2 md:px-5',
       footer: 'hidden'
     }"
     @update:open="handleOpenChange"
@@ -69,19 +70,17 @@ const handleOpenChange = (nextOpen: boolean) => {
     <template #header>
       <div
         v-if="request"
-        class="flex items-start justify-between gap-4"
+        class="space-y-1.5"
       >
-        <div class="space-y-1">
-          <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-primary">
-            Pending request
-          </p>
-          <h2 class="text-base font-semibold text-highlighted">
-            {{ title }}
-          </h2>
-          <p class="text-sm leading-6 text-muted">
-            {{ description }}
-          </p>
-        </div>
+        <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-primary">
+          Pending request
+        </p>
+        <h2 class="text-sm font-semibold text-highlighted md:text-base">
+          {{ title }}
+        </h2>
+        <p class="text-sm leading-5 text-muted">
+          {{ description }}
+        </p>
       </div>
     </template>
 
