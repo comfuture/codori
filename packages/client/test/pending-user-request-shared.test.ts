@@ -1,3 +1,4 @@
+import { ref } from 'vue'
 import { describe, expect, it } from 'vitest'
 import { usePendingUserRequest } from '../app/composables/usePendingUserRequest'
 import { toServerRequestResponse } from '../shared/codex-rpc'
@@ -84,6 +85,7 @@ describe('pending user request shared helpers', () => {
     })).toEqual({
       kind: 'mcpElicitationForm',
       requestId: 9,
+      threadId: null,
       message: 'Need confirmation',
       fields: [{
         kind: 'string',
@@ -117,6 +119,7 @@ describe('pending user request shared helpers', () => {
     })).toEqual({
       kind: 'mcpElicitationUrl',
       requestId: 10,
+      threadId: null,
       message: 'Open the auth flow',
       url: 'https://example.com/auth',
       elicitationId: 'elic-1'
@@ -173,7 +176,7 @@ describe('pending user request shared helpers', () => {
   })
 
   it('holds an incoming request until the UI resolves it', async () => {
-    const manager = usePendingUserRequest(`project-${Date.now()}`)
+    const manager = usePendingUserRequest(`project-${Date.now()}`, ref('thread-1'))
     const responsePromise = manager.handleServerRequest({
       id: 11,
       method: 'item/tool/requestUserInput',
@@ -200,5 +203,42 @@ describe('pending user request shared helpers', () => {
       }
     })
     expect(manager.pendingRequest.value).toBeNull()
+  })
+
+  it('only exposes requests for the active thread session', async () => {
+    const activeThreadId = ref('thread-a')
+    const manager = usePendingUserRequest(`project-${Date.now()}`, activeThreadId)
+    const responsePromise = manager.handleServerRequest({
+      id: 14,
+      method: 'item/tool/requestUserInput',
+      params: {
+        threadId: 'thread-a',
+        questions: [{
+          id: 'choice',
+          question: 'Pick one',
+          options: [{ label: 'Ship' }]
+        }]
+      }
+    })
+
+    expect(manager.pendingRequest.value?.threadId).toBe('thread-a')
+
+    activeThreadId.value = 'thread-b'
+    expect(manager.pendingRequest.value).toBeNull()
+
+    activeThreadId.value = 'thread-a'
+    expect(manager.pendingRequest.value?.threadId).toBe('thread-a')
+
+    manager.resolveCurrentRequest({
+      answers: {
+        choice: ['Ship']
+      }
+    })
+
+    await expect(responsePromise).resolves.toEqual({
+      answers: {
+        choice: ['Ship']
+      }
+    })
   })
 })

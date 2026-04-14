@@ -271,6 +271,7 @@ describe('pending user request drawer', () => {
     const wrapper = mountDrawer({
       kind: 'mcpElicitationForm',
       requestId: 3,
+      threadId: null,
       message: 'Provide the release metadata.',
       fields: [{
         kind: 'string',
@@ -314,6 +315,7 @@ describe('pending user request drawer', () => {
     const wrapper = mountDrawer({
       kind: 'mcpElicitationUrl',
       requestId: 4,
+      threadId: null,
       message: 'Authorize the connector.',
       url: 'https://example.com/oauth',
       elicitationId: 'elic-2'

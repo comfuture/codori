@@ -87,6 +87,7 @@ export type PendingElicitationField =
 export type PendingMcpElicitationForm = {
   kind: 'mcpElicitationForm'
   requestId: number
+  threadId: string | null
   message: string | null
   fields: PendingElicitationField[]
 }
@@ -94,6 +95,7 @@ export type PendingMcpElicitationForm = {
 export type PendingMcpElicitationUrl = {
   kind: 'mcpElicitationUrl'
   requestId: number
+  threadId: string | null
   message: string | null
   url: string
   elicitationId: string | null
@@ -295,6 +297,7 @@ export const parsePendingUserRequest = (request: CodexRpcServerRequest): Pending
         return {
           kind: 'mcpElicitationUrl',
           requestId: request.id,
+          threadId: asTrimmedString(params?.threadId),
           message: asTrimmedString(params?.message),
           url,
           elicitationId: asTrimmedString(params?.elicitationId)
@@ -326,6 +329,7 @@ export const parsePendingUserRequest = (request: CodexRpcServerRequest): Pending
       return {
         kind: 'mcpElicitationForm',
         requestId: request.id,
+        threadId: asTrimmedString(params?.threadId),
         message: asTrimmedString(params?.message),
         fields
       }

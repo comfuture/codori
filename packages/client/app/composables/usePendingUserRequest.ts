@@ -15,8 +15,12 @@ type PendingUserRequestSession = {
 
 const sessions = new Map<string, PendingUserRequestSession>()
 
-const getSession = (projectId: string): PendingUserRequestSession => {
-  const existing = sessions.get(projectId)
+const sessionKey = (projectId: string, threadId: string | null) =>
+  `${projectId}::${threadId ?? '__draft__'}`
+
+const getSession = (projectId: string, threadId: string | null): PendingUserRequestSession => {
+  const key = sessionKey(projectId, threadId)
+  const existing = sessions.get(key)
   if (existing) {
     return existing
   }
@@ -25,7 +29,7 @@ const getSession = (projectId: string): PendingUserRequestSession => {
     current: ref<PendingUserRequest | null>(null),
     queue: []
   }
-  sessions.set(projectId, session)
+  sessions.set(key, session)
   return session
 }
 
@@ -33,14 +37,16 @@ const promoteNextRequest = (session: PendingUserRequestSession) => {
   session.current.value = session.queue[0]?.request ?? null
 }
 
-export const usePendingUserRequest = (projectId: string) => {
-  const session = getSession(projectId)
+export const usePendingUserRequest = (projectId: string, activeThreadId: Ref<string | null>) => {
+  const resolveSession = (threadId: string | null) => getSession(projectId, threadId)
 
   const handleServerRequest = async (request: CodexRpcServerRequest) => {
     const normalized = parsePendingUserRequest(request)
     if (!normalized) {
       return null
     }
+
+    const session = resolveSession(normalized.threadId ?? activeThreadId.value)
 
     return await new Promise((resolve, reject) => {
       session.queue.push({
@@ -56,6 +62,7 @@ export const usePendingUserRequest = (projectId: string) => {
   }
 
   const resolveCurrentRequest = (response: unknown) => {
+    const session = resolveSession(activeThreadId.value)
     const current = session.queue.shift()
     if (!current) {
       return
@@ -66,6 +73,7 @@ export const usePendingUserRequest = (projectId: string) => {
   }
 
   const rejectCurrentRequest = (error: unknown) => {
+    const session = resolveSession(activeThreadId.value)
     const current = session.queue.shift()
     if (!current) {
       return
@@ -76,8 +84,8 @@ export const usePendingUserRequest = (projectId: string) => {
   }
 
   return {
-    pendingRequest: session.current,
-    hasPendingRequest: computed(() => session.current.value !== null),
+    pendingRequest: computed(() => resolveSession(activeThreadId.value).current.value),
+    hasPendingRequest: computed(() => resolveSession(activeThreadId.value).current.value !== null),
     handleServerRequest,
     resolveCurrentRequest,
     rejectCurrentRequest
