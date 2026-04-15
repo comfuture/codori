@@ -12,6 +12,7 @@ import {
 import MessageContent from './MessageContent.vue'
 import ReviewStartDrawer from './ReviewStartDrawer.vue'
 import PendingUserRequestDrawer from './PendingUserRequestDrawer.vue'
+import UsageStatusModal from './UsageStatusModal.vue'
 import {
   reconcileOptimisticUserMessage,
   removeChatMessage,
@@ -70,6 +71,10 @@ import {
   type ThreadStartResponse,
   type TurnStartResponse
 } from '~~/shared/codex-rpc'
+import {
+  normalizeAccountRateLimits,
+  type RateLimitBucket
+} from '~~/shared/account-rate-limits'
 import {
   buildTurnOverrides,
   coercePromptSelection,
@@ -188,10 +193,16 @@ const slashHighlightIndex = ref(0)
 const reviewDrawerOpen = ref(false)
 const reviewDrawerMode = ref<'target' | 'branch'>('target')
 const reviewDrawerCommandText = ref('/review')
+const usageStatusModalOpen = ref(false)
+const usageStatusLoading = ref(false)
+const usageStatusError = ref<string | null>(null)
+const usageStatusBuckets = ref<RateLimitBucket[]>([])
 const reviewBranches = ref<string[]>([])
 const reviewCurrentBranch = ref<string | null>(null)
 const reviewBranchesLoading = ref(false)
 const reviewBranchesError = ref<string | null>(null)
+let releaseUsageStatusSubscription: (() => void) | null = null
+let usageStatusLoadToken = 0
 const isBusy = computed(() =>
   status.value === 'submitted'
   || status.value === 'streaming'
@@ -273,7 +284,11 @@ const slashPaletteGroups = computed(() => [{
   items: filteredSlashCommands.value.map((command, index) => ({
     label: `/${command.name}`,
     description: command.description,
-    icon: command.name === 'review' ? 'i-lucide-search-check' : 'i-lucide-terminal',
+    icon: command.name === 'review'
+      ? 'i-lucide-search-check'
+      : (command.name === 'usage' || command.name === 'status')
+          ? 'i-lucide-gauge'
+          : 'i-lucide-terminal',
     active: index === slashHighlightIndex.value,
     onSelect: () => {
       void activateSlashCommand(command, command.supportsInlineArgs ? 'complete' : 'execute')
@@ -776,6 +791,66 @@ const closeReviewDrawer = () => {
   resetReviewDrawerState()
 }
 
+const resetUsageStatusState = () => {
+  usageStatusLoading.value = false
+  usageStatusError.value = null
+  usageStatusBuckets.value = []
+}
+
+const closeUsageStatusModal = () => {
+  usageStatusLoadToken += 1
+  usageStatusModalOpen.value = false
+  releaseUsageStatusSubscription?.()
+  releaseUsageStatusSubscription = null
+  resetUsageStatusState()
+}
+
+const applyUsageStatusSnapshot = (value: unknown) => {
+  usageStatusBuckets.value = normalizeAccountRateLimits(value)
+  usageStatusError.value = null
+}
+
+const openUsageStatusModal = async () => {
+  dismissedSlashMatchKey.value = null
+  usageStatusLoadToken += 1
+  const loadToken = usageStatusLoadToken
+  usageStatusModalOpen.value = true
+  usageStatusLoading.value = true
+  usageStatusError.value = null
+  usageStatusBuckets.value = []
+
+  const client = getClient(props.projectId)
+  releaseUsageStatusSubscription?.()
+  releaseUsageStatusSubscription = client.subscribe((notification) => {
+    if (notification.method !== 'account/rateLimits/updated' || !usageStatusModalOpen.value) {
+      return
+    }
+
+    applyUsageStatusSnapshot(notification.params)
+    usageStatusLoading.value = false
+  })
+
+  try {
+    await ensureProjectRuntime()
+    const response = await client.request('account/rateLimits/read')
+    if (!usageStatusModalOpen.value || loadToken !== usageStatusLoadToken) {
+      return
+    }
+
+    applyUsageStatusSnapshot(response)
+  } catch (caughtError) {
+    if (!usageStatusModalOpen.value || loadToken !== usageStatusLoadToken) {
+      return
+    }
+
+    usageStatusError.value = caughtError instanceof Error ? caughtError.message : String(caughtError)
+  } finally {
+    if (loadToken === usageStatusLoadToken) {
+      usageStatusLoading.value = false
+    }
+  }
+}
+
 const openReviewDrawer = (commandText = '/review') => {
   dismissedSlashMatchKey.value = null
   reviewDrawerCommandText.value = commandText
@@ -928,16 +1003,34 @@ const handleSlashCommandSubmission = async (
     return true
   }
 
-  if (!slashCommand.isBare) {
-    setComposerError('`/review` currently only supports the bare command. Choose the diff target in the review drawer.')
-    return true
-  }
+  switch (command.name) {
+    case 'review': {
+      if (!slashCommand.isBare) {
+        setComposerError('`/review` currently only supports the bare command. Choose the diff target in the review drawer.')
+        return true
+      }
 
-  error.value = null
-  status.value = 'ready'
-  openReviewDrawer(`/${command.name}`)
-  await focusPromptAt(rawText.trim().length)
-  return true
+      error.value = null
+      status.value = 'ready'
+      openReviewDrawer(`/${command.name}`)
+      await focusPromptAt(rawText.trim().length)
+      return true
+    }
+    case 'usage':
+    case 'status': {
+      if (!slashCommand.isBare) {
+        setComposerError(`\`/${command.name}\` currently only supports the bare command.`)
+        return true
+      }
+
+      error.value = null
+      status.value = 'ready'
+      await openUsageStatusModal()
+      return true
+    }
+    default:
+      return false
+  }
 }
 
 const activateSlashCommand = async (
@@ -959,6 +1052,15 @@ const handleReviewDrawerOpenChange = (open: boolean) => {
   }
 
   closeReviewDrawer()
+}
+
+const handleUsageStatusOpenChange = (open: boolean) => {
+  if (open) {
+    void openUsageStatusModal()
+    return
+  }
+
+  closeUsageStatusModal()
 }
 
 const handleReviewDrawerBack = () => {
@@ -2461,6 +2563,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   cancelAllPendingRequests()
+  closeUsageStatusModal()
   releaseServerRequestHandler?.()
   releaseServerRequestHandler = null
 })
@@ -2931,5 +3034,13 @@ watch(input, async () => {
     @choose-base-branch-mode="openBaseBranchPicker"
     @choose-base-branch="(branch) => startReview({ type: 'baseBranch', branch })"
     @back="handleReviewDrawerBack"
+  />
+
+  <UsageStatusModal
+    :open="usageStatusModalOpen"
+    :loading="usageStatusLoading"
+    :error="usageStatusError"
+    :buckets="usageStatusBuckets"
+    @update:open="handleUsageStatusOpenChange"
   />
 </template>
