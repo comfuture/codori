@@ -5,6 +5,8 @@ import math, { Math as ComarkMath } from '@comark/vue/plugins/math'
 import mermaid from '@comark/vue/plugins/mermaid'
 import { renderMermaidSVG, THEMES } from 'beautiful-mermaid'
 import { computed, defineComponent, h, onMounted, ref, watch } from 'vue'
+import ReviewPriorityBadge from './ReviewPriorityBadge.vue'
+import { reviewPriorityBadgePlugin } from '../../utils/review-priority-badge'
 
 const props = defineProps<{
   role?: 'user' | 'assistant' | 'system'
@@ -126,12 +128,14 @@ const ChatMarkdownMermaid = defineComponent({
 
 const components = {
   math: ComarkMath,
-  mermaid: ChatMarkdownMermaid
+  mermaid: ChatMarkdownMermaid,
+  'review-priority-badge': ReviewPriorityBadge
 }
 
 const plugins = [
   math(),
   mermaid(),
+  reviewPriorityBadgePlugin(),
   highlight({ preStyles: false })
 ]
 const isStreaming = computed(() => props.part?.state === 'streaming')
