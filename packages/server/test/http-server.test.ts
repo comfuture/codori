@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
 import { createServer as createNetServer } from 'node:net'
@@ -14,6 +15,7 @@ const startedApps: Array<Awaited<ReturnType<typeof createHttpServer>>> = []
 const startedSocketServers: WebSocketServer[] = []
 const occupiedTcpServers: Array<ReturnType<typeof createNetServer>> = []
 const attachmentsRoots: string[] = []
+const tempDirs: string[] = []
 
 afterEach(async () => {
   for (const app of startedApps.splice(0, startedApps.length)) {
@@ -46,6 +48,10 @@ afterEach(async () => {
 
   for (const root of attachmentsRoots.splice(0, attachmentsRoots.length)) {
     await rm(root, { recursive: true, force: true })
+  }
+
+  for (const dir of tempDirs.splice(0, tempDirs.length)) {
+    await rm(dir, { recursive: true, force: true })
   }
 })
 
@@ -101,6 +107,19 @@ const rawDataToString = (value: WebSocket.RawData) => {
   }
 
   return value.toString('utf8')
+}
+
+const createGitRepo = () => {
+  const projectPath = mkdtempSync(join(os.tmpdir(), 'codori-git-'))
+  tempDirs.push(projectPath)
+  execFileSync('git', ['init', '-b', 'main'], { cwd: projectPath, stdio: 'ignore' })
+  execFileSync('git', ['config', 'user.name', 'Codori Test'], { cwd: projectPath, stdio: 'ignore' })
+  execFileSync('git', ['config', 'user.email', 'codori@example.com'], { cwd: projectPath, stdio: 'ignore' })
+  writeFileSync(join(projectPath, 'README.md'), '# test\n')
+  execFileSync('git', ['add', 'README.md'], { cwd: projectPath, stdio: 'ignore' })
+  execFileSync('git', ['commit', '-m', 'init'], { cwd: projectPath, stdio: 'ignore' })
+  execFileSync('git', ['branch', 'feature/review'], { cwd: projectPath, stdio: 'ignore' })
+  return projectPath
 }
 
 describe('createHttpServer', () => {
@@ -180,6 +199,28 @@ describe('createHttpServer', () => {
         installedVersion: '0.0.3',
         latestVersion: '0.0.4'
       }
+    })
+  })
+
+  it('lists local git branches for a project', async () => {
+    const projectPath = createGitRepo()
+    const app = await createHttpServer(createManager({
+      getProjectStatus: () => ({
+        ...createProjectRecord(),
+        projectPath
+      })
+    }))
+    startedApps.push(app)
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/projects/demo/git/branches'
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toEqual({
+      currentBranch: 'main',
+      branches: ['feature/review', 'main']
     })
   })
 

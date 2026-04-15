@@ -190,6 +190,31 @@ export type TurnStartResponse = {
   }
 }
 
+export type ReviewTarget =
+  | {
+      type: 'uncommittedChanges'
+    }
+  | {
+      type: 'baseBranch'
+      branch: string
+    }
+  | {
+      type: 'commit'
+      sha: string
+      title?: string | null
+    }
+  | {
+      type: 'custom'
+      instructions: string
+    }
+
+export type ReviewStartResponse = {
+  reviewThreadId: string
+  turn: {
+    id: string
+  }
+}
+
 export type ModelListResponse = {
   data?: unknown[]
 }

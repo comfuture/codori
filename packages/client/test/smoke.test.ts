@@ -47,6 +47,7 @@ import {
   encodeProjectIdSegment,
   normalizeProjectIdParam,
   projectStatusMeta,
+  resolveProjectGitBranchesUrl,
   toProjectRoute,
   toProjectThreadRoute
 } from '../shared/codori'
@@ -66,6 +67,18 @@ describe('client package', () => {
       color: 'success',
       label: 'Running'
     })
+  })
+
+  it('routes git branch requests through the correct base path', () => {
+    expect(resolveProjectGitBranchesUrl({
+      projectId: 'team/api',
+      configuredBase: 'https://codori.example.com'
+    })).toBe('/api/codori/projects/team%2Fapi/git/branches')
+
+    expect(resolveProjectGitBranchesUrl({
+      projectId: 'team/api',
+      configuredBase: ''
+    })).toBe('http://127.0.0.1:4310/api/projects/team%2Fapi/git/branches')
   })
 
   it('orders the active project first while preserving alphabetical order for the rest', () => {
