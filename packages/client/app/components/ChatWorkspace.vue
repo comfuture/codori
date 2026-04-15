@@ -2689,7 +2689,7 @@ watch(input, async () => {
             ref="slashDropdownRef"
             role="listbox"
             aria-label="Slash commands"
-            class="absolute bottom-full left-0 z-20 mb-2 w-[90vw] max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-default bg-default/95 shadow-2xl backdrop-blur md:w-[min(50vw,52rem)] md:max-w-[min(50vw,52rem)]"
+            class="absolute bottom-full left-0 z-20 mb-2 w-[90vw] max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-default bg-default/95 shadow-2xl backdrop-blur md:w-[min(50vw,52rem)] md:max-w-[min(50vw,52rem)]"
             @pointerdown="handleSlashDropdownPointerDown"
           >
             <!-- Do not swap this back to a focus-managing listbox/palette. Slash
@@ -2703,7 +2703,7 @@ watch(input, async () => {
                 role="option"
                 :aria-selected="index === slashHighlightIndex"
                 data-slash-command-option=""
-                class="group relative flex cursor-pointer items-start gap-1.5 rounded-xl px-3 py-2.5 text-sm text-highlighted outline-none transition-colors before:absolute before:inset-px before:z-[-1] before:rounded-md"
+                class="group relative flex cursor-pointer items-start gap-1.5 px-3 py-2.5 text-sm text-highlighted outline-none transition-colors before:absolute before:inset-px before:z-[-1] before:rounded-md"
                 :class="index === slashHighlightIndex
                   ? 'before:bg-elevated'
                   : 'hover:before:bg-elevated/60'"
