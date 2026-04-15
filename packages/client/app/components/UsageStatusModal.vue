@@ -187,7 +187,6 @@ onBeforeUnmount(() => {
   <UModal
     :open="open"
     title="Usage status"
-    description="Live Codex quota windows for the current account."
     @update:open="emit('update:open', $event)"
   >
     <template #body>
@@ -223,7 +222,7 @@ onBeforeUnmount(() => {
             :key="card.id"
             class="rounded-lg border border-default bg-elevated/35 p-3 sm:p-4"
           >
-            <div class="mb-3 flex items-start justify-between gap-3">
+            <div class="mb-3 min-w-0">
               <div class="min-w-0">
                 <h3 class="truncate text-sm font-semibold text-highlighted">
                   {{ card.label }}
@@ -234,9 +233,6 @@ onBeforeUnmount(() => {
                 >
                   {{ card.detail }}
                 </p>
-              </div>
-              <div class="rounded-full border border-default px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.18em] text-muted">
-                bucket
               </div>
             </div>
 
