@@ -42,8 +42,7 @@ const pulseClass = 'text-success/35'
       aria-hidden="true"
       class="project-status-pulse pointer-events-none absolute inset-0 rounded-full"
       :class="pulseClass"
-    >
-    </span>
+    />
 
     <span
       class="relative z-10 block size-2 shrink-0 rounded-full ring-4"

@@ -2671,9 +2671,6 @@ watch(input, async () => {
             :input="false"
             :autofocus="false"
             :search-term="activeSlashMatch?.query ?? ''"
-            @entry-focus="preventSlashPaletteEntryFocus"
-            @focusin.capture="handleSlashDropdownFocusIn"
-            @mousedown.prevent
             :ui="{
               root: 'min-h-0 overflow-hidden rounded-2xl border border-default bg-default/95 shadow-2xl backdrop-blur',
               content: 'max-h-72 overflow-y-auto p-2',
@@ -2683,6 +2680,9 @@ watch(input, async () => {
               itemLabel: 'text-sm font-medium',
               itemDescription: 'text-xs leading-5'
             }"
+            @entry-focus="preventSlashPaletteEntryFocus"
+            @focusin.capture="handleSlashDropdownFocusIn"
+            @mousedown.prevent
           />
 
           <UChatPrompt

@@ -80,10 +80,10 @@ const icon = computed(() => {
             : eventData?.kind === 'review.completed'
               ? 'The review turn finished.'
               : eventData?.kind === 'turn.failed'
-            ? eventData.error?.message ?? 'The turn failed.'
-            : eventData?.kind === 'stream.error'
-              ? eventData.message
-              : ''
+                ? eventData.error?.message ?? 'The turn failed.'
+                : eventData?.kind === 'stream.error'
+                  ? eventData.message
+                  : ''
         }}
       </span>
     </template>
