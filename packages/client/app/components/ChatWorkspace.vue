@@ -1,6 +1,14 @@
 <script setup lang="ts">
 import { useRouter, useRuntimeConfig } from '#imports'
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+  type ComponentPublicInstance
+} from 'vue'
 import MessageContent from './MessageContent.vue'
 import ReviewStartDrawer from './ReviewStartDrawer.vue'
 import PendingUserRequestDrawer from './PendingUserRequestDrawer.vue'
@@ -134,7 +142,7 @@ const input = ref('')
 const chatPromptRef = ref<{
   textareaRef?: unknown
 } | null>(null)
-const slashDropdownRef = ref<HTMLElement | null>(null)
+const slashDropdownRef = ref<ComponentPublicInstance | HTMLElement | null>(null)
 const scrollViewport = ref<HTMLElement | null>(null)
 const pinnedToBottom = ref(true)
 const session = useChatSession(props.projectId)
@@ -714,9 +722,19 @@ const focusPromptAt = async (position?: number) => {
   isPromptFocused.value = true
 }
 
+const resolveSlashDropdownElement = () => {
+  const target = slashDropdownRef.value
+  if (target instanceof HTMLElement) {
+    return target
+  }
+
+  const rootElement = target?.$el
+  return rootElement instanceof HTMLElement ? rootElement : null
+}
+
 const shouldRetainPromptFocus = (nextFocused: EventTarget | null) =>
   nextFocused instanceof Node
-  && Boolean(slashDropdownRef.value?.contains(nextFocused))
+  && Boolean(resolveSlashDropdownElement()?.contains(nextFocused))
 
 const handlePromptBlur = (event: FocusEvent) => {
   if (shouldRetainPromptFocus(event.relatedTarget)) {
