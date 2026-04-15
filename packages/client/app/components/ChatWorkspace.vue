@@ -6,8 +6,7 @@ import {
   onBeforeUnmount,
   onMounted,
   ref,
-  watch,
-  type ComponentPublicInstance
+  watch
 } from 'vue'
 import MessageContent from './MessageContent.vue'
 import ReviewStartDrawer from './ReviewStartDrawer.vue'
@@ -26,6 +25,7 @@ import {
   shouldRetrySteerWithTurnStart,
   shouldIgnoreNotificationAfterInterrupt
 } from '../utils/chat-turn-engagement'
+import { isFocusWithinContainer } from '../utils/slash-prompt-focus'
 import { useChatAttachments, type DraftAttachment } from '../composables/useChatAttachments'
 import { usePendingUserRequest } from '../composables/usePendingUserRequest'
 import { useChatSession, type LiveStream, type SubagentPanelState } from '../composables/useChatSession'
@@ -147,7 +147,7 @@ const input = ref('')
 const chatPromptRef = ref<{
   textareaRef?: unknown
 } | null>(null)
-const slashDropdownRef = ref<ComponentPublicInstance | HTMLElement | null>(null)
+const slashDropdownRef = ref<HTMLElement | null>(null)
 const scrollViewport = ref<HTMLElement | null>(null)
 const pinnedToBottom = ref(true)
 const session = useChatSession(props.projectId)
@@ -277,24 +277,6 @@ const slashDropdownOpen = computed(() =>
 const highlightedSlashCommand = computed(() =>
   filteredSlashCommands.value[slashHighlightIndex.value] ?? filteredSlashCommands.value[0] ?? null
 )
-
-const slashPaletteGroups = computed(() => [{
-  id: 'slash-commands',
-  ignoreFilter: true,
-  items: filteredSlashCommands.value.map((command, index) => ({
-    label: `/${command.name}`,
-    description: command.description,
-    icon: command.name === 'review'
-      ? 'i-lucide-search-check'
-      : (command.name === 'usage' || command.name === 'status')
-          ? 'i-lucide-gauge'
-          : 'i-lucide-terminal',
-    active: index === slashHighlightIndex.value,
-    onSelect: () => {
-      void activateSlashCommand(command, command.supportsInlineArgs ? 'complete' : 'execute')
-    }
-  }))
-}])
 
 const reviewBaseBranches = computed(() =>
   reviewBranches.value.filter(branch => branch !== reviewCurrentBranch.value)
@@ -737,23 +719,15 @@ const focusPromptAt = async (position?: number) => {
   isPromptFocused.value = true
 }
 
-const resolveSlashDropdownElement = () => {
-  const target = slashDropdownRef.value
-  if (target instanceof HTMLElement) {
-    return target
-  }
-
-  const rootElement = target?.$el
-  return rootElement instanceof HTMLElement ? rootElement : null
-}
-
-const shouldRetainPromptFocus = (nextFocused: EventTarget | null) =>
-  nextFocused instanceof Node
-  && Boolean(resolveSlashDropdownElement()?.contains(nextFocused))
+const shouldRetainPromptFocus = (nextFocused: EventTarget | null | undefined) =>
+  isFocusWithinContainer(nextFocused, slashDropdownRef.value)
 
 const handlePromptBlur = (event: FocusEvent) => {
+  // Slash suggestions must stay focusless. If focus ever moves into the popup,
+  // the composer stops matching slash commands and the menu collapses while the
+  // textarea still contains `/`. Keep this blur guard aligned with the inert
+  // popup template below.
   if (shouldRetainPromptFocus(event.relatedTarget)) {
-    isPromptFocused.value = true
     void focusPromptAt(promptSelectionStart.value)
     return
   }
@@ -761,16 +735,12 @@ const handlePromptBlur = (event: FocusEvent) => {
   isPromptFocused.value = false
 }
 
-const handleSlashDropdownFocusIn = () => {
-  if (!slashDropdownOpen.value) {
-    return
-  }
-
-  void focusPromptAt(promptSelectionStart.value)
-}
-
-const preventSlashPaletteEntryFocus = (event: CustomEvent) => {
+const handleSlashDropdownPointerDown = (event: PointerEvent) => {
+  // Fundamental rule for slash commands: the popup is only a visual chooser.
+  // Selection happens through the textarea's keyboard handlers, and mouse/touch
+  // clicks must not transfer DOM focus into popup items.
   event.preventDefault()
+  void focusPromptAt(promptSelectionStart.value)
 }
 
 const setComposerError = (messageText: string) => {
@@ -878,6 +848,18 @@ const moveSlashHighlight = (delta: number) => {
   }
 
   slashHighlightIndex.value = nextIndex
+}
+
+const resolveSlashCommandIcon = (command: SlashCommandDefinition) => {
+  if (command.name === 'review') {
+    return 'i-lucide-search-check'
+  }
+
+  if (command.name === 'usage' || command.name === 'status') {
+    return 'i-lucide-gauge'
+  }
+
+  return 'i-lucide-terminal'
 }
 
 const completeSlashCommand = async (command: SlashCommandDefinition) => {
@@ -2766,27 +2748,46 @@ watch(input, async () => {
             Drop images to attach them
           </div>
 
-          <UCommandPalette
+          <div
             v-if="slashDropdownOpen"
             ref="slashDropdownRef"
-            class="absolute bottom-full left-0 z-20 mb-2 w-[90vw] max-w-[calc(100vw-2rem)] md:w-[min(50vw,52rem)] md:max-w-[min(50vw,52rem)]"
-            :groups="slashPaletteGroups"
-            :input="false"
-            :autofocus="false"
-            :search-term="activeSlashMatch?.query ?? ''"
-            :ui="{
-              root: 'min-h-0 overflow-hidden rounded-2xl border border-default bg-default/95 shadow-2xl backdrop-blur',
-              content: 'max-h-72 overflow-y-auto p-2',
-              group: 'space-y-1',
-              item: 'rounded-xl px-3 py-2.5',
-              itemLeadingIcon: 'size-4',
-              itemLabel: 'text-sm font-medium',
-              itemDescription: 'text-xs leading-5'
-            }"
-            @entry-focus="preventSlashPaletteEntryFocus"
-            @focusin.capture="handleSlashDropdownFocusIn"
-            @mousedown.prevent
-          />
+            role="listbox"
+            aria-label="Slash commands"
+            class="absolute bottom-full left-0 z-20 mb-2 w-[90vw] max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-default bg-default/95 shadow-2xl backdrop-blur md:w-[min(50vw,52rem)] md:max-w-[min(50vw,52rem)]"
+            @pointerdown="handleSlashDropdownPointerDown"
+          >
+            <!-- Do not swap this back to a focus-managing listbox/palette. Slash
+                 suggestions are anchored to the textarea selection state; the
+                 popup must remain an inert overlay or the first `/` can move
+                 focus out of the composer and permanently collapse matching. -->
+            <div class="max-h-72 space-y-1 overflow-y-auto p-2">
+              <div
+                v-for="(command, index) in filteredSlashCommands"
+                :key="command.name"
+                role="option"
+                :aria-selected="index === slashHighlightIndex"
+                data-slash-command-option=""
+                class="group relative flex cursor-pointer items-start gap-1.5 rounded-xl px-3 py-2.5 text-sm text-highlighted outline-none transition-colors before:absolute before:inset-px before:z-[-1] before:rounded-md"
+                :class="index === slashHighlightIndex
+                  ? 'before:bg-elevated'
+                  : 'hover:before:bg-elevated/60'"
+                @click="void activateSlashCommand(command, command.supportsInlineArgs ? 'complete' : 'execute')"
+              >
+                <UIcon
+                  :name="resolveSlashCommandIcon(command)"
+                  class="mt-0.5 size-4 shrink-0 text-dimmed group-aria-selected:text-highlighted"
+                />
+                <div class="min-w-0">
+                  <div class="text-sm font-medium">
+                    /{{ command.name }}
+                  </div>
+                  <div class="text-xs leading-5 text-toned">
+                    {{ command.description }}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
 
           <UChatPrompt
             ref="chatPromptRef"
