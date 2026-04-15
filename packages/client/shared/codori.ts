@@ -1,3 +1,5 @@
+import { resolveApiUrl, shouldUseServerProxy } from './network'
+
 export type ProjectRuntimeStatus = 'running' | 'stopped' | 'error'
 
 export type ProjectRecord = {
@@ -38,6 +40,11 @@ export type ServiceUpdateResponse = {
   serviceUpdate: ServiceUpdateStatus
 }
 
+export type ProjectGitBranchesResponse = {
+  currentBranch: string | null
+  branches: string[]
+}
+
 export const normalizeProjectIdParam = (value: string | string[] | undefined) => {
   if (!value) {
     return null
@@ -56,6 +63,19 @@ export const toProjectThreadRoute = (projectId: string, threadId: string) =>
   `/projects/${projectId}/threads/${encodeURIComponent(threadId)}`
 
 export const encodeProjectIdSegment = (projectId: string) => encodeURIComponent(projectId)
+
+export const resolveProjectGitBranchesUrl = (input: {
+  projectId: string
+  configuredBase?: string | null
+}) => {
+  const requestPath = `/projects/${encodeProjectIdSegment(input.projectId)}/git/branches`
+
+  if (shouldUseServerProxy(input.configuredBase)) {
+    return `/api/codori${requestPath}`
+  }
+
+  return resolveApiUrl(requestPath, input.configuredBase)
+}
 
 export const projectStatusMeta = (status: ProjectRuntimeStatus) => {
   switch (status) {

@@ -21,6 +21,7 @@ import {
   resolveProjectAttachmentsDir
 } from './attachment-store.js'
 import { CodoriError } from './errors.js'
+import { listGitBranches } from './git.js'
 import { createRuntimeManager } from './process-manager.js'
 import {
   createServiceUpdateController,
@@ -60,6 +61,11 @@ type ProjectsResponse = {
 
 type ServiceUpdateResponse = {
   serviceUpdate: ServiceUpdateStatus
+}
+
+type ProjectGitBranchesResponse = {
+  currentBranch: string | null
+  branches: string[]
 }
 
 export type HttpServerOptions = {
@@ -308,6 +314,16 @@ export const createHttpServer = async (
     async (request: FastifyRequest<{ Params: { projectId: string } }>): Promise<ProjectResponse> => ({
       project: await resolveValue(manager.getProjectStatus(getProjectIdFromRequest(request.params.projectId)))
     })
+  )
+
+  app.get<{ Params: { projectId: string } }>(
+    '/api/projects/:projectId/git/branches',
+    async (request: FastifyRequest<{ Params: { projectId: string } }>): Promise<ProjectGitBranchesResponse> => {
+      const projectId = getProjectIdFromRequest(request.params.projectId)
+      const project = await resolveValue(manager.getProjectStatus(projectId))
+      await touchProjectActivity(manager, projectId)
+      return await listGitBranches(project.projectPath)
+    }
   )
 
   app.post<{ Params: { projectId: string } }>(
