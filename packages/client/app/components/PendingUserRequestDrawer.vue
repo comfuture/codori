@@ -6,6 +6,7 @@ import {
   buildRequestUserInputResponse,
   type PendingUserRequest
 } from '../../shared/pending-user-request'
+import BottomDrawerShell from './BottomDrawerShell.vue'
 import McpElicitationForm from './pending-request/McpElicitationForm.vue'
 import McpElicitationUrlPrompt from './pending-request/McpElicitationUrlPrompt.vue'
 import RequestUserInputForm from './pending-request/RequestUserInputForm.vue'
@@ -52,58 +53,36 @@ const handleOpenChange = (nextOpen: boolean) => {
 </script>
 
 <template>
-  <UDrawer
+  <BottomDrawerShell
     :open="Boolean(request)"
-    direction="bottom"
-    :handle="true"
-    :ui="{
-      content: 'inset-x-auto right-auto bottom-0 left-1/2 w-[90vw] max-w-[52rem] -translate-x-1/2 rounded-t-2xl rounded-b-none border-x border-t border-default bg-default shadow-2xl md:w-[min(50vw,52rem)]',
-      container: 'gap-0 p-0',
-      handle: 'mt-2 !h-1 !w-10 rounded-full',
-      header: isRequestUserInput ? 'hidden' : 'px-4 pb-1 pt-3 md:px-5',
-      body: isRequestUserInput ? 'px-3 pb-3 pt-3 md:px-4 md:pb-4 md:pt-4' : 'px-4 pb-4 pt-2 md:px-5',
-      footer: 'hidden'
-    }"
+    :hide-header="isRequestUserInput"
+    :title="title"
+    :description="description"
+    :body-class="isRequestUserInput ? 'px-3 pb-3 pt-3 md:px-4 md:pb-4 md:pt-4' : 'px-4 pb-4 pt-2 md:px-5'"
     @update:open="handleOpenChange"
   >
-    <template #header>
-      <div
-        v-if="request && !isRequestUserInput"
-        class="space-y-1.5"
-      >
-        <h2 class="text-sm font-semibold text-highlighted md:text-base">
-          {{ title }}
-        </h2>
-        <p class="text-sm leading-5 text-muted">
-          {{ description }}
-        </p>
-      </div>
-    </template>
+    <RequestUserInputForm
+      v-if="request?.kind === 'requestUserInput'"
+      :key="request.requestId"
+      :request="request"
+      @submit="emit('respond', buildRequestUserInputResponse($event))"
+    />
 
-    <template #body>
-      <RequestUserInputForm
-        v-if="request?.kind === 'requestUserInput'"
-        :key="request.requestId"
-        :request="request"
-        @submit="emit('respond', buildRequestUserInputResponse($event))"
-      />
+    <McpElicitationForm
+      v-else-if="request?.kind === 'mcpElicitationForm'"
+      :key="request.requestId"
+      :request="request"
+      @accept="emit('respond', buildMcpElicitationResponse('accept', $event))"
+      @decline="emit('respond', buildMcpElicitationResponse('decline'))"
+      @cancel="emit('respond', buildMcpElicitationResponse('cancel'))"
+    />
 
-      <McpElicitationForm
-        v-else-if="request?.kind === 'mcpElicitationForm'"
-        :key="request.requestId"
-        :request="request"
-        @accept="emit('respond', buildMcpElicitationResponse('accept', $event))"
-        @decline="emit('respond', buildMcpElicitationResponse('decline'))"
-        @cancel="emit('respond', buildMcpElicitationResponse('cancel'))"
-      />
-
-      <McpElicitationUrlPrompt
-        v-else-if="request?.kind === 'mcpElicitationUrl'"
-        :request="request"
-        @accept="emit('respond', buildMcpElicitationResponse('accept'))"
-        @decline="emit('respond', buildMcpElicitationResponse('decline'))"
-        @cancel="emit('respond', buildMcpElicitationResponse('cancel'))"
-      />
-    </template>
-  </UDrawer>
+    <McpElicitationUrlPrompt
+      v-else-if="request?.kind === 'mcpElicitationUrl'"
+      :request="request"
+      @accept="emit('respond', buildMcpElicitationResponse('accept'))"
+      @decline="emit('respond', buildMcpElicitationResponse('decline'))"
+      @cancel="emit('respond', buildMcpElicitationResponse('cancel'))"
+    />
+  </BottomDrawerShell>
 </template>

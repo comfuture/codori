@@ -135,6 +135,16 @@ export type CodexThreadItem =
       type: 'contextCompaction'
       id: string
     }
+  | {
+      type: 'enteredReviewMode'
+      id: string
+      review: string
+    }
+  | {
+      type: 'exitedReviewMode'
+      id: string
+      review: string
+    }
 
 export type CodexTurn = {
   id: string
@@ -208,11 +218,17 @@ export type ReviewTarget =
       instructions: string
     }
 
+export type ReviewDelivery = 'inline' | 'detached'
+
+export type ReviewStartParams = {
+  threadId: string
+  delivery?: ReviewDelivery
+  target: ReviewTarget
+}
+
 export type ReviewStartResponse = {
   reviewThreadId: string
-  turn: {
-    id: string
-  }
+  turn: CodexTurn
 }
 
 export type ModelListResponse = {

@@ -19,11 +19,20 @@ const shouldRenderEvent = computed(() => {
     return false
   }
 
-  return event.kind === 'turn.failed' || event.kind === 'stream.error'
+  return (
+    event.kind === 'turn.failed'
+    || event.kind === 'stream.error'
+    || event.kind === 'review.started'
+    || event.kind === 'review.completed'
+  )
 })
 
 const title = computed(() => {
   switch (eventData.value?.kind) {
+    case 'review.started':
+      return 'Review started'
+    case 'review.completed':
+      return 'Review completed'
     case 'turn.failed':
       return 'Turn failed'
     case 'stream.error':
@@ -32,20 +41,45 @@ const title = computed(() => {
       return 'Event'
   }
 })
+const color = computed(() => {
+  switch (eventData.value?.kind) {
+    case 'review.completed':
+      return 'success'
+    case 'review.started':
+      return 'primary'
+    default:
+      return 'error'
+  }
+})
+
+const icon = computed(() => {
+  switch (eventData.value?.kind) {
+    case 'review.completed':
+      return 'i-lucide-badge-check'
+    case 'review.started':
+      return 'i-lucide-search-check'
+    default:
+      return 'i-lucide-circle-alert'
+  }
+})
 </script>
 
 <template>
   <UAlert
     v-if="shouldRenderEvent"
-    color="error"
+    :color="color"
     variant="soft"
-    icon="i-lucide-circle-alert"
+    :icon="icon"
     :title="title"
   >
     <template #description>
       <span class="text-sm">
         {{
-          eventData?.kind === 'turn.failed'
+          eventData?.kind === 'review.started'
+            ? eventData.summary ?? 'Codex is reviewing the selected diff.'
+            : eventData?.kind === 'review.completed'
+              ? 'The review turn finished.'
+              : eventData?.kind === 'turn.failed'
             ? eventData.error?.message ?? 'The turn failed.'
             : eventData?.kind === 'stream.error'
               ? eventData.message

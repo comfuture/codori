@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { useRouter } from '#imports'
+import { useRouter, useRuntimeConfig } from '#imports'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import MessageContent from './MessageContent.vue'
+import ReviewStartDrawer from './ReviewStartDrawer.vue'
 import PendingUserRequestDrawer from './PendingUserRequestDrawer.vue'
 import {
   reconcileOptimisticUserMessage,
@@ -48,6 +49,9 @@ import {
   type CodexRpcNotification,
   type CodexThread,
   type CodexThreadItem,
+  type ReviewStartParams,
+  type ReviewStartResponse,
+  type ReviewTarget,
   type ThreadReadResponse,
   type ThreadResumeResponse,
   type ThreadStartResponse,
@@ -69,7 +73,19 @@ import {
   visibleModelOptions,
   type ReasoningEffort
 } from '~~/shared/chat-prompt-controls'
-import { toProjectThreadRoute } from '~~/shared/codori'
+import {
+  resolveProjectGitBranchesUrl,
+  toProjectThreadRoute,
+  type ProjectGitBranchesResponse
+} from '~~/shared/codori'
+import {
+  filterSlashCommands,
+  findActiveSlashCommand,
+  parseSubmittedSlashCommand,
+  SLASH_COMMANDS,
+  toSlashCommandCompletion,
+  type SlashCommandDefinition
+} from '~~/shared/slash-commands'
 
 const props = defineProps<{
   projectId: string
@@ -77,6 +93,7 @@ const props = defineProps<{
 }>()
 
 const router = useRouter()
+const runtimeConfig = useRuntimeConfig()
 const { getClient } = useRpc()
 const {
   loaded,
@@ -109,6 +126,9 @@ const {
   uploadAttachments
 } = useChatAttachments(props.projectId)
 const input = ref('')
+const chatPromptRef = ref<{
+  textareaRef?: unknown
+} | null>(null)
 const scrollViewport = ref<HTMLElement | null>(null)
 const pinnedToBottom = ref(true)
 const session = useChatSession(props.projectId)
@@ -145,10 +165,23 @@ const submitError = computed(() => composerError.value ? new Error(composerError
 const interruptRequested = ref(false)
 const awaitingAssistantOutput = ref(false)
 const sendMessageLocked = ref(false)
+const reviewStartPending = ref(false)
+const promptSelectionStart = ref(0)
+const promptSelectionEnd = ref(0)
+const isPromptFocused = ref(false)
+const slashHighlightIndex = ref(0)
+const reviewDrawerOpen = ref(false)
+const reviewDrawerMode = ref<'target' | 'branch'>('target')
+const reviewDrawerCommandText = ref('/review')
+const reviewBranches = ref<string[]>([])
+const reviewCurrentBranch = ref<string | null>(null)
+const reviewBranchesLoading = ref(false)
+const reviewBranchesError = ref<string | null>(null)
 const isBusy = computed(() =>
   status.value === 'submitted'
   || status.value === 'streaming'
   || isUploading.value
+  || reviewStartPending.value
 )
 const hasDraftContent = computed(() =>
   input.value.trim().length > 0
@@ -158,6 +191,7 @@ const isComposerDisabled = computed(() =>
   isUploading.value
   || interruptRequested.value
   || hasPendingRequest.value
+  || reviewStartPending.value
 )
 const composerPlaceholder = computed(() =>
   hasPendingRequest.value
@@ -180,6 +214,50 @@ const showWelcomeState = computed(() =>
   && !activeThreadId.value
   && messages.value.length === 0
   && !isBusy.value
+)
+
+const slashCommands = computed(() =>
+  SLASH_COMMANDS.filter(() => !hasPendingRequest.value)
+)
+
+const activeSlashMatch = computed(() =>
+  isPromptFocused.value
+    ? findActiveSlashCommand(input.value, promptSelectionStart.value, promptSelectionEnd.value)
+    : null
+)
+
+const filteredSlashCommands = computed(() =>
+  activeSlashMatch.value
+    ? filterSlashCommands(slashCommands.value, activeSlashMatch.value.query)
+    : []
+)
+
+const slashDropdownOpen = computed(() =>
+  !reviewDrawerOpen.value
+  && Boolean(activeSlashMatch.value)
+  && filteredSlashCommands.value.length > 0
+)
+
+const highlightedSlashCommand = computed(() =>
+  filteredSlashCommands.value[slashHighlightIndex.value] ?? filteredSlashCommands.value[0] ?? null
+)
+
+const slashPaletteGroups = computed(() => [{
+  id: 'slash-commands',
+  ignoreFilter: true,
+  items: filteredSlashCommands.value.map((command, index) => ({
+    label: `/${command.name}`,
+    description: command.description,
+    icon: command.name === 'review' ? 'i-lucide-search-check' : 'i-lucide-terminal',
+    active: index === slashHighlightIndex.value,
+    onSelect: () => {
+      void activateSlashCommand(command, command.supportsInlineArgs ? 'complete' : 'execute')
+    }
+  }))
+}])
+
+const reviewBaseBranches = computed(() =>
+  reviewBranches.value.filter(branch => branch !== reviewCurrentBranch.value)
 )
 
 const starterPrompts = computed(() => {
@@ -561,6 +639,238 @@ const formatAttachmentSize = (size: number) => {
   }
 
   return `${size} B`
+}
+
+const isTextareaElement = (value: unknown): value is HTMLTextAreaElement =>
+  typeof HTMLTextAreaElement !== 'undefined'
+  && value instanceof HTMLTextAreaElement
+
+const getPromptTextarea = () => {
+  const exposed = chatPromptRef.value?.textareaRef
+  if (isTextareaElement(exposed)) {
+    return exposed
+  }
+
+  if (
+    typeof exposed === 'object'
+    && exposed !== null
+    && 'value' in exposed
+    && isTextareaElement(exposed.value)
+  ) {
+    return exposed.value
+  }
+
+  return null
+}
+
+const syncPromptSelectionFromDom = () => {
+  const textarea = getPromptTextarea()
+  promptSelectionStart.value = textarea?.selectionStart ?? input.value.length
+  promptSelectionEnd.value = textarea?.selectionEnd ?? input.value.length
+}
+
+const focusPromptAt = async (position?: number) => {
+  await nextTick()
+  const textarea = getPromptTextarea()
+  if (!textarea) {
+    return
+  }
+
+  const nextPosition = position ?? textarea.value.length
+  textarea.focus()
+  textarea.setSelectionRange(nextPosition, nextPosition)
+  promptSelectionStart.value = nextPosition
+  promptSelectionEnd.value = nextPosition
+  isPromptFocused.value = true
+}
+
+const setComposerError = (messageText: string) => {
+  markAwaitingAssistantOutput(false)
+  error.value = messageText
+  status.value = 'error'
+}
+
+const resetReviewDrawerState = () => {
+  reviewDrawerMode.value = 'target'
+  reviewDrawerCommandText.value = '/review'
+  reviewBranchesLoading.value = false
+  reviewBranchesError.value = null
+}
+
+const closeReviewDrawer = () => {
+  reviewDrawerOpen.value = false
+  resetReviewDrawerState()
+}
+
+const openReviewDrawer = (commandText = '/review') => {
+  reviewDrawerCommandText.value = commandText
+  reviewDrawerMode.value = 'target'
+  reviewBranchesError.value = null
+  reviewDrawerOpen.value = true
+}
+
+const moveSlashHighlight = (delta: number) => {
+  if (!filteredSlashCommands.value.length) {
+    slashHighlightIndex.value = 0
+    return
+  }
+
+  const maxIndex = filteredSlashCommands.value.length - 1
+  const nextIndex = slashHighlightIndex.value + delta
+  if (nextIndex < 0) {
+    slashHighlightIndex.value = maxIndex
+    return
+  }
+
+  if (nextIndex > maxIndex) {
+    slashHighlightIndex.value = 0
+    return
+  }
+
+  slashHighlightIndex.value = nextIndex
+}
+
+const completeSlashCommand = async (command: SlashCommandDefinition) => {
+  const match = activeSlashMatch.value
+  if (!match) {
+    return
+  }
+
+  const completion = toSlashCommandCompletion(command)
+  input.value = `${input.value.slice(0, match.start)}${completion}${input.value.slice(match.end)}`
+  await focusPromptAt(match.start + completion.length)
+}
+
+const fetchProjectGitBranches = async () => {
+  reviewBranchesLoading.value = true
+  reviewBranchesError.value = null
+
+  try {
+    const response = await fetch(resolveProjectGitBranchesUrl({
+      projectId: props.projectId,
+      configuredBase: String(runtimeConfig.public.serverBase ?? '')
+    }))
+
+    const body = await response.json() as ProjectGitBranchesResponse | { error?: { message?: string } }
+    if (!response.ok) {
+      throw new Error(body && typeof body === 'object' && 'error' in body
+        ? body.error?.message ?? 'Failed to load local branches.'
+        : 'Failed to load local branches.')
+    }
+
+    const result = body as ProjectGitBranchesResponse
+    reviewCurrentBranch.value = result.currentBranch
+    reviewBranches.value = result.branches
+  } finally {
+    reviewBranchesLoading.value = false
+  }
+}
+
+const openBaseBranchPicker = async () => {
+  reviewDrawerMode.value = 'branch'
+
+  try {
+    await fetchProjectGitBranches()
+    if (!reviewBaseBranches.value.length) {
+      reviewBranchesError.value = 'No local base branches are available to compare against.'
+    }
+  } catch (caughtError) {
+    reviewBranchesError.value = caughtError instanceof Error ? caughtError.message : String(caughtError)
+  }
+}
+
+const startReview = async (target: ReviewTarget) => {
+  if (hasPendingRequest.value || isBusy.value) {
+    setComposerError('Review can only start when the current thread is idle.')
+    return
+  }
+
+  reviewStartPending.value = true
+  const draftText = reviewDrawerCommandText.value
+  const submittedAttachments = attachments.value.slice()
+  input.value = ''
+  clearAttachments({ revoke: false })
+
+  try {
+    const client = getClient(props.projectId)
+    const liveStream = await ensurePendingLiveStream()
+    error.value = null
+    status.value = 'submitted'
+    tokenUsage.value = null
+    markAwaitingAssistantOutput(true)
+
+    const response = await client.request<ReviewStartResponse>('review/start', {
+      threadId: liveStream.threadId,
+      delivery: 'inline',
+      target
+    } satisfies ReviewStartParams)
+
+    setLiveStreamTurnId(liveStream, response.turn.id)
+    replayBufferedNotifications(liveStream)
+    closeReviewDrawer()
+  } catch (caughtError) {
+    restoreDraftIfPristine(draftText, submittedAttachments)
+    setComposerError(caughtError instanceof Error ? caughtError.message : String(caughtError))
+  } finally {
+    reviewStartPending.value = false
+  }
+}
+
+const handleSlashCommandSubmission = async (
+  rawText: string,
+  submittedAttachments: DraftAttachment[]
+) => {
+  const slashCommand = parseSubmittedSlashCommand(rawText)
+  if (!slashCommand) {
+    return false
+  }
+
+  const command = slashCommands.value.find(candidate => candidate.name === slashCommand.name)
+  if (!command) {
+    return false
+  }
+
+  if (submittedAttachments.length > 0) {
+    setComposerError('Slash commands do not support image attachments yet.')
+    return true
+  }
+
+  if (!slashCommand.isBare) {
+    setComposerError('`/review` currently only supports the bare command. Choose the diff target in the review drawer.')
+    return true
+  }
+
+  error.value = null
+  status.value = 'ready'
+  openReviewDrawer(`/${command.name}`)
+  await focusPromptAt(rawText.trim().length)
+  return true
+}
+
+const activateSlashCommand = async (
+  command: SlashCommandDefinition,
+  mode: 'complete' | 'execute'
+) => {
+  if (mode === 'complete') {
+    await completeSlashCommand(command)
+    return
+  }
+
+  await handleSlashCommandSubmission(`/${command.name}`, attachments.value.slice())
+}
+
+const handleReviewDrawerOpenChange = (open: boolean) => {
+  if (open) {
+    reviewDrawerOpen.value = true
+    return
+  }
+
+  closeReviewDrawer()
+}
+
+const handleReviewDrawerBack = () => {
+  reviewDrawerMode.value = 'target'
+  reviewBranchesError.value = null
 }
 
 const removeOptimisticMessage = (messageId: string) => {
@@ -1794,10 +2104,16 @@ const sendMessage = async () => {
   }
 
   sendMessageLocked.value = true
-  const text = input.value.trim()
+  const rawText = input.value
+  const text = rawText.trim()
   const submittedAttachments = attachments.value.slice()
 
   if (!text && submittedAttachments.length === 0) {
+    sendMessageLocked.value = false
+    return
+  }
+
+  if (await handleSlashCommandSubmission(rawText, submittedAttachments)) {
     sendMessageLocked.value = false
     return
   }
@@ -1961,9 +2277,56 @@ const respondToPendingRequest = (response: unknown) => {
   resolveCurrentRequest(response)
 }
 
+const onPromptKeydown = (event: KeyboardEvent) => {
+  if (!slashDropdownOpen.value) {
+    return
+  }
+
+  if (event.key === 'ArrowDown') {
+    event.preventDefault()
+    moveSlashHighlight(1)
+    return
+  }
+
+  if (event.key === 'ArrowUp') {
+    event.preventDefault()
+    moveSlashHighlight(-1)
+    return
+  }
+
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    isPromptFocused.value = false
+    return
+  }
+
+  if (event.key === ' ') {
+    const command = highlightedSlashCommand.value
+    if (!command) {
+      return
+    }
+
+    event.preventDefault()
+    void activateSlashCommand(command, 'complete')
+  }
+}
+
 const onPromptEnter = (event: KeyboardEvent) => {
   if (!shouldSubmit(event)) {
     return
+  }
+
+  if (slashDropdownOpen.value) {
+    const command = highlightedSlashCommand.value
+    if (command) {
+      event.preventDefault()
+      const isExactMatch = activeSlashMatch.value?.query === command.name
+      const action = isExactMatch && command.executeOnEnter && !command.supportsInlineArgs
+        ? 'execute'
+        : 'complete'
+      void activateSlashCommand(command, action)
+      return
+    }
   }
 
   event.preventDefault()
@@ -2037,6 +2400,17 @@ watch(status, (nextStatus, previousStatus) => {
   void scheduleScrollToBottom(nextStatus === 'streaming' ? 'auto' : 'smooth')
 }, { flush: 'post' })
 
+watch(filteredSlashCommands, (commands) => {
+  if (!commands.length) {
+    slashHighlightIndex.value = 0
+    return
+  }
+
+  if (slashHighlightIndex.value >= commands.length) {
+    slashHighlightIndex.value = 0
+  }
+}, { flush: 'sync' })
+
 watch([selectedModel, availableModels], () => {
   const nextSelection = coercePromptSelection(effectiveModelList.value, selectedModel.value, selectedEffort.value)
   if (selectedModel.value !== nextSelection.model) {
@@ -2048,6 +2422,11 @@ watch([selectedModel, availableModels], () => {
     selectedEffort.value = nextSelection.effort
   }
 }, { flush: 'sync' })
+
+watch(input, async () => {
+  await nextTick()
+  syncPromptSelectionFromDom()
+}, { flush: 'post' })
 </script>
 
 <template>
@@ -2168,14 +2547,39 @@ watch([selectedModel, availableModels], () => {
             Drop images to attach them
           </div>
 
+          <UCommandPalette
+            v-if="slashDropdownOpen"
+            :groups="slashPaletteGroups"
+            :input="false"
+            :search-term="activeSlashMatch?.query ?? ''"
+            class="absolute inset-x-0 bottom-full z-20 mb-2 overflow-hidden rounded-2xl border border-default bg-default/95 shadow-2xl backdrop-blur"
+            :ui="{
+              root: 'min-h-0',
+              content: 'max-h-72 overflow-y-auto p-2',
+              group: 'space-y-1',
+              item: 'rounded-xl px-3 py-2.5',
+              itemLeadingIcon: 'size-4',
+              itemLabel: 'text-sm font-medium',
+              itemDescription: 'text-xs leading-5'
+            }"
+          />
+
           <UChatPrompt
+            ref="chatPromptRef"
             v-model="input"
             :placeholder="composerPlaceholder"
             :error="submitError"
             :disabled="isComposerDisabled"
             autoresize
             @submit.prevent="sendMessage"
+            @keydown="onPromptKeydown"
             @keydown.enter="onPromptEnter"
+            @input="syncPromptSelectionFromDom"
+            @click="syncPromptSelectionFromDom"
+            @keyup="syncPromptSelectionFromDom"
+            @focus="isPromptFocused = true; syncPromptSelectionFromDom()"
+            @blur="isPromptFocused = false"
+            @select="syncPromptSelectionFromDom"
             @compositionstart="onCompositionStart"
             @compositionend="onCompositionEnd"
             @paste="onPaste"
@@ -2391,5 +2795,19 @@ watch([selectedModel, availableModels], () => {
   <PendingUserRequestDrawer
     :request="pendingRequest"
     @respond="respondToPendingRequest"
+  />
+
+  <ReviewStartDrawer
+    :open="reviewDrawerOpen"
+    :mode="reviewDrawerMode"
+    :branches="reviewBaseBranches"
+    :current-branch="reviewCurrentBranch"
+    :loading="reviewBranchesLoading"
+    :error="reviewBranchesError"
+    @update:open="handleReviewDrawerOpenChange"
+    @choose-current-changes="startReview({ type: 'uncommittedChanges' })"
+    @choose-base-branch-mode="openBaseBranchPicker"
+    @choose-base-branch="(branch) => startReview({ type: 'baseBranch', branch })"
+    @back="handleReviewDrawerBack"
   />
 </template>
