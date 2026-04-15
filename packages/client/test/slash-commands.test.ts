@@ -30,9 +30,12 @@ describe('slash command helpers', () => {
   })
 
   it('filters available commands by prefix and formats completion text', () => {
-    expect(filterSlashCommands(SLASH_COMMANDS, '')).toHaveLength(1)
+    expect(filterSlashCommands(SLASH_COMMANDS, '')).toHaveLength(3)
     expect(filterSlashCommands(SLASH_COMMANDS, 're').map(command => command.name)).toEqual(['review'])
+    expect(filterSlashCommands(SLASH_COMMANDS, 'us').map(command => command.name)).toEqual(['usage'])
+    expect(filterSlashCommands(SLASH_COMMANDS, 'st').map(command => command.name)).toEqual(['status'])
     expect(toSlashCommandCompletion(SLASH_COMMANDS[0]!)).toBe('/review ')
+    expect(toSlashCommandCompletion(SLASH_COMMANDS[1]!)).toBe('/usage ')
   })
 
   it('parses submitted slash commands and inline args', () => {
@@ -46,6 +49,18 @@ describe('slash command helpers', () => {
       name: 'review',
       args: 'compare this',
       isBare: false
+    })
+
+    expect(parseSubmittedSlashCommand('/usage')).toEqual({
+      name: 'usage',
+      args: '',
+      isBare: true
+    })
+
+    expect(parseSubmittedSlashCommand('/status')).toEqual({
+      name: 'status',
+      args: '',
+      isBare: true
     })
 
     expect(parseSubmittedSlashCommand('review')).toBeNull()
