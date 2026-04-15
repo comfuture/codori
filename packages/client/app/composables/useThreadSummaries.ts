@@ -23,8 +23,34 @@ type UseThreadSummariesResult = ThreadSummariesState & {
 
 const states = new Map<string, ThreadSummariesState>()
 
+export const normalizeThreadTitleCandidate = (value: string | null | undefined) => {
+  const raw = value?.trim() ?? ''
+  if (!raw) {
+    return ''
+  }
+
+  const stripped = raw
+    .replace(/<\/?[a-z_]+>/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  if (!stripped) {
+    return ''
+  }
+
+  if (
+    /<(?:user_action|context)>/i.test(raw)
+    || /user initiated a review task/i.test(stripped)
+    || /review output from reviewer mode/i.test(stripped)
+  ) {
+    return 'Code Review'
+  }
+
+  return stripped
+}
+
 export const resolveThreadSummaryTitle = (thread: Pick<CodexThread, 'id' | 'name' | 'preview'>) => {
-  const nextTitle = thread.name?.trim() || thread.preview.trim()
+  const nextTitle = normalizeThreadTitleCandidate(thread.name) || normalizeThreadTitleCandidate(thread.preview)
   return nextTitle || `Thread ${thread.id}`
 }
 
@@ -41,7 +67,7 @@ export const renameThreadSummary = (
     updatedAt?: number
   }
 ) => {
-  const nextTitle = input.title.trim()
+  const nextTitle = normalizeThreadTitleCandidate(input.title)
   if (!nextTitle) {
     return threads
   }

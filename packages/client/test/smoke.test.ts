@@ -5,6 +5,7 @@ import {
   removePendingUserMessageId,
   resolvePromptSubmitStatus,
   resolveTurnSubmissionMethod,
+  shouldAdvanceLiveStreamTurn,
   shouldApplyNotificationToCurrentTurn,
   shouldSubmitViaTurnSteer,
   shouldAwaitThreadHydration,
@@ -51,6 +52,7 @@ import {
   toProjectRoute,
   toProjectThreadRoute
 } from '../shared/codori'
+import { normalizeThreadTitleCandidate, resolveThreadSummaryTitle } from '../app/composables/useThreadSummaries'
 import { sortSidebarProjects } from '../app/utils/project-sidebar-order'
 import { resolveApiUrl, resolveWsBase, shouldUseServerProxy } from '../shared/network'
 
@@ -79,6 +81,15 @@ describe('client package', () => {
       projectId: 'team/api',
       configuredBase: ''
     })).toBe('http://127.0.0.1:4310/api/projects/team%2Fapi/git/branches')
+  })
+
+  it('normalizes structured review previews into a stable thread title', () => {
+    expect(normalizeThreadTitleCandidate("<user_action><context>User initiated a review task. Here's the full review output from reviewer mode...</context></user_action>")).toBe('Code Review')
+    expect(resolveThreadSummaryTitle({
+      id: 'thread-1',
+      name: null,
+      preview: "<user_action><context>User initiated a review task. Here's the full review output from reviewer mode...</context></user_action>"
+    })).toBe('Code Review')
   })
 
   it('orders the active project first while preserving alphabetical order for the rest', () => {
@@ -436,6 +447,25 @@ describe('client package', () => {
       liveStreamTurnId: 'turn-1',
       notificationMethod: 'item/agentMessage/delta',
       notificationTurnId: 'turn-1'
+    })).toBe(true)
+  })
+
+  it('keeps a locked review turn pinned when unrelated turns start', () => {
+    expect(shouldApplyNotificationToCurrentTurn({
+      liveStreamTurnId: 'turn-1',
+      lockedTurnId: 'turn-1',
+      notificationMethod: 'item/reasoning/textDelta',
+      notificationTurnId: 'turn-1'
+    })).toBe(true)
+
+    expect(shouldAdvanceLiveStreamTurn({
+      lockedTurnId: 'turn-1',
+      nextTurnId: 'turn-2'
+    })).toBe(false)
+
+    expect(shouldAdvanceLiveStreamTurn({
+      lockedTurnId: 'turn-1',
+      nextTurnId: 'turn-1'
     })).toBe(true)
   })
 

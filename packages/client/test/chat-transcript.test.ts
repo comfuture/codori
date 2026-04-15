@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   itemToMessages,
+  threadToMessages,
   replaceStreamingMessage,
   upsertStreamingMessage,
   type ChatMessage
@@ -140,7 +141,7 @@ describe('chat transcript stability', () => {
       id: 'review-1',
       review: 'Reviewing current changes'
     })).toEqual([{
-      id: 'review-1',
+      id: 'review-1-review-started',
       role: 'system',
       parts: [{
         type: 'data-thread-event',
@@ -156,13 +157,76 @@ describe('chat transcript stability', () => {
       id: 'review-1',
       review: 'Final review output'
     })).toEqual([{
-      id: 'review-1',
+      id: 'review-1-review-completed',
       role: 'system',
       parts: [{
         type: 'data-thread-event',
         data: {
           kind: 'review.completed'
         }
+      }]
+    }, {
+      id: 'review-1-review-output',
+      role: 'assistant',
+      parts: [{
+        type: 'text',
+        text: 'Final review output',
+        state: 'done'
+      }]
+    }])
+  })
+
+  it('hides the synthetic review bootstrap user message when hydrating a thread', () => {
+    expect(threadToMessages({
+      id: 'thread-1',
+      preview: '',
+      cwd: '/tmp',
+      createdAt: 0,
+      updatedAt: 0,
+      name: null,
+      turns: [{
+        id: 'turn-1',
+        status: 'completed',
+        error: null,
+        items: [{
+          type: 'userMessage',
+          id: 'turn-1',
+          content: [{
+            type: 'text',
+            text: "changes against 'main'",
+            text_elements: []
+          }]
+        }, {
+          type: 'enteredReviewMode',
+          id: 'turn-1',
+          review: "changes against 'main'"
+        }, {
+          type: 'userMessage',
+          id: 'user-2',
+          content: [{
+            type: 'text',
+            text: 'Full review instructions',
+            text_elements: []
+          }]
+        }]
+      }]
+    })).toEqual<ChatMessage[]>([{
+      id: 'turn-1-review-started',
+      role: 'system',
+      parts: [{
+        type: 'data-thread-event',
+        data: {
+          kind: 'review.started',
+          summary: "changes against 'main'"
+        }
+      }]
+    }, {
+      id: 'user-2',
+      role: 'user',
+      parts: [{
+        type: 'text',
+        text: 'Full review instructions',
+        state: 'done'
       }]
     }])
   })

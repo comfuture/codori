@@ -1,4 +1,4 @@
-import type { CodexThread, CodexThreadItem, CodexUserInput } from './codex-rpc'
+import type { CodexThread, CodexThreadItem, CodexTurn, CodexUserInput } from './codex-rpc'
 
 export const EVENT_PART = 'data-thread-event' as const
 export const ITEM_PART = 'data-thread-item' as const
@@ -168,6 +168,29 @@ const userInputToParts = (input: CodexUserInput): ChatPart[] => {
   }]
 }
 
+const getUserMessageText = (item: Extract<CodexThreadItem, { type: 'userMessage' }>) =>
+  item.content
+    .filter((input): input is Extract<CodexUserInput, { type: 'text' }> => input.type === 'text')
+    .map(input => input.text.trim())
+    .filter(Boolean)
+    .join('\n')
+
+const shouldHideReviewBootstrapUserMessage = (
+  item: Extract<CodexThreadItem, { type: 'userMessage' }>,
+  turn: CodexTurn
+) => {
+  const reviewLifecycle = turn.items.find((candidate): candidate is Extract<CodexThreadItem, { type: 'enteredReviewMode' | 'exitedReviewMode' }> =>
+    (candidate.type === 'enteredReviewMode' || candidate.type === 'exitedReviewMode')
+    && candidate.id === item.id
+  )
+
+  if (!reviewLifecycle) {
+    return false
+  }
+
+  return getUserMessageText(item) === reviewLifecycle.review.trim()
+}
+
 export const itemToMessages = (item: CodexThreadItem): ChatMessage[] => {
   switch (item.type) {
     case 'userMessage':
@@ -309,7 +332,7 @@ export const itemToMessages = (item: CodexThreadItem): ChatMessage[] => {
       }]
     case 'enteredReviewMode':
       return [{
-        id: item.id,
+        id: `${item.id}-review-started`,
         role: 'system',
         parts: [{
           type: EVENT_PART,
@@ -321,13 +344,21 @@ export const itemToMessages = (item: CodexThreadItem): ChatMessage[] => {
       }]
     case 'exitedReviewMode': {
       return [{
-        id: item.id,
+        id: `${item.id}-review-completed`,
         role: 'system',
         parts: [{
           type: EVENT_PART,
           data: {
             kind: 'review.completed'
           }
+        }]
+      }, {
+        id: `${item.id}-review-output`,
+        role: 'assistant',
+        parts: [{
+          type: 'text',
+          text: item.review,
+          state: 'done'
         }]
       }]
     }
@@ -337,7 +368,15 @@ export const itemToMessages = (item: CodexThreadItem): ChatMessage[] => {
 }
 
 export const threadToMessages = (thread: CodexThread) =>
-  thread.turns.flatMap(turn => turn.items.flatMap(item => itemToMessages(item)))
+  thread.turns.flatMap((turn) =>
+    turn.items.flatMap((item) => {
+      if (item.type === 'userMessage' && shouldHideReviewBootstrapUserMessage(item, turn)) {
+        return []
+      }
+
+      return itemToMessages(item)
+    })
+  )
 
 export const eventToMessage = (id: string, data: ThreadEventData): ChatMessage => ({
   id,

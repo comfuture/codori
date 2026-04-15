@@ -151,4 +151,19 @@ describe('review start drawer', () => {
 
     expect(wrapper.emitted('chooseBaseBranch')?.[0]?.[0]).toBe('release')
   })
+
+  it('does not emit selections while submitting', async () => {
+    const wrapper = mountDrawer({
+      open: true,
+      mode: 'target',
+      submitting: true
+    })
+
+    const currentChangesButton = wrapper.findAll('button').find(button => button.text().includes('Review current changes'))
+    expect(currentChangesButton).toBeTruthy()
+
+    await currentChangesButton!.trigger('click')
+
+    expect(wrapper.emitted('chooseCurrentChanges')).toBeUndefined()
+  })
 })

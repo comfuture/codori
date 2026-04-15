@@ -18,6 +18,7 @@ export type LiveStreamTurnIdWaiter = {
 export type LiveStream = {
   threadId: string
   turnId: string | null
+  lockedTurnId: string | null
   bufferedNotifications: CodexRpcNotification[]
   observedSubagentThreadIds: Set<string>
   pendingUserMessageIds: string[]

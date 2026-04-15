@@ -8,6 +8,7 @@ const props = withDefaults(defineProps<{
   branches?: string[]
   currentBranch?: string | null
   loading?: boolean
+  submitting?: boolean
   error?: string | null
 }>(), {
   open: false,
@@ -15,6 +16,7 @@ const props = withDefaults(defineProps<{
   branches: () => [],
   currentBranch: null,
   loading: false,
+  submitting: false,
   error: null
 })
 
@@ -55,6 +57,7 @@ const branchGroups = computed(() => [{
   items: filteredBranches.value.map(branch => ({
     label: branch,
     description: props.currentBranch ? `${props.currentBranch} -> ${branch}` : 'Compare against this branch.',
+    disabled: props.loading || props.submitting,
     onSelect: () => emit('chooseBaseBranch', branch)
   }))
 }])
@@ -86,6 +89,7 @@ const description = computed(() =>
     >
       <button
         type="button"
+        :disabled="submitting"
         class="flex w-full items-start justify-between gap-4 rounded-2xl border border-default bg-elevated/35 px-4 py-4 text-left transition hover:border-primary/30 hover:bg-elevated/55"
         @click="emit('chooseCurrentChanges')"
       >
@@ -105,6 +109,7 @@ const description = computed(() =>
 
       <button
         type="button"
+        :disabled="submitting"
         class="flex w-full items-start justify-between gap-4 rounded-2xl border border-default bg-elevated/35 px-4 py-4 text-left transition hover:border-primary/30 hover:bg-elevated/55"
         @click="emit('chooseBaseBranchMode')"
       >
@@ -158,7 +163,8 @@ const description = computed(() =>
       <UCommandPalette
         v-model:search-term="branchSearch"
         :groups="branchGroups"
-        :loading="loading"
+        :loading="loading || submitting"
+        :disabled="submitting"
         placeholder="Search local branches"
         class="rounded-2xl border border-default bg-default/70"
         :ui="{

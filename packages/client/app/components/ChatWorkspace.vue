@@ -10,6 +10,7 @@ import {
   removePendingUserMessageId,
   resolvePromptSubmitStatus,
   resolveTurnSubmissionMethod,
+  shouldAdvanceLiveStreamTurn,
   shouldApplyNotificationToCurrentTurn,
   shouldSubmitViaTurnSteer,
   shouldAwaitThreadHydration,
@@ -22,7 +23,11 @@ import { useChatSession, type LiveStream, type SubagentPanelState } from '../com
 import { useProjects } from '../composables/useProjects'
 import { useRpc } from '../composables/useRpc'
 import { useChatSubmitGuard } from '../composables/useChatSubmitGuard'
-import { resolveThreadSummaryTitle, useThreadSummaries } from '../composables/useThreadSummaries'
+import {
+  normalizeThreadTitleCandidate,
+  resolveThreadSummaryTitle,
+  useThreadSummaries
+} from '../composables/useThreadSummaries'
 import { resolveChatMessagesStatus, shouldAwaitAssistantOutput } from '../utils/chat-messages-status'
 import {
   ITEM_PART,
@@ -129,6 +134,7 @@ const input = ref('')
 const chatPromptRef = ref<{
   textareaRef?: unknown
 } | null>(null)
+const slashDropdownRef = ref<HTMLElement | null>(null)
 const scrollViewport = ref<HTMLElement | null>(null)
 const pinnedToBottom = ref(true)
 const session = useChatSession(props.projectId)
@@ -169,6 +175,7 @@ const reviewStartPending = ref(false)
 const promptSelectionStart = ref(0)
 const promptSelectionEnd = ref(0)
 const isPromptFocused = ref(false)
+const dismissedSlashMatchKey = ref<string | null>(null)
 const slashHighlightIndex = ref(0)
 const reviewDrawerOpen = ref(false)
 const reviewDrawerMode = ref<'target' | 'branch'>('target')
@@ -226,6 +233,15 @@ const activeSlashMatch = computed(() =>
     : null
 )
 
+const activeSlashMatchKey = computed(() => {
+  const match = activeSlashMatch.value
+  if (!match) {
+    return null
+  }
+
+  return `${match.start}:${match.end}:${match.raw}`
+})
+
 const filteredSlashCommands = computed(() =>
   activeSlashMatch.value
     ? filterSlashCommands(slashCommands.value, activeSlashMatch.value.query)
@@ -235,6 +251,7 @@ const filteredSlashCommands = computed(() =>
 const slashDropdownOpen = computed(() =>
   !reviewDrawerOpen.value
   && Boolean(activeSlashMatch.value)
+  && activeSlashMatchKey.value !== dismissedSlashMatchKey.value
   && filteredSlashCommands.value.length > 0
 )
 
@@ -447,6 +464,7 @@ const createLiveStreamState = (
 ): LiveStream => ({
   threadId,
   turnId: null,
+  lockedTurnId: null,
   bufferedNotifications,
   observedSubagentThreadIds: new Set<string>(),
   pendingUserMessageIds: [],
@@ -473,6 +491,7 @@ const setLiveStreamTurnId = (liveStream: LiveStream, turnId: string | null) => {
   liveStream.turnId = turnId
 
   if (!turnId) {
+    liveStream.lockedTurnId = null
     return
   }
 
@@ -481,6 +500,11 @@ const setLiveStreamTurnId = (liveStream: LiveStream, turnId: string | null) => {
   for (const waiter of waiters) {
     waiter.resolve(turnId)
   }
+}
+
+const lockLiveStreamTurnId = (liveStream: LiveStream, turnId: string | null) => {
+  liveStream.lockedTurnId = turnId
+  setLiveStreamTurnId(liveStream, turnId)
 }
 
 const waitForLiveStreamTurnId = async (liveStream: LiveStream) => {
@@ -502,9 +526,10 @@ const queuePendingUserMessage = (liveStream: LiveStream, messageId: string) => {
 }
 
 const replayBufferedNotifications = (liveStream: LiveStream) => {
+  const trackedTurnId = liveStream.lockedTurnId ?? liveStream.turnId
   for (const notification of liveStream.bufferedNotifications.splice(0, liveStream.bufferedNotifications.length)) {
     const turnId = notificationTurnId(notification)
-    if (turnId && turnId !== liveStream.turnId) {
+    if (turnId && trackedTurnId && turnId !== trackedTurnId) {
       continue
     }
 
@@ -564,6 +589,7 @@ const ensurePendingLiveStream = async () => {
       const turnId = notificationTurnId(notification)
       if (!shouldApplyNotificationToCurrentTurn({
         liveStreamTurnId: liveStream.turnId,
+        lockedTurnId: liveStream.lockedTurnId,
         notificationMethod: notification.method,
         notificationTurnId: turnId
       })) {
@@ -667,6 +693,10 @@ const syncPromptSelectionFromDom = () => {
   const textarea = getPromptTextarea()
   promptSelectionStart.value = textarea?.selectionStart ?? input.value.length
   promptSelectionEnd.value = textarea?.selectionEnd ?? input.value.length
+
+  if (!activeSlashMatchKey.value || activeSlashMatchKey.value !== dismissedSlashMatchKey.value) {
+    dismissedSlashMatchKey.value = null
+  }
 }
 
 const focusPromptAt = async (position?: number) => {
@@ -682,6 +712,32 @@ const focusPromptAt = async (position?: number) => {
   promptSelectionStart.value = nextPosition
   promptSelectionEnd.value = nextPosition
   isPromptFocused.value = true
+}
+
+const shouldRetainPromptFocus = (nextFocused: EventTarget | null) =>
+  nextFocused instanceof Node
+  && Boolean(slashDropdownRef.value?.contains(nextFocused))
+
+const handlePromptBlur = (event: FocusEvent) => {
+  if (shouldRetainPromptFocus(event.relatedTarget)) {
+    isPromptFocused.value = true
+    void focusPromptAt(promptSelectionStart.value)
+    return
+  }
+
+  isPromptFocused.value = false
+}
+
+const handleSlashDropdownFocusIn = () => {
+  if (!slashDropdownOpen.value) {
+    return
+  }
+
+  void focusPromptAt(promptSelectionStart.value)
+}
+
+const preventSlashPaletteEntryFocus = (event: CustomEvent) => {
+  event.preventDefault()
 }
 
 const setComposerError = (messageText: string) => {
@@ -703,6 +759,7 @@ const closeReviewDrawer = () => {
 }
 
 const openReviewDrawer = (commandText = '/review') => {
+  dismissedSlashMatchKey.value = null
   reviewDrawerCommandText.value = commandText
   reviewDrawerMode.value = 'target'
   reviewBranchesError.value = null
@@ -736,6 +793,7 @@ const completeSlashCommand = async (command: SlashCommandDefinition) => {
     return
   }
 
+  dismissedSlashMatchKey.value = null
   const completion = toSlashCommandCompletion(command)
   input.value = `${input.value.slice(0, match.start)}${completion}${input.value.slice(match.end)}`
   await focusPromptAt(match.start + completion.length)
@@ -780,6 +838,10 @@ const openBaseBranchPicker = async () => {
 }
 
 const startReview = async (target: ReviewTarget) => {
+  if (reviewStartPending.value) {
+    return
+  }
+
   if (hasPendingRequest.value || isBusy.value) {
     setComposerError('Review can only start when the current thread is idle.')
     return
@@ -805,7 +867,20 @@ const startReview = async (target: ReviewTarget) => {
       target
     } satisfies ReviewStartParams)
 
-    setLiveStreamTurnId(liveStream, response.turn.id)
+    for (const item of response.turn.items) {
+      if (item.type === 'userMessage') {
+        continue
+      }
+
+      for (const nextMessage of itemToMessages(item)) {
+        messages.value = upsertStreamingMessage(messages.value, {
+          ...nextMessage,
+          pending: false
+        })
+      }
+    }
+
+    lockLiveStreamTurnId(liveStream, response.turn.id)
     replayBufferedNotifications(liveStream)
     closeReviewDrawer()
   } catch (caughtError) {
@@ -1139,6 +1214,7 @@ const hydrateThread = async (threadId: string) => {
           const turnId = notificationTurnId(notification)
           if (!shouldApplyNotificationToCurrentTurn({
             liveStreamTurnId: nextLiveStream.turnId,
+            lockedTurnId: nextLiveStream.lockedTurnId,
             notificationMethod: notification.method,
             notificationTurnId: turnId
           })) {
@@ -1846,7 +1922,7 @@ const applyNotification = (notification: CodexRpcNotification) => {
       if (!nextThreadId || !nextThreadName) {
         return
       }
-      const nextTitle = nextThreadName.trim()
+      const nextTitle = normalizeThreadTitleCandidate(nextThreadName)
       if (!nextTitle) {
         return
       }
@@ -1859,13 +1935,21 @@ const applyNotification = (notification: CodexRpcNotification) => {
       return
     }
     case 'turn/started': {
+      const nextTurnId = notificationTurnId(notification)
+      if (liveStream && !shouldAdvanceLiveStreamTurn({
+        lockedTurnId: liveStream.lockedTurnId,
+        nextTurnId
+      })) {
+        return
+      }
+
       if (liveStream) {
-        setLiveStreamTurnId(liveStream, notificationTurnId(notification))
+        setLiveStreamTurnId(liveStream, nextTurnId)
         setLiveStreamInterruptRequested(liveStream, false)
       }
       messages.value = upsertStreamingMessage(
         messages.value,
-        eventToMessage(`event-turn-started-${notificationTurnId(notification) ?? Date.now()}`, {
+        eventToMessage(`event-turn-started-${nextTurnId ?? Date.now()}`, {
           kind: 'turn.started'
         })
       )
@@ -2058,6 +2142,9 @@ const applyNotification = (notification: CodexRpcNotification) => {
       markAwaitingAssistantOutput(false)
       pushEventMessage('stream.error', messageText)
       clearPendingOptimisticMessages(liveStream, { discardSnapshots: true })
+      if (liveStream) {
+        liveStream.lockedTurnId = null
+      }
       clearLiveStream(new Error(messageText))
       error.value = messageText
       status.value = 'error'
@@ -2069,6 +2156,9 @@ const applyNotification = (notification: CodexRpcNotification) => {
       markAwaitingAssistantOutput(false)
       pushEventMessage('turn.failed', messageText)
       clearPendingOptimisticMessages(liveStream, { discardSnapshots: true })
+      if (liveStream) {
+        liveStream.lockedTurnId = null
+      }
       clearLiveStream(new Error(messageText))
       error.value = messageText
       status.value = 'error'
@@ -2080,6 +2170,9 @@ const applyNotification = (notification: CodexRpcNotification) => {
       markAwaitingAssistantOutput(false)
       pushEventMessage('stream.error', messageText)
       clearPendingOptimisticMessages(liveStream, { discardSnapshots: true })
+      if (liveStream) {
+        liveStream.lockedTurnId = null
+      }
       clearLiveStream(new Error(messageText))
       error.value = messageText
       status.value = 'error'
@@ -2088,6 +2181,9 @@ const applyNotification = (notification: CodexRpcNotification) => {
     case 'turn/completed': {
       markAwaitingAssistantOutput(false)
       clearPendingOptimisticMessages(liveStream, { discardSnapshots: true })
+      if (liveStream) {
+        liveStream.lockedTurnId = null
+      }
       error.value = null
       status.value = 'ready'
       clearLiveStream()
@@ -2296,13 +2392,15 @@ const onPromptKeydown = (event: KeyboardEvent) => {
 
   if (event.key === 'Escape') {
     event.preventDefault()
-    isPromptFocused.value = false
+    dismissedSlashMatchKey.value = activeSlashMatchKey.value
+    isPromptFocused.value = true
+    void focusPromptAt(promptSelectionStart.value)
     return
   }
 
-  if (event.key === ' ') {
+  if (event.key === 'Tab' || event.key === ' ') {
     const command = highlightedSlashCommand.value
-    if (!command) {
+    if (!command || (event.key === ' ' && !command.completeOnSpace)) {
       return
     }
 
@@ -2549,12 +2647,17 @@ watch(input, async () => {
 
           <UCommandPalette
             v-if="slashDropdownOpen"
+            ref="slashDropdownRef"
+            class="absolute bottom-full left-0 z-20 mb-2 w-[90vw] max-w-[calc(100vw-2rem)] md:w-[min(50vw,52rem)] md:max-w-[min(50vw,52rem)]"
             :groups="slashPaletteGroups"
             :input="false"
+            :autofocus="false"
             :search-term="activeSlashMatch?.query ?? ''"
-            class="absolute inset-x-0 bottom-full z-20 mb-2 overflow-hidden rounded-2xl border border-default bg-default/95 shadow-2xl backdrop-blur"
+            @entry-focus="preventSlashPaletteEntryFocus"
+            @focusin.capture="handleSlashDropdownFocusIn"
+            @mousedown.prevent
             :ui="{
-              root: 'min-h-0',
+              root: 'min-h-0 overflow-hidden rounded-2xl border border-default bg-default/95 shadow-2xl backdrop-blur',
               content: 'max-h-72 overflow-y-auto p-2',
               group: 'space-y-1',
               item: 'rounded-xl px-3 py-2.5',
@@ -2578,7 +2681,7 @@ watch(input, async () => {
             @click="syncPromptSelectionFromDom"
             @keyup="syncPromptSelectionFromDom"
             @focus="isPromptFocused = true; syncPromptSelectionFromDom()"
-            @blur="isPromptFocused = false"
+            @blur="handlePromptBlur"
             @select="syncPromptSelectionFromDom"
             @compositionstart="onCompositionStart"
             @compositionend="onCompositionEnd"
@@ -2803,6 +2906,7 @@ watch(input, async () => {
     :branches="reviewBaseBranches"
     :current-branch="reviewCurrentBranch"
     :loading="reviewBranchesLoading"
+    :submitting="reviewStartPending"
     :error="reviewBranchesError"
     @update:open="handleReviewDrawerOpenChange"
     @choose-current-changes="startReview({ type: 'uncommittedChanges' })"
