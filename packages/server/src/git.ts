@@ -18,12 +18,20 @@ const runGit = async (projectPath: string, args: string[]) => {
 }
 
 export const listGitBranches = async (projectPath: string): Promise<GitBranchesResult> => {
-  const branchesOutput = await runGit(projectPath, [
-    'for-each-ref',
-    '--sort=refname',
-    '--format=%(refname:short)',
-    'refs/heads'
-  ])
+  let branchesOutput = ''
+  try {
+    branchesOutput = await runGit(projectPath, [
+      'for-each-ref',
+      '--sort=refname',
+      '--format=%(refname:short)',
+      'refs/heads'
+    ])
+  } catch {
+    return {
+      currentBranch: null,
+      branches: []
+    }
+  }
 
   let currentBranch: string | null = null
   try {
