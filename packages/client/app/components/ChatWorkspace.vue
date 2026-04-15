@@ -72,10 +72,6 @@ import {
   type TurnStartResponse
 } from '~~/shared/codex-rpc'
 import {
-  normalizeAccountRateLimits,
-  type RateLimitBucket
-} from '~~/shared/account-rate-limits'
-import {
   buildTurnOverrides,
   coercePromptSelection,
   ensureModelOption,
@@ -194,15 +190,10 @@ const reviewDrawerOpen = ref(false)
 const reviewDrawerMode = ref<'target' | 'branch'>('target')
 const reviewDrawerCommandText = ref('/review')
 const usageStatusModalOpen = ref(false)
-const usageStatusLoading = ref(false)
-const usageStatusError = ref<string | null>(null)
-const usageStatusBuckets = ref<RateLimitBucket[]>([])
 const reviewBranches = ref<string[]>([])
 const reviewCurrentBranch = ref<string | null>(null)
 const reviewBranchesLoading = ref(false)
 const reviewBranchesError = ref<string | null>(null)
-let releaseUsageStatusSubscription: (() => void) | null = null
-let usageStatusLoadToken = 0
 const isBusy = computed(() =>
   status.value === 'submitted'
   || status.value === 'streaming'
@@ -761,72 +752,21 @@ const closeReviewDrawer = () => {
   resetReviewDrawerState()
 }
 
-const resetUsageStatusState = () => {
-  usageStatusLoading.value = false
-  usageStatusError.value = null
-  usageStatusBuckets.value = []
-}
-
-const closeUsageStatusModal = () => {
-  usageStatusLoadToken += 1
-  usageStatusModalOpen.value = false
-  releaseUsageStatusSubscription?.()
-  releaseUsageStatusSubscription = null
-  resetUsageStatusState()
-}
-
-const applyUsageStatusSnapshot = (value: unknown) => {
-  usageStatusBuckets.value = normalizeAccountRateLimits(value)
-  usageStatusError.value = null
-}
-
-const openUsageStatusModal = async () => {
-  dismissedSlashMatchKey.value = null
-  usageStatusLoadToken += 1
-  const loadToken = usageStatusLoadToken
-  usageStatusModalOpen.value = true
-  usageStatusLoading.value = true
-  usageStatusError.value = null
-  usageStatusBuckets.value = []
-
-  const client = getClient(props.projectId)
-  releaseUsageStatusSubscription?.()
-  releaseUsageStatusSubscription = client.subscribe((notification) => {
-    if (notification.method !== 'account/rateLimits/updated' || !usageStatusModalOpen.value) {
-      return
-    }
-
-    applyUsageStatusSnapshot(notification.params)
-    usageStatusLoading.value = false
-  })
-
-  try {
-    await ensureProjectRuntime()
-    const response = await client.request('account/rateLimits/read')
-    if (!usageStatusModalOpen.value || loadToken !== usageStatusLoadToken) {
-      return
-    }
-
-    applyUsageStatusSnapshot(response)
-  } catch (caughtError) {
-    if (!usageStatusModalOpen.value || loadToken !== usageStatusLoadToken) {
-      return
-    }
-
-    usageStatusError.value = caughtError instanceof Error ? caughtError.message : String(caughtError)
-  } finally {
-    if (loadToken === usageStatusLoadToken) {
-      usageStatusLoading.value = false
-    }
-  }
-}
-
 const openReviewDrawer = (commandText = '/review') => {
   dismissedSlashMatchKey.value = null
   reviewDrawerCommandText.value = commandText
   reviewDrawerMode.value = 'target'
   reviewBranchesError.value = null
   reviewDrawerOpen.value = true
+}
+
+const clearSlashCommandDraft = () => {
+  // Successful slash commands consume the draft immediately. Leaving `/usage`
+  // or `/review` in the prompt after opening the modal/drawer makes the next
+  // edit start from stale command text and feels like the action did not finish.
+  input.value = ''
+  clearAttachments({ revoke: false })
+  dismissedSlashMatchKey.value = null
 }
 
 const moveSlashHighlight = (delta: number) => {
@@ -994,8 +934,9 @@ const handleSlashCommandSubmission = async (
 
       error.value = null
       status.value = 'ready'
-      openReviewDrawer(`/${command.name}`)
-      await focusPromptAt(rawText.trim().length)
+      clearSlashCommandDraft()
+      openReviewDrawer(rawText.trim())
+      await focusPromptAt(0)
       return true
     }
     case 'usage':
@@ -1007,7 +948,8 @@ const handleSlashCommandSubmission = async (
 
       error.value = null
       status.value = 'ready'
-      await openUsageStatusModal()
+      clearSlashCommandDraft()
+      usageStatusModalOpen.value = true
       return true
     }
     default:
@@ -1037,12 +979,7 @@ const handleReviewDrawerOpenChange = (open: boolean) => {
 }
 
 const handleUsageStatusOpenChange = (open: boolean) => {
-  if (open) {
-    void openUsageStatusModal()
-    return
-  }
-
-  closeUsageStatusModal()
+  usageStatusModalOpen.value = open
 }
 
 const handleReviewDrawerBack = () => {
@@ -2545,7 +2482,6 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   cancelAllPendingRequests()
-  closeUsageStatusModal()
   releaseServerRequestHandler?.()
   releaseServerRequestHandler = null
 })
@@ -3038,10 +2974,8 @@ watch(input, async () => {
   />
 
   <UsageStatusModal
+    :project-id="props.projectId"
     :open="usageStatusModalOpen"
-    :loading="usageStatusLoading"
-    :error="usageStatusError"
-    :buckets="usageStatusBuckets"
     @update:open="handleUsageStatusOpenChange"
   />
 </template>
