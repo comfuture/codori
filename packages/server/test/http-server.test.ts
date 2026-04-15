@@ -224,6 +224,30 @@ describe('createHttpServer', () => {
     })
   })
 
+  it('returns an empty branch list when the project is not a git repository', async () => {
+    const projectPath = mkdtempSync(join(os.tmpdir(), 'codori-non-git-'))
+    tempDirs.push(projectPath)
+
+    const app = await createHttpServer(createManager({
+      getProjectStatus: () => ({
+        ...createProjectRecord(),
+        projectPath
+      })
+    }))
+    startedApps.push(app)
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/projects/demo/git/branches'
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toEqual({
+      currentBranch: null,
+      branches: []
+    })
+  })
+
   it('serves the bundled client and falls back to index.html for app routes', async () => {
     const bundleDir = mkdtempSync(join(os.tmpdir(), 'codori-ui-'))
     writeFileSync(join(bundleDir, 'index.html'), '<html><body>codori ui</body></html>')
