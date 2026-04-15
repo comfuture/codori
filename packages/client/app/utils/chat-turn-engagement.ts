@@ -48,13 +48,22 @@ export const shouldRetrySteerWithTurnStart = (message: string) =>
 
 export const shouldApplyNotificationToCurrentTurn = (input: {
   liveStreamTurnId: string | null
+  lockedTurnId?: string | null
   notificationMethod: string
   notificationTurnId: string | null
 }) =>
-  input.liveStreamTurnId === null
+  (input.lockedTurnId ?? input.liveStreamTurnId) === null
   || input.notificationTurnId === null
-  || input.notificationTurnId === input.liveStreamTurnId
+  || input.notificationTurnId === (input.lockedTurnId ?? input.liveStreamTurnId)
   || input.notificationMethod === 'turn/started'
+
+export const shouldAdvanceLiveStreamTurn = (input: {
+  lockedTurnId?: string | null
+  nextTurnId: string | null
+}) =>
+  !input.lockedTurnId
+  || !input.nextTurnId
+  || input.nextTurnId === input.lockedTurnId
 
 export const resolvePromptSubmitStatus = (input: {
   status: PromptSubmitStatus
