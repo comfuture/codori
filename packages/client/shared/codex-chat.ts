@@ -9,6 +9,13 @@ export type ThreadEventData =
       title?: string | null
     }
   | {
+      kind: 'review.started'
+      summary: string | null
+    }
+  | {
+      kind: 'review.completed'
+    }
+  | {
       kind: 'turn.failed'
       error: {
         message: string
@@ -300,6 +307,30 @@ export const itemToMessages = (item: CodexThreadItem): ChatMessage[] => {
           }
         }]
       }]
+    case 'enteredReviewMode':
+      return [{
+        id: item.id,
+        role: 'system',
+        parts: [{
+          type: EVENT_PART,
+          data: {
+            kind: 'review.started',
+            summary: item.review.trim() || null
+          }
+        }]
+      }]
+    case 'exitedReviewMode': {
+      return [{
+        id: item.id,
+        role: 'system',
+        parts: [{
+          type: EVENT_PART,
+          data: {
+            kind: 'review.completed'
+          }
+        }]
+      }]
+    }
     default:
       return []
   }

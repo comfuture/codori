@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  itemToMessages,
   replaceStreamingMessage,
   upsertStreamingMessage,
   type ChatMessage
@@ -130,6 +131,39 @@ describe('chat transcript stability', () => {
       id: 'thread-1',
       title: 'Existing thread',
       updatedAt: 1
+    }])
+  })
+
+  it('maps review lifecycle items into a banner plus final assistant output', () => {
+    expect(itemToMessages({
+      type: 'enteredReviewMode',
+      id: 'review-1',
+      review: 'Reviewing current changes'
+    })).toEqual([{
+      id: 'review-1',
+      role: 'system',
+      parts: [{
+        type: 'data-thread-event',
+        data: {
+          kind: 'review.started',
+          summary: 'Reviewing current changes'
+        }
+      }]
+    }])
+
+    expect(itemToMessages({
+      type: 'exitedReviewMode',
+      id: 'review-1',
+      review: 'Final review output'
+    })).toEqual([{
+      id: 'review-1',
+      role: 'system',
+      parts: [{
+        type: 'data-thread-event',
+        data: {
+          kind: 'review.completed'
+        }
+      }]
     }])
   })
 })
