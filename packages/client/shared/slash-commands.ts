@@ -1,4 +1,4 @@
-export type SlashCommandName = 'review'
+export type SlashCommandName = 'review' | 'usage' | 'status'
 
 export type SlashCommandDefinition = {
   name: SlashCommandName
@@ -24,6 +24,18 @@ export type SubmittedSlashCommand = {
 export const SLASH_COMMANDS: SlashCommandDefinition[] = [{
   name: 'review',
   description: 'Review current changes or compare against a base branch.',
+  supportsInlineArgs: false,
+  completeOnSpace: true,
+  executeOnEnter: true
+}, {
+  name: 'usage',
+  description: 'Inspect current Codex quota windows and reset timing.',
+  supportsInlineArgs: false,
+  completeOnSpace: true,
+  executeOnEnter: true
+}, {
+  name: 'status',
+  description: 'Alias for `/usage` to inspect current Codex quota windows.',
   supportsInlineArgs: false,
   completeOnSpace: true,
   executeOnEnter: true

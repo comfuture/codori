@@ -26,6 +26,11 @@ import {
   validateAttachmentSelection
 } from '../shared/chat-attachments'
 import {
+  formatRateLimitWindowDuration,
+  normalizeAccountRateLimits,
+  type RateLimitBucket
+} from '../shared/account-rate-limits'
+import {
   buildTurnOverrides,
   coercePromptSelection,
   ensureModelOption,
@@ -147,6 +152,71 @@ describe('client package', () => {
         state: 'done'
       }]
     }])
+  })
+
+  it('normalizes account rate limit snapshots from both list and map payloads', () => {
+    const buckets = normalizeAccountRateLimits({
+      rateLimits: [{
+        limitId: 'gpt-5',
+        limitName: 'GPT-5',
+        primary: {
+          usedPercent: 72,
+          resetsAt: '2026-04-15T12:00:00.000Z',
+          windowDurationMins: 300
+        }
+      }],
+      rateLimitsByLimitId: {
+        'gpt-5': {
+          limitId: 'gpt-5',
+          secondary: {
+            usedPercent: '0.5',
+            resetsAt: '2026-04-20T00:00:00.000Z',
+            windowDurationMins: 10080
+          }
+        },
+        'gpt-5-mini': {
+          limitId: 'gpt-5-mini',
+          limitName: 'GPT-5 Mini',
+          primary: {
+            usedPercent: 18,
+            resetsAt: 'invalid-date',
+            windowDurationMins: 1440
+          }
+        }
+      }
+    })
+
+    expect(buckets).toEqual<RateLimitBucket[]>([{
+      limitId: 'gpt-5',
+      limitName: 'GPT-5',
+      primary: {
+        usedPercent: 72,
+        resetsAt: '2026-04-15T12:00:00.000Z',
+        windowDurationMins: 300
+      },
+      secondary: {
+        usedPercent: 50,
+        resetsAt: '2026-04-20T00:00:00.000Z',
+        windowDurationMins: 10080
+      }
+    }, {
+      limitId: 'gpt-5-mini',
+      limitName: 'GPT-5 Mini',
+      primary: {
+        usedPercent: 18,
+        resetsAt: null,
+        windowDurationMins: 1440
+      },
+      secondary: null
+    }])
+  })
+
+  it('formats rate limit window durations compactly', () => {
+    expect(formatRateLimitWindowDuration(300)).toBe('5h window')
+    expect(formatRateLimitWindowDuration(1440)).toBe('1d window')
+    expect(formatRateLimitWindowDuration(10080)).toBe('1w window')
+    expect(formatRateLimitWindowDuration(15)).toBe('15m window')
+    expect(formatRateLimitWindowDuration(null)).toBeNull()
   })
 
   it('builds turn input for text with image attachments', () => {
