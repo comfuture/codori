@@ -33,9 +33,19 @@ export const parseLocalFileHref = (href: string): LocalFileLinkTarget | null => 
     return null
   }
 
-  const decoded = decodeURIComponent(trimmed)
+  let decoded: string
+  try {
+    decoded = decodeURIComponent(trimmed)
+  } catch {
+    return null
+  }
+
   if (decoded.startsWith('file://')) {
-    return parseLocalFileHref(decoded.slice('file://'.length))
+    const filePath = decoded
+      .slice('file://'.length)
+      .replace(/^\/(?=[A-Za-z]:[\\/])/u, '')
+
+    return parseLocalFileHref(filePath)
   }
 
   if (decoded.startsWith('http://') || decoded.startsWith('https://') || decoded.startsWith('mailto:')) {

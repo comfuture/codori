@@ -2838,6 +2838,7 @@ watch(
 
     if (!projectPath) {
       fileAutocompleteLoading.value = false
+      fileAutocompleteError.value = null
       fileAutocompleteResults.value = []
       return
     }
