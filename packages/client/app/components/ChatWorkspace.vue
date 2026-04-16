@@ -833,6 +833,24 @@ const handleFileAutocompletePointerDown = (event: PointerEvent) => {
   void focusPromptAt(promptSelectionStart.value)
 }
 
+const onPromptEnterCapture = (event: KeyboardEvent) => {
+  if (!fileAutocompleteOpen.value) {
+    return
+  }
+
+  // UChatPrompt wires its own `keydown.enter.exact` handler on the textarea and
+  // emits `submit` immediately. Intercept exact Enter in capture phase so file
+  // palette selection never falls through to the component's submit path.
+  event.preventDefault()
+  event.stopPropagation()
+  event.stopImmediatePropagation()
+
+  const match = highlightedFileAutocompleteResult.value
+  if (match) {
+    void selectFileAutocompleteResult(match)
+  }
+}
+
 const setComposerError = (messageText: string) => {
   markAwaitingAssistantOutput(false)
   error.value = messageText
@@ -3082,6 +3100,7 @@ watch(
             :disabled="isComposerDisabled"
             autoresize
             @submit.prevent="sendMessage"
+            @keydown.enter.exact.capture="onPromptEnterCapture"
             @keydown="onPromptKeydown"
             @keydown.enter="onPromptEnter"
             @input="syncPromptSelectionFromDom"
