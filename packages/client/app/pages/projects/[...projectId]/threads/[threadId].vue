@@ -376,6 +376,7 @@ watch(
       <template #body>
         <VisualSubagentStack
           :agents="availablePanels"
+          :project-id="projectId"
           class="h-full min-h-0"
           @expand="openExpandedSubagent"
         />
@@ -441,6 +442,7 @@ watch(
         <SubagentTranscriptPanel
           v-if="expandedSubagentPanel"
           :agent="expandedSubagentPanel"
+          :project-id="projectId"
           :accent="expandedSubagentAccent"
           scroll-scope="expanded"
           expanded

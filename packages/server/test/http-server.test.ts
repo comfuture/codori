@@ -463,8 +463,9 @@ describe('createHttpServer', () => {
       client.once('message', () => {
         client.close()
       })
-      client.once('close', () => {
+      client.once('close', async () => {
         try {
+          await new Promise(resolvePromise => setTimeout(resolvePromise, 0))
           expect(events[0]).toBe('acquire')
           expect(events).toContain('touch')
           expect(events.at(-1)).toBe('release')
@@ -743,6 +744,97 @@ describe('createHttpServer', () => {
       error: {
         code: 'UNSUPPORTED_MEDIA_TYPE',
         message: 'Attachment preview is only available for image files.'
+      }
+    })
+  })
+
+  it('returns a read-only preview for text files inside the active project root', async () => {
+    const projectPath = mkdtempSync(join(os.tmpdir(), 'codori-local-file-'))
+    tempDirs.push(projectPath)
+    const filePath = join(projectPath, 'src', 'viewer.ts')
+    mkdirSync(join(projectPath, 'src'), { recursive: true })
+    writeFileSync(filePath, 'export const viewer = true\n', 'utf8')
+
+    const app = await createHttpServer(createManager({
+      getProjectStatus: () => ({
+        ...createProjectRecord(),
+        projectPath
+      })
+    }))
+    startedApps.push(app)
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/projects/demo/local-file?path=${encodeURIComponent(filePath)}`
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toEqual({
+      file: {
+        path: expect.stringMatching(/src\/viewer\.ts$/),
+        relativePath: 'src/viewer.ts',
+        name: 'viewer.ts',
+        size: 'export const viewer = true\n'.length,
+        updatedAt: expect.any(Number),
+        text: 'export const viewer = true\n'
+      }
+    })
+  })
+
+  it('rejects local file previews outside the active project root', async () => {
+    const projectPath = mkdtempSync(join(os.tmpdir(), 'codori-local-file-'))
+    tempDirs.push(projectPath)
+    const outsidePath = join(os.tmpdir(), 'codori-local-file-outside.txt')
+    writeFileSync(outsidePath, 'outside\n', 'utf8')
+    tempDirs.push(outsidePath)
+
+    const app = await createHttpServer(createManager({
+      getProjectStatus: () => ({
+        ...createProjectRecord(),
+        projectPath
+      })
+    }))
+    startedApps.push(app)
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/projects/demo/local-file?path=${encodeURIComponent(outsidePath)}`
+    })
+
+    expect(response.statusCode).toBe(403)
+    expect(response.json()).toEqual({
+      error: {
+        code: 'FORBIDDEN',
+        message: 'Local file access is limited to the active project root.'
+      }
+    })
+  })
+
+  it('rejects binary local file previews', async () => {
+    const projectPath = mkdtempSync(join(os.tmpdir(), 'codori-local-file-'))
+    tempDirs.push(projectPath)
+    const filePath = join(projectPath, 'dist', 'blob.bin')
+    mkdirSync(join(projectPath, 'dist'), { recursive: true })
+    writeFileSync(filePath, Buffer.from([0x00, 0x01, 0x02]))
+
+    const app = await createHttpServer(createManager({
+      getProjectStatus: () => ({
+        ...createProjectRecord(),
+        projectPath
+      })
+    }))
+    startedApps.push(app)
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/projects/demo/local-file?path=${encodeURIComponent(filePath)}`
+    })
+
+    expect(response.statusCode).toBe(415)
+    expect(response.json()).toEqual({
+      error: {
+        code: 'BINARY',
+        message: 'Binary files are not supported by the local file viewer.'
       }
     })
   })

@@ -26,6 +26,11 @@ import {
   validateAttachmentSelection
 } from '../shared/chat-attachments'
 import {
+  isLocalFileWithinProject,
+  parseLocalFileHref,
+  resolveProjectLocalFileUrl
+} from '../shared/local-files'
+import {
   formatRateLimitWindowDuration,
   normalizeAccountRateLimits,
   type RateLimitBucket
@@ -257,6 +262,30 @@ describe('client package', () => {
       path: '/tmp/screenshot.png',
       configuredBase: 'https://codori.example.com'
     })).toBe('/api/codori/projects/team%2Fapi/attachments/file?path=%2Ftmp%2Fscreenshot.png')
+
+    expect(resolveProjectLocalFileUrl({
+      projectId: 'team/api',
+      path: '/Users/demo/Project/codori/src/app.ts',
+      configuredBase: 'https://codori.example.com'
+    })).toBe('/api/codori/projects/team%2Fapi/local-file?path=%2FUsers%2Fdemo%2FProject%2Fcodori%2Fsrc%2Fapp.ts')
+  })
+
+  it('detects project-local absolute file links and optional line suffixes', () => {
+    expect(parseLocalFileHref('/Users/demo/Project/codori/src/app.ts:18')).toEqual({
+      path: '/Users/demo/Project/codori/src/app.ts',
+      line: 18,
+      column: null
+    })
+
+    expect(parseLocalFileHref('https://example.com/docs')).toBeNull()
+    expect(isLocalFileWithinProject(
+      '/Users/demo/Project/codori/src/app.ts',
+      '/Users/demo/Project/codori'
+    )).toBe(true)
+    expect(isLocalFileWithinProject(
+      '/Users/demo/Project/other/app.ts',
+      '/Users/demo/Project/codori'
+    )).toBe(false)
   })
 
   it('keeps direct attachment requests when bundled with the codori server', () => {

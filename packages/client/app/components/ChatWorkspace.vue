@@ -8,6 +8,7 @@ import {
   ref,
   watch
 } from 'vue'
+import LocalFileViewerModal from './LocalFileViewerModal.vue'
 import MessageContent from './MessageContent.vue'
 import ReviewStartDrawer from './ReviewStartDrawer.vue'
 import PendingUserRequestDrawer from './PendingUserRequestDrawer.vue'
@@ -2957,6 +2958,8 @@ watch(input, async () => {
     :request="pendingRequest"
     @respond="respondToPendingRequest"
   />
+
+  <LocalFileViewerModal />
 
   <ReviewStartDrawer
     :open="reviewDrawerOpen"
