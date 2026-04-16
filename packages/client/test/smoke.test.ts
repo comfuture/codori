@@ -278,6 +278,12 @@ describe('client package', () => {
     })
 
     expect(parseLocalFileHref('https://example.com/docs')).toBeNull()
+    expect(parseLocalFileHref('%')).toBeNull()
+    expect(parseLocalFileHref('file:///C:/Users/demo/Project/codori/src/app.ts:9:2')).toEqual({
+      path: 'C:/Users/demo/Project/codori/src/app.ts',
+      line: 9,
+      column: 2
+    })
     expect(isLocalFileWithinProject(
       '/Users/demo/Project/codori/src/app.ts',
       '/Users/demo/Project/codori'
@@ -286,6 +292,10 @@ describe('client package', () => {
       '/Users/demo/Project/other/app.ts',
       '/Users/demo/Project/codori'
     )).toBe(false)
+    expect(isLocalFileWithinProject(
+      'C:/Users/demo/Project/codori/src/app.ts',
+      'C:/Users/demo/Project/codori'
+    )).toBe(true)
   })
 
   it('keeps direct attachment requests when bundled with the codori server', () => {
