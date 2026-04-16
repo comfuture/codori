@@ -168,6 +168,11 @@ describe('client package', () => {
       rateLimitsByLimitId: {
         'gpt-5': {
           limitId: 'gpt-5',
+          primary: {
+            usedPercent: 65,
+            resetsAt: '2026-04-15T13:00:00.000Z',
+            windowDurationMins: 300
+          },
           secondary: {
             usedPercent: '0.5',
             resetsAt: '2026-04-20T00:00:00.000Z',
@@ -190,8 +195,8 @@ describe('client package', () => {
       limitId: 'gpt-5',
       limitName: 'GPT-5',
       primary: {
-        usedPercent: 72,
-        resetsAt: '2026-04-15T12:00:00.000Z',
+        usedPercent: 65,
+        resetsAt: '2026-04-15T13:00:00.000Z',
         windowDurationMins: 300
       },
       secondary: {

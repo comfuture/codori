@@ -8,16 +8,6 @@ import {
   type RateLimitBucket
 } from '../../shared/account-rate-limits'
 
-type UsageWindowRow = {
-  id: string
-  title: string
-  remainingPercent: number | null
-  progressLabel: string
-  resetsAt: string | null
-  nextResetLabel: string
-  durationMins: number | null
-}
-
 const props = withDefaults(defineProps<{
   projectId: string
   open?: boolean

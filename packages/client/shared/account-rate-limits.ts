@@ -72,6 +72,25 @@ const normalizeRateLimitWindow = (value: unknown): RateLimitWindow | null => {
   }
 }
 
+const mergeRateLimitWindow = (
+  existing: RateLimitWindow | null,
+  incoming: RateLimitWindow | null
+): RateLimitWindow | null => {
+  if (!existing) {
+    return incoming
+  }
+
+  if (!incoming) {
+    return existing
+  }
+
+  return {
+    usedPercent: incoming.usedPercent ?? existing.usedPercent,
+    resetsAt: incoming.resetsAt ?? existing.resetsAt,
+    windowDurationMins: incoming.windowDurationMins ?? existing.windowDurationMins
+  }
+}
+
 const normalizeRateLimitBucket = (value: unknown): RateLimitBucket | null => {
   const record = isObjectRecord(value) ? value : null
   if (!record) {
@@ -135,8 +154,8 @@ export const normalizeAccountRateLimits = (value: unknown): RateLimitBucket[] =>
     bucketsById.set(bucket.limitId, {
       ...existing,
       limitName: existing.limitName ?? bucket.limitName,
-      primary: existing.primary ?? bucket.primary,
-      secondary: existing.secondary ?? bucket.secondary
+      primary: mergeRateLimitWindow(existing.primary, bucket.primary),
+      secondary: mergeRateLimitWindow(existing.secondary, bucket.secondary)
     })
   }
 
