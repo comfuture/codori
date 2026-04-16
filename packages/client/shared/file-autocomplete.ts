@@ -98,13 +98,19 @@ export const findActiveFileAutocompleteMatch = (
 export const normalizeFileAutocompleteQuery = (query: string) =>
   query.trim().replace(/^\/+/, '')
 
-export const toFileAutocompleteInsertion = (match: Pick<NormalizedFuzzyFileSearchMatch, 'path' | 'matchType'>) => {
-  const normalizedPath = `/${match.path.replace(/^\/+/, '')}`
-  if (match.matchType === 'directory') {
-    return `${normalizedPath.replace(/\/?$/, '/')}`
-  }
+const toAbsoluteAutocompletePath = (match: Pick<NormalizedFuzzyFileSearchMatch, 'root' | 'path'>) => {
+  const normalizedRoot = match.root.replace(/\\/g, '/').replace(/\/+$/, '')
+  const normalizedPath = match.path.replace(/\\/g, '/').replace(/^\/+/, '')
+  return normalizedRoot
+    ? `${normalizedRoot}/${normalizedPath}`
+    : `/${normalizedPath}`
+}
 
-  return normalizedPath
+export const toFileAutocompleteHandle = (
+  match: Pick<NormalizedFuzzyFileSearchMatch, 'root' | 'path' | 'fileName'>
+) => {
+  const absolutePath = toAbsoluteAutocompletePath(match)
+  return `[${match.fileName}](${encodeURI(absolutePath)})`
 }
 
 export const replaceActiveFileAutocompleteMatch = (
@@ -112,12 +118,10 @@ export const replaceActiveFileAutocompleteMatch = (
   match: Pick<ActiveFileAutocompleteMatch, 'start' | 'end'>,
   replacement: string
 ) => {
-  const needsQuotes = /\s/u.test(replacement) && !replacement.includes('"')
-  const inserted = needsQuotes ? `"${replacement}"` : replacement
   const suffix = input.slice(match.end)
-  const trailingSpace = inserted.endsWith('/') || /^\s/u.test(suffix) || suffix.length === 0 ? '' : ' '
-  const nextValue = `${input.slice(0, match.start)}${inserted}${trailingSpace}${suffix}`
-  const nextCaret = match.start + inserted.length + trailingSpace.length
+  const trailingSpace = /^\s/u.test(suffix) || suffix.length === 0 ? '' : ' '
+  const nextValue = `${input.slice(0, match.start)}${replacement}${trailingSpace}${suffix}`
+  const nextCaret = match.start + replacement.length + trailingSpace.length
 
   return {
     value: nextValue,
