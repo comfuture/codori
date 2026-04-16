@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  buildFileAutocompletePathSegments,
   findActiveFileAutocompleteMatch,
   normalizeFileAutocompleteQuery,
   normalizeFuzzyFileSearchMatches,
@@ -113,5 +114,18 @@ describe('file autocomplete helpers', () => {
       value: 'Open [my file.ts](/dir/my%20file.ts)',
       caret: 36
     })
+  })
+
+  it('builds compact path segments with highlighted fuzzy matches', () => {
+    expect(buildFileAutocompletePathSegments({
+      path: 'src/components/LocalFileViewerModal.vue',
+      indices: [0, 1, 2, 15, 16, 17, 18]
+    })).toEqual([
+      { text: '/', isMatch: false },
+      { text: 'src', isMatch: true },
+      { text: '/components/', isMatch: false },
+      { text: 'Loca', isMatch: true },
+      { text: 'lFileViewerModal.vue', isMatch: false }
+    ])
   })
 })

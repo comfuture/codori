@@ -102,11 +102,13 @@ import {
   type SlashCommandDefinition
 } from '~~/shared/slash-commands'
 import {
+  buildFileAutocompletePathSegments,
   findActiveFileAutocompleteMatch,
   normalizeFileAutocompleteQuery,
   normalizeFuzzyFileSearchMatches,
   replaceActiveFileAutocompleteMatch,
   toFileAutocompleteHandle,
+  type FileAutocompletePathSegment,
   type NormalizedFuzzyFileSearchMatch
 } from '~~/shared/file-autocomplete'
 
@@ -154,6 +156,7 @@ const chatPromptRef = ref<{
 } | null>(null)
 const slashDropdownRef = ref<HTMLElement | null>(null)
 const fileAutocompleteDropdownRef = ref<HTMLElement | null>(null)
+const fileAutocompleteListRef = ref<HTMLElement | null>(null)
 const scrollViewport = ref<HTMLElement | null>(null)
 const pinnedToBottom = ref(true)
 const session = useChatSession(props.projectId)
@@ -934,6 +937,11 @@ const completeSlashCommand = async (command: SlashCommandDefinition) => {
 const resolveFileAutocompleteIcon = (match: Pick<NormalizedFuzzyFileSearchMatch, 'matchType'>) =>
   match.matchType === 'directory' ? 'i-lucide-folder-open' : 'i-lucide-file-code-2'
 
+const renderFileAutocompletePathSegments = (
+  match: Pick<NormalizedFuzzyFileSearchMatch, 'path' | 'indices'>
+): FileAutocompletePathSegment[] =>
+  buildFileAutocompletePathSegments(match)
+
 const selectFileAutocompleteResult = async (match: NormalizedFuzzyFileSearchMatch) => {
   const activeMatch = activeFileAutocompleteMatch.value
   if (!activeMatch) {
@@ -947,6 +955,17 @@ const selectFileAutocompleteResult = async (match: NormalizedFuzzyFileSearchMatc
   input.value = nextDraft.value
   fileAutocompleteResults.value = []
   await focusPromptAt(nextDraft.caret)
+}
+
+const syncFileAutocompleteScroll = async () => {
+  await nextTick()
+
+  const selected = fileAutocompleteListRef.value?.querySelector<HTMLElement>(
+    '[data-file-autocomplete-option][aria-selected="true"]'
+  )
+  selected?.scrollIntoView({
+    block: 'nearest'
+  })
 }
 
 const fetchProjectGitBranches = async () => {
@@ -2369,6 +2388,19 @@ const applyNotification = (notification: CodexRpcNotification) => {
 }
 
 const sendMessage = async () => {
+  // Nuxt UI's UChatPrompt emits `submit` directly from its internal
+  // `keydown.enter.exact` handler, so guarding only in our keydown callback is
+  // not sufficient to stop Enter from racing into a send while the file palette
+  // is open. Keep the submit path itself aware of the palette state.
+  if (fileAutocompleteOpen.value) {
+    const match = highlightedFileAutocompleteResult.value
+    if (match) {
+      await selectFileAutocompleteResult(match)
+    }
+
+    return
+  }
+
   if (sendMessageLocked.value || hasPendingRequest.value) {
     return
   }
@@ -2745,6 +2777,18 @@ watch(visibleFileAutocompleteResults, (results) => {
   }
 }, { flush: 'sync' })
 
+watch(
+  [fileAutocompleteOpen, fileAutocompleteHighlightIndex, visibleFileAutocompleteResults],
+  async ([open, highlightIndex, results]) => {
+    if (!open || !results.length || highlightIndex >= results.length) {
+      return
+    }
+
+    await syncFileAutocompleteScroll()
+  },
+  { flush: 'post' }
+)
+
 watch([selectedModel, availableModels], () => {
   const nextSelection = coercePromptSelection(effectiveModelList.value, selectedModel.value, selectedEffort.value)
   if (selectedModel.value !== nextSelection.model) {
@@ -2948,7 +2992,10 @@ watch(
             class="absolute bottom-full left-0 z-20 mb-2 w-[90vw] max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-default bg-default/95 shadow-2xl backdrop-blur md:w-[min(50vw,52rem)] md:max-w-[min(50vw,52rem)]"
             @pointerdown="handleFileAutocompletePointerDown"
           >
-            <div class="max-h-72 overflow-y-auto p-2">
+            <div
+              ref="fileAutocompleteListRef"
+              class="max-h-72 overflow-y-auto p-2"
+            >
               <div
                 v-if="fileAutocompleteEmptyState"
                 class="px-3 py-2 text-sm leading-6 text-muted"
@@ -2962,7 +3009,7 @@ watch(
                 role="option"
                 :aria-selected="index === fileAutocompleteHighlightIndex"
                 data-file-autocomplete-option=""
-                class="group relative flex cursor-pointer items-start gap-1.5 px-3 py-2.5 text-sm text-highlighted outline-none transition-colors before:absolute before:inset-px before:z-[-1] before:rounded-md"
+                class="group relative flex cursor-pointer items-center gap-1.5 px-3 py-2 text-sm text-highlighted outline-none transition-colors before:absolute before:inset-px before:z-[-1] before:rounded-md"
                 :class="index === fileAutocompleteHighlightIndex
                   ? 'before:bg-elevated'
                   : 'hover:before:bg-elevated/60'"
@@ -2970,15 +3017,17 @@ watch(
               >
                 <UIcon
                   :name="resolveFileAutocompleteIcon(match)"
-                  class="mt-0.5 size-4 shrink-0 text-dimmed group-aria-selected:text-highlighted"
+                  class="size-4 shrink-0 text-dimmed group-aria-selected:text-highlighted"
                 />
-                <div class="min-w-0">
-                  <div class="truncate text-sm font-medium">
-                    {{ match.fileName }}
-                  </div>
-                  <div class="truncate text-xs leading-5 text-toned">
-                    /{{ match.path }}
-                  </div>
+                <div class="min-w-0 truncate font-mono text-[13px] leading-6">
+                  <span
+                    v-for="(segment, segmentIndex) in renderFileAutocompletePathSegments(match)"
+                    :key="`${match.path}:${segmentIndex}:${segment.isMatch ? 'match' : 'plain'}`"
+                    class="truncate"
+                    :class="segment.isMatch ? 'font-semibold text-primary' : 'text-toned'"
+                  >
+                    {{ segment.text }}
+                  </span>
                 </div>
               </div>
             </div>
