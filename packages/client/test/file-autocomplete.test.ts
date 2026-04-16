@@ -4,7 +4,7 @@ import {
   normalizeFileAutocompleteQuery,
   normalizeFuzzyFileSearchMatches,
   replaceActiveFileAutocompleteMatch,
-  toFileAutocompleteInsertion
+  toFileAutocompleteHandle
 } from '../shared/file-autocomplete'
 
 describe('file autocomplete helpers', () => {
@@ -31,7 +31,7 @@ describe('file autocomplete helpers', () => {
     })
   })
 
-  it('normalizes fuzzy file search responses and insertion text', () => {
+  it('normalizes fuzzy file search responses and builds markdown file handles', () => {
     expect(normalizeFuzzyFileSearchMatches({
       files: [{
         path: 'src/components',
@@ -65,14 +65,16 @@ describe('file autocomplete helpers', () => {
     }])
 
     expect(normalizeFileAutocompleteQuery('/src/app.ts')).toBe('src/app.ts')
-    expect(toFileAutocompleteInsertion({
-      path: 'src/components',
-      matchType: 'directory'
-    })).toBe('/src/components/')
-    expect(toFileAutocompleteInsertion({
+    expect(toFileAutocompleteHandle({
+      root: '/Users/demo/project',
       path: 'src/app.ts',
-      matchType: 'file'
-    })).toBe('/src/app.ts')
+      fileName: 'app.ts'
+    })).toBe('[app.ts](/Users/demo/project/src/app.ts)')
+    expect(toFileAutocompleteHandle({
+      root: '/Users/demo/project',
+      path: 'docs/My File.md',
+      fileName: 'My File.md'
+    })).toBe('[My File.md](/Users/demo/project/docs/My%20File.md)')
   })
 
   it('replaces the active token and preserves follow-up typing ergonomics', () => {
@@ -82,22 +84,22 @@ describe('file autocomplete helpers', () => {
         start: 15,
         end: 22
       },
-      '/src/lib/baz.ts'
+      '[baz.ts](/src/lib/baz.ts)'
     )).toEqual({
-      value: 'Please inspect /src/lib/baz.ts soon',
-      caret: 30
+      value: 'Please inspect [baz.ts](/src/lib/baz.ts) soon',
+      caret: 40
     })
 
     expect(replaceActiveFileAutocompleteMatch(
-      '@src/components',
+      '@src/app.ts',
       {
         start: 0,
-        end: 15
+        end: 11
       },
-      '/src/components/'
+      '[app.ts](/src/app.ts)'
     )).toEqual({
-      value: '/src/components/',
-      caret: 16
+      value: '[app.ts](/src/app.ts)',
+      caret: 21
     })
 
     expect(replaceActiveFileAutocompleteMatch(
@@ -106,10 +108,10 @@ describe('file autocomplete helpers', () => {
         start: 5,
         end: 16
       },
-      '/dir/my file.ts'
+      '[my file.ts](/dir/my%20file.ts)'
     )).toEqual({
-      value: 'Open "/dir/my file.ts"',
-      caret: 22
+      value: 'Open [my file.ts](/dir/my%20file.ts)',
+      caret: 36
     })
   })
 })

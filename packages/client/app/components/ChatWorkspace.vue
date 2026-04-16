@@ -106,7 +106,7 @@ import {
   normalizeFileAutocompleteQuery,
   normalizeFuzzyFileSearchMatches,
   replaceActiveFileAutocompleteMatch,
-  toFileAutocompleteInsertion,
+  toFileAutocompleteHandle,
   type NormalizedFuzzyFileSearchMatch
 } from '~~/shared/file-autocomplete'
 
@@ -301,7 +301,9 @@ const fileAutocompleteOpen = computed(() =>
 )
 
 const visibleFileAutocompleteResults = computed(() =>
-  fileAutocompleteResults.value.slice(0, 8)
+  fileAutocompleteResults.value
+    .filter((match) => match.matchType === 'file')
+    .slice(0, 8)
 )
 
 const highlightedFileAutocompleteResult = computed(() =>
@@ -940,7 +942,7 @@ const selectFileAutocompleteResult = async (match: NormalizedFuzzyFileSearchMatc
 
   dismissedFileAutocompleteMatchKey.value = null
   fileAutocompleteError.value = null
-  const replacement = toFileAutocompleteInsertion(match)
+  const replacement = toFileAutocompleteHandle(match)
   const nextDraft = replaceActiveFileAutocompleteMatch(input.value, activeMatch, replacement)
   input.value = nextDraft.value
   fileAutocompleteResults.value = []
@@ -2628,12 +2630,13 @@ const onPromptEnter = (event: KeyboardEvent) => {
   }
 
   if (fileAutocompleteOpen.value) {
+    event.preventDefault()
     const match = highlightedFileAutocompleteResult.value
     if (match) {
-      event.preventDefault()
       void selectFileAutocompleteResult(match)
-      return
     }
+
+    return
   }
 
   if (slashDropdownOpen.value) {
