@@ -163,18 +163,17 @@ const plugins = [
   highlight({ preStyles: false })
 ]
 const isStreaming = computed(() => props.part?.state === 'streaming')
+const markdownClass = computed(() =>
+  props.role === 'user'
+    ? 'cd-markdown cd-markdown-user'
+    : 'cd-markdown'
+)
 </script>
 
 <template>
-  <p
-    v-if="role === 'user'"
-    class="whitespace-pre-wrap text-[15px] leading-7 text-highlighted"
-  >
-    {{ part?.text ?? '' }}
-  </p>
-  <Suspense v-else>
+  <Suspense>
     <Comark
-      class="cd-markdown"
+      :class="markdownClass"
       :markdown="part?.text ?? ''"
       :streaming="isStreaming"
       :components="components"

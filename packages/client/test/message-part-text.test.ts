@@ -183,11 +183,15 @@ const settle = async () => {
   await flushPromises()
 }
 
-const mountAssistantText = async (text: string, state: 'done' | 'streaming' = 'done') => {
+const mountText = async (
+  role: 'user' | 'assistant' | 'system',
+  text: string,
+  state: 'done' | 'streaming' = 'done'
+) => {
   const wrapper = mount(MessagePartText, {
     attachTo: document.body,
     props: {
-      role: 'assistant',
+      role,
       part: {
         type: 'text',
         text,
@@ -209,7 +213,7 @@ afterEach(() => {
 
 describe('message part text markdown rendering', () => {
   it('renders inline LaTeX formulas with KaTeX markup', async () => {
-    const wrapper = await mountAssistantText('Energy stays concise: $E = mc^2$.')
+    const wrapper = await mountText('assistant', 'Energy stays concise: $E = mc^2$.')
 
     expect(wrapper.find('.math.inline').exists()).toBe(true)
     expect(wrapper.find('.math.inline .katex').exists()).toBe(true)
@@ -217,7 +221,8 @@ describe('message part text markdown rendering', () => {
   })
 
   it('renders block LaTeX formulas with display math markup', async () => {
-    const wrapper = await mountAssistantText(
+    const wrapper = await mountText(
+      'assistant',
       'Solve this first.\n\n$$x = \\\\frac{-b \\\\pm \\\\sqrt{b^2 - 4ac}}{2a}$$\n\nThen continue.'
     )
 
@@ -228,7 +233,7 @@ describe('message part text markdown rendering', () => {
   })
 
   it('renders Mermaid code fences as diagrams while streaming', async () => {
-    const wrapper = await mountAssistantText([
+    const wrapper = await mountText('assistant', [
       'Diagram:',
       '',
       '```mermaid',
@@ -264,7 +269,7 @@ describe('message part text markdown rendering', () => {
   })
 
   it('falls back unsupported Mermaid blocks to plain code blocks', async () => {
-    const wrapper = await mountAssistantText([
+    const wrapper = await mountText('assistant', [
       '```mermaid',
       'gantt',
       '  title Unsupported here',
@@ -297,6 +302,31 @@ describe('message part text markdown rendering', () => {
       projectId: 'demo',
       path: '/Users/comfuture/Project/codori/packages/client/app/components/ChatWorkspace.vue',
       line: 12,
+      column: null
+    })
+  })
+
+  it('renders markdown links in user messages and routes local files to the viewer', async () => {
+    const wrapper = mount(MessagePartText, {
+      attachTo: document.body,
+      props: {
+        role: 'user',
+        projectId: 'demo',
+        part: {
+          type: 'text',
+          text: '[LocalFileViewerModal.vue](/Users/comfuture/Project/codori/packages/client/app/components/LocalFileViewerModal.vue)',
+          state: 'done'
+        }
+      }
+    })
+
+    await settle()
+    await wrapper.get('a').trigger('click')
+
+    expect(openViewerMock).toHaveBeenCalledWith({
+      projectId: 'demo',
+      path: '/Users/comfuture/Project/codori/packages/client/app/components/LocalFileViewerModal.vue',
+      line: null,
       column: null
     })
   })

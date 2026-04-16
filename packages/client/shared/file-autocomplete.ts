@@ -14,6 +14,11 @@ export type NormalizedFuzzyFileSearchMatch = {
   indices: number[] | null
 }
 
+export type FileAutocompletePathSegment = {
+  text: string
+  isMatch: boolean
+}
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object'
   && value !== null
@@ -111,6 +116,37 @@ export const toFileAutocompleteHandle = (
 ) => {
   const absolutePath = toAbsoluteAutocompletePath(match)
   return `[${match.fileName}](${encodeURI(absolutePath)})`
+}
+
+export const buildFileAutocompletePathSegments = (
+  match: Pick<NormalizedFuzzyFileSearchMatch, 'path' | 'indices'>
+): FileAutocompletePathSegment[] => {
+  const highlightedIndices = new Set(
+    (match.indices ?? [])
+      .filter(index => Number.isInteger(index) && index >= 0 && index < match.path.length)
+  )
+
+  const characters = match.path.split('')
+  const segments: FileAutocompletePathSegment[] = [{
+    text: '/',
+    isMatch: false
+  }]
+
+  for (const [index, character] of characters.entries()) {
+    const isMatch = highlightedIndices.has(index)
+    const previousSegment = segments[segments.length - 1]
+    if (previousSegment && previousSegment.isMatch === isMatch) {
+      previousSegment.text += character
+      continue
+    }
+
+    segments.push({
+      text: character,
+      isMatch
+    })
+  }
+
+  return segments
 }
 
 export const replaceActiveFileAutocompleteMatch = (
