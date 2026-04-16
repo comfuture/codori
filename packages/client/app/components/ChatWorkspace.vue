@@ -101,6 +101,14 @@ import {
   toSlashCommandCompletion,
   type SlashCommandDefinition
 } from '~~/shared/slash-commands'
+import {
+  findActiveFileAutocompleteMatch,
+  normalizeFileAutocompleteQuery,
+  normalizeFuzzyFileSearchMatches,
+  replaceActiveFileAutocompleteMatch,
+  toFileAutocompleteInsertion,
+  type NormalizedFuzzyFileSearchMatch
+} from '~~/shared/file-autocomplete'
 
 const props = defineProps<{
   projectId: string
@@ -145,6 +153,7 @@ const chatPromptRef = ref<{
   textareaRef?: unknown
 } | null>(null)
 const slashDropdownRef = ref<HTMLElement | null>(null)
+const fileAutocompleteDropdownRef = ref<HTMLElement | null>(null)
 const scrollViewport = ref<HTMLElement | null>(null)
 const pinnedToBottom = ref(true)
 const session = useChatSession(props.projectId)
@@ -186,7 +195,12 @@ const promptSelectionStart = ref(0)
 const promptSelectionEnd = ref(0)
 const isPromptFocused = ref(false)
 const dismissedSlashMatchKey = ref<string | null>(null)
+const dismissedFileAutocompleteMatchKey = ref<string | null>(null)
 const slashHighlightIndex = ref(0)
+const fileAutocompleteHighlightIndex = ref(0)
+const fileAutocompleteLoading = ref(false)
+const fileAutocompleteError = ref<string | null>(null)
+const fileAutocompleteResults = ref<NormalizedFuzzyFileSearchMatch[]>([])
 const reviewDrawerOpen = ref(false)
 const reviewDrawerMode = ref<'target' | 'branch'>('target')
 const reviewDrawerCommandText = ref('/review')
@@ -259,8 +273,46 @@ const filteredSlashCommands = computed(() =>
     : []
 )
 
+const activeFileAutocompleteMatch = computed(() =>
+  isPromptFocused.value
+    ? findActiveFileAutocompleteMatch(input.value, promptSelectionStart.value, promptSelectionEnd.value)
+    : null
+)
+
+const activeFileAutocompleteMatchKey = computed(() => {
+  const match = activeFileAutocompleteMatch.value
+  if (!match) {
+    return null
+  }
+
+  return `${match.start}:${match.end}:${match.raw}`
+})
+
+const normalizedFileAutocompleteQuery = computed(() =>
+  activeFileAutocompleteMatch.value
+    ? normalizeFileAutocompleteQuery(activeFileAutocompleteMatch.value.query)
+    : ''
+)
+
+const fileAutocompleteOpen = computed(() =>
+  !reviewDrawerOpen.value
+  && Boolean(activeFileAutocompleteMatch.value)
+  && activeFileAutocompleteMatchKey.value !== dismissedFileAutocompleteMatchKey.value
+)
+
+const visibleFileAutocompleteResults = computed(() =>
+  fileAutocompleteResults.value.slice(0, 8)
+)
+
+const highlightedFileAutocompleteResult = computed(() =>
+  visibleFileAutocompleteResults.value[fileAutocompleteHighlightIndex.value]
+  ?? visibleFileAutocompleteResults.value[0]
+  ?? null
+)
+
 const slashDropdownOpen = computed(() =>
   !reviewDrawerOpen.value
+  && !fileAutocompleteOpen.value
   && Boolean(activeSlashMatch.value)
   && activeSlashMatchKey.value !== dismissedSlashMatchKey.value
   && filteredSlashCommands.value.length > 0
@@ -327,6 +379,34 @@ const contextUsedPercent = computed(() => contextWindowState.value.usedPercent ?
 const contextIndicatorLabel = computed(() => {
   const remainingPercent = contextWindowState.value.remainingPercent
   return remainingPercent == null ? 'ctx' : `${Math.round(remainingPercent)}%`
+})
+
+const fileAutocompleteEmptyState = computed(() => {
+  if (!fileAutocompleteOpen.value) {
+    return null
+  }
+
+  if (!selectedProject.value?.projectPath) {
+    return 'Project runtime is not ready yet.'
+  }
+
+  if (!normalizedFileAutocompleteQuery.value) {
+    return 'Type a path or filename to search project files.'
+  }
+
+  if (fileAutocompleteLoading.value) {
+    return 'Searching project files...'
+  }
+
+  if (fileAutocompleteError.value) {
+    return fileAutocompleteError.value
+  }
+
+  if (visibleFileAutocompleteResults.value.length === 0) {
+    return 'No matching project files.'
+  }
+
+  return null
 })
 
 const normalizePromptSelection = (
@@ -423,6 +503,7 @@ const optimisticAttachmentSnapshots = new Map<string, DraftAttachment[]>()
 let promptControlsPromise: Promise<void> | null = null
 let pendingThreadHydration: Promise<void> | null = null
 let releaseServerRequestHandler: (() => void) | null = null
+let fileAutocompleteRequestSequence = 0
 
 const isActiveTurnStatus = (value: string | null | undefined) => {
   if (!value) {
@@ -694,6 +775,10 @@ const syncPromptSelectionFromDom = () => {
   if (!activeSlashMatchKey.value || activeSlashMatchKey.value !== dismissedSlashMatchKey.value) {
     dismissedSlashMatchKey.value = null
   }
+
+  if (!activeFileAutocompleteMatchKey.value || activeFileAutocompleteMatchKey.value !== dismissedFileAutocompleteMatchKey.value) {
+    dismissedFileAutocompleteMatchKey.value = null
+  }
 }
 
 const focusPromptAt = async (position?: number) => {
@@ -713,12 +798,12 @@ const focusPromptAt = async (position?: number) => {
 
 const shouldRetainPromptFocus = (nextFocused: EventTarget | null | undefined) =>
   isFocusWithinContainer(nextFocused, slashDropdownRef.value)
+  || isFocusWithinContainer(nextFocused, fileAutocompleteDropdownRef.value)
 
 const handlePromptBlur = (event: FocusEvent) => {
-  // Slash suggestions must stay focusless. If focus ever moves into the popup,
-  // the composer stops matching slash commands and the menu collapses while the
-  // textarea still contains `/`. Keep this blur guard aligned with the inert
-  // popup template below.
+  // Composer suggestion popups must stay focusless. If focus ever moves into
+  // the overlay, the textarea selection state no longer matches the active
+  // token and the menu collapses while the draft still contains `/` or `@`.
   if (shouldRetainPromptFocus(event.relatedTarget)) {
     void focusPromptAt(promptSelectionStart.value)
     return
@@ -731,6 +816,14 @@ const handleSlashDropdownPointerDown = (event: PointerEvent) => {
   // Fundamental rule for slash commands: the popup is only a visual chooser.
   // Selection happens through the textarea's keyboard handlers, and mouse/touch
   // clicks must not transfer DOM focus into popup items.
+  event.preventDefault()
+  void focusPromptAt(promptSelectionStart.value)
+}
+
+const handleFileAutocompletePointerDown = (event: PointerEvent) => {
+  // File suggestions follow the same inert-overlay rule as slash commands.
+  // Keeping focus anchored in the textarea avoids collapsing the popup while
+  // the active `@token` is still being edited.
   event.preventDefault()
   void focusPromptAt(promptSelectionStart.value)
 }
@@ -791,6 +884,27 @@ const moveSlashHighlight = (delta: number) => {
   slashHighlightIndex.value = nextIndex
 }
 
+const moveFileAutocompleteHighlight = (delta: number) => {
+  if (!visibleFileAutocompleteResults.value.length) {
+    fileAutocompleteHighlightIndex.value = 0
+    return
+  }
+
+  const maxIndex = visibleFileAutocompleteResults.value.length - 1
+  const nextIndex = fileAutocompleteHighlightIndex.value + delta
+  if (nextIndex < 0) {
+    fileAutocompleteHighlightIndex.value = maxIndex
+    return
+  }
+
+  if (nextIndex > maxIndex) {
+    fileAutocompleteHighlightIndex.value = 0
+    return
+  }
+
+  fileAutocompleteHighlightIndex.value = nextIndex
+}
+
 const resolveSlashCommandIcon = (command: SlashCommandDefinition) => {
   if (command.name === 'review') {
     return 'i-lucide-search-check'
@@ -813,6 +927,24 @@ const completeSlashCommand = async (command: SlashCommandDefinition) => {
   const completion = toSlashCommandCompletion(command)
   input.value = `${input.value.slice(0, match.start)}${completion}${input.value.slice(match.end)}`
   await focusPromptAt(match.start + completion.length)
+}
+
+const resolveFileAutocompleteIcon = (match: Pick<NormalizedFuzzyFileSearchMatch, 'matchType'>) =>
+  match.matchType === 'directory' ? 'i-lucide-folder-open' : 'i-lucide-file-code-2'
+
+const selectFileAutocompleteResult = async (match: NormalizedFuzzyFileSearchMatch) => {
+  const activeMatch = activeFileAutocompleteMatch.value
+  if (!activeMatch) {
+    return
+  }
+
+  dismissedFileAutocompleteMatchKey.value = null
+  fileAutocompleteError.value = null
+  const replacement = toFileAutocompleteInsertion(match)
+  const nextDraft = replaceActiveFileAutocompleteMatch(input.value, activeMatch, replacement)
+  input.value = nextDraft.value
+  fileAutocompleteResults.value = []
+  await focusPromptAt(nextDraft.caret)
 }
 
 const fetchProjectGitBranches = async () => {
@@ -2414,6 +2546,47 @@ const respondToPendingRequest = (response: unknown) => {
 }
 
 const onPromptKeydown = (event: KeyboardEvent) => {
+  if (fileAutocompleteOpen.value) {
+    if (event.key === 'ArrowDown') {
+      if (visibleFileAutocompleteResults.value.length === 0) {
+        return
+      }
+
+      event.preventDefault()
+      moveFileAutocompleteHighlight(1)
+      return
+    }
+
+    if (event.key === 'ArrowUp') {
+      if (visibleFileAutocompleteResults.value.length === 0) {
+        return
+      }
+
+      event.preventDefault()
+      moveFileAutocompleteHighlight(-1)
+      return
+    }
+
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      dismissedFileAutocompleteMatchKey.value = activeFileAutocompleteMatchKey.value
+      isPromptFocused.value = true
+      void focusPromptAt(promptSelectionStart.value)
+      return
+    }
+
+    if (event.key === 'Tab') {
+      const match = highlightedFileAutocompleteResult.value
+      if (!match) {
+        return
+      }
+
+      event.preventDefault()
+      void selectFileAutocompleteResult(match)
+      return
+    }
+  }
+
   if (!slashDropdownOpen.value) {
     return
   }
@@ -2452,6 +2625,15 @@ const onPromptKeydown = (event: KeyboardEvent) => {
 const onPromptEnter = (event: KeyboardEvent) => {
   if (!shouldSubmit(event)) {
     return
+  }
+
+  if (fileAutocompleteOpen.value) {
+    const match = highlightedFileAutocompleteResult.value
+    if (match) {
+      event.preventDefault()
+      void selectFileAutocompleteResult(match)
+      return
+    }
   }
 
   if (slashDropdownOpen.value) {
@@ -2549,6 +2731,17 @@ watch(filteredSlashCommands, (commands) => {
   }
 }, { flush: 'sync' })
 
+watch(visibleFileAutocompleteResults, (results) => {
+  if (!results.length) {
+    fileAutocompleteHighlightIndex.value = 0
+    return
+  }
+
+  if (fileAutocompleteHighlightIndex.value >= results.length) {
+    fileAutocompleteHighlightIndex.value = 0
+  }
+}, { flush: 'sync' })
+
 watch([selectedModel, availableModels], () => {
   const nextSelection = coercePromptSelection(effectiveModelList.value, selectedModel.value, selectedEffort.value)
   if (selectedModel.value !== nextSelection.model) {
@@ -2565,6 +2758,65 @@ watch(input, async () => {
   await nextTick()
   syncPromptSelectionFromDom()
 }, { flush: 'post' })
+
+watch(
+  [fileAutocompleteOpen, normalizedFileAutocompleteQuery, () => selectedProject.value?.projectPath ?? null],
+  async ([open, query, projectPath]) => {
+    const requestSequence = ++fileAutocompleteRequestSequence
+
+    if (!open) {
+      fileAutocompleteLoading.value = false
+      fileAutocompleteError.value = null
+      fileAutocompleteResults.value = []
+      return
+    }
+
+    if (!projectPath) {
+      fileAutocompleteLoading.value = false
+      fileAutocompleteResults.value = []
+      return
+    }
+
+    fileAutocompleteError.value = null
+    if (!query) {
+      fileAutocompleteLoading.value = false
+      fileAutocompleteResults.value = []
+      return
+    }
+
+    fileAutocompleteLoading.value = true
+    fileAutocompleteResults.value = []
+
+    try {
+      await ensureProjectRuntime()
+      const response = await getClient(props.projectId).request('fuzzyFileSearch', {
+        query,
+        roots: [projectPath],
+        cancellationToken: `chat-file-autocomplete:${props.projectId}`
+      })
+
+      if (requestSequence !== fileAutocompleteRequestSequence) {
+        return
+      }
+
+      fileAutocompleteResults.value = normalizeFuzzyFileSearchMatches(response)
+    } catch (caughtError) {
+      if (requestSequence !== fileAutocompleteRequestSequence) {
+        return
+      }
+
+      fileAutocompleteResults.value = []
+      fileAutocompleteError.value = caughtError instanceof Error
+        ? caughtError.message
+        : 'Failed to search project files.'
+    } finally {
+      if (requestSequence === fileAutocompleteRequestSequence) {
+        fileAutocompleteLoading.value = false
+      }
+    }
+  },
+  { flush: 'post' }
+)
 </script>
 
 <template>
@@ -2683,6 +2935,50 @@ watch(input, async () => {
             class="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-3xl border border-dashed border-primary/50 bg-primary/10 text-sm font-medium text-primary backdrop-blur-sm"
           >
             Drop images to attach them
+          </div>
+
+          <div
+            v-if="fileAutocompleteOpen"
+            ref="fileAutocompleteDropdownRef"
+            role="listbox"
+            aria-label="Project files"
+            class="absolute bottom-full left-0 z-20 mb-2 w-[90vw] max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-default bg-default/95 shadow-2xl backdrop-blur md:w-[min(50vw,52rem)] md:max-w-[min(50vw,52rem)]"
+            @pointerdown="handleFileAutocompletePointerDown"
+          >
+            <div class="max-h-72 overflow-y-auto p-2">
+              <div
+                v-if="fileAutocompleteEmptyState"
+                class="px-3 py-2 text-sm leading-6 text-muted"
+              >
+                {{ fileAutocompleteEmptyState }}
+              </div>
+              <div
+                v-for="(match, index) in visibleFileAutocompleteResults"
+                v-else
+                :key="`${match.matchType}:${match.path}`"
+                role="option"
+                :aria-selected="index === fileAutocompleteHighlightIndex"
+                data-file-autocomplete-option=""
+                class="group relative flex cursor-pointer items-start gap-1.5 px-3 py-2.5 text-sm text-highlighted outline-none transition-colors before:absolute before:inset-px before:z-[-1] before:rounded-md"
+                :class="index === fileAutocompleteHighlightIndex
+                  ? 'before:bg-elevated'
+                  : 'hover:before:bg-elevated/60'"
+                @click="void selectFileAutocompleteResult(match)"
+              >
+                <UIcon
+                  :name="resolveFileAutocompleteIcon(match)"
+                  class="mt-0.5 size-4 shrink-0 text-dimmed group-aria-selected:text-highlighted"
+                />
+                <div class="min-w-0">
+                  <div class="truncate text-sm font-medium">
+                    {{ match.fileName }}
+                  </div>
+                  <div class="truncate text-xs leading-5 text-toned">
+                    /{{ match.path }}
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
 
           <div
