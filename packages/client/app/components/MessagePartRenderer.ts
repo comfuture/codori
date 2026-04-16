@@ -32,6 +32,7 @@ export default defineComponent({
         case 'text':
           return h(MessagePartText, {
             role: props.message?.role,
+            projectId: props.projectId,
             part: props.part
           })
         case 'reasoning':

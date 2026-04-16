@@ -5,6 +5,26 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { defineComponent, h, nextTick, type Component } from 'vue'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+const openViewerMock = vi.fn()
+
+vi.mock('../app/composables/useProjects', () => {
+  return {
+    useProjects: () => ({
+      getProject: (projectId?: string | null) => projectId
+        ? { projectPath: '/Users/comfuture/Project/codori' }
+        : null
+    })
+  }
+})
+
+vi.mock('../app/composables/useLocalFileViewer', () => {
+  return {
+    useLocalFileViewer: () => ({
+      openViewer: openViewerMock
+    })
+  }
+})
+
 vi.mock('beautiful-mermaid', () => {
   return {
     THEMES: {
@@ -94,6 +114,18 @@ vi.mock('@comark/vue', () => {
             ])
           }
 
+          const linkMatch = text.match(/^\[(.+?)\]\((.+?)\)$/)
+          if (linkMatch && components.a) {
+            return h('div', { class: 'mock-comark', 'data-streaming': String(props.streaming) }, [
+              h(components.a, {
+                href: linkMatch[2],
+                title: ''
+              }, {
+                default: () => [linkMatch[1]]
+              })
+            ])
+          }
+
           return h('div', { class: 'mock-comark', 'data-streaming': String(props.streaming) }, text)
         }
       }
@@ -172,6 +204,7 @@ const mountAssistantText = async (text: string, state: 'done' | 'streaming' = 'd
 afterEach(() => {
   document.body.innerHTML = ''
   document.documentElement.className = ''
+  openViewerMock.mockReset()
 })
 
 describe('message part text markdown rendering', () => {
@@ -241,5 +274,30 @@ describe('message part text markdown rendering', () => {
     expect(wrapper.find('.cd-markdown-mermaid-fallback').exists()).toBe(true)
     expect(wrapper.find('pre code.language-mermaid').exists()).toBe(true)
     expect(wrapper.find('.mermaid svg').exists()).toBe(false)
+  })
+
+  it('routes project-local absolute file links to the in-app viewer', async () => {
+    const wrapper = mount(MessagePartText, {
+      attachTo: document.body,
+      props: {
+        role: 'assistant',
+        projectId: 'demo',
+        part: {
+          type: 'text',
+          text: '[ChatWorkspace.vue](/Users/comfuture/Project/codori/packages/client/app/components/ChatWorkspace.vue:12)',
+          state: 'done'
+        }
+      }
+    })
+
+    await settle()
+    await wrapper.get('a').trigger('click')
+
+    expect(openViewerMock).toHaveBeenCalledWith({
+      projectId: 'demo',
+      path: '/Users/comfuture/Project/codori/packages/client/app/components/ChatWorkspace.vue',
+      line: 12,
+      column: null
+    })
   })
 })

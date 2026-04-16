@@ -5,11 +5,13 @@ import math, { Math as ComarkMath } from '@comark/vue/plugins/math'
 import mermaid from '@comark/vue/plugins/mermaid'
 import { renderMermaidSVG, THEMES } from 'beautiful-mermaid'
 import { computed, defineComponent, h, onMounted, ref, watch } from 'vue'
+import LocalFileLink from './LocalFileLink.vue'
 import ReviewPriorityBadge from './ReviewPriorityBadge.vue'
 import { reviewPriorityBadgePlugin } from '../../utils/review-priority-badge'
 
 const props = defineProps<{
   role?: 'user' | 'assistant' | 'system'
+  projectId?: string | null
   part?: {
     type: 'text'
     text: string
@@ -126,7 +128,29 @@ const ChatMarkdownMermaid = defineComponent({
   }
 })
 
+const ChatMarkdownLocalFileLink = defineComponent({
+  name: 'ChatMarkdownLocalFileLink',
+  props: {
+    href: {
+      type: String,
+      default: ''
+    },
+    title: {
+      type: String,
+      default: ''
+    }
+  },
+  setup(linkProps, { slots }) {
+    return () => h(LocalFileLink, {
+      href: linkProps.href,
+      title: linkProps.title,
+      projectId: props.projectId ?? null
+    }, slots)
+  }
+})
+
 const components = {
+  a: ChatMarkdownLocalFileLink,
   math: ComarkMath,
   mermaid: ChatMarkdownMermaid,
   'review-priority-badge': ReviewPriorityBadge

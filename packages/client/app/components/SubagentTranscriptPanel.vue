@@ -10,6 +10,7 @@ import { resolveSubagentStatusMeta, type SubagentAccent } from '~~/shared/subage
 
 const props = withDefaults(defineProps<{
   agent: VisualSubagentPanel
+  projectId?: string | null
   accent?: SubagentAccent | null
   expanded?: boolean
   showExpandButton?: boolean
@@ -271,7 +272,10 @@ onBeforeUnmount(() => {
         compact
       >
         <template #content="{ message }">
-          <MessageContent :message="message as VisualSubagentPanel['messages'][number]" />
+          <MessageContent
+            :message="message as VisualSubagentPanel['messages'][number]"
+            :project-id="projectId ?? undefined"
+          />
         </template>
       </UChatMessages>
     </div>

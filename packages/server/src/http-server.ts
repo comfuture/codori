@@ -22,6 +22,7 @@ import {
 } from './attachment-store.js'
 import { CodoriError } from './errors.js'
 import { listGitBranches } from './git.js'
+import { LocalFileViewError, readProjectLocalFile } from './local-file-viewer.js'
 import { createRuntimeManager } from './process-manager.js'
 import {
   createServiceUpdateController,
@@ -66,6 +67,17 @@ type ServiceUpdateResponse = {
 type ProjectGitBranchesResponse = {
   currentBranch: string | null
   branches: string[]
+}
+
+type ProjectLocalFileResponse = {
+  file: {
+    path: string
+    relativePath: string
+    name: string
+    size: number
+    updatedAt: number
+    text: string
+  }
 }
 
 export type HttpServerOptions = {
@@ -472,6 +484,52 @@ export const createHttpServer = async (
       reply.header('content-disposition', `inline; filename="${basename(resolvedPath).replace(/"/g, '')}"`)
 
       return await readFile(resolvedPath)
+    }
+  )
+
+  app.get<{ Params: { projectId: string }, Querystring: { path?: string } }>(
+    '/api/projects/:projectId/local-file',
+    async (request, reply): Promise<ProjectLocalFileResponse | { error: { code: string, message: string } }> => {
+      const projectId = getProjectIdFromRequest(request.params.projectId)
+      const requestedPath = typeof request.query.path === 'string'
+        ? request.query.path.trim()
+        : ''
+
+      if (!requestedPath) {
+        reply.status(400)
+        return {
+          error: {
+            code: 'INVALID_LOCAL_FILE',
+            message: 'Missing local file path.'
+          }
+        }
+      }
+
+      const project = await resolveValue(manager.getProjectStatus(projectId))
+      await touchProjectActivity(manager, projectId)
+
+      try {
+        const file = await readProjectLocalFile(project.projectPath, requestedPath)
+        reply.header('cache-control', 'no-store')
+        return { file }
+      } catch (error) {
+        if (error instanceof LocalFileViewError) {
+          const statusCode = error.code === 'FORBIDDEN'
+            ? 403
+            : error.code === 'NOT_FOUND' || error.code === 'NOT_A_FILE'
+              ? 404
+              : 415
+          reply.status(statusCode)
+          return {
+            error: {
+              code: error.code,
+              message: error.message
+            }
+          }
+        }
+
+        throw error
+      }
     }
   )
 

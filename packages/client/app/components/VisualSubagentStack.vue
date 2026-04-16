@@ -5,6 +5,7 @@ import { resolveSubagentAccent } from '~~/shared/subagent-panels'
 
 const props = defineProps<{
   agents: VisualSubagentPanel[]
+  projectId?: string | null
 }>()
 
 const emit = defineEmits<{
@@ -26,6 +27,7 @@ const paneSize = computed(() => {
       v-for="(agent, index) in agents"
       :key="agent.threadId"
       :agent="agent"
+      :project-id="projectId ?? null"
       :accent="resolveSubagentAccent(index)"
       scroll-scope="stack"
       show-expand-button
