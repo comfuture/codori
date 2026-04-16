@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import {
   comparePackageVersions,
@@ -8,6 +10,25 @@ import {
   CODORI_SERVICE_MANAGED_ENV,
   CODORI_SERVICE_SCOPE_ENV
 } from '../src/service.js'
+
+const CURRENT_SERVER_VERSION = (() => {
+  const manifest = JSON.parse(readFileSync(resolve(import.meta.dirname, '../package.json'), 'utf8')) as {
+    version: string
+  }
+  return manifest.version
+})()
+
+const nextPatchVersion = (version: string) => {
+  const [major = '0', minor = '0', patch = '0', ...rest] = version.split('.')
+  const nextPatch = Number.parseInt(patch, 10)
+  if (Number.isNaN(nextPatch)) {
+    throw new Error(`Cannot derive next patch version from "${version}".`)
+  }
+
+  return [major, minor, String(nextPatch + 1), ...rest].join('.')
+}
+
+const NEWER_SERVER_VERSION = nextPatchVersion(CURRENT_SERVER_VERSION)
 
 describe('service update controller', () => {
   it('compares package versions numerically', () => {
@@ -44,7 +65,7 @@ describe('service update controller', () => {
       fetchImpl: vi.fn(async () => ({
         ok: true,
         json: async () => ({
-          version: '0.0.9'
+          version: NEWER_SERVER_VERSION
         })
       } as Response))
     })
@@ -53,7 +74,7 @@ describe('service update controller', () => {
     expect(status.enabled).toBe(true)
     expect(status.updateAvailable).toBe(true)
     expect(status.installedVersion).toMatch(/^\d+\.\d+\.\d+/u)
-    expect(status.latestVersion).toBe('0.0.9')
+    expect(status.latestVersion).toBe(NEWER_SERVER_VERSION)
     expect(status.updating).toBe(false)
   })
 
@@ -71,7 +92,7 @@ describe('service update controller', () => {
       fetchImpl: vi.fn(async () => ({
         ok: true,
         json: async () => ({
-          version: '0.0.9'
+          version: NEWER_SERVER_VERSION
         })
       } as Response)),
       spawnUpdateProcess
