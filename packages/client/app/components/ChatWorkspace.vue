@@ -1099,6 +1099,57 @@ const completeSlashCommand = async (command: SlashCommandDefinition) => {
 const resolveSkillAutocompleteDescription = (skill: SkillAutocompleteEntry) =>
   skill.shortDescription ?? skill.description
 
+const resolveSkillAutocompleteIcon = (skill: SkillAutocompleteEntry) => {
+  const haystack = [
+    skill.name,
+    skill.displayName,
+    skill.shortDescription,
+    skill.description,
+    skill.path
+  ]
+    .filter((value): value is string => typeof value === 'string' && value.length > 0)
+    .join(' ')
+    .toLowerCase()
+
+  if (haystack.includes('github') || haystack.includes('gh-') || haystack.includes(' ci ') || haystack.includes('actions')) {
+    return 'i-lucide-github'
+  }
+
+  if (haystack.includes('image') || haystack.includes('figma') || haystack.includes('bitmap')) {
+    return 'i-lucide-image'
+  }
+
+  if (haystack.includes('calendar') || haystack.includes('schedule')) {
+    return 'i-lucide-calendar'
+  }
+
+  if (haystack.includes('gmail') || haystack.includes('email') || haystack.includes('mailbox')) {
+    return 'i-lucide-mail'
+  }
+
+  if (haystack.includes('slack')) {
+    return 'i-lucide-message-square'
+  }
+
+  if (haystack.includes('excel') || haystack.includes('sheet') || haystack.includes('csv') || haystack.includes('spreadsheet')) {
+    return 'i-lucide-table-properties'
+  }
+
+  if (haystack.includes('powerpoint') || haystack.includes('slide') || haystack.includes('presentation') || haystack.includes('canva')) {
+    return 'i-lucide-presentation'
+  }
+
+  if (haystack.includes('cloudflare') || haystack.includes('worker')) {
+    return 'i-lucide-cloud'
+  }
+
+  if (haystack.includes('plugin')) {
+    return 'i-lucide-plug'
+  }
+
+  return 'i-lucide-badge-plus'
+}
+
 const selectSkillAutocompleteResult = async (skill: SkillAutocompleteEntry) => {
   const activeMatch = activeSkillAutocompleteMatch.value
   if (!activeMatch) {
@@ -3475,7 +3526,7 @@ watch(
             ref="skillAutocompleteDropdownRef"
             role="listbox"
             aria-label="Skills"
-            class="absolute bottom-full left-0 z-20 mb-2 w-[90vw] max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-default bg-default/95 shadow-2xl backdrop-blur md:w-[min(50vw,52rem)] md:max-w-[min(50vw,52rem)]"
+            class="absolute bottom-full left-0 z-20 mb-2 w-full overflow-hidden rounded-lg border border-default bg-default/95 shadow-2xl backdrop-blur"
             @pointerdown="handleSkillAutocompletePointerDown"
           >
             <div
@@ -3502,12 +3553,12 @@ watch(
                 @click="void selectSkillAutocompleteResult(skill)"
               >
                 <UIcon
-                  name="i-lucide-badge-plus"
+                  :name="resolveSkillAutocompleteIcon(skill)"
                   class="size-4 shrink-0 text-dimmed group-aria-selected:text-highlighted"
                 />
                 <div class="min-w-0 flex flex-1 items-center gap-2">
                   <span class="shrink-0 font-mono text-[13px] leading-6">
-                    ${{ skill.name }}
+                    {{ skill.name }}
                   </span>
                   <span class="min-w-0 truncate text-xs text-muted">
                     {{ resolveSkillAutocompleteDescription(skill) }}
