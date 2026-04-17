@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import {
+  buildMentionAutocompleteSubmission,
   filterAgentMentionEntries,
   filterPluginMentionEntries,
   findActiveMentionAutocompleteMatch,
   normalizePluginListResponse,
   reconcileMentionAutocompleteSelections,
   replaceActiveMentionAutocompleteMatch,
+  resolvePluginMentionIconUrl,
   slugifyMentionToken,
+  stripMentionSelectionsFromText,
   toAgentMentionToken,
   toPluginMentionToken
 } from '../shared/mention-autocomplete'
@@ -174,5 +177,69 @@ describe('mention autocomplete helpers', () => {
         threadId: 'thr_1'
       }]
     )).toEqual([])
+  })
+
+  it('strips structured mentions from the submitted text and resolves icon URLs', () => {
+    expect(stripMentionSelectionsFromText(
+      '  @atlas-worker please inspect @plugin-display-name now  ',
+      [{
+        start: 2,
+        end: 15
+      }, {
+        start: 31,
+        end: 51
+      }]
+    )).toBe('please inspect now')
+
+    expect(resolvePluginMentionIconUrl({
+      projectId: 'team/api',
+      path: '/Users/demo/.codex/plugins/demo/assets/icon.png',
+      configuredBase: null
+    })).toBe('http://127.0.0.1:4310/api/projects/team%2Fapi/mentions/icon?path=%2FUsers%2Fdemo%2F.codex%2Fplugins%2Fdemo%2Fassets%2Ficon.png')
+
+    expect(resolvePluginMentionIconUrl({
+      projectId: 'team/api',
+      path: 'https://example.com/icon.png',
+      configuredBase: 'http://127.0.0.1:4310'
+    })).toBe('https://example.com/icon.png')
+  })
+
+  it('builds structured plugin mention input and unique agent targets for submission', () => {
+    expect(buildMentionAutocompleteSubmission([{
+      start: 0,
+      end: 13,
+      kind: 'agent',
+      token: '@atlas-worker',
+      name: 'Atlas Worker',
+      threadId: 'thr_atlas'
+    }, {
+      start: 14,
+      end: 34,
+      kind: 'plugin',
+      token: '@plugin-display-name',
+      name: 'Plugin Display Name',
+      path: 'plugin://demo-plugin@openai-curated'
+    }, {
+      start: 35,
+      end: 55,
+      kind: 'plugin',
+      token: '@plugin-display-name',
+      name: 'Plugin Display Name',
+      path: 'plugin://demo-plugin@openai-curated'
+    }, {
+      start: 56,
+      end: 69,
+      kind: 'agent',
+      token: '@atlas-worker',
+      name: 'Atlas Worker',
+      threadId: 'thr_atlas'
+    }])).toEqual({
+      pluginInput: [{
+        type: 'mention',
+        name: 'Plugin Display Name',
+        path: 'plugin://demo-plugin@openai-curated'
+      }],
+      agentThreadIds: ['thr_atlas']
+    })
   })
 })

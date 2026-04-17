@@ -42,6 +42,16 @@ export type CodexUserInput =
       text_elements: unknown[]
     }
   | {
+      type: 'skill'
+      name: string
+      path: string
+    }
+  | {
+      type: 'mention'
+      name: string
+      path: string
+    }
+  | {
       type: 'localImage'
       path: string
     }
