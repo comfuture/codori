@@ -103,7 +103,6 @@ import {
 } from '~~/shared/slash-commands'
 import {
   buildFileAutocompletePathSegments,
-  findActiveFileAutocompleteMatch,
   normalizeFileAutocompleteQuery,
   normalizeFuzzyFileSearchMatches,
   replaceActiveFileAutocompleteMatch,
@@ -111,6 +110,21 @@ import {
   type FileAutocompletePathSegment,
   type NormalizedFuzzyFileSearchMatch
 } from '~~/shared/file-autocomplete'
+import {
+  buildMentionAutocompleteSubmission,
+  filterAgentMentionEntries,
+  filterPluginMentionEntries,
+  findActiveMentionAutocompleteMatch,
+  normalizePluginListResponse,
+  reconcileMentionAutocompleteSelections,
+  replaceActiveMentionAutocompleteMatch,
+  resolvePluginMentionIconUrl,
+  toAgentMentionToken,
+  toPluginMentionToken,
+  type AgentMentionAutocompleteEntry,
+  type MentionAutocompleteSelection,
+  type PluginMentionAutocompleteEntry
+} from '~~/shared/mention-autocomplete'
 import {
   filterSkillAutocompleteEntries,
   findActiveSkillAutocompleteMatch,
@@ -123,6 +137,10 @@ import {
   type SkillAutocompleteEntry,
   type SkillAutocompleteSelection
 } from '~~/shared/skill-autocomplete'
+import {
+  resolveSubagentAccent,
+  toSubagentAvatarText
+} from '~~/shared/subagent-panels'
 
 const props = defineProps<{
   projectId: string
@@ -169,8 +187,8 @@ const chatPromptRef = ref<{
 const slashDropdownRef = ref<HTMLElement | null>(null)
 const skillAutocompleteDropdownRef = ref<HTMLElement | null>(null)
 const skillAutocompleteListRef = ref<HTMLElement | null>(null)
-const fileAutocompleteDropdownRef = ref<HTMLElement | null>(null)
-const fileAutocompleteListRef = ref<HTMLElement | null>(null)
+const mentionAutocompleteDropdownRef = ref<HTMLElement | null>(null)
+const mentionAutocompleteListRef = ref<HTMLElement | null>(null)
 const scrollViewport = ref<HTMLElement | null>(null)
 const pinnedToBottom = ref(true)
 const session = useChatSession(props.projectId)
@@ -201,6 +219,36 @@ const {
   cancelAllPendingRequests
 } = usePendingUserRequest(props.projectId, activeThreadId)
 
+type MentionAutocompletePaletteItem =
+  | {
+      kind: 'agent'
+      key: string
+      label: string
+      description: string | null
+      agent: AgentMentionAutocompleteEntry
+      accentIndex: number
+    }
+  | {
+      kind: 'plugin'
+      key: string
+      label: string
+      description: string | null
+      plugin: PluginMentionAutocompleteEntry
+    }
+  | {
+      kind: 'file'
+      key: string
+      label: string
+      description: string | null
+      file: NormalizedFuzzyFileSearchMatch
+    }
+
+type MentionAutocompletePaletteSection = {
+  key: string
+  title: string
+  items: MentionAutocompletePaletteItem[]
+}
+
 const selectedProject = computed(() => getProject(props.projectId))
 const composerError = computed(() => attachmentError.value ?? error.value)
 const submitError = computed(() => composerError.value ? new Error(composerError.value) : undefined)
@@ -213,9 +261,15 @@ const promptSelectionEnd = ref(0)
 const isPromptFocused = ref(false)
 const dismissedSlashMatchKey = ref<string | null>(null)
 const dismissedSkillAutocompleteMatchKey = ref<string | null>(null)
-const dismissedFileAutocompleteMatchKey = ref<string | null>(null)
+const dismissedMentionAutocompleteMatchKey = ref<string | null>(null)
 const slashHighlightIndex = ref(0)
 const skillAutocompleteHighlightIndex = ref(0)
+const mentionAutocompleteHighlightIndex = ref(0)
+const pluginMentionLoading = ref(false)
+const pluginMentionError = ref<string | null>(null)
+const pluginMentionCatalog = ref<PluginMentionAutocompleteEntry[]>([])
+const pluginMentionCatalogCwd = ref<string | null>(null)
+const insertedMentionSelections = ref<MentionAutocompleteSelection[]>([])
 const skillAutocompleteLoading = ref(false)
 const skillAutocompleteError = ref<string | null>(null)
 const skillAutocompleteCatalog = ref<SkillAutocompleteEntry[]>([])
@@ -223,7 +277,6 @@ const skillAutocompleteCatalogCwd = ref<string | null>(null)
 const skillAutocompleteCatalogVersion = ref(-1)
 const skillAutocompleteInvalidationVersion = ref(0)
 const insertedSkillMentions = ref<SkillAutocompleteSelection[]>([])
-const fileAutocompleteHighlightIndex = ref(0)
 const fileAutocompleteLoading = ref(false)
 const fileAutocompleteError = ref<string | null>(null)
 const fileAutocompleteResults = ref<NormalizedFuzzyFileSearchMatch[]>([])
@@ -321,14 +374,14 @@ const filteredSkillAutocompleteResults = computed(() =>
     : []
 )
 
-const activeFileAutocompleteMatch = computed(() =>
+const activeMentionAutocompleteMatch = computed(() =>
   isPromptFocused.value
-    ? findActiveFileAutocompleteMatch(input.value, promptSelectionStart.value, promptSelectionEnd.value)
+    ? findActiveMentionAutocompleteMatch(input.value, promptSelectionStart.value, promptSelectionEnd.value)
     : null
 )
 
-const activeFileAutocompleteMatchKey = computed(() => {
-  const match = activeFileAutocompleteMatch.value
+const activeMentionAutocompleteMatchKey = computed(() => {
+  const match = activeMentionAutocompleteMatch.value
   if (!match) {
     return null
   }
@@ -336,33 +389,117 @@ const activeFileAutocompleteMatchKey = computed(() => {
   return `${match.start}:${match.end}:${match.raw}`
 })
 
-const normalizedFileAutocompleteQuery = computed(() =>
-  activeFileAutocompleteMatch.value
-    ? normalizeFileAutocompleteQuery(activeFileAutocompleteMatch.value.query)
+const normalizedMentionAutocompleteQuery = computed(() =>
+  activeMentionAutocompleteMatch.value
+    ? normalizeFileAutocompleteQuery(activeMentionAutocompleteMatch.value.query)
     : ''
 )
 
-const fileAutocompleteOpen = computed(() =>
+const activeAgentMentionEntries = computed(() =>
+  [...subagentPanels.value]
+    .filter(panel => isSubagentActiveStatus(panel.status))
+    .sort((left, right) => left.firstSeenAt - right.firstSeenAt)
+    .map((panel) => ({
+      threadId: panel.threadId,
+      name: panel.name,
+      role: panel.role ?? null,
+      status: panel.status
+    } satisfies AgentMentionAutocompleteEntry))
+)
+
+const filteredAgentMentionResults = computed(() =>
+  activeMentionAutocompleteMatch.value
+    ? filterAgentMentionEntries(activeAgentMentionEntries.value, activeMentionAutocompleteMatch.value.query)
+    : []
+)
+
+const filteredPluginMentionResults = computed(() =>
+  activeMentionAutocompleteMatch.value
+    ? filterPluginMentionEntries(pluginMentionCatalog.value, activeMentionAutocompleteMatch.value.query)
+      .slice(0, activeMentionAutocompleteMatch.value.query.trim() ? 8 : 6)
+    : []
+)
+
+const visibleMentionFileResults = computed(() =>
+  activeMentionAutocompleteMatch.value && normalizedMentionAutocompleteQuery.value
+    ? fileAutocompleteResults.value
+      .filter((match: NormalizedFuzzyFileSearchMatch) => match.matchType === 'file')
+      .slice(0, 8)
+    : []
+)
+
+const mentionAutocompleteOpen = computed(() =>
   !reviewDrawerOpen.value
-  && Boolean(activeFileAutocompleteMatch.value)
-  && activeFileAutocompleteMatchKey.value !== dismissedFileAutocompleteMatchKey.value
+  && Boolean(activeMentionAutocompleteMatch.value)
+  && activeMentionAutocompleteMatchKey.value !== dismissedMentionAutocompleteMatchKey.value
 )
 
-const visibleFileAutocompleteResults = computed(() =>
-  fileAutocompleteResults.value
-    .filter((match) => match.matchType === 'file')
-    .slice(0, 8)
+const mentionAutocompleteSections = computed<MentionAutocompletePaletteSection[]>(() => {
+  if (!mentionAutocompleteOpen.value) {
+    return []
+  }
+
+  const sections: MentionAutocompletePaletteSection[] = []
+
+  if (filteredAgentMentionResults.value.length > 0) {
+    sections.push({
+      key: 'agents',
+      title: 'Agents',
+      items: filteredAgentMentionResults.value.map((agent) => ({
+        kind: 'agent',
+        key: `agent:${agent.threadId}`,
+        label: agent.name,
+        description: agent.role ?? null,
+        agent,
+        accentIndex: activeAgentMentionEntries.value.findIndex(entry => entry.threadId === agent.threadId)
+      }))
+    })
+  }
+
+  if (filteredPluginMentionResults.value.length > 0) {
+    sections.push({
+      key: 'plugins',
+      title: 'Plugins',
+      items: filteredPluginMentionResults.value.map((plugin) => ({
+        kind: 'plugin',
+        key: `plugin:${plugin.id}`,
+        label: plugin.displayName?.trim() || plugin.name,
+        description: plugin.shortDescription ?? plugin.longDescription ?? null,
+        plugin
+      }))
+    })
+  }
+
+  if (visibleMentionFileResults.value.length > 0) {
+    sections.push({
+      key: 'files',
+      title: 'Files',
+      items: visibleMentionFileResults.value.map((file: NormalizedFuzzyFileSearchMatch) => ({
+        kind: 'file',
+        key: `file:${file.matchType}:${file.path}`,
+        label: file.fileName,
+        description: file.path,
+        file
+      }))
+    })
+  }
+
+  return sections
+})
+
+const flatMentionAutocompleteItems = computed(() =>
+  mentionAutocompleteSections.value.flatMap(section => section.items)
 )
 
-const highlightedFileAutocompleteResult = computed(() =>
-  visibleFileAutocompleteResults.value[fileAutocompleteHighlightIndex.value]
-  ?? visibleFileAutocompleteResults.value[0]
+const highlightedMentionAutocompleteItem = computed(() =>
+  flatMentionAutocompleteItems.value[mentionAutocompleteHighlightIndex.value]
+  ?? flatMentionAutocompleteItems.value[0]
   ?? null
 )
 
 const skillAutocompleteOpen = computed(() =>
   !reviewDrawerOpen.value
-  && !fileAutocompleteOpen.value
+  && !mentionAutocompleteOpen.value
   && Boolean(activeSkillAutocompleteMatch.value)
   && activeSkillAutocompleteMatchKey.value !== dismissedSkillAutocompleteMatchKey.value
 )
@@ -376,7 +513,7 @@ const highlightedSkillAutocompleteResult = computed(() =>
 const slashDropdownOpen = computed(() =>
   !reviewDrawerOpen.value
   && !skillAutocompleteOpen.value
-  && !fileAutocompleteOpen.value
+  && !mentionAutocompleteOpen.value
   && Boolean(activeSlashMatch.value)
   && activeSlashMatchKey.value !== dismissedSlashMatchKey.value
   && filteredSlashCommands.value.length > 0
@@ -445,32 +582,40 @@ const contextIndicatorLabel = computed(() => {
   return remainingPercent == null ? 'ctx' : `${Math.round(remainingPercent)}%`
 })
 
-const fileAutocompleteEmptyState = computed(() => {
-  if (!fileAutocompleteOpen.value) {
+const mentionAutocompleteEmptyState = computed(() => {
+  if (!mentionAutocompleteOpen.value) {
     return null
   }
 
-  if (!selectedProject.value?.projectPath) {
-    return 'Project runtime is not ready yet.'
+  if (mentionAutocompleteSections.value.length > 0) {
+    return null
   }
 
-  if (!normalizedFileAutocompleteQuery.value) {
-    return 'Type a path or filename to search project files.'
+  if (pluginMentionLoading.value) {
+    return 'Loading mention targets...'
   }
 
-  if (fileAutocompleteLoading.value) {
-    return 'Searching project files...'
+  if (pluginMentionError.value) {
+    return pluginMentionError.value
   }
 
-  if (fileAutocompleteError.value) {
-    return fileAutocompleteError.value
+  if (normalizedMentionAutocompleteQuery.value) {
+    if (!selectedProject.value?.projectPath) {
+      return 'Project runtime is not ready yet.'
+    }
+
+    if (fileAutocompleteLoading.value) {
+      return 'Searching mention targets...'
+    }
+
+    if (fileAutocompleteError.value) {
+      return fileAutocompleteError.value
+    }
+
+    return 'No matching mentions.'
   }
 
-  if (visibleFileAutocompleteResults.value.length === 0) {
-    return 'No matching project files.'
-  }
-
-  return null
+  return 'No active agents or enabled plugins.'
 })
 
 const skillAutocompleteEmptyState = computed(() => {
@@ -595,7 +740,9 @@ let pendingThreadHydration: Promise<void> | null = null
 let releaseServerRequestHandler: (() => void) | null = null
 let releaseSkillNotificationSubscription: (() => void) | null = null
 let skipNextSkillMentionSync = false
+let skipNextMentionSelectionSync = false
 let skillAutocompleteRequestSequence = 0
+let pluginMentionRequestSequence = 0
 let fileAutocompleteRequestSequence = 0
 
 const isActiveTurnStatus = (value: string | null | undefined) => {
@@ -644,6 +791,40 @@ const createLiveStreamState = (
   interruptAcknowledged: false,
   unsubscribe: null
 })
+
+const subscribeThreadNotifications = (threadId: string, liveStream: LiveStream) => {
+  const client = getClient(props.projectId)
+  liveStream.unsubscribe = client.subscribe((notification) => {
+    const targetThreadId = notificationThreadId(notification)
+    if (!targetThreadId) {
+      return
+    }
+
+    if (targetThreadId !== threadId) {
+      if (liveStream.observedSubagentThreadIds.has(targetThreadId)) {
+        applySubagentNotification(targetThreadId, notification)
+      }
+      return
+    }
+
+    if (!liveStream.turnId) {
+      liveStream.bufferedNotifications.push(notification)
+      return
+    }
+
+    const turnId = notificationTurnId(notification)
+    if (!shouldApplyNotificationToCurrentTurn({
+      liveStreamTurnId: liveStream.turnId,
+      lockedTurnId: liveStream.lockedTurnId,
+      notificationMethod: notification.method,
+      notificationTurnId: turnId
+    })) {
+      return
+    }
+
+    applyNotification(notification)
+  })
+}
 
 const setSessionLiveStream = (liveStream: LiveStream | null) => {
   session.liveStream = liveStream
@@ -734,41 +915,11 @@ const ensurePendingLiveStream = async () => {
   const pendingLiveStream = (async () => {
     await ensureProjectRuntime()
     const { threadId, created } = await ensureThread()
-    const client = getClient(props.projectId)
     const buffered: CodexRpcNotification[] = []
     clearLiveStream()
 
     const liveStream = createLiveStreamState(threadId, buffered)
-    liveStream.unsubscribe = client.subscribe((notification) => {
-      const targetThreadId = notificationThreadId(notification)
-      if (!targetThreadId) {
-        return
-      }
-
-      if (targetThreadId !== threadId) {
-        if (liveStream.observedSubagentThreadIds.has(targetThreadId)) {
-          applySubagentNotification(targetThreadId, notification)
-        }
-        return
-      }
-
-      if (!liveStream.turnId) {
-        buffered.push(notification)
-        return
-      }
-
-      const turnId = notificationTurnId(notification)
-      if (!shouldApplyNotificationToCurrentTurn({
-        liveStreamTurnId: liveStream.turnId,
-        lockedTurnId: liveStream.lockedTurnId,
-        notificationMethod: notification.method,
-        notificationTurnId: turnId
-      })) {
-        return
-      }
-
-      applyNotification(notification)
-    })
+    subscribeThreadNotifications(threadId, liveStream)
 
     setSessionLiveStream(liveStream)
 
@@ -788,6 +939,23 @@ const ensurePendingLiveStream = async () => {
       session.pendingLiveStream = null
     }
   }
+}
+
+const ensureObservedThreadSubscription = async () => {
+  if (session.liveStream && session.liveStream.threadId === activeThreadId.value) {
+    return session.liveStream
+  }
+
+  const threadId = activeThreadId.value
+  if (!threadId) {
+    return null
+  }
+
+  await ensureProjectRuntime()
+  const liveStream = createLiveStreamState(threadId)
+  subscribeThreadNotifications(threadId, liveStream)
+  setSessionLiveStream(liveStream)
+  return liveStream
 }
 
 const createOptimisticMessageId = () =>
@@ -873,8 +1041,8 @@ const syncPromptSelectionFromDom = () => {
     dismissedSkillAutocompleteMatchKey.value = null
   }
 
-  if (!activeFileAutocompleteMatchKey.value || activeFileAutocompleteMatchKey.value !== dismissedFileAutocompleteMatchKey.value) {
-    dismissedFileAutocompleteMatchKey.value = null
+  if (!activeMentionAutocompleteMatchKey.value || activeMentionAutocompleteMatchKey.value !== dismissedMentionAutocompleteMatchKey.value) {
+    dismissedMentionAutocompleteMatchKey.value = null
   }
 }
 
@@ -896,7 +1064,7 @@ const focusPromptAt = async (position?: number) => {
 const shouldRetainPromptFocus = (nextFocused: EventTarget | null | undefined) =>
   isFocusWithinContainer(nextFocused, slashDropdownRef.value)
   || isFocusWithinContainer(nextFocused, skillAutocompleteDropdownRef.value)
-  || isFocusWithinContainer(nextFocused, fileAutocompleteDropdownRef.value)
+  || isFocusWithinContainer(nextFocused, mentionAutocompleteDropdownRef.value)
 
 const handlePromptBlur = (event: FocusEvent) => {
   // Composer suggestion popups must stay focusless. If focus ever moves into
@@ -923,8 +1091,8 @@ const handleSkillAutocompletePointerDown = (event: PointerEvent) => {
   void focusPromptAt(promptSelectionStart.value)
 }
 
-const handleFileAutocompletePointerDown = (event: PointerEvent) => {
-  // File suggestions follow the same inert-overlay rule as slash commands.
+const handleMentionAutocompletePointerDown = (event: PointerEvent) => {
+  // Mention suggestions follow the same inert-overlay rule as slash commands.
   // Keeping focus anchored in the textarea avoids collapsing the popup while
   // the active `@token` is still being edited.
   event.preventDefault()
@@ -932,6 +1100,18 @@ const handleFileAutocompletePointerDown = (event: PointerEvent) => {
 }
 
 const onPromptEnterCapture = (event: KeyboardEvent) => {
+  if (mentionAutocompleteOpen.value) {
+    event.preventDefault()
+    event.stopPropagation()
+    event.stopImmediatePropagation()
+
+    const item = highlightedMentionAutocompleteItem.value
+    if (item) {
+      void selectMentionAutocompleteItem(item)
+    }
+    return
+  }
+
   if (skillAutocompleteOpen.value) {
     event.preventDefault()
     event.stopPropagation()
@@ -944,21 +1124,6 @@ const onPromptEnterCapture = (event: KeyboardEvent) => {
     return
   }
 
-  if (!fileAutocompleteOpen.value) {
-    return
-  }
-
-  // UChatPrompt wires its own `keydown.enter.exact` handler on the textarea and
-  // emits `submit` immediately. Intercept exact Enter in capture phase so file
-  // palette selection never falls through to the component's submit path.
-  event.preventDefault()
-  event.stopPropagation()
-  event.stopImmediatePropagation()
-
-  const match = highlightedFileAutocompleteResult.value
-  if (match) {
-    void selectFileAutocompleteResult(match)
-  }
 }
 
 const setComposerError = (messageText: string) => {
@@ -993,6 +1158,7 @@ const clearSlashCommandDraft = () => {
   // edit start from stale command text and feels like the action did not finish.
   input.value = ''
   insertedSkillMentions.value = []
+  insertedMentionSelections.value = []
   clearAttachments({ revoke: false })
   dismissedSlashMatchKey.value = null
 }
@@ -1000,13 +1166,19 @@ const clearSlashCommandDraft = () => {
 const cloneSkillMentions = (mentions = insertedSkillMentions.value) =>
   mentions.map(mention => ({ ...mention }))
 
+const cloneMentionSelections = (selections = insertedMentionSelections.value) =>
+  selections.map(selection => ({ ...selection }))
+
 const applyDraftTextState = (
   nextText: string,
-  nextMentions: SkillAutocompleteSelection[] = []
+  nextMentions: SkillAutocompleteSelection[] = [],
+  nextMentionSelections: MentionAutocompleteSelection[] = []
 ) => {
   skipNextSkillMentionSync = true
+  skipNextMentionSelectionSync = true
   input.value = nextText
   insertedSkillMentions.value = cloneSkillMentions(nextMentions)
+  insertedMentionSelections.value = cloneMentionSelections(nextMentionSelections)
 }
 
 const moveSlashHighlight = (delta: number) => {
@@ -1051,25 +1223,25 @@ const moveSkillAutocompleteHighlight = (delta: number) => {
   skillAutocompleteHighlightIndex.value = nextIndex
 }
 
-const moveFileAutocompleteHighlight = (delta: number) => {
-  if (!visibleFileAutocompleteResults.value.length) {
-    fileAutocompleteHighlightIndex.value = 0
+const moveMentionAutocompleteHighlight = (delta: number) => {
+  if (!flatMentionAutocompleteItems.value.length) {
+    mentionAutocompleteHighlightIndex.value = 0
     return
   }
 
-  const maxIndex = visibleFileAutocompleteResults.value.length - 1
-  const nextIndex = fileAutocompleteHighlightIndex.value + delta
+  const maxIndex = flatMentionAutocompleteItems.value.length - 1
+  const nextIndex = mentionAutocompleteHighlightIndex.value + delta
   if (nextIndex < 0) {
-    fileAutocompleteHighlightIndex.value = maxIndex
+    mentionAutocompleteHighlightIndex.value = maxIndex
     return
   }
 
   if (nextIndex > maxIndex) {
-    fileAutocompleteHighlightIndex.value = 0
+    mentionAutocompleteHighlightIndex.value = 0
     return
   }
 
-  fileAutocompleteHighlightIndex.value = nextIndex
+  mentionAutocompleteHighlightIndex.value = nextIndex
 }
 
 const resolveSlashCommandIcon = (command: SlashCommandDefinition) => {
@@ -1101,6 +1273,33 @@ const resolveSkillAutocompleteDescription = (skill: SkillAutocompleteEntry) =>
 
 const resolveSkillAutocompleteLabel = (skill: SkillAutocompleteEntry) =>
   skill.displayName?.trim() || skill.name
+
+const resolveAgentMentionDescription = (agent: AgentMentionAutocompleteEntry) => {
+  const parts = [
+    agent.role,
+    agent.status ? agent.status.replace(/^pendingInit$/u, 'pending') : null
+  ].filter((value): value is string => Boolean(value))
+
+  return parts.length > 0 ? parts.join(' · ') : null
+}
+
+const resolvePluginMentionLabel = (plugin: PluginMentionAutocompleteEntry) =>
+  plugin.displayName?.trim() || plugin.name
+
+const resolvePluginMentionAvatarText = (plugin: PluginMentionAutocompleteEntry) => {
+  const normalized = resolvePluginMentionLabel(plugin).replace(/\s+/gu, '').trim()
+  return Array.from(normalized || 'PL').slice(0, 2).join('').toUpperCase()
+}
+
+const resolvePluginMentionAvatarSrc = (plugin: PluginMentionAutocompleteEntry) =>
+  resolvePluginMentionIconUrl({
+    projectId: props.projectId,
+    path: plugin.composerIcon ?? plugin.logo,
+    configuredBase: String(runtimeConfig.public.serverBase ?? '')
+  })
+
+const resolvePluginMentionPath = (plugin: PluginMentionAutocompleteEntry) =>
+  `plugin://${plugin.name}@${plugin.marketplaceName}`
 
 const resolveSkillAutocompleteIcon = (skill: SkillAutocompleteEntry) => {
   const haystack = [
@@ -1168,6 +1367,11 @@ const selectSkillAutocompleteResult = async (skill: SkillAutocompleteEntry) => {
     nextDraft.value,
     insertedSkillMentions.value
   )
+  const nextMentionSelections = reconcileMentionAutocompleteSelections(
+    input.value,
+    nextDraft.value,
+    insertedMentionSelections.value
+  )
 
   nextMentions.push({
     start: nextDraft.tokenStart,
@@ -1176,7 +1380,7 @@ const selectSkillAutocompleteResult = async (skill: SkillAutocompleteEntry) => {
     path: skill.path
   })
 
-  applyDraftTextState(nextDraft.value, nextMentions)
+  applyDraftTextState(nextDraft.value, nextMentions, nextMentionSelections)
   await focusPromptAt(nextDraft.caret)
 }
 
@@ -1188,31 +1392,127 @@ const renderFileAutocompletePathSegments = (
 ): FileAutocompletePathSegment[] =>
   buildFileAutocompletePathSegments(match)
 
-const selectFileAutocompleteResult = async (match: NormalizedFuzzyFileSearchMatch) => {
-  const activeMatch = activeFileAutocompleteMatch.value
+const selectAgentMentionEntry = async (agent: AgentMentionAutocompleteEntry) => {
+  const activeMatch = activeMentionAutocompleteMatch.value
   if (!activeMatch) {
     return
   }
 
-  dismissedFileAutocompleteMatchKey.value = null
+  dismissedMentionAutocompleteMatchKey.value = null
+  fileAutocompleteError.value = null
+  const replacement = toAgentMentionToken(agent)
+  const nextDraft = replaceActiveMentionAutocompleteMatch(input.value, activeMatch, replacement)
+  const nextSkillMentions = reconcileSkillAutocompleteSelections(
+    input.value,
+    nextDraft.value,
+    insertedSkillMentions.value
+  )
+  const nextMentionSelections = reconcileMentionAutocompleteSelections(
+    input.value,
+    nextDraft.value,
+    insertedMentionSelections.value
+  )
+
+  nextMentionSelections.push({
+    start: nextDraft.tokenStart,
+    end: nextDraft.tokenEnd,
+    kind: 'agent',
+    token: replacement,
+    name: agent.name,
+    threadId: agent.threadId
+  })
+
+  applyDraftTextState(nextDraft.value, nextSkillMentions, nextMentionSelections)
+  await focusPromptAt(nextDraft.caret)
+}
+
+const selectPluginMentionEntry = async (plugin: PluginMentionAutocompleteEntry) => {
+  const activeMatch = activeMentionAutocompleteMatch.value
+  if (!activeMatch) {
+    return
+  }
+
+  dismissedMentionAutocompleteMatchKey.value = null
+  fileAutocompleteError.value = null
+  const replacement = toPluginMentionToken(plugin)
+  const nextDraft = replaceActiveMentionAutocompleteMatch(input.value, activeMatch, replacement)
+  const nextSkillMentions = reconcileSkillAutocompleteSelections(
+    input.value,
+    nextDraft.value,
+    insertedSkillMentions.value
+  )
+  const nextMentionSelections = reconcileMentionAutocompleteSelections(
+    input.value,
+    nextDraft.value,
+    insertedMentionSelections.value
+  )
+
+  nextMentionSelections.push({
+    start: nextDraft.tokenStart,
+    end: nextDraft.tokenEnd,
+    kind: 'plugin',
+    token: replacement,
+    name: resolvePluginMentionLabel(plugin),
+    path: resolvePluginMentionPath(plugin)
+  })
+
+  applyDraftTextState(nextDraft.value, nextSkillMentions, nextMentionSelections)
+  await focusPromptAt(nextDraft.caret)
+}
+
+const selectFileAutocompleteResult = async (match: NormalizedFuzzyFileSearchMatch) => {
+  const activeMatch = activeMentionAutocompleteMatch.value
+  if (!activeMatch) {
+    return
+  }
+
+  dismissedMentionAutocompleteMatchKey.value = null
   fileAutocompleteError.value = null
   const replacement = toFileAutocompleteHandle(match)
   const nextDraft = replaceActiveFileAutocompleteMatch(input.value, activeMatch, replacement)
-  input.value = nextDraft.value
+  const nextSkillMentions = reconcileSkillAutocompleteSelections(
+    input.value,
+    nextDraft.value,
+    insertedSkillMentions.value
+  )
+  const nextMentionSelections = reconcileMentionAutocompleteSelections(
+    input.value,
+    nextDraft.value,
+    insertedMentionSelections.value
+  )
+
+  applyDraftTextState(nextDraft.value, nextSkillMentions, nextMentionSelections)
   fileAutocompleteResults.value = []
   await focusPromptAt(nextDraft.caret)
 }
 
-const syncFileAutocompleteScroll = async () => {
+const selectMentionAutocompleteItem = async (item: MentionAutocompletePaletteItem) => {
+  if (item.kind === 'agent') {
+    await selectAgentMentionEntry(item.agent)
+    return
+  }
+
+  if (item.kind === 'plugin') {
+    await selectPluginMentionEntry(item.plugin)
+    return
+  }
+
+  await selectFileAutocompleteResult(item.file)
+}
+
+const syncMentionAutocompleteScroll = async () => {
   await nextTick()
 
-  const selected = fileAutocompleteListRef.value?.querySelector<HTMLElement>(
-    '[data-file-autocomplete-option][aria-selected="true"]'
+  const selected = mentionAutocompleteListRef.value?.querySelector<HTMLElement>(
+    '[data-mention-autocomplete-option][aria-selected="true"]'
   )
   selected?.scrollIntoView({
     block: 'nearest'
   })
 }
+
+const resolveMentionAutocompleteIndex = (item: MentionAutocompletePaletteItem) =>
+  flatMentionAutocompleteItems.value.findIndex(candidate => candidate.key === item.key)
 
 const syncSkillAutocompleteScroll = async () => {
   await nextTick()
@@ -1223,6 +1523,37 @@ const syncSkillAutocompleteScroll = async () => {
   selected?.scrollIntoView({
     block: 'nearest'
   })
+}
+
+const shouldReloadPluginMentionCatalog = (projectPath: string) =>
+  pluginMentionCatalogCwd.value !== projectPath
+
+const loadPluginMentionCatalog = async (options?: {
+  projectPath?: string | null
+  requestSequence?: number | null
+}) => {
+  const projectPath = options?.projectPath ?? selectedProject.value?.projectPath ?? null
+  if (!projectPath) {
+    pluginMentionCatalog.value = []
+    pluginMentionCatalogCwd.value = null
+    pluginMentionError.value = null
+    return []
+  }
+
+  await ensureProjectRuntime()
+  const response = await getClient(props.projectId).request('plugin/list', {
+    cwds: [projectPath]
+  })
+  const plugins = normalizePluginListResponse(response)
+
+  if (options?.requestSequence != null && options.requestSequence !== pluginMentionRequestSequence) {
+    return pluginMentionCatalog.value
+  }
+
+  pluginMentionCatalog.value = plugins
+  pluginMentionCatalogCwd.value = projectPath
+  pluginMentionError.value = null
+  return plugins
 }
 
 const shouldReloadSkillAutocompleteCatalog = (projectPath: string) =>
@@ -1480,10 +1811,11 @@ const markAssistantOutputStartedForItem = (item: CodexThreadItem) => {
 const restoreDraftIfPristine = (
   text: string,
   submittedAttachments: DraftAttachment[],
-  submittedSkillMentions: SkillAutocompleteSelection[] = []
+  submittedSkillMentions: SkillAutocompleteSelection[] = [],
+  submittedMentionSelections: MentionAutocompleteSelection[] = []
 ) => {
   if (!input.value.trim()) {
-    applyDraftTextState(text, submittedSkillMentions)
+    applyDraftTextState(text, submittedSkillMentions, submittedMentionSelections)
   }
 
   if (attachments.value.length === 0 && submittedAttachments.length > 0) {
@@ -1539,6 +1871,7 @@ const submitTurnStart = async (input: {
   liveStream: LiveStream
   text: string
   submittedAttachments: DraftAttachment[]
+  additionalInput?: ReturnType<typeof buildMentionAutocompleteSubmission>['pluginInput']
   uploadedAttachments?: PersistedProjectAttachment[]
   optimisticMessageId: string
   queueOptimisticMessage?: boolean
@@ -1548,6 +1881,7 @@ const submitTurnStart = async (input: {
     liveStream,
     text,
     submittedAttachments,
+    additionalInput = [],
     uploadedAttachments: existingUploadedAttachments,
     optimisticMessageId,
     queueOptimisticMessage: shouldQueueOptimisticMessage = true
@@ -1561,7 +1895,7 @@ const submitTurnStart = async (input: {
     ?? await uploadAttachments(liveStream.threadId, submittedAttachments)
   const turnStart = await client.request<TurnStartResponse>('turn/start', {
     threadId: liveStream.threadId,
-    input: buildTurnStartInput(text, uploadedAttachments),
+    input: buildTurnStartInput(text, uploadedAttachments, additionalInput),
     cwd: selectedProject.value?.projectPath ?? null,
     approvalPolicy: 'never',
     ...buildTurnOverrides(selectedModel.value, selectedEffort.value)
@@ -1570,6 +1904,55 @@ const submitTurnStart = async (input: {
   tokenUsage.value = null
   setLiveStreamTurnId(liveStream, turnStart.turn.id)
   replayBufferedNotifications(liveStream)
+}
+
+const sendMentionedAgentMessage = async (input: {
+  threadId: string
+  text: string
+  submittedAttachments: DraftAttachment[]
+  additionalInput: ReturnType<typeof buildMentionAutocompleteSubmission>['pluginInput']
+}) => {
+  const client = getClient(props.projectId)
+  const { threadId, text, submittedAttachments, additionalInput } = input
+
+  await ensureObservedThreadSubscription()
+  await bootstrapSubagentPanel(threadId)
+  rememberObservedSubagentThread(threadId)
+  const uploadedAttachments = await uploadAttachments(threadId, submittedAttachments)
+  const currentTurnId = getSubagentPanel(threadId)?.turnId ?? null
+
+  if (currentTurnId) {
+    try {
+      await client.request<TurnStartResponse>('turn/steer', {
+        threadId,
+        expectedTurnId: currentTurnId,
+        input: buildTurnStartInput(text, uploadedAttachments, additionalInput),
+        ...buildTurnOverrides(selectedModel.value, selectedEffort.value)
+      })
+      return
+    } catch (caughtError) {
+      const errorToHandle = caughtError instanceof Error ? caughtError : new Error(String(caughtError))
+      if (!shouldRetrySteerWithTurnStart(errorToHandle.message)) {
+        throw errorToHandle
+      }
+    }
+  }
+
+  const turnStart = await client.request<TurnStartResponse>('turn/start', {
+    threadId,
+    input: buildTurnStartInput(text, uploadedAttachments, additionalInput),
+    cwd: selectedProject.value?.projectPath ?? null,
+    approvalPolicy: 'never',
+    ...buildTurnOverrides(selectedModel.value, selectedEffort.value)
+  })
+
+  upsertSubagentPanel(threadId, (panel) => ({
+    ...(panel ?? createSubagentPanelState(threadId)),
+    turnId: turnStart.turn.id,
+    status: 'running',
+    bootstrapped: panel?.bootstrapped ?? true,
+    lastSeenAt: Date.now()
+  }))
 }
 
 const shortThreadId = (value: string) => value.slice(0, 8)
@@ -1595,6 +1978,7 @@ const getSubagentPanel = (threadId: string) =>
 const createSubagentPanelState = (threadId: string): SubagentPanelState => ({
   threadId,
   name: resolveSubagentName(threadId),
+  role: null,
   status: null,
   messages: [],
   firstSeenAt: Date.now(),
@@ -2153,6 +2537,7 @@ const bootstrapSubagentPanel = async (threadId: string) => {
         return {
           ...basePanel,
           name: resolveSubagentName(threadId, response.thread),
+          role: response.thread.agentRole ?? basePanel.role ?? null,
           messages: threadToMessages(response.thread),
           turnId: activeTurn?.id ?? null,
           bootstrapped: true,
@@ -2715,21 +3100,21 @@ const applyNotification = (notification: CodexRpcNotification) => {
 const sendMessage = async () => {
   // Nuxt UI's UChatPrompt emits `submit` directly from its internal
   // `keydown.enter.exact` handler, so guarding only in our keydown callback is
-  // not sufficient to stop Enter from racing into a send while the file palette
+  // not sufficient to stop Enter from racing into a send while the mention palette
   // is open. Keep the submit path itself aware of the palette state.
-  if (skillAutocompleteOpen.value) {
-    const skill = highlightedSkillAutocompleteResult.value
-    if (skill) {
-      await selectSkillAutocompleteResult(skill)
+  if (mentionAutocompleteOpen.value) {
+    const item = highlightedMentionAutocompleteItem.value
+    if (item) {
+      await selectMentionAutocompleteItem(item)
     }
 
     return
   }
 
-  if (fileAutocompleteOpen.value) {
-    const match = highlightedFileAutocompleteResult.value
-    if (match) {
-      await selectFileAutocompleteResult(match)
+  if (skillAutocompleteOpen.value) {
+    const skill = highlightedSkillAutocompleteResult.value
+    if (skill) {
+      await selectSkillAutocompleteResult(skill)
     }
 
     return
@@ -2743,6 +3128,7 @@ const sendMessage = async () => {
   const rawText = input.value
   const submittedAttachments = attachments.value.slice()
   const submittedSkillMentions = cloneSkillMentions()
+  const submittedMentionSelections = cloneMentionSelections()
 
   if (!rawText.trim() && submittedAttachments.length === 0) {
     sendMessageLocked.value = false
@@ -2765,6 +3151,14 @@ const sendMessage = async () => {
     }
   }
 
+  const mentionSubmission = buildMentionAutocompleteSubmission(submittedMentionSelections)
+  if (mentionSubmission.agentThreadIds.length > 1) {
+    error.value = 'Send to one agent at a time.'
+    status.value = 'error'
+    sendMessageLocked.value = false
+    return
+  }
+
   const text = preprocessSkillMentionsForSubmission(
     rawText,
     submittedSkillMentions,
@@ -2781,7 +3175,7 @@ const sendMessage = async () => {
   try {
     await loadPromptControls()
   } catch (caughtError) {
-    restoreDraftIfPristine(rawText, submittedAttachments, submittedSkillMentions)
+    restoreDraftIfPristine(rawText, submittedAttachments, submittedSkillMentions, submittedMentionSelections)
     error.value = caughtError instanceof Error ? caughtError.message : String(caughtError)
     status.value = 'error'
     sendMessageLocked.value = false
@@ -2799,6 +3193,19 @@ const sendMessage = async () => {
     pinnedToBottom.value = true
     error.value = null
     attachmentError.value = null
+
+    const targetAgentThreadId = mentionSubmission.agentThreadIds[0] ?? null
+    if (targetAgentThreadId) {
+      await sendMentionedAgentMessage({
+        threadId: targetAgentThreadId,
+        text,
+        submittedAttachments,
+        additionalInput: mentionSubmission.pluginInput
+      })
+      status.value = 'ready'
+      return
+    }
+
     const submissionMethod = resolveTurnSubmissionMethod(shouldSubmitWithTurnSteer())
     if (submissionMethod === 'turn/start') {
       status.value = 'submitted'
@@ -2826,7 +3233,7 @@ const sendMessage = async () => {
           await client.request<TurnStartResponse>('turn/steer', {
             threadId: liveStream.threadId,
             expectedTurnId: turnId,
-            input: buildTurnStartInput(text, uploadedAttachments),
+            input: buildTurnStartInput(text, uploadedAttachments, mentionSubmission.pluginInput),
             ...buildTurnOverrides(selectedModel.value, selectedEffort.value)
           })
           tokenUsage.value = null
@@ -2847,6 +3254,7 @@ const sendMessage = async () => {
             liveStream,
             text,
             submittedAttachments,
+            additionalInput: mentionSubmission.pluginInput,
             uploadedAttachments,
             optimisticMessageId,
             queueOptimisticMessage: false
@@ -2862,6 +3270,7 @@ const sendMessage = async () => {
         liveStream,
         text,
         submittedAttachments,
+        additionalInput: mentionSubmission.pluginInput,
         optimisticMessageId
       })
     } catch (caughtError) {
@@ -2876,14 +3285,15 @@ const sendMessage = async () => {
           clearPendingOptimisticMessages(clearLiveStream(new Error(messageText)))
         }
         session.pendingLiveStream = null
-        restoreDraftIfPristine(rawText, submittedAttachments, submittedSkillMentions)
+        restoreDraftIfPristine(rawText, submittedAttachments, submittedSkillMentions, submittedMentionSelections)
         error.value = messageText
         status.value = 'error'
         return
       }
 
-      restoreDraftIfPristine(rawText, submittedAttachments, submittedSkillMentions)
+      restoreDraftIfPristine(rawText, submittedAttachments, submittedSkillMentions, submittedMentionSelections)
       error.value = messageText
+      status.value = 'error'
     }
   } finally {
     sendMessageLocked.value = false
@@ -2935,6 +3345,47 @@ const respondToPendingRequest = (response: unknown) => {
 }
 
 const onPromptKeydown = (event: KeyboardEvent) => {
+  if (mentionAutocompleteOpen.value) {
+    if (event.key === 'ArrowDown') {
+      if (flatMentionAutocompleteItems.value.length === 0) {
+        return
+      }
+
+      event.preventDefault()
+      moveMentionAutocompleteHighlight(1)
+      return
+    }
+
+    if (event.key === 'ArrowUp') {
+      if (flatMentionAutocompleteItems.value.length === 0) {
+        return
+      }
+
+      event.preventDefault()
+      moveMentionAutocompleteHighlight(-1)
+      return
+    }
+
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      dismissedMentionAutocompleteMatchKey.value = activeMentionAutocompleteMatchKey.value
+      isPromptFocused.value = true
+      void focusPromptAt(promptSelectionStart.value)
+      return
+    }
+
+    if (event.key === 'Tab') {
+      const item = highlightedMentionAutocompleteItem.value
+      if (!item) {
+        return
+      }
+
+      event.preventDefault()
+      void selectMentionAutocompleteItem(item)
+      return
+    }
+  }
+
   if (skillAutocompleteOpen.value) {
     if (event.key === 'ArrowDown') {
       if (filteredSkillAutocompleteResults.value.length === 0) {
@@ -2972,47 +3423,6 @@ const onPromptKeydown = (event: KeyboardEvent) => {
 
       event.preventDefault()
       void selectSkillAutocompleteResult(skill)
-      return
-    }
-  }
-
-  if (fileAutocompleteOpen.value) {
-    if (event.key === 'ArrowDown') {
-      if (visibleFileAutocompleteResults.value.length === 0) {
-        return
-      }
-
-      event.preventDefault()
-      moveFileAutocompleteHighlight(1)
-      return
-    }
-
-    if (event.key === 'ArrowUp') {
-      if (visibleFileAutocompleteResults.value.length === 0) {
-        return
-      }
-
-      event.preventDefault()
-      moveFileAutocompleteHighlight(-1)
-      return
-    }
-
-    if (event.key === 'Escape') {
-      event.preventDefault()
-      dismissedFileAutocompleteMatchKey.value = activeFileAutocompleteMatchKey.value
-      isPromptFocused.value = true
-      void focusPromptAt(promptSelectionStart.value)
-      return
-    }
-
-    if (event.key === 'Tab') {
-      const match = highlightedFileAutocompleteResult.value
-      if (!match) {
-        return
-      }
-
-      event.preventDefault()
-      void selectFileAutocompleteResult(match)
       return
     }
   }
@@ -3057,21 +3467,21 @@ const onPromptEnter = (event: KeyboardEvent) => {
     return
   }
 
-  if (skillAutocompleteOpen.value) {
+  if (mentionAutocompleteOpen.value) {
     event.preventDefault()
-    const skill = highlightedSkillAutocompleteResult.value
-    if (skill) {
-      void selectSkillAutocompleteResult(skill)
+    const item = highlightedMentionAutocompleteItem.value
+    if (item) {
+      void selectMentionAutocompleteItem(item)
     }
 
     return
   }
 
-  if (fileAutocompleteOpen.value) {
+  if (skillAutocompleteOpen.value) {
     event.preventDefault()
-    const match = highlightedFileAutocompleteResult.value
-    if (match) {
-      void selectFileAutocompleteResult(match)
+    const skill = highlightedSkillAutocompleteResult.value
+    if (skill) {
+      void selectSkillAutocompleteResult(skill)
     }
 
     return
@@ -3193,25 +3603,25 @@ watch(filteredSkillAutocompleteResults, (results) => {
   }
 }, { flush: 'sync' })
 
-watch(visibleFileAutocompleteResults, (results) => {
-  if (!results.length) {
-    fileAutocompleteHighlightIndex.value = 0
+watch(flatMentionAutocompleteItems, (items) => {
+  if (!items.length) {
+    mentionAutocompleteHighlightIndex.value = 0
     return
   }
 
-  if (fileAutocompleteHighlightIndex.value >= results.length) {
-    fileAutocompleteHighlightIndex.value = 0
+  if (mentionAutocompleteHighlightIndex.value >= items.length) {
+    mentionAutocompleteHighlightIndex.value = 0
   }
 }, { flush: 'sync' })
 
 watch(
-  [fileAutocompleteOpen, fileAutocompleteHighlightIndex, visibleFileAutocompleteResults],
-  async ([open, highlightIndex, results]) => {
-    if (!open || !results.length || highlightIndex >= results.length) {
+  [mentionAutocompleteOpen, mentionAutocompleteHighlightIndex, flatMentionAutocompleteItems],
+  async ([open, highlightIndex, items]) => {
+    if (!open || !items.length || highlightIndex >= items.length) {
       return
     }
 
-    await syncFileAutocompleteScroll()
+    await syncMentionAutocompleteScroll()
   },
   { flush: 'post' }
 )
@@ -3251,9 +3661,69 @@ watch(input, async (nextValue, previousValue) => {
     )
   }
 
+  if (skipNextMentionSelectionSync) {
+    skipNextMentionSelectionSync = false
+  } else {
+    insertedMentionSelections.value = reconcileMentionAutocompleteSelections(
+      previousValue,
+      nextValue,
+      insertedMentionSelections.value
+    )
+  }
+
   await nextTick()
   syncPromptSelectionFromDom()
 }, { flush: 'post' })
+
+watch(
+  [mentionAutocompleteOpen, () => selectedProject.value?.projectPath ?? null],
+  async ([open, projectPath]) => {
+    const requestSequence = ++pluginMentionRequestSequence
+
+    if (!open) {
+      pluginMentionLoading.value = false
+      pluginMentionError.value = null
+      return
+    }
+
+    if (!projectPath) {
+      pluginMentionLoading.value = false
+      pluginMentionCatalog.value = []
+      pluginMentionCatalogCwd.value = null
+      pluginMentionError.value = null
+      return
+    }
+
+    if (!shouldReloadPluginMentionCatalog(projectPath)) {
+      pluginMentionLoading.value = false
+      pluginMentionError.value = null
+      return
+    }
+
+    pluginMentionLoading.value = true
+    pluginMentionError.value = null
+
+    try {
+      await loadPluginMentionCatalog({
+        projectPath,
+        requestSequence
+      })
+    } catch (caughtError) {
+      if (requestSequence !== pluginMentionRequestSequence) {
+        return
+      }
+
+      pluginMentionError.value = caughtError instanceof Error
+        ? caughtError.message
+        : 'Failed to load enabled plugins.'
+    } finally {
+      if (requestSequence === pluginMentionRequestSequence) {
+        pluginMentionLoading.value = false
+      }
+    }
+  },
+  { flush: 'post' }
+)
 
 watch(
   [skillAutocompleteOpen, () => selectedProject.value?.projectPath ?? null, skillAutocompleteInvalidationVersion],
@@ -3308,7 +3778,7 @@ watch(
 )
 
 watch(
-  [fileAutocompleteOpen, normalizedFileAutocompleteQuery, () => selectedProject.value?.projectPath ?? null],
+  [mentionAutocompleteOpen, normalizedMentionAutocompleteQuery, () => selectedProject.value?.projectPath ?? null],
   async ([open, query, projectPath]) => {
     const requestSequence = ++fileAutocompleteRequestSequence
 
@@ -3487,51 +3957,102 @@ watch(
           </div>
 
           <div
-            v-if="fileAutocompleteOpen"
-            ref="fileAutocompleteDropdownRef"
+            v-if="mentionAutocompleteOpen"
+            ref="mentionAutocompleteDropdownRef"
             role="listbox"
-            aria-label="Project files"
-            class="absolute bottom-full left-0 z-20 mb-2 w-[90vw] max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-default bg-default/95 shadow-2xl backdrop-blur md:w-[min(50vw,52rem)] md:max-w-[min(50vw,52rem)]"
-            @pointerdown="handleFileAutocompletePointerDown"
+            aria-label="Mentions"
+            class="absolute bottom-full left-0 z-20 mb-2 w-full overflow-hidden rounded-lg border border-default bg-default/95 shadow-2xl backdrop-blur"
+            @pointerdown="handleMentionAutocompletePointerDown"
           >
             <div
-              ref="fileAutocompleteListRef"
-              class="max-h-72 overflow-y-auto p-2"
+              ref="mentionAutocompleteListRef"
+              class="max-h-80 overflow-y-auto p-2"
             >
               <div
-                v-if="fileAutocompleteEmptyState"
+                v-if="mentionAutocompleteEmptyState"
                 class="px-3 py-2 text-sm leading-6 text-muted"
               >
-                {{ fileAutocompleteEmptyState }}
+                {{ mentionAutocompleteEmptyState }}
               </div>
-              <div
-                v-for="(match, index) in visibleFileAutocompleteResults"
-                v-else
-                :key="`${match.matchType}:${match.path}`"
-                role="option"
-                :aria-selected="index === fileAutocompleteHighlightIndex"
-                data-file-autocomplete-option=""
-                class="group relative flex cursor-pointer items-center gap-1.5 px-3 py-2 text-sm text-highlighted outline-none transition-colors before:absolute before:inset-px before:z-[-1] before:rounded-md"
-                :class="index === fileAutocompleteHighlightIndex
-                  ? 'before:bg-elevated'
-                  : 'hover:before:bg-elevated/60'"
-                @click="void selectFileAutocompleteResult(match)"
-              >
-                <UIcon
-                  :name="resolveFileAutocompleteIcon(match)"
-                  class="size-4 shrink-0 text-dimmed group-aria-selected:text-highlighted"
-                />
-                <div class="min-w-0 truncate font-mono text-[13px] leading-6">
-                  <span
-                    v-for="(segment, segmentIndex) in renderFileAutocompletePathSegments(match)"
-                    :key="`${match.path}:${segmentIndex}:${segment.isMatch ? 'match' : 'plain'}`"
-                    class="truncate"
-                    :class="segment.isMatch ? 'font-semibold text-primary' : 'text-toned'"
+              <template v-else>
+                <div
+                  v-for="section in mentionAutocompleteSections"
+                  :key="section.key"
+                  class="mt-2 first:mt-0"
+                >
+                  <div class="px-3 pb-1 pt-1 text-[11px] font-medium uppercase tracking-[0.14em] text-muted">
+                    {{ section.title }}
+                  </div>
+                  <div
+                    v-for="item in section.items"
+                    :key="item.key"
+                    role="option"
+                    :aria-selected="resolveMentionAutocompleteIndex(item) === mentionAutocompleteHighlightIndex"
+                    data-mention-autocomplete-option=""
+                    class="group relative flex cursor-pointer items-center gap-2 px-3 py-2 text-sm text-highlighted outline-none transition-colors before:absolute before:inset-px before:z-[-1] before:rounded-md"
+                    :class="resolveMentionAutocompleteIndex(item) === mentionAutocompleteHighlightIndex
+                      ? 'before:bg-elevated'
+                      : 'hover:before:bg-elevated/60'"
+                    @click="void selectMentionAutocompleteItem(item)"
                   >
-                    {{ segment.text }}
-                  </span>
+                    <template v-if="item.kind === 'agent'">
+                      <UAvatar
+                        :text="toSubagentAvatarText(item.agent.name)"
+                        :alt="item.agent.name"
+                        size="xs"
+                        :class="resolveSubagentAccent(Math.max(0, item.accentIndex)).avatarClass"
+                      />
+                      <div class="min-w-0 flex flex-1 items-center gap-2">
+                        <span
+                          class="shrink-0 text-[13px] font-semibold leading-6"
+                          :class="resolveSubagentAccent(Math.max(0, item.accentIndex)).textClass"
+                        >
+                          {{ item.label }}
+                        </span>
+                        <span class="min-w-0 truncate text-xs text-muted">
+                          {{ resolveAgentMentionDescription(item.agent) }}
+                        </span>
+                      </div>
+                    </template>
+                    <template v-else-if="item.kind === 'plugin'">
+                      <UAvatar
+                        :src="resolvePluginMentionAvatarSrc(item.plugin) || undefined"
+                        :icon="resolvePluginMentionAvatarSrc(item.plugin) ? undefined : 'i-lucide-plug'"
+                        :text="resolvePluginMentionAvatarText(item.plugin)"
+                        :alt="item.label"
+                        size="xs"
+                      />
+                      <div class="min-w-0 flex flex-1 items-center gap-2">
+                        <span class="shrink-0 text-[13px] font-medium leading-6">
+                          {{ item.label }}
+                        </span>
+                        <span class="min-w-0 truncate text-xs text-muted">
+                          {{ item.description }}
+                        </span>
+                      </div>
+                      <span class="shrink-0 text-[11px] uppercase tracking-[0.12em] text-muted">
+                        {{ item.plugin.marketplaceName }}
+                      </span>
+                    </template>
+                    <template v-else>
+                      <UIcon
+                        :name="resolveFileAutocompleteIcon(item.file)"
+                        class="size-4 shrink-0 text-dimmed group-aria-selected:text-highlighted"
+                      />
+                      <div class="min-w-0 truncate font-mono text-[13px] leading-6">
+                        <span
+                          v-for="(segment, segmentIndex) in renderFileAutocompletePathSegments(item.file)"
+                          :key="`${item.file.path}:${segmentIndex}:${segment.isMatch ? 'match' : 'plain'}`"
+                          class="truncate"
+                          :class="segment.isMatch ? 'font-semibold text-primary' : 'text-toned'"
+                        >
+                          {{ segment.text }}
+                        </span>
+                      </div>
+                    </template>
+                  </div>
                 </div>
-              </div>
+              </template>
             </div>
           </div>
 

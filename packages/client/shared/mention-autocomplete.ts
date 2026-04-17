@@ -1,4 +1,7 @@
 import type { SubagentAgentStatus } from './codex-chat'
+import type { CodexUserInput } from './codex-rpc'
+import { encodeProjectIdSegment } from './codori'
+import { resolveApiUrl, shouldUseServerProxy } from './network'
 
 export type ActiveMentionAutocompleteMatch = {
   start: number
@@ -48,6 +51,11 @@ export type PluginMentionAutocompleteEntry = {
   brandColor: string | null
   composerIcon: string | null
   logo: string | null
+}
+
+export type MentionAutocompleteSubmission = {
+  pluginInput: Extract<CodexUserInput, { type: 'mention' }>[]
+  agentThreadIds: string[]
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -312,6 +320,103 @@ export const reconcileMentionAutocompleteSelections = (
       && selection.end <= nextInput.length
       && nextInput.slice(selection.start, selection.end) === selection.token
     )
+}
+
+export const stripMentionSelectionsFromText = (
+  input: string,
+  selections: Pick<MentionAutocompleteSelection, 'start' | 'end'>[]
+) => {
+  if (!selections.length) {
+    return input.trim()
+  }
+
+  const orderedSelections = selections
+    .slice()
+    .sort((left, right) => left.start - right.start)
+
+  let cursor = 0
+  let output = ''
+  for (const selection of orderedSelections) {
+    if (selection.start < cursor) {
+      continue
+    }
+
+    output += input.slice(cursor, selection.start)
+    cursor = selection.end
+  }
+
+  output += input.slice(cursor)
+  return output.replace(/\s+/gu, ' ').trim()
+}
+
+export const buildMentionAutocompleteSubmission = (
+  selections: MentionAutocompleteSelection[]
+): MentionAutocompleteSubmission => {
+  const pluginInput: MentionAutocompleteSubmission['pluginInput'] = []
+  const agentThreadIds: string[] = []
+  const seenPluginPaths = new Set<string>()
+  const seenAgentThreadIds = new Set<string>()
+
+  for (const selection of selections) {
+    if (selection.kind === 'plugin' && selection.path) {
+      const path = selection.path.trim()
+      if (!path || seenPluginPaths.has(path)) {
+        continue
+      }
+
+      seenPluginPaths.add(path)
+      pluginInput.push({
+        type: 'mention',
+        name: selection.name,
+        path
+      })
+      continue
+    }
+
+    if (selection.kind === 'agent' && selection.threadId) {
+      const threadId = selection.threadId.trim()
+      if (!threadId || seenAgentThreadIds.has(threadId)) {
+        continue
+      }
+
+      seenAgentThreadIds.add(threadId)
+      agentThreadIds.push(threadId)
+    }
+  }
+
+  return {
+    pluginInput,
+    agentThreadIds
+  }
+}
+
+export const resolvePluginMentionIconUrl = (input: {
+  projectId: string
+  path: string | null | undefined
+  configuredBase?: string | null
+}) => {
+  const path = input.path?.trim()
+  if (!path) {
+    return null
+  }
+
+  if (/^(https?:)?\/\//i.test(path) || path.startsWith('data:')) {
+    return path
+  }
+
+  if (!path.startsWith('/')) {
+    return null
+  }
+
+  const query = new URLSearchParams({
+    path
+  })
+  const requestPath = `/projects/${encodeProjectIdSegment(input.projectId)}/mentions/icon?${query.toString()}`
+  if (shouldUseServerProxy(input.configuredBase)) {
+    return `/api/codori${requestPath}`
+  }
+
+  return resolveApiUrl(requestPath, input.configuredBase)
 }
 
 export const filterAgentMentionEntries = (

@@ -1,6 +1,7 @@
 import { readFile, stat } from 'node:fs/promises'
 import net from 'node:net'
 import { existsSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import multipart from '@fastify/multipart'
@@ -136,6 +137,12 @@ const getProjectIdFromRequest = (value: string | undefined) => {
   }
   return value
 }
+
+const resolveMentionAssetRoots = (projectPath: string) => [
+  resolve(projectPath, '.agents/plugins'),
+  resolve(projectPath, '.codex/plugins'),
+  resolve(homedir(), '.codex/plugins')
+]
 
 const resolveValue = async <T>(value: MaybePromise<T>) => value
 
@@ -479,6 +486,78 @@ export const createHttpServer = async (
       }
 
       reply.header('cache-control', 'private, max-age=3600')
+      reply.header('cross-origin-resource-policy', 'cross-origin')
+      reply.header('content-type', mediaType)
+      reply.header('content-disposition', `inline; filename="${basename(resolvedPath).replace(/"/g, '')}"`)
+
+      return await readFile(resolvedPath)
+    }
+  )
+
+  app.get<{ Params: { projectId: string }, Querystring: { path?: string } }>(
+    '/api/projects/:projectId/mentions/icon',
+    async (request, reply) => {
+      const projectId = getProjectIdFromRequest(request.params.projectId)
+      const requestedPath = typeof request.query.path === 'string'
+        ? request.query.path.trim()
+        : ''
+
+      if (!requestedPath) {
+        throw new CodoriError('INVALID_ATTACHMENT', 'Missing mention asset path.')
+      }
+
+      const project = await resolveValue(manager.getProjectStatus(projectId))
+      await touchProjectActivity(manager, projectId)
+      const resolvedPath = resolve(requestedPath)
+
+      if (!resolveMentionAssetRoots(project.projectPath).some(root => isPathInsideDirectory(resolvedPath, root))) {
+        reply.status(403)
+        return {
+          error: {
+            code: 'FORBIDDEN',
+            message: 'Invalid mention asset path.'
+          }
+        }
+      }
+
+      let fileStat
+      try {
+        fileStat = await stat(resolvedPath)
+      } catch {
+        reply.status(404)
+        return {
+          error: {
+            code: 'NOT_FOUND',
+            message: 'Mention asset not found.'
+          }
+        }
+      }
+
+      if (!fileStat.isFile()) {
+        reply.status(404)
+        return {
+          error: {
+            code: 'NOT_FOUND',
+            message: 'Mention asset not found.'
+          }
+        }
+      }
+
+      const mediaType = typeof lookupMimeType(resolvedPath) === 'string'
+        ? String(lookupMimeType(resolvedPath)).toLowerCase()
+        : null
+
+      if (!mediaType?.startsWith('image/')) {
+        reply.status(415)
+        return {
+          error: {
+            code: 'UNSUPPORTED_MEDIA_TYPE',
+            message: 'Mention assets must be image files.'
+          }
+        }
+      }
+
+      reply.header('cache-control', 'public, max-age=300')
       reply.header('cross-origin-resource-policy', 'cross-origin')
       reply.header('content-type', mediaType)
       reply.header('content-disposition', `inline; filename="${basename(resolvedPath).replace(/"/g, '')}"`)

@@ -65,6 +65,7 @@ export type SubagentActivityItem = Omit<Extract<CodexThreadItem, { type: 'collab
 export type VisualSubagentPanel = {
   threadId: string
   name: string
+  role?: string | null
   status: SubagentAgentStatus
   messages: ChatMessage[]
   firstSeenAt: number
@@ -155,6 +156,10 @@ const userInputToParts = (input: CodexUserInput): ChatPart[] => {
       text: input.text,
       state: 'done'
     }]
+  }
+
+  if (input.type === 'skill' || input.type === 'mention') {
+    return []
   }
 
   return [{

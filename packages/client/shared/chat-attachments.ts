@@ -78,7 +78,8 @@ export const validateAttachmentSelection = <T extends FileLike>(
 
 export const buildTurnStartInput = (
   text: string,
-  attachments: Array<{ path: string }>
+  attachments: Array<{ path: string }>,
+  additionalInput: CodexUserInput[] = []
 ): CodexUserInput[] => {
   const input: CodexUserInput[] = []
   const trimmedText = text.trim()
@@ -90,6 +91,8 @@ export const buildTurnStartInput = (
       text_elements: []
     })
   }
+
+  input.push(...additionalInput)
 
   for (const attachment of attachments) {
     input.push({
