@@ -1099,6 +1099,9 @@ const completeSlashCommand = async (command: SlashCommandDefinition) => {
 const resolveSkillAutocompleteDescription = (skill: SkillAutocompleteEntry) =>
   skill.shortDescription ?? skill.description
 
+const resolveSkillAutocompleteLabel = (skill: SkillAutocompleteEntry) =>
+  skill.displayName?.trim() || skill.name
+
 const resolveSkillAutocompleteIcon = (skill: SkillAutocompleteEntry) => {
   const haystack = [
     skill.name,
@@ -3569,7 +3572,7 @@ watch(
                 />
                 <div class="min-w-0 flex flex-1 items-center gap-2">
                   <span class="shrink-0 font-mono text-[13px] leading-6">
-                    {{ skill.name }}
+                    {{ resolveSkillAutocompleteLabel(skill) }}
                   </span>
                   <span class="min-w-0 truncate text-xs text-muted">
                     {{ resolveSkillAutocompleteDescription(skill) }}
