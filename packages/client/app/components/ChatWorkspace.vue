@@ -3495,7 +3495,7 @@ watch(
                 role="option"
                 :aria-selected="index === skillAutocompleteHighlightIndex"
                 data-skill-autocomplete-option=""
-                class="group relative flex cursor-pointer items-start gap-2 px-3 py-2.5 text-sm text-highlighted outline-none transition-colors before:absolute before:inset-px before:z-[-1] before:rounded-md"
+                class="group relative flex cursor-pointer items-center gap-2 px-3 py-2 text-sm text-highlighted outline-none transition-colors before:absolute before:inset-px before:z-[-1] before:rounded-md"
                 :class="index === skillAutocompleteHighlightIndex
                   ? 'before:bg-elevated'
                   : 'hover:before:bg-elevated/60'"
@@ -3503,26 +3503,18 @@ watch(
               >
                 <UIcon
                   name="i-lucide-badge-plus"
-                  class="mt-0.5 size-4 shrink-0 text-dimmed group-aria-selected:text-highlighted"
+                  class="size-4 shrink-0 text-dimmed group-aria-selected:text-highlighted"
                 />
-                <div class="min-w-0 flex-1">
-                  <div class="flex min-w-0 items-center gap-2">
-                    <span class="truncate font-mono text-[13px] leading-6">
-                      ${{ skill.name }}
-                    </span>
-                    <span
-                      v-if="skill.displayName && skill.displayName !== skill.name"
-                      class="truncate text-xs text-toned"
-                    >
-                      {{ skill.displayName }}
-                    </span>
-                  </div>
-                  <div class="truncate text-xs leading-5 text-toned">
+                <div class="min-w-0 flex flex-1 items-center gap-2">
+                  <span class="shrink-0 font-mono text-[13px] leading-6">
+                    ${{ skill.name }}
+                  </span>
+                  <span class="min-w-0 truncate text-xs text-muted">
                     {{ resolveSkillAutocompleteDescription(skill) }}
-                  </div>
-                  <div class="truncate font-mono text-[11px] leading-5 text-muted">
-                    {{ skill.scope }} · {{ skill.path }}
-                  </div>
+                  </span>
+                </div>
+                <div class="shrink-0 text-[11px] uppercase tracking-[0.12em] text-muted">
+                  {{ skill.scope }}
                 </div>
               </div>
             </div>

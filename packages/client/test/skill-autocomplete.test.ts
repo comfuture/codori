@@ -35,6 +35,17 @@ const TEST_SKILLS: SkillAutocompleteEntry[] = [{
   iconSmall: null,
   iconLarge: null
 }, {
+  name: 'gh-fix-ci',
+  description: 'Fix failing Github CI actions.',
+  enabled: true,
+  path: '/Users/demo/.codex/skills/gh-fix-ci/SKILL.md',
+  scope: 'user',
+  shortDescription: 'Fix failing Github CI actions',
+  displayName: null,
+  brandColor: null,
+  iconSmall: null,
+  iconLarge: null
+}, {
   name: 'duplicate',
   description: 'Repo-scoped duplicate',
   enabled: true,
@@ -120,10 +131,13 @@ describe('skill autocomplete helpers', () => {
     expect(filterSkillAutocompleteEntries(TEST_SKILLS, '').map(entry => entry.name)).toEqual([
       'imagegen',
       'linear',
+      'gh-fix-ci',
       'duplicate',
       'duplicate'
     ])
     expect(filterSkillAutocompleteEntries(TEST_SKILLS, 'im').map(entry => entry.name)).toEqual(['imagegen'])
+    expect(filterSkillAutocompleteEntries(TEST_SKILLS, 'fi').map(entry => entry.name)).toContain('gh-fix-ci')
+    expect(filterSkillAutocompleteEntries(TEST_SKILLS, 'FI').map(entry => entry.name)).toContain('gh-fix-ci')
     expect(toSkillAutocompleteCompletion(TEST_SKILLS[0]!)).toBe('$imagegen')
   })
 

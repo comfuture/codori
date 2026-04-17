@@ -232,12 +232,63 @@ export const hasSkillAutocompleteMentions = (input: string) => {
   return SUBMITTED_SKILL_MENTION_PATTERN.test(input)
 }
 
+const getSubsequenceMatchScore = (candidate: string, query: string) => {
+  if (!query) {
+    return 0
+  }
+
+  const prefixIndex = candidate.indexOf(query)
+  if (prefixIndex === 0) {
+    return 400 - Math.max(0, candidate.length - query.length)
+  }
+
+  if (prefixIndex > 0) {
+    return 300 - prefixIndex
+  }
+
+  let previousIndex = -1
+  let gapPenalty = 0
+  let startIndex = -1
+
+  for (const character of query) {
+    const nextIndex = candidate.indexOf(character, previousIndex + 1)
+    if (nextIndex === -1) {
+      return null
+    }
+
+    if (startIndex === -1) {
+      startIndex = nextIndex
+    } else {
+      gapPenalty += Math.max(0, nextIndex - previousIndex - 1)
+    }
+
+    previousIndex = nextIndex
+  }
+
+  return 200 - startIndex - gapPenalty
+}
+
+const resolveSkillAutocompleteScore = (
+  entry: SkillAutocompleteEntry,
+  normalizedQuery: string
+) => {
+  const nameScore = getSubsequenceMatchScore(entry.name.toLowerCase(), normalizedQuery)
+  const displayNameScore = entry.displayName
+    ? getSubsequenceMatchScore(entry.displayName.toLowerCase(), normalizedQuery)
+    : null
+
+  return Math.max(
+    nameScore == null ? Number.NEGATIVE_INFINITY : nameScore + 25,
+    displayNameScore ?? Number.NEGATIVE_INFINITY
+  )
+}
+
 export const filterSkillAutocompleteEntries = (
   entries: SkillAutocompleteEntry[],
   query: string
 ) => {
   const normalizedQuery = query.trim().toLowerCase()
-  return entries.filter((entry) => {
+  const filteredEntries = entries.filter((entry) => {
     if (!entry.enabled) {
       return false
     }
@@ -246,8 +297,21 @@ export const filterSkillAutocompleteEntries = (
       return true
     }
 
-    return entry.name.toLowerCase().startsWith(normalizedQuery)
-      || entry.displayName?.toLowerCase().startsWith(normalizedQuery)
+    return resolveSkillAutocompleteScore(entry, normalizedQuery) > Number.NEGATIVE_INFINITY
+  })
+
+  if (!normalizedQuery) {
+    return filteredEntries
+  }
+
+  return filteredEntries.sort((left, right) => {
+    const scoreDelta = resolveSkillAutocompleteScore(right, normalizedQuery)
+      - resolveSkillAutocompleteScore(left, normalizedQuery)
+    if (scoreDelta !== 0) {
+      return scoreDelta
+    }
+
+    return left.name.localeCompare(right.name)
   })
 }
 
