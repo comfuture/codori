@@ -118,6 +118,7 @@ import {
   normalizePluginListResponse,
   reconcileMentionAutocompleteSelections,
   replaceActiveMentionAutocompleteMatch,
+  resolveMentionAutocompleteScore,
   resolvePluginMentionIconUrl,
   toAgentMentionToken,
   toPluginMentionToken,
@@ -265,6 +266,7 @@ const dismissedMentionAutocompleteMatchKey = ref<string | null>(null)
 const slashHighlightIndex = ref(0)
 const skillAutocompleteHighlightIndex = ref(0)
 const mentionAutocompleteHighlightIndex = ref(0)
+const mentionAutocompleteUserNavigated = ref(false)
 const pluginMentionLoading = ref(false)
 const pluginMentionError = ref<string | null>(null)
 const pluginMentionCatalog = ref<PluginMentionAutocompleteEntry[]>([])
@@ -441,6 +443,20 @@ const mentionAutocompleteSections = computed<MentionAutocompletePaletteSection[]
 
   const sections: MentionAutocompletePaletteSection[] = []
 
+  if (visibleMentionFileResults.value.length > 0) {
+    sections.push({
+      key: 'files',
+      title: 'Files',
+      items: visibleMentionFileResults.value.map((file: NormalizedFuzzyFileSearchMatch) => ({
+        kind: 'file',
+        key: `file:${file.matchType}:${file.path}`,
+        label: file.fileName,
+        description: file.path,
+        file
+      }))
+    })
+  }
+
   if (filteredAgentMentionResults.value.length > 0) {
     sections.push({
       key: 'agents',
@@ -470,20 +486,6 @@ const mentionAutocompleteSections = computed<MentionAutocompletePaletteSection[]
     })
   }
 
-  if (visibleMentionFileResults.value.length > 0) {
-    sections.push({
-      key: 'files',
-      title: 'Files',
-      items: visibleMentionFileResults.value.map((file: NormalizedFuzzyFileSearchMatch) => ({
-        kind: 'file',
-        key: `file:${file.matchType}:${file.path}`,
-        label: file.fileName,
-        description: file.path,
-        file
-      }))
-    })
-  }
-
   return sections
 })
 
@@ -491,8 +493,70 @@ const flatMentionAutocompleteItems = computed(() =>
   mentionAutocompleteSections.value.flatMap(section => section.items)
 )
 
+const resolveMentionAutocompleteItemScore = (
+  item: MentionAutocompletePaletteItem,
+  query: string
+) => {
+  if (item.kind === 'agent') {
+    return resolveMentionAutocompleteScore(query, [
+      item.agent.name,
+      item.agent.role
+    ])
+  }
+
+  if (item.kind === 'plugin') {
+    return resolveMentionAutocompleteScore(query, [
+      item.plugin.displayName,
+      item.plugin.name,
+      item.plugin.marketplaceName,
+      item.plugin.category,
+      item.plugin.shortDescription,
+      item.plugin.longDescription,
+      item.plugin.developerName
+    ])
+  }
+
+  return resolveMentionAutocompleteScore(query, [
+    item.file.fileName,
+    item.file.path
+  ])
+}
+
+const bestMentionAutocompleteHighlightIndex = computed(() => {
+  const items = flatMentionAutocompleteItems.value
+  if (items.length === 0) {
+    return 0
+  }
+
+  const query = activeMentionAutocompleteMatch.value?.query ?? ''
+  let bestIndex = 0
+  let bestScore = Number.NEGATIVE_INFINITY
+
+  for (const [index, item] of items.entries()) {
+    const score = resolveMentionAutocompleteItemScore(item, query)
+    if (score > bestScore) {
+      bestScore = score
+      bestIndex = index
+    }
+  }
+
+  return bestIndex
+})
+
+const effectiveMentionAutocompleteHighlightIndex = computed(() => {
+  if (
+    mentionAutocompleteUserNavigated.value
+    && mentionAutocompleteHighlightIndex.value >= 0
+    && mentionAutocompleteHighlightIndex.value < flatMentionAutocompleteItems.value.length
+  ) {
+    return mentionAutocompleteHighlightIndex.value
+  }
+
+  return bestMentionAutocompleteHighlightIndex.value
+})
+
 const highlightedMentionAutocompleteItem = computed(() =>
-  flatMentionAutocompleteItems.value[mentionAutocompleteHighlightIndex.value]
+  flatMentionAutocompleteItems.value[effectiveMentionAutocompleteHighlightIndex.value]
   ?? flatMentionAutocompleteItems.value[0]
   ?? null
 )
@@ -1226,11 +1290,13 @@ const moveSkillAutocompleteHighlight = (delta: number) => {
 const moveMentionAutocompleteHighlight = (delta: number) => {
   if (!flatMentionAutocompleteItems.value.length) {
     mentionAutocompleteHighlightIndex.value = 0
+    mentionAutocompleteUserNavigated.value = false
     return
   }
 
+  mentionAutocompleteUserNavigated.value = true
   const maxIndex = flatMentionAutocompleteItems.value.length - 1
-  const nextIndex = mentionAutocompleteHighlightIndex.value + delta
+  const nextIndex = effectiveMentionAutocompleteHighlightIndex.value + delta
   if (nextIndex < 0) {
     mentionAutocompleteHighlightIndex.value = maxIndex
     return
@@ -3606,16 +3672,18 @@ watch(filteredSkillAutocompleteResults, (results) => {
 watch(flatMentionAutocompleteItems, (items) => {
   if (!items.length) {
     mentionAutocompleteHighlightIndex.value = 0
+    mentionAutocompleteUserNavigated.value = false
     return
   }
 
   if (mentionAutocompleteHighlightIndex.value >= items.length) {
     mentionAutocompleteHighlightIndex.value = 0
+    mentionAutocompleteUserNavigated.value = false
   }
 }, { flush: 'sync' })
 
 watch(
-  [mentionAutocompleteOpen, mentionAutocompleteHighlightIndex, flatMentionAutocompleteItems],
+  [mentionAutocompleteOpen, effectiveMentionAutocompleteHighlightIndex, flatMentionAutocompleteItems],
   async ([open, highlightIndex, items]) => {
     if (!open || !items.length || highlightIndex >= items.length) {
       return
@@ -3625,6 +3693,11 @@ watch(
   },
   { flush: 'post' }
 )
+
+watch(activeMentionAutocompleteMatchKey, () => {
+  mentionAutocompleteUserNavigated.value = false
+  mentionAutocompleteHighlightIndex.value = 0
+}, { flush: 'sync' })
 
 watch(
   [skillAutocompleteOpen, skillAutocompleteHighlightIndex, filteredSkillAutocompleteResults],
@@ -3987,10 +4060,10 @@ watch(
                     v-for="item in section.items"
                     :key="item.key"
                     role="option"
-                    :aria-selected="resolveMentionAutocompleteIndex(item) === mentionAutocompleteHighlightIndex"
+                    :aria-selected="resolveMentionAutocompleteIndex(item) === effectiveMentionAutocompleteHighlightIndex"
                     data-mention-autocomplete-option=""
                     class="group relative flex cursor-pointer items-center gap-2 px-3 py-2 text-sm text-highlighted outline-none transition-colors before:absolute before:inset-px before:z-[-1] before:rounded-md"
-                    :class="resolveMentionAutocompleteIndex(item) === mentionAutocompleteHighlightIndex
+                    :class="resolveMentionAutocompleteIndex(item) === effectiveMentionAutocompleteHighlightIndex
                       ? 'before:bg-elevated'
                       : 'hover:before:bg-elevated/60'"
                     @click="void selectMentionAutocompleteItem(item)"

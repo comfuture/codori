@@ -119,6 +119,18 @@ const resolveBestScore = (query: string, candidates: Array<string | null | undef
   return best
 }
 
+export const resolveMentionAutocompleteScore = (
+  query: string,
+  candidates: Array<string | null | undefined>
+) => {
+  const normalizedQuery = query.trim().toLowerCase()
+  if (!normalizedQuery) {
+    return 0
+  }
+
+  return resolveBestScore(normalizedQuery, candidates)
+}
+
 const normalizePluginInterface = (value: unknown) => {
   if (!isRecord(value)) {
     return null
@@ -430,14 +442,14 @@ export const filterAgentMentionEntries = (
 
   return entries
     .filter((entry) =>
-      resolveBestScore(normalizedQuery, [
+      resolveMentionAutocompleteScore(normalizedQuery, [
         entry.name,
         entry.role
       ]) > Number.NEGATIVE_INFINITY
     )
     .sort((left, right) => {
-      const scoreDelta = resolveBestScore(normalizedQuery, [right.name, right.role])
-        - resolveBestScore(normalizedQuery, [left.name, left.role])
+      const scoreDelta = resolveMentionAutocompleteScore(normalizedQuery, [right.name, right.role])
+        - resolveMentionAutocompleteScore(normalizedQuery, [left.name, left.role])
       if (scoreDelta !== 0) {
         return scoreDelta
       }
@@ -461,7 +473,7 @@ export const filterPluginMentionEntries = (
 
   return enabledEntries
     .filter((entry) =>
-      resolveBestScore(normalizedQuery, [
+      resolveMentionAutocompleteScore(normalizedQuery, [
         entry.displayName,
         entry.name,
         entry.marketplaceName,
@@ -472,7 +484,7 @@ export const filterPluginMentionEntries = (
       ]) > Number.NEGATIVE_INFINITY
     )
     .sort((left, right) => {
-      const scoreDelta = resolveBestScore(normalizedQuery, [
+      const scoreDelta = resolveMentionAutocompleteScore(normalizedQuery, [
         right.displayName,
         right.name,
         right.marketplaceName,
@@ -480,7 +492,7 @@ export const filterPluginMentionEntries = (
         right.shortDescription,
         right.longDescription,
         right.developerName
-      ]) - resolveBestScore(normalizedQuery, [
+      ]) - resolveMentionAutocompleteScore(normalizedQuery, [
         left.displayName,
         left.name,
         left.marketplaceName,

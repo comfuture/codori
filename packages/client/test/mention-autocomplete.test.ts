@@ -7,6 +7,7 @@ import {
   normalizePluginListResponse,
   reconcileMentionAutocompleteSelections,
   replaceActiveMentionAutocompleteMatch,
+  resolveMentionAutocompleteScore,
   resolvePluginMentionIconUrl,
   slugifyMentionToken,
   stripMentionSelectionsFromText,
@@ -126,6 +127,14 @@ describe('mention autocomplete helpers', () => {
       composerIcon: null,
       logo: null
     }], 'FI').map(entry => entry.name)).toEqual(['gh-fix-ci'])
+  })
+
+  it('scores stronger prefix matches above distant fuzzy matches', () => {
+    expect(resolveMentionAutocompleteScore('cloudf', [
+      'Cloudflare'
+    ])).toBeGreaterThan(resolveMentionAutocompleteScore('cloudf', [
+      '/packages/client/app/layouts/default.vue'
+    ]))
   })
 
   it('replaces the active @token and reconciles tracked selections', () => {
