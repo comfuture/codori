@@ -1111,7 +1111,7 @@ const resolveSkillAutocompleteIcon = (skill: SkillAutocompleteEntry) => {
     .join(' ')
     .toLowerCase()
 
-  if (haystack.includes('github') || haystack.includes('gh-') || haystack.includes(' ci ') || haystack.includes('actions')) {
+  if (haystack.includes('github') || haystack.includes('gh-') || /\bci\b/.test(haystack) || haystack.includes('actions')) {
     return 'i-lucide-github'
   }
 
@@ -1226,9 +1226,13 @@ const shouldReloadSkillAutocompleteCatalog = (projectPath: string) =>
   skillAutocompleteCatalogCwd.value !== projectPath
   || skillAutocompleteCatalogVersion.value !== skillAutocompleteInvalidationVersion.value
 
+const isLatestSkillAutocompleteRequest = (requestSequence?: number | null) =>
+  requestSequence == null || requestSequence === skillAutocompleteRequestSequence
+
 const loadSkillAutocompleteCatalog = async (options?: {
   forceReload?: boolean
   projectPath?: string | null
+  requestSequence?: number | null
 }) => {
   const projectPath = options?.projectPath ?? selectedProject.value?.projectPath ?? null
   if (!projectPath) {
@@ -1252,6 +1256,10 @@ const loadSkillAutocompleteCatalog = async (options?: {
     ? entry.errors.map(errorEntry => errorEntry.message).join('\n')
     : null
 
+  if (!isLatestSkillAutocompleteRequest(options?.requestSequence)) {
+    return skillAutocompleteCatalog.value
+  }
+
   skillAutocompleteCatalog.value = skills
   skillAutocompleteCatalogCwd.value = projectPath
   skillAutocompleteCatalogVersion.value = skillAutocompleteInvalidationVersion.value
@@ -1270,9 +1278,11 @@ const ensureSkillAutocompleteCatalogCurrent = async () => {
     return skillAutocompleteCatalog.value
   }
 
+  const requestSequence = ++skillAutocompleteRequestSequence
   return await loadSkillAutocompleteCatalog({
     forceReload: skillAutocompleteCatalogCwd.value === projectPath,
-    projectPath
+    projectPath,
+    requestSequence
   })
 }
 
@@ -3274,7 +3284,8 @@ watch(
     try {
       await loadSkillAutocompleteCatalog({
         forceReload: skillAutocompleteCatalogCwd.value === projectPath,
-        projectPath
+        projectPath,
+        requestSequence
       })
     } catch (caughtError) {
       if (requestSequence !== skillAutocompleteRequestSequence) {
