@@ -2,7 +2,7 @@ import { readFile, stat } from 'node:fs/promises'
 import net from 'node:net'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { basename, join, resolve } from 'node:path'
+import { basename, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import multipart from '@fastify/multipart'
 import fastifyStatic from '@fastify/static'
@@ -143,6 +143,14 @@ const resolveMentionAssetRoots = (projectPath: string) => [
   resolve(projectPath, '.codex/plugins'),
   resolve(homedir(), '.codex/plugins')
 ]
+
+const WINDOWS_ABSOLUTE_PATH_PATTERN = /^[a-z]:[\\/]/i
+const WINDOWS_UNC_PATH_PATTERN = /^\\\\[^\\]+\\[^\\]+/
+
+const isAbsoluteFilesystemPath = (value: string) =>
+  isAbsolute(value)
+  || WINDOWS_ABSOLUTE_PATH_PATTERN.test(value)
+  || WINDOWS_UNC_PATH_PATTERN.test(value)
 
 const resolveValue = async <T>(value: MaybePromise<T>) => value
 
@@ -504,6 +512,16 @@ export const createHttpServer = async (
 
       if (!requestedPath) {
         throw new CodoriError('INVALID_ATTACHMENT', 'Missing mention asset path.')
+      }
+
+      if (!isAbsoluteFilesystemPath(requestedPath)) {
+        reply.status(400)
+        return {
+          error: {
+            code: 'INVALID_ATTACHMENT',
+            message: 'Mention asset path must be absolute.'
+          }
+        }
       }
 
       const project = await resolveValue(manager.getProjectStatus(projectId))

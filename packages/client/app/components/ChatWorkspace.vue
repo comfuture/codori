@@ -251,7 +251,19 @@ type MentionAutocompletePaletteSection = {
 }
 
 const selectedProject = computed(() => getProject(props.projectId))
-const composerError = computed(() => attachmentError.value ?? error.value)
+const mentionSubmission = computed(() =>
+  buildMentionAutocompleteSubmission(insertedMentionSelections.value)
+)
+const multiAgentMentionError = computed(() =>
+  mentionSubmission.value.agentThreadIds.length > 1
+    ? 'Send to one agent at a time.'
+    : null
+)
+const composerError = computed(() =>
+  attachmentError.value
+  ?? multiAgentMentionError.value
+  ?? error.value
+)
 const submitError = computed(() => composerError.value ? new Error(composerError.value) : undefined)
 const interruptRequested = ref(false)
 const awaitingAssistantOutput = ref(false)
@@ -409,6 +421,16 @@ const activeAgentMentionEntries = computed(() =>
     } satisfies AgentMentionAutocompleteEntry))
 )
 
+const agentMentionAccentIndexByThreadId = computed(() => {
+  const entries = new Map<string, number>()
+
+  for (const [index, panel] of activeAgentMentionEntries.value.entries()) {
+    entries.set(panel.threadId, index)
+  }
+
+  return entries
+})
+
 const filteredAgentMentionResults = computed(() =>
   activeMentionAutocompleteMatch.value
     ? filterAgentMentionEntries(activeAgentMentionEntries.value, activeMentionAutocompleteMatch.value.query)
@@ -467,7 +489,7 @@ const mentionAutocompleteSections = computed<MentionAutocompletePaletteSection[]
         label: agent.name,
         description: agent.role ?? null,
         agent,
-        accentIndex: activeAgentMentionEntries.value.findIndex(entry => entry.threadId === agent.threadId)
+        accentIndex: agentMentionAccentIndexByThreadId.value.get(agent.threadId) ?? 0
       }))
     })
   }
@@ -3217,9 +3239,9 @@ const sendMessage = async () => {
     }
   }
 
-  const mentionSubmission = buildMentionAutocompleteSubmission(submittedMentionSelections)
-  if (mentionSubmission.agentThreadIds.length > 1) {
-    error.value = 'Send to one agent at a time.'
+  const submittedMentionInput = buildMentionAutocompleteSubmission(submittedMentionSelections)
+  if (submittedMentionInput.agentThreadIds.length > 1) {
+    error.value = multiAgentMentionError.value ?? 'Send to one agent at a time.'
     status.value = 'error'
     sendMessageLocked.value = false
     return
@@ -3260,13 +3282,13 @@ const sendMessage = async () => {
     error.value = null
     attachmentError.value = null
 
-    const targetAgentThreadId = mentionSubmission.agentThreadIds[0] ?? null
+    const targetAgentThreadId = submittedMentionInput.agentThreadIds[0] ?? null
     if (targetAgentThreadId) {
       await sendMentionedAgentMessage({
         threadId: targetAgentThreadId,
         text,
         submittedAttachments,
-        additionalInput: mentionSubmission.pluginInput
+        additionalInput: submittedMentionInput.pluginInput
       })
       status.value = 'ready'
       return
@@ -3299,7 +3321,7 @@ const sendMessage = async () => {
           await client.request<TurnStartResponse>('turn/steer', {
             threadId: liveStream.threadId,
             expectedTurnId: turnId,
-            input: buildTurnStartInput(text, uploadedAttachments, mentionSubmission.pluginInput),
+            input: buildTurnStartInput(text, uploadedAttachments, submittedMentionInput.pluginInput),
             ...buildTurnOverrides(selectedModel.value, selectedEffort.value)
           })
           tokenUsage.value = null
@@ -3320,7 +3342,7 @@ const sendMessage = async () => {
             liveStream,
             text,
             submittedAttachments,
-            additionalInput: mentionSubmission.pluginInput,
+            additionalInput: submittedMentionInput.pluginInput,
             uploadedAttachments,
             optimisticMessageId,
             queueOptimisticMessage: false
@@ -3336,7 +3358,7 @@ const sendMessage = async () => {
         liveStream,
         text,
         submittedAttachments,
-        additionalInput: mentionSubmission.pluginInput,
+        additionalInput: submittedMentionInput.pluginInput,
         optimisticMessageId
       })
     } catch (caughtError) {

@@ -200,6 +200,17 @@ describe('mention autocomplete helpers', () => {
       }]
     )).toBe('please inspect now')
 
+    expect(stripMentionSelectionsFromText(
+      '@atlas-worker\n\n  keep this block\n@plugin-display-name',
+      [{
+        start: 0,
+        end: 13
+      }, {
+        start: 33,
+        end: 53
+      }]
+    )).toBe('keep this block')
+
     expect(resolvePluginMentionIconUrl({
       projectId: 'team/api',
       path: '/Users/demo/.codex/plugins/demo/assets/icon.png',
@@ -211,6 +222,12 @@ describe('mention autocomplete helpers', () => {
       path: 'https://example.com/icon.png',
       configuredBase: 'http://127.0.0.1:4310'
     })).toBe('https://example.com/icon.png')
+
+    expect(resolvePluginMentionIconUrl({
+      projectId: 'team/api',
+      path: 'C:\\Users\\demo\\.codex\\plugins\\demo\\assets\\icon.png',
+      configuredBase: null
+    })).toBe('http://127.0.0.1:4310/api/projects/team%2Fapi/mentions/icon?path=C%3A%5CUsers%5Cdemo%5C.codex%5Cplugins%5Cdemo%5Cassets%5Cicon.png')
   })
 
   it('builds structured plugin mention input and unique agent targets for submission', () => {

@@ -66,6 +66,9 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const normalizeNullableString = (value: unknown) =>
   typeof value === 'string' ? value : null
 
+const WINDOWS_ABSOLUTE_PATH_PATTERN = /^[a-z]:[\\/]/i
+const WINDOWS_UNC_PATH_PATTERN = /^\\\\[^\\]+\\[^\\]+/
+
 const getSubsequenceMatchScore = (candidate: string, query: string) => {
   if (!query) {
     return 0
@@ -358,7 +361,10 @@ export const stripMentionSelectionsFromText = (
   }
 
   output += input.slice(cursor)
-  return output.replace(/\s+/gu, ' ').trim()
+  return output
+    .replace(/[^\S\r\n]+/gu, ' ')
+    .replace(/ *(\r?\n) */gu, '$1')
+    .trim()
 }
 
 export const buildMentionAutocompleteSubmission = (
@@ -416,7 +422,11 @@ export const resolvePluginMentionIconUrl = (input: {
     return path
   }
 
-  if (!path.startsWith('/')) {
+  if (
+    !path.startsWith('/')
+    && !WINDOWS_ABSOLUTE_PATH_PATTERN.test(path)
+    && !WINDOWS_UNC_PATH_PATTERN.test(path)
+  ) {
     return null
   }
 
