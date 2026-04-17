@@ -111,6 +111,18 @@ import {
   type FileAutocompletePathSegment,
   type NormalizedFuzzyFileSearchMatch
 } from '~~/shared/file-autocomplete'
+import {
+  filterSkillAutocompleteEntries,
+  findActiveSkillAutocompleteMatch,
+  hasSkillAutocompleteMentions,
+  normalizeSkillsListResponse,
+  preprocessSkillMentionsForSubmission,
+  reconcileSkillAutocompleteSelections,
+  replaceActiveSkillAutocompleteMatch,
+  toSkillAutocompleteCompletion,
+  type SkillAutocompleteEntry,
+  type SkillAutocompleteSelection
+} from '~~/shared/skill-autocomplete'
 
 const props = defineProps<{
   projectId: string
@@ -155,6 +167,8 @@ const chatPromptRef = ref<{
   textareaRef?: unknown
 } | null>(null)
 const slashDropdownRef = ref<HTMLElement | null>(null)
+const skillAutocompleteDropdownRef = ref<HTMLElement | null>(null)
+const skillAutocompleteListRef = ref<HTMLElement | null>(null)
 const fileAutocompleteDropdownRef = ref<HTMLElement | null>(null)
 const fileAutocompleteListRef = ref<HTMLElement | null>(null)
 const scrollViewport = ref<HTMLElement | null>(null)
@@ -198,8 +212,17 @@ const promptSelectionStart = ref(0)
 const promptSelectionEnd = ref(0)
 const isPromptFocused = ref(false)
 const dismissedSlashMatchKey = ref<string | null>(null)
+const dismissedSkillAutocompleteMatchKey = ref<string | null>(null)
 const dismissedFileAutocompleteMatchKey = ref<string | null>(null)
 const slashHighlightIndex = ref(0)
+const skillAutocompleteHighlightIndex = ref(0)
+const skillAutocompleteLoading = ref(false)
+const skillAutocompleteError = ref<string | null>(null)
+const skillAutocompleteCatalog = ref<SkillAutocompleteEntry[]>([])
+const skillAutocompleteCatalogCwd = ref<string | null>(null)
+const skillAutocompleteCatalogVersion = ref(-1)
+const skillAutocompleteInvalidationVersion = ref(0)
+const insertedSkillMentions = ref<SkillAutocompleteSelection[]>([])
 const fileAutocompleteHighlightIndex = ref(0)
 const fileAutocompleteLoading = ref(false)
 const fileAutocompleteError = ref<string | null>(null)
@@ -276,6 +299,28 @@ const filteredSlashCommands = computed(() =>
     : []
 )
 
+const activeSkillAutocompleteMatch = computed(() =>
+  isPromptFocused.value
+    ? findActiveSkillAutocompleteMatch(input.value, promptSelectionStart.value, promptSelectionEnd.value)
+    : null
+)
+
+const activeSkillAutocompleteMatchKey = computed(() => {
+  const match = activeSkillAutocompleteMatch.value
+  if (!match) {
+    return null
+  }
+
+  return `${match.start}:${match.end}:${match.raw}`
+})
+
+const filteredSkillAutocompleteResults = computed(() =>
+  activeSkillAutocompleteMatch.value
+    ? filterSkillAutocompleteEntries(skillAutocompleteCatalog.value, activeSkillAutocompleteMatch.value.query)
+      .slice(0, 8)
+    : []
+)
+
 const activeFileAutocompleteMatch = computed(() =>
   isPromptFocused.value
     ? findActiveFileAutocompleteMatch(input.value, promptSelectionStart.value, promptSelectionEnd.value)
@@ -315,8 +360,22 @@ const highlightedFileAutocompleteResult = computed(() =>
   ?? null
 )
 
+const skillAutocompleteOpen = computed(() =>
+  !reviewDrawerOpen.value
+  && !fileAutocompleteOpen.value
+  && Boolean(activeSkillAutocompleteMatch.value)
+  && activeSkillAutocompleteMatchKey.value !== dismissedSkillAutocompleteMatchKey.value
+)
+
+const highlightedSkillAutocompleteResult = computed(() =>
+  filteredSkillAutocompleteResults.value[skillAutocompleteHighlightIndex.value]
+  ?? filteredSkillAutocompleteResults.value[0]
+  ?? null
+)
+
 const slashDropdownOpen = computed(() =>
   !reviewDrawerOpen.value
+  && !skillAutocompleteOpen.value
   && !fileAutocompleteOpen.value
   && Boolean(activeSlashMatch.value)
   && activeSlashMatchKey.value !== dismissedSlashMatchKey.value
@@ -409,6 +468,32 @@ const fileAutocompleteEmptyState = computed(() => {
 
   if (visibleFileAutocompleteResults.value.length === 0) {
     return 'No matching project files.'
+  }
+
+  return null
+})
+
+const skillAutocompleteEmptyState = computed(() => {
+  if (!skillAutocompleteOpen.value) {
+    return null
+  }
+
+  if (!selectedProject.value?.projectPath) {
+    return 'Project runtime is not ready yet.'
+  }
+
+  if (skillAutocompleteLoading.value) {
+    return 'Loading available skills...'
+  }
+
+  if (skillAutocompleteError.value && filteredSkillAutocompleteResults.value.length === 0) {
+    return skillAutocompleteError.value
+  }
+
+  if (filteredSkillAutocompleteResults.value.length === 0) {
+    return activeSkillAutocompleteMatch.value?.query
+      ? 'No matching skills.'
+      : 'No available skills were found for this workspace.'
   }
 
   return null
@@ -508,6 +593,9 @@ const optimisticAttachmentSnapshots = new Map<string, DraftAttachment[]>()
 let promptControlsPromise: Promise<void> | null = null
 let pendingThreadHydration: Promise<void> | null = null
 let releaseServerRequestHandler: (() => void) | null = null
+let releaseSkillNotificationSubscription: (() => void) | null = null
+let skipNextSkillMentionSync = false
+let skillAutocompleteRequestSequence = 0
 let fileAutocompleteRequestSequence = 0
 
 const isActiveTurnStatus = (value: string | null | undefined) => {
@@ -781,6 +869,10 @@ const syncPromptSelectionFromDom = () => {
     dismissedSlashMatchKey.value = null
   }
 
+  if (!activeSkillAutocompleteMatchKey.value || activeSkillAutocompleteMatchKey.value !== dismissedSkillAutocompleteMatchKey.value) {
+    dismissedSkillAutocompleteMatchKey.value = null
+  }
+
   if (!activeFileAutocompleteMatchKey.value || activeFileAutocompleteMatchKey.value !== dismissedFileAutocompleteMatchKey.value) {
     dismissedFileAutocompleteMatchKey.value = null
   }
@@ -803,6 +895,7 @@ const focusPromptAt = async (position?: number) => {
 
 const shouldRetainPromptFocus = (nextFocused: EventTarget | null | undefined) =>
   isFocusWithinContainer(nextFocused, slashDropdownRef.value)
+  || isFocusWithinContainer(nextFocused, skillAutocompleteDropdownRef.value)
   || isFocusWithinContainer(nextFocused, fileAutocompleteDropdownRef.value)
 
 const handlePromptBlur = (event: FocusEvent) => {
@@ -825,6 +918,11 @@ const handleSlashDropdownPointerDown = (event: PointerEvent) => {
   void focusPromptAt(promptSelectionStart.value)
 }
 
+const handleSkillAutocompletePointerDown = (event: PointerEvent) => {
+  event.preventDefault()
+  void focusPromptAt(promptSelectionStart.value)
+}
+
 const handleFileAutocompletePointerDown = (event: PointerEvent) => {
   // File suggestions follow the same inert-overlay rule as slash commands.
   // Keeping focus anchored in the textarea avoids collapsing the popup while
@@ -834,6 +932,18 @@ const handleFileAutocompletePointerDown = (event: PointerEvent) => {
 }
 
 const onPromptEnterCapture = (event: KeyboardEvent) => {
+  if (skillAutocompleteOpen.value) {
+    event.preventDefault()
+    event.stopPropagation()
+    event.stopImmediatePropagation()
+
+    const skill = highlightedSkillAutocompleteResult.value
+    if (skill) {
+      void selectSkillAutocompleteResult(skill)
+    }
+    return
+  }
+
   if (!fileAutocompleteOpen.value) {
     return
   }
@@ -882,8 +992,21 @@ const clearSlashCommandDraft = () => {
   // or `/review` in the prompt after opening the modal/drawer makes the next
   // edit start from stale command text and feels like the action did not finish.
   input.value = ''
+  insertedSkillMentions.value = []
   clearAttachments({ revoke: false })
   dismissedSlashMatchKey.value = null
+}
+
+const cloneSkillMentions = (mentions = insertedSkillMentions.value) =>
+  mentions.map(mention => ({ ...mention }))
+
+const applyDraftTextState = (
+  nextText: string,
+  nextMentions: SkillAutocompleteSelection[] = []
+) => {
+  skipNextSkillMentionSync = true
+  input.value = nextText
+  insertedSkillMentions.value = cloneSkillMentions(nextMentions)
 }
 
 const moveSlashHighlight = (delta: number) => {
@@ -905,6 +1028,27 @@ const moveSlashHighlight = (delta: number) => {
   }
 
   slashHighlightIndex.value = nextIndex
+}
+
+const moveSkillAutocompleteHighlight = (delta: number) => {
+  if (!filteredSkillAutocompleteResults.value.length) {
+    skillAutocompleteHighlightIndex.value = 0
+    return
+  }
+
+  const maxIndex = filteredSkillAutocompleteResults.value.length - 1
+  const nextIndex = skillAutocompleteHighlightIndex.value + delta
+  if (nextIndex < 0) {
+    skillAutocompleteHighlightIndex.value = maxIndex
+    return
+  }
+
+  if (nextIndex > maxIndex) {
+    skillAutocompleteHighlightIndex.value = 0
+    return
+  }
+
+  skillAutocompleteHighlightIndex.value = nextIndex
 }
 
 const moveFileAutocompleteHighlight = (delta: number) => {
@@ -952,6 +1096,36 @@ const completeSlashCommand = async (command: SlashCommandDefinition) => {
   await focusPromptAt(match.start + completion.length)
 }
 
+const resolveSkillAutocompleteDescription = (skill: SkillAutocompleteEntry) =>
+  skill.shortDescription ?? skill.description
+
+const selectSkillAutocompleteResult = async (skill: SkillAutocompleteEntry) => {
+  const activeMatch = activeSkillAutocompleteMatch.value
+  if (!activeMatch) {
+    return
+  }
+
+  dismissedSkillAutocompleteMatchKey.value = null
+  skillAutocompleteError.value = null
+  const completion = toSkillAutocompleteCompletion(skill)
+  const nextDraft = replaceActiveSkillAutocompleteMatch(input.value, activeMatch, completion)
+  const nextMentions = reconcileSkillAutocompleteSelections(
+    input.value,
+    nextDraft.value,
+    insertedSkillMentions.value
+  )
+
+  nextMentions.push({
+    start: nextDraft.tokenStart,
+    end: nextDraft.tokenEnd,
+    name: skill.name,
+    path: skill.path
+  })
+
+  applyDraftTextState(nextDraft.value, nextMentions)
+  await focusPromptAt(nextDraft.caret)
+}
+
 const resolveFileAutocompleteIcon = (match: Pick<NormalizedFuzzyFileSearchMatch, 'matchType'>) =>
   match.matchType === 'directory' ? 'i-lucide-folder-open' : 'i-lucide-file-code-2'
 
@@ -983,6 +1157,71 @@ const syncFileAutocompleteScroll = async () => {
   )
   selected?.scrollIntoView({
     block: 'nearest'
+  })
+}
+
+const syncSkillAutocompleteScroll = async () => {
+  await nextTick()
+
+  const selected = skillAutocompleteListRef.value?.querySelector<HTMLElement>(
+    '[data-skill-autocomplete-option][aria-selected="true"]'
+  )
+  selected?.scrollIntoView({
+    block: 'nearest'
+  })
+}
+
+const shouldReloadSkillAutocompleteCatalog = (projectPath: string) =>
+  skillAutocompleteCatalogCwd.value !== projectPath
+  || skillAutocompleteCatalogVersion.value !== skillAutocompleteInvalidationVersion.value
+
+const loadSkillAutocompleteCatalog = async (options?: {
+  forceReload?: boolean
+  projectPath?: string | null
+}) => {
+  const projectPath = options?.projectPath ?? selectedProject.value?.projectPath ?? null
+  if (!projectPath) {
+    skillAutocompleteCatalog.value = []
+    skillAutocompleteCatalogCwd.value = null
+    skillAutocompleteCatalogVersion.value = -1
+    skillAutocompleteError.value = null
+    return []
+  }
+
+  await ensureProjectRuntime()
+  const response = await getClient(props.projectId).request('skills/list', {
+    cwds: [projectPath],
+    forceReload: options?.forceReload ? true : undefined
+  })
+
+  const entries = normalizeSkillsListResponse(response)
+  const entry = entries.find(candidate => candidate.cwd === projectPath) ?? entries[0] ?? null
+  const skills = entry?.skills.filter(skill => skill.enabled) ?? []
+  const nextError = skills.length === 0 && entry?.errors.length
+    ? entry.errors.map(errorEntry => errorEntry.message).join('\n')
+    : null
+
+  skillAutocompleteCatalog.value = skills
+  skillAutocompleteCatalogCwd.value = projectPath
+  skillAutocompleteCatalogVersion.value = skillAutocompleteInvalidationVersion.value
+  skillAutocompleteError.value = nextError
+
+  return skills
+}
+
+const ensureSkillAutocompleteCatalogCurrent = async () => {
+  const projectPath = selectedProject.value?.projectPath ?? null
+  if (!projectPath) {
+    return skillAutocompleteCatalog.value
+  }
+
+  if (!shouldReloadSkillAutocompleteCatalog(projectPath)) {
+    return skillAutocompleteCatalog.value
+  }
+
+  return await loadSkillAutocompleteCatalog({
+    forceReload: skillAutocompleteCatalogCwd.value === projectPath,
+    projectPath
   })
 }
 
@@ -1174,9 +1413,13 @@ const markAssistantOutputStartedForItem = (item: CodexThreadItem) => {
   }
 }
 
-const restoreDraftIfPristine = (text: string, submittedAttachments: DraftAttachment[]) => {
+const restoreDraftIfPristine = (
+  text: string,
+  submittedAttachments: DraftAttachment[],
+  submittedSkillMentions: SkillAutocompleteSelection[] = []
+) => {
   if (!input.value.trim()) {
-    input.value = text
+    applyDraftTextState(text, submittedSkillMentions)
   }
 
   if (attachments.value.length === 0 && submittedAttachments.length > 0) {
@@ -2410,6 +2653,15 @@ const sendMessage = async () => {
   // `keydown.enter.exact` handler, so guarding only in our keydown callback is
   // not sufficient to stop Enter from racing into a send while the file palette
   // is open. Keep the submit path itself aware of the palette state.
+  if (skillAutocompleteOpen.value) {
+    const skill = highlightedSkillAutocompleteResult.value
+    if (skill) {
+      await selectSkillAutocompleteResult(skill)
+    }
+
+    return
+  }
+
   if (fileAutocompleteOpen.value) {
     const match = highlightedFileAutocompleteResult.value
     if (match) {
@@ -2425,10 +2677,10 @@ const sendMessage = async () => {
 
   sendMessageLocked.value = true
   const rawText = input.value
-  const text = rawText.trim()
   const submittedAttachments = attachments.value.slice()
+  const submittedSkillMentions = cloneSkillMentions()
 
-  if (!text && submittedAttachments.length === 0) {
+  if (!rawText.trim() && submittedAttachments.length === 0) {
     sendMessageLocked.value = false
     return
   }
@@ -2438,13 +2690,34 @@ const sendMessage = async () => {
     return
   }
 
-  input.value = ''
+  if (hasSkillAutocompleteMentions(rawText)) {
+    try {
+      await ensureSkillAutocompleteCatalogCurrent()
+    } catch (caughtError) {
+      error.value = caughtError instanceof Error ? caughtError.message : String(caughtError)
+      status.value = 'error'
+      sendMessageLocked.value = false
+      return
+    }
+  }
+
+  const text = preprocessSkillMentionsForSubmission(
+    rawText,
+    submittedSkillMentions,
+    skillAutocompleteCatalog.value
+  ).trim()
+  if (!text && submittedAttachments.length === 0) {
+    sendMessageLocked.value = false
+    return
+  }
+
+  applyDraftTextState('')
   clearAttachments({ revoke: false })
 
   try {
     await loadPromptControls()
   } catch (caughtError) {
-    restoreDraftIfPristine(text, submittedAttachments)
+    restoreDraftIfPristine(rawText, submittedAttachments, submittedSkillMentions)
     error.value = caughtError instanceof Error ? caughtError.message : String(caughtError)
     status.value = 'error'
     sendMessageLocked.value = false
@@ -2539,13 +2812,13 @@ const sendMessage = async () => {
           clearPendingOptimisticMessages(clearLiveStream(new Error(messageText)))
         }
         session.pendingLiveStream = null
-        restoreDraftIfPristine(text, submittedAttachments)
+        restoreDraftIfPristine(rawText, submittedAttachments, submittedSkillMentions)
         error.value = messageText
         status.value = 'error'
         return
       }
 
-      restoreDraftIfPristine(text, submittedAttachments)
+      restoreDraftIfPristine(rawText, submittedAttachments, submittedSkillMentions)
       error.value = messageText
     }
   } finally {
@@ -2598,6 +2871,47 @@ const respondToPendingRequest = (response: unknown) => {
 }
 
 const onPromptKeydown = (event: KeyboardEvent) => {
+  if (skillAutocompleteOpen.value) {
+    if (event.key === 'ArrowDown') {
+      if (filteredSkillAutocompleteResults.value.length === 0) {
+        return
+      }
+
+      event.preventDefault()
+      moveSkillAutocompleteHighlight(1)
+      return
+    }
+
+    if (event.key === 'ArrowUp') {
+      if (filteredSkillAutocompleteResults.value.length === 0) {
+        return
+      }
+
+      event.preventDefault()
+      moveSkillAutocompleteHighlight(-1)
+      return
+    }
+
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      dismissedSkillAutocompleteMatchKey.value = activeSkillAutocompleteMatchKey.value
+      isPromptFocused.value = true
+      void focusPromptAt(promptSelectionStart.value)
+      return
+    }
+
+    if (event.key === 'Tab') {
+      const skill = highlightedSkillAutocompleteResult.value
+      if (!skill) {
+        return
+      }
+
+      event.preventDefault()
+      void selectSkillAutocompleteResult(skill)
+      return
+    }
+  }
+
   if (fileAutocompleteOpen.value) {
     if (event.key === 'ArrowDown') {
       if (visibleFileAutocompleteResults.value.length === 0) {
@@ -2679,6 +2993,16 @@ const onPromptEnter = (event: KeyboardEvent) => {
     return
   }
 
+  if (skillAutocompleteOpen.value) {
+    event.preventDefault()
+    const skill = highlightedSkillAutocompleteResult.value
+    if (skill) {
+      void selectSkillAutocompleteResult(skill)
+    }
+
+    return
+  }
+
   if (fileAutocompleteOpen.value) {
     event.preventDefault()
     const match = highlightedFileAutocompleteResult.value
@@ -2708,10 +3032,18 @@ const onPromptEnter = (event: KeyboardEvent) => {
 
 onMounted(() => {
   releaseServerRequestHandler = getClient(props.projectId).setServerRequestHandler(handleServerRequest)
+  releaseSkillNotificationSubscription = getClient(props.projectId).subscribe((notification) => {
+    if (notification.method !== 'skills/changed') {
+      return
+    }
+
+    skillAutocompleteInvalidationVersion.value += 1
+  })
   if (!loaded.value) {
     void refreshProjects()
   }
 
+  void getClient(props.projectId).connect().catch(() => {})
   void loadPromptControls()
   void scheduleScrollToBottom('auto')
 })
@@ -2720,6 +3052,8 @@ onBeforeUnmount(() => {
   cancelAllPendingRequests()
   releaseServerRequestHandler?.()
   releaseServerRequestHandler = null
+  releaseSkillNotificationSubscription?.()
+  releaseSkillNotificationSubscription = null
 })
 
 watch(() => props.threadId ?? null, (threadId) => {
@@ -2784,6 +3118,17 @@ watch(filteredSlashCommands, (commands) => {
   }
 }, { flush: 'sync' })
 
+watch(filteredSkillAutocompleteResults, (results) => {
+  if (!results.length) {
+    skillAutocompleteHighlightIndex.value = 0
+    return
+  }
+
+  if (skillAutocompleteHighlightIndex.value >= results.length) {
+    skillAutocompleteHighlightIndex.value = 0
+  }
+}, { flush: 'sync' })
+
 watch(visibleFileAutocompleteResults, (results) => {
   if (!results.length) {
     fileAutocompleteHighlightIndex.value = 0
@@ -2807,6 +3152,18 @@ watch(
   { flush: 'post' }
 )
 
+watch(
+  [skillAutocompleteOpen, skillAutocompleteHighlightIndex, filteredSkillAutocompleteResults],
+  async ([open, highlightIndex, results]) => {
+    if (!open || !results.length || highlightIndex >= results.length) {
+      return
+    }
+
+    await syncSkillAutocompleteScroll()
+  },
+  { flush: 'post' }
+)
+
 watch([selectedModel, availableModels], () => {
   const nextSelection = coercePromptSelection(effectiveModelList.value, selectedModel.value, selectedEffort.value)
   if (selectedModel.value !== nextSelection.model) {
@@ -2819,10 +3176,71 @@ watch([selectedModel, availableModels], () => {
   }
 }, { flush: 'sync' })
 
-watch(input, async () => {
+watch(input, async (nextValue, previousValue) => {
+  if (skipNextSkillMentionSync) {
+    skipNextSkillMentionSync = false
+  } else {
+    insertedSkillMentions.value = reconcileSkillAutocompleteSelections(
+      previousValue,
+      nextValue,
+      insertedSkillMentions.value
+    )
+  }
+
   await nextTick()
   syncPromptSelectionFromDom()
 }, { flush: 'post' })
+
+watch(
+  [skillAutocompleteOpen, () => selectedProject.value?.projectPath ?? null, skillAutocompleteInvalidationVersion],
+  async ([open, projectPath]) => {
+    const requestSequence = ++skillAutocompleteRequestSequence
+
+    if (!open) {
+      skillAutocompleteLoading.value = false
+      skillAutocompleteError.value = null
+      return
+    }
+
+    if (!projectPath) {
+      skillAutocompleteLoading.value = false
+      skillAutocompleteCatalog.value = []
+      skillAutocompleteCatalogCwd.value = null
+      skillAutocompleteCatalogVersion.value = -1
+      skillAutocompleteError.value = null
+      return
+    }
+
+    if (!shouldReloadSkillAutocompleteCatalog(projectPath)) {
+      skillAutocompleteLoading.value = false
+      skillAutocompleteError.value = null
+      return
+    }
+
+    skillAutocompleteLoading.value = true
+    skillAutocompleteError.value = null
+
+    try {
+      await loadSkillAutocompleteCatalog({
+        forceReload: skillAutocompleteCatalogCwd.value === projectPath,
+        projectPath
+      })
+    } catch (caughtError) {
+      if (requestSequence !== skillAutocompleteRequestSequence) {
+        return
+      }
+
+      skillAutocompleteError.value = caughtError instanceof Error
+        ? caughtError.message
+        : 'Failed to load available skills.'
+    } finally {
+      if (requestSequence === skillAutocompleteRequestSequence) {
+        skillAutocompleteLoading.value = false
+      }
+    }
+  },
+  { flush: 'post' }
+)
 
 watch(
   [fileAutocompleteOpen, normalizedFileAutocompleteQuery, () => selectedProject.value?.projectPath ?? null],
@@ -3047,6 +3465,64 @@ watch(
                   >
                     {{ segment.text }}
                   </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div
+            v-if="skillAutocompleteOpen"
+            ref="skillAutocompleteDropdownRef"
+            role="listbox"
+            aria-label="Skills"
+            class="absolute bottom-full left-0 z-20 mb-2 w-[90vw] max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border border-default bg-default/95 shadow-2xl backdrop-blur md:w-[min(50vw,52rem)] md:max-w-[min(50vw,52rem)]"
+            @pointerdown="handleSkillAutocompletePointerDown"
+          >
+            <div
+              ref="skillAutocompleteListRef"
+              class="max-h-72 overflow-y-auto p-2"
+            >
+              <div
+                v-if="skillAutocompleteEmptyState"
+                class="px-3 py-2 text-sm leading-6 text-muted"
+              >
+                {{ skillAutocompleteEmptyState }}
+              </div>
+              <div
+                v-for="(skill, index) in filteredSkillAutocompleteResults"
+                v-else
+                :key="`${skill.scope}:${skill.path}`"
+                role="option"
+                :aria-selected="index === skillAutocompleteHighlightIndex"
+                data-skill-autocomplete-option=""
+                class="group relative flex cursor-pointer items-start gap-2 px-3 py-2.5 text-sm text-highlighted outline-none transition-colors before:absolute before:inset-px before:z-[-1] before:rounded-md"
+                :class="index === skillAutocompleteHighlightIndex
+                  ? 'before:bg-elevated'
+                  : 'hover:before:bg-elevated/60'"
+                @click="void selectSkillAutocompleteResult(skill)"
+              >
+                <UIcon
+                  name="i-lucide-badge-plus"
+                  class="mt-0.5 size-4 shrink-0 text-dimmed group-aria-selected:text-highlighted"
+                />
+                <div class="min-w-0 flex-1">
+                  <div class="flex min-w-0 items-center gap-2">
+                    <span class="truncate font-mono text-[13px] leading-6">
+                      ${{ skill.name }}
+                    </span>
+                    <span
+                      v-if="skill.displayName && skill.displayName !== skill.name"
+                      class="truncate text-xs text-toned"
+                    >
+                      {{ skill.displayName }}
+                    </span>
+                  </div>
+                  <div class="truncate text-xs leading-5 text-toned">
+                    {{ resolveSkillAutocompleteDescription(skill) }}
+                  </div>
+                  <div class="truncate font-mono text-[11px] leading-5 text-muted">
+                    {{ skill.scope }} · {{ skill.path }}
+                  </div>
                 </div>
               </div>
             </div>
