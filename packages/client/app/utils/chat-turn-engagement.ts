@@ -6,6 +6,7 @@ const interruptIgnoredMethods = new Set([
   'item/started',
   'item/agentMessage/delta',
   'item/plan/delta',
+  'turn/plan/updated',
   'item/reasoning/textDelta',
   'item/reasoning/summaryTextDelta',
   'item/commandExecution/outputDelta',

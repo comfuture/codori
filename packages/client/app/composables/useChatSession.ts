@@ -1,6 +1,7 @@
 import { ref, type Ref } from 'vue'
 import type { ChatMessage, SubagentAgentStatus, VisualSubagentPanel } from '~~/shared/codex-chat'
 import type { CodexRpcNotification } from '~~/shared/codex-rpc'
+import type { ThreadPlanState } from '~~/shared/turn-plan'
 import {
   FALLBACK_MODELS,
   type ModelOption,
@@ -38,6 +39,7 @@ export type SubagentPanelState = VisualSubagentPanel & {
 export type ChatSession = {
   messages: Ref<ChatMessage[]>
   subagentPanels: Ref<SubagentPanelState[]>
+  threadPlans: Ref<Record<string, ThreadPlanState>>
   status: Ref<ChatStatus>
   error: Ref<string | null>
   activeThreadId: Ref<string | null>
@@ -61,6 +63,7 @@ const sessions = new Map<string, ChatSession>()
 const createSession = (): ChatSession => ({
   messages: ref<ChatMessage[]>([]),
   subagentPanels: ref<SubagentPanelState[]>([]),
+  threadPlans: ref<Record<string, ThreadPlanState>>({}),
   status: ref<ChatStatus>('ready'),
   error: ref<string | null>(null),
   activeThreadId: ref<string | null>(null),
