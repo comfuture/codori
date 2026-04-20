@@ -3,6 +3,7 @@ import { useRoute, useRouter } from '#imports'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useChatSession } from '../../../../composables/useChatSession'
 import { useProjects } from '../../../../composables/useProjects'
+import { useThreadSummaries } from '../../../../composables/useThreadSummaries'
 import { useThreadPanel } from '../../../../composables/useThreadPanel'
 import { useVisualSubagentPanels } from '../../../../composables/useVisualSubagentPanels'
 import { normalizeProjectIdParam, toProjectRoute } from '~~/shared/codori'
@@ -25,8 +26,17 @@ const threadId = computed(() => {
   return typeof value === 'string' ? value : null
 })
 const selectedProject = computed(() => getProject(projectId.value))
+const session = computed(() =>
+  projectId.value ? useChatSession(projectId.value) : null
+)
+const threadSummaries = computed(() =>
+  projectId.value ? useThreadSummaries(projectId.value).threads.value : []
+)
+const routeThreadSummaryTitle = computed(() =>
+  threadSummaries.value.find(thread => thread.id === threadId.value)?.title ?? null
+)
 const subagentPanels = computed(() =>
-  projectId.value ? useChatSession(projectId.value).subagentPanels.value : []
+  session.value?.subagentPanels.value ?? []
 )
 const { availablePanels, activePanels } = useVisualSubagentPanels(() => subagentPanels.value)
 const projectName = computed(() => selectedProject.value?.projectId ?? projectId.value ?? 'Project')
@@ -35,7 +45,12 @@ const threadTitle = computed(() => {
     return threadId.value ?? 'Thread'
   }
 
-  return useChatSession(projectId.value).threadTitle.value ?? threadId.value ?? 'Thread'
+  const activeThreadId = session.value?.activeThreadId.value ?? null
+  if (activeThreadId === threadId.value && session.value?.threadTitle.value) {
+    return session.value.threadTitle.value
+  }
+
+  return routeThreadSummaryTitle.value ?? threadId.value ?? 'Thread'
 })
 const rpcStatus = computed(() => {
   if (!projectId.value) {
