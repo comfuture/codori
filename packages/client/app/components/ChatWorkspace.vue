@@ -4104,7 +4104,7 @@ watch(
 
     <div
       ref="stickyFooterRef"
-      class="sticky bottom-0 shrink-0 px-4 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] pt-10 md:px-6 md:pt-8"
+      class="sticky bottom-0 shrink-0 px-4 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] pt-2 md:px-6 md:pt-2"
     >
       <div class="pointer-events-none absolute inset-x-0 inset-y-0 bg-gradient-to-b from-transparent via-default/88 to-default" />
 
@@ -4343,6 +4343,10 @@ watch(
             :placeholder="composerPlaceholder"
             :error="submitError"
             :disabled="isComposerDisabled"
+            :ui="{
+              root: 'px-2.5 pt-1 pb-2',
+              base: 'px-2.5 pt-1 pb-1.5'
+            }"
             autoresize
             @submit.prevent="sendMessage"
             @keydown.enter.exact.capture="onPromptEnterCapture"
@@ -4358,9 +4362,11 @@ watch(
             @compositionend="onCompositionEnd"
             @paste="onPaste"
           >
-            <template #header>
+            <template
+              v-if="attachments.length"
+              #header
+            >
               <div
-                v-if="attachments.length"
                 class="flex flex-wrap gap-2 pb-2"
               >
                 <div
