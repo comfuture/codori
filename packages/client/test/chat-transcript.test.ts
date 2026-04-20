@@ -176,6 +176,29 @@ describe('chat transcript stability', () => {
     }])
   })
 
+  it('hydrates server-provided image inputs without assuming a local path', () => {
+    expect(itemToMessages({
+      type: 'userMessage',
+      id: 'user-image-1',
+      content: [{
+        type: 'image',
+        url: 'data:image/png;base64,abc123'
+      }]
+    })).toEqual<ChatMessage[]>([{
+      id: 'user-image-1',
+      role: 'user',
+      parts: [{
+        type: 'attachment',
+        attachment: {
+          kind: 'image',
+          name: 'image',
+          mediaType: 'image/png',
+          url: 'data:image/png;base64,abc123'
+        }
+      }]
+    }])
+  })
+
   it('hides the synthetic review bootstrap user message when hydrating a thread', () => {
     expect(threadToMessages({
       id: 'thread-1',

@@ -145,6 +145,14 @@ export const isSubagentActiveStatus = (status: SubagentAgentStatus) =>
 
 const streamingState = (pending?: boolean) => pending ? 'streaming' : 'done'
 
+const attachmentNameFromPath = (path: string) =>
+  path.split(/[\\/]/).pop() || 'image'
+
+const attachmentMediaTypeFromUrl = (url: string) => {
+  const match = /^data:([^;,]+)[;,]/i.exec(url)
+  return match?.[1] || 'image/*'
+}
+
 const userInputToParts = (input: CodexUserInput): ChatPart[] => {
   if (input.type === 'text') {
     if (!input.text.trim()) {
@@ -162,11 +170,23 @@ const userInputToParts = (input: CodexUserInput): ChatPart[] => {
     return []
   }
 
+  if (input.type === 'image') {
+    return [{
+      type: 'attachment',
+      attachment: {
+        kind: 'image',
+        name: 'image',
+        mediaType: attachmentMediaTypeFromUrl(input.url),
+        url: input.url
+      }
+    }]
+  }
+
   return [{
     type: 'attachment',
     attachment: {
       kind: 'image',
-      name: input.path.split(/[\\/]/).pop() || 'image',
+      name: attachmentNameFromPath(input.path),
       mediaType: 'image/*',
       localPath: input.path
     }
