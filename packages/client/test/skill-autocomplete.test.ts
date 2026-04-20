@@ -195,6 +195,22 @@ describe('skill autocomplete helpers', () => {
       'Use $image ',
       selections
     )).toEqual([])
+
+    expect(reconcileSkillAutocompleteSelections(
+      '/plan Use $imagegen',
+      'Use $imagegen',
+      [{
+        start: 10,
+        end: 19,
+        name: 'imagegen',
+        path: '/Users/demo/.codex/skills/.system/imagegen/SKILL.md'
+      }]
+    )).toEqual([{
+      start: 4,
+      end: 13,
+      name: 'imagegen',
+      path: '/Users/demo/.codex/skills/.system/imagegen/SKILL.md'
+    }])
   })
 
   it('preprocesses tracked selections first and falls back to unique skill names', () => {

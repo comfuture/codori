@@ -3545,8 +3545,8 @@ const sendMessage = async () => {
   sendMessageLocked.value = true
   const rawText = input.value
   const submittedAttachments = attachments.value.slice()
-  const submittedSkillMentions = cloneSkillMentions()
-  const submittedMentionSelections = cloneMentionSelections()
+  let submittedSkillMentions = cloneSkillMentions()
+  let submittedMentionSelections = cloneMentionSelections()
   let effectiveRawText = rawText
 
   if (!effectiveRawText.trim() && submittedAttachments.length === 0) {
@@ -3560,7 +3560,20 @@ const sendMessage = async () => {
     return
   }
 
-  effectiveRawText = slashResult.replacementText ?? effectiveRawText
+  const nextEffectiveRawText = slashResult.replacementText ?? effectiveRawText
+  if (nextEffectiveRawText !== effectiveRawText) {
+    submittedSkillMentions = reconcileSkillAutocompleteSelections(
+      effectiveRawText,
+      nextEffectiveRawText,
+      submittedSkillMentions
+    )
+    submittedMentionSelections = reconcileMentionAutocompleteSelections(
+      effectiveRawText,
+      nextEffectiveRawText,
+      submittedMentionSelections
+    )
+  }
+  effectiveRawText = nextEffectiveRawText
 
   if (hasSkillAutocompleteMentions(effectiveRawText)) {
     try {
