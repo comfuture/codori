@@ -4,7 +4,7 @@ import {
   buildMcpElicitationResponse,
   buildPendingUserRequestDismissResponse,
   buildRequestUserInputResponse,
-  type PendingUserRequest
+  type PendingUserRequestState
 } from '../../shared/pending-user-request'
 import BottomDrawerShell from './BottomDrawerShell.vue'
 import McpElicitationForm from './pending-request/McpElicitationForm.vue'
@@ -12,11 +12,11 @@ import McpElicitationUrlPrompt from './pending-request/McpElicitationUrlPrompt.v
 import RequestUserInputForm from './pending-request/RequestUserInputForm.vue'
 
 const props = defineProps<{
-  request: PendingUserRequest | null
+  request: PendingUserRequestState | null
 }>()
 
 const emit = defineEmits<{
-  respond: [response: unknown]
+  respond: [payload: { requestId: string | number, response: unknown }]
 }>()
 
 const isRequestUserInput = computed(() => props.request?.kind === 'requestUserInput')
@@ -44,18 +44,24 @@ const description = computed(() => {
 })
 
 const handleOpenChange = (nextOpen: boolean) => {
-  if (nextOpen || !props.request) {
+  if (nextOpen || !props.request || props.request.kind === 'requestUserInput') {
     return
   }
 
-  emit('respond', buildPendingUserRequestDismissResponse(props.request))
+  emit('respond', {
+    requestId: props.request.requestId,
+    response: buildPendingUserRequestDismissResponse(props.request)
+  })
 }
 </script>
 
 <template>
   <BottomDrawerShell
+    :key="request ? `${request.kind}:${String(request.requestId)}` : 'empty'"
     :open="Boolean(request)"
     :hide-header="isRequestUserInput"
+    :handle="!isRequestUserInput"
+    :dismissible="!isRequestUserInput"
     :title="title"
     :description="description"
     :body-class="isRequestUserInput ? 'px-3 pb-3 pt-3 md:px-4 md:pb-4 md:pt-4' : 'px-4 pb-4 pt-2 md:px-5'"
@@ -65,24 +71,46 @@ const handleOpenChange = (nextOpen: boolean) => {
       v-if="request?.kind === 'requestUserInput'"
       :key="request.requestId"
       :request="request"
-      @submit="emit('respond', buildRequestUserInputResponse($event))"
+      :submitting="request.submitting"
+      @submit="emit('respond', {
+        requestId: request.requestId,
+        response: buildRequestUserInputResponse($event)
+      })"
     />
 
     <McpElicitationForm
       v-else-if="request?.kind === 'mcpElicitationForm'"
       :key="request.requestId"
       :request="request"
-      @accept="emit('respond', buildMcpElicitationResponse('accept', $event))"
-      @decline="emit('respond', buildMcpElicitationResponse('decline'))"
-      @cancel="emit('respond', buildMcpElicitationResponse('cancel'))"
+      @accept="emit('respond', {
+        requestId: request.requestId,
+        response: buildMcpElicitationResponse('accept', $event)
+      })"
+      @decline="emit('respond', {
+        requestId: request.requestId,
+        response: buildMcpElicitationResponse('decline')
+      })"
+      @cancel="emit('respond', {
+        requestId: request.requestId,
+        response: buildMcpElicitationResponse('cancel')
+      })"
     />
 
     <McpElicitationUrlPrompt
       v-else-if="request?.kind === 'mcpElicitationUrl'"
       :request="request"
-      @accept="emit('respond', buildMcpElicitationResponse('accept'))"
-      @decline="emit('respond', buildMcpElicitationResponse('decline'))"
-      @cancel="emit('respond', buildMcpElicitationResponse('cancel'))"
+      @accept="emit('respond', {
+        requestId: request.requestId,
+        response: buildMcpElicitationResponse('accept')
+      })"
+      @decline="emit('respond', {
+        requestId: request.requestId,
+        response: buildMcpElicitationResponse('decline')
+      })"
+      @cancel="emit('respond', {
+        requestId: request.requestId,
+        response: buildMcpElicitationResponse('cancel')
+      })"
     />
   </BottomDrawerShell>
 </template>

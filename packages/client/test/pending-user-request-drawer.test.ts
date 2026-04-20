@@ -5,7 +5,7 @@ import { mount } from '@vue/test-utils'
 import { defineComponent, h, nextTick } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 import PendingUserRequestDrawer from '../app/components/PendingUserRequestDrawer.vue'
-import type { PendingUserRequest } from '../shared/pending-user-request'
+import type { PendingUserRequest, PendingUserRequestState } from '../shared/pending-user-request'
 
 const DrawerStub = defineComponent({
   name: 'DrawerStub',
@@ -144,9 +144,16 @@ const NavigationMenuStub = defineComponent({
   }
 })
 
-const mountDrawer = (request: PendingUserRequest | null) =>
+const mountDrawer = (request: PendingUserRequest | null, submitting = false) =>
   mount(PendingUserRequestDrawer, {
-    props: { request },
+    props: {
+      request: request
+        ? {
+            ...request,
+            submitting
+          } satisfies PendingUserRequestState
+        : null
+    },
     global: {
       stubs: {
         UDrawer: DrawerStub,
@@ -194,8 +201,13 @@ describe('pending user request drawer', () => {
     await wrapper.get('button[type="button"]').trigger('click')
 
     expect(wrapper.emitted('respond')?.[0]?.[0]).toEqual({
-      answers: {
-        plan: ['Use drawer']
+      requestId: 1,
+      response: {
+        answers: {
+          plan: {
+            answers: ['Use drawer']
+          }
+        }
       }
     })
   })
@@ -223,9 +235,7 @@ describe('pending user request drawer', () => {
     wrapper.getComponent(DrawerStub).vm.$emit('update:open', false)
     await nextTick()
 
-    expect(wrapper.emitted('respond')?.[0]?.[0]).toEqual({
-      answers: {}
-    })
+    expect(wrapper.emitted('respond')).toBeUndefined()
   })
 
   it('advances across multiple questions and submits from the final custom answer step', async () => {
@@ -267,9 +277,16 @@ describe('pending user request drawer', () => {
     await wrapper.get('form').trigger('submit')
 
     expect(wrapper.emitted('respond')?.[0]?.[0]).toEqual({
-      answers: {
-        layout: ['Compact'],
-        notes: ['Keep the controls left aligned.']
+      requestId: 11,
+      response: {
+        answers: {
+          layout: {
+            answers: ['Compact']
+          },
+          notes: {
+            answers: ['Keep the controls left aligned.']
+          }
+        }
       }
     })
   })
@@ -330,10 +347,13 @@ describe('pending user request drawer', () => {
     await wrapper.get('button[type="submit"]').trigger('submit')
 
     expect(wrapper.emitted('respond')?.[0]?.[0]).toEqual({
-      action: 'accept',
-      content: {
-        email: 'octocat@example.com',
-        attempts: 3
+      requestId: 3,
+      response: {
+        action: 'accept',
+        content: {
+          email: 'octocat@example.com',
+          attempts: 3
+        }
       }
     })
   })
@@ -357,8 +377,11 @@ describe('pending user request drawer', () => {
     await wrapper.get('button[type="submit"]').trigger('submit')
 
     expect(wrapper.emitted('respond')?.[0]?.[0]).toEqual({
-      action: 'accept',
-      content: {}
+      requestId: 31,
+      response: {
+        action: 'accept',
+        content: {}
+      }
     })
   })
 
@@ -387,6 +410,7 @@ describe('pending user request drawer', () => {
       request: {
         kind: 'mcpElicitationForm',
         requestId: 22,
+        submitting: false,
         threadId: null,
         message: 'Need a fresh value.',
         fields: [{
@@ -425,11 +449,20 @@ describe('pending user request drawer', () => {
     await nextTick()
 
     expect(wrapper.emitted('respond')?.map(event => event[0])).toEqual([{
-      action: 'decline'
+      requestId: 4,
+      response: {
+        action: 'decline'
+      }
     }, {
-      action: 'cancel'
+      requestId: 4,
+      response: {
+        action: 'cancel'
+      }
     }, {
-      action: 'accept'
+      requestId: 4,
+      response: {
+        action: 'accept'
+      }
     }])
     expect(openSpy).toHaveBeenCalledWith('https://example.com/oauth', '_blank', 'noopener,noreferrer')
   })
@@ -449,8 +482,56 @@ describe('pending user request drawer', () => {
     await buttons[2]!.trigger('click')
 
     expect(wrapper.emitted('respond')?.[0]?.[0]).toEqual({
-      action: 'cancel'
+      requestId: 5,
+      response: {
+        action: 'cancel'
+      }
     })
     expect(openSpy).not.toHaveBeenCalled()
+  })
+
+  it('drops close events from an unmounted request instance after replacement', async () => {
+    const wrapper = mountDrawer({
+      kind: 'requestUserInput',
+      requestId: 41,
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      itemId: 'item-1',
+      questions: [{
+        header: null,
+        id: 'first',
+        question: 'First question',
+        options: [{ label: 'One', description: null }],
+        isOther: false,
+        isSecret: false
+      }]
+    })
+
+    const firstDrawer = wrapper.getComponent(DrawerStub)
+
+    await wrapper.setProps({
+      request: {
+        kind: 'requestUserInput',
+        requestId: 42,
+        submitting: false,
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        itemId: 'item-2',
+        questions: [{
+          header: null,
+          id: 'second',
+          question: 'Second question',
+          options: [{ label: 'Two', description: null }],
+          isOther: false,
+          isSecret: false
+        }]
+      }
+    })
+    await nextTick()
+
+    firstDrawer.vm.$emit('update:open', false)
+    await nextTick()
+
+    expect(wrapper.emitted('respond')).toBeUndefined()
   })
 })

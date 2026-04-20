@@ -67,6 +67,7 @@ import {
 } from '~~/shared/collaboration-mode'
 import {
   type ConfigReadResponse,
+  notificationRequestId,
   type ModelListResponse,
   notificationThreadName,
   notificationThreadId,
@@ -242,8 +243,8 @@ const {
   pendingRequest,
   hasPendingRequest,
   handleServerRequest,
-  resolveCurrentRequest,
-  cancelAllPendingRequests
+  resolveRequest,
+  markRequestResolved
 } = usePendingUserRequest(
   props.projectId,
   computed(() => activeThreadId.value ?? routeThreadId.value),
@@ -1153,6 +1154,20 @@ const rememberOptimisticAttachments = (messageId: string, submittedAttachments: 
   }
 
   optimisticAttachmentSnapshots.set(messageId, submittedAttachments)
+}
+
+const updateThreadTitleFromUserInput = (threadId: string, text: string) => {
+  const nextTitle = normalizeThreadTitleCandidate(text)
+  if (!nextTitle) {
+    return
+  }
+
+  const fallbackTitle = `Thread ${threadId}`
+  if (!threadTitle.value || threadTitle.value === fallbackTitle) {
+    threadTitle.value = nextTitle
+  }
+
+  updateThreadSummaryTitle(threadId, nextTitle)
 }
 
 const formatAttachmentSize = (size: number) => {
@@ -3258,6 +3273,15 @@ const applyNotification = (notification: CodexRpcNotification) => {
       updateThreadSummaryTitle(nextThreadId, nextTitle, notificationThreadUpdatedAt(notification))
       return
     }
+    case 'serverRequest/resolved': {
+      const requestId = notificationRequestId(notification)
+      if (requestId == null) {
+        return
+      }
+
+      markRequestResolved(requestId)
+      return
+    }
     case 'turn/started': {
       const threadId = notificationThreadId(notification) ?? currentLiveStream()?.threadId ?? activeThreadId.value
       const nextTurnId = notificationTurnId(notification)
@@ -3689,6 +3713,7 @@ const sendMessage = async () => {
 
       if (submissionMethod === 'turn/steer') {
         const liveStream = await ensurePendingLiveStream()
+        updateThreadTitleFromUserInput(liveStream.threadId, text)
         queuePendingUserMessage(liveStream, optimisticMessageId)
         let uploadedAttachments: PersistedProjectAttachment[] | undefined
 
@@ -3732,6 +3757,7 @@ const sendMessage = async () => {
 
       const liveStream = await ensurePendingLiveStream()
       startedLiveStream = liveStream
+      updateThreadTitleFromUserInput(liveStream.threadId, text)
       await submitTurnStart({
         client,
         liveStream,
@@ -3826,9 +3852,11 @@ const sendStarterPrompt = async (text: string) => {
   await sendMessage()
 }
 
-const respondToPendingRequest = (response: unknown) => {
+const respondToPendingRequest = (payload: { requestId: string | number, response: unknown }) => {
   error.value = null
-  resolveCurrentRequest(response)
+  if (!resolveRequest(payload.requestId, payload.response)) {
+    error.value = 'The pending request could not be matched to the active session.'
+  }
 }
 
 const onPromptKeydown = (event: KeyboardEvent) => {
@@ -4026,7 +4054,6 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-  cancelAllPendingRequests()
   releaseServerRequestHandler?.()
   releaseServerRequestHandler = null
   releaseSkillNotificationSubscription?.()
