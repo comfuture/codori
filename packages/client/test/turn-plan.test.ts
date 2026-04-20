@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   applyTurnPlanUpdate,
-  normalizeTurnPlanUpdate
+  normalizeTurnPlanUpdate,
+  shouldResetThreadPlanState
 } from '../shared/turn-plan'
 
 describe('turn plan state', () => {
@@ -124,5 +125,52 @@ describe('turn plan state', () => {
       panelOpen: true,
       structuralSignature: '["Inspect upstream events","Capture screenshot"]'
     })
+  })
+
+  it('treats a new turn id as fresh plan state', () => {
+    const previousPlan = applyTurnPlanUpdate(null, {
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      explanation: null,
+      plan: [{
+        step: 'Inspect upstream events',
+        status: 'completed'
+      }]
+    }, 100)
+
+    const nextPlan = applyTurnPlanUpdate({
+      ...previousPlan!,
+      panelOpen: false
+    }, {
+      threadId: 'thread-1',
+      turnId: 'turn-2',
+      explanation: 'Fresh turn plan',
+      plan: [{
+        step: 'Inspect upstream events',
+        status: 'completed'
+      }]
+    }, 200)
+
+    expect(nextPlan).toMatchObject({
+      turnId: 'turn-2',
+      panelOpen: true,
+      explanation: 'Fresh turn plan'
+    })
+  })
+
+  it('resets thread plan state when a new turn starts', () => {
+    const previousPlan = applyTurnPlanUpdate(null, {
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      explanation: null,
+      plan: [{
+        step: 'Inspect upstream events',
+        status: 'pending'
+      }]
+    }, 100)
+
+    expect(shouldResetThreadPlanState(previousPlan, 'turn-2')).toBe(true)
+    expect(shouldResetThreadPlanState(previousPlan, 'turn-1')).toBe(false)
+    expect(shouldResetThreadPlanState(previousPlan, null)).toBe(false)
   })
 })

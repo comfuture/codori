@@ -145,7 +145,8 @@ import {
 } from '~~/shared/subagent-panels'
 import {
   applyTurnPlanUpdate,
-  normalizeTurnPlanUpdate
+  normalizeTurnPlanUpdate,
+  shouldResetThreadPlanState
 } from '~~/shared/turn-plan'
 
 const props = defineProps<{
@@ -1858,6 +1859,16 @@ const setThreadPlanPanelOpen = (open: boolean) => {
   }
 }
 
+const clearThreadPlanState = (threadId: string) => {
+  if (!(threadId in threadPlans.value)) {
+    return
+  }
+
+  const nextThreadPlans = { ...threadPlans.value }
+  delete nextThreadPlans[threadId]
+  threadPlans.value = nextThreadPlans
+}
+
 const handleSlashCommandSubmission = async (
   rawText: string,
   submittedAttachments: DraftAttachment[]
@@ -2984,12 +2995,17 @@ const applyNotification = (notification: CodexRpcNotification) => {
       return
     }
     case 'turn/started': {
+      const threadId = notificationThreadId(notification) ?? currentLiveStream()?.threadId ?? activeThreadId.value
       const nextTurnId = notificationTurnId(notification)
       if (liveStream && !shouldAdvanceLiveStreamTurn({
         lockedTurnId: liveStream.lockedTurnId,
         nextTurnId
       })) {
         return
+      }
+
+      if (threadId && shouldResetThreadPlanState(threadPlans.value[threadId], nextTurnId)) {
+        clearThreadPlanState(threadId)
       }
 
       if (liveStream) {
@@ -3678,7 +3694,9 @@ onMounted(() => {
 
   if (import.meta.client) {
     footerResizeObserver = new ResizeObserver((entries) => {
-      const nextHeight = entries[0]?.contentRect.height
+      const entry = entries[0]
+      const borderBoxSize = entry?.borderBoxSize[0]?.blockSize
+      const nextHeight = borderBoxSize ?? entry?.target.getBoundingClientRect().height
       if (typeof nextHeight === 'number' && Number.isFinite(nextHeight)) {
         stickyFooterHeight.value = Math.ceil(nextHeight)
       }

@@ -78,6 +78,12 @@ export const normalizeTurnPlanUpdate = (value: unknown): TurnPlanUpdate | null =
 export const getTurnPlanStructureSignature = (plan: TurnPlanStep[]) =>
   JSON.stringify(plan.map(step => step.step))
 
+export const shouldResetThreadPlanState = (
+  previous: ThreadPlanState | null | undefined,
+  nextTurnId: string | null | undefined
+) =>
+  Boolean(previous?.turnId && nextTurnId && previous.turnId !== nextTurnId)
+
 export const applyTurnPlanUpdate = (
   previous: ThreadPlanState | null | undefined,
   update: TurnPlanUpdate,
@@ -87,13 +93,16 @@ export const applyTurnPlanUpdate = (
     return null
   }
 
+  const previousState = shouldResetThreadPlanState(previous, update.turnId)
+    ? null
+    : previous
   const structuralSignature = getTurnPlanStructureSignature(update.plan)
-  const shouldAutoOpen = !previous || previous.structuralSignature !== structuralSignature
+  const shouldAutoOpen = !previousState || previousState.structuralSignature !== structuralSignature
 
   return {
     ...update,
     structuralSignature,
-    panelOpen: shouldAutoOpen ? true : previous.panelOpen,
+    panelOpen: shouldAutoOpen ? true : previousState.panelOpen,
     updatedAt
   }
 }
