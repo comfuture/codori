@@ -3,24 +3,37 @@ import type { CodexRpcServerRequest } from '../../shared/codex-rpc'
 import {
   buildPendingUserRequestDismissResponse,
   parsePendingUserRequest,
-  type PendingUserRequest
+  type PendingUserRequest,
+  type PendingUserRequestState
 } from '../../shared/pending-user-request'
+
+type PendingUserRequestId = PendingUserRequest['requestId']
 
 type PendingUserRequestQueueEntry = {
   request: PendingUserRequest
   resolve: (value: unknown) => void
   reject: (error: unknown) => void
+  submitting: boolean
 }
 
 type PendingUserRequestSession = {
-  current: Ref<PendingUserRequest | null>
+  current: Ref<PendingUserRequestState | null>
   queue: PendingUserRequestQueueEntry[]
 }
 
 const sessions = new Map<string, PendingUserRequestSession>()
+const entriesByRequestId = new Map<PendingUserRequestId, PendingUserRequestQueueEntry>()
 
 const sessionKey = (projectId: string, threadId: string | null) =>
   `${projectId}::${threadId ?? '__draft__'}`
+
+const projectSessions = (projectId: string) => {
+  const prefix = `${projectId}::`
+
+  return [...sessions.entries()]
+    .filter(([key]) => key.startsWith(prefix))
+    .map(([, session]) => session)
+}
 
 const getSession = (projectId: string, threadId: string | null): PendingUserRequestSession => {
   const key = sessionKey(projectId, threadId)
@@ -30,7 +43,7 @@ const getSession = (projectId: string, threadId: string | null): PendingUserRequ
   }
 
   const session: PendingUserRequestSession = {
-    current: ref<PendingUserRequest | null>(null),
+    current: ref<PendingUserRequestState | null>(null),
     queue: []
   }
   sessions.set(key, session)
@@ -38,7 +51,13 @@ const getSession = (projectId: string, threadId: string | null): PendingUserRequ
 }
 
 const promoteNextRequest = (session: PendingUserRequestSession) => {
-  session.current.value = session.queue[0]?.request ?? null
+  const entry = session.queue[0]
+  session.current.value = entry
+    ? {
+        ...entry.request,
+        submitting: entry.submitting
+      }
+    : null
 }
 
 const movePendingRequests = (
@@ -66,10 +85,34 @@ const resolveQueuedRequest = (session: PendingUserRequestSession, responseFactor
       continue
     }
 
+    entriesByRequestId.delete(entry.request.requestId)
     entry.resolve(responseFactory(entry.request))
   }
 
   session.current.value = null
+}
+
+const resolveSessionEntry = (
+  session: PendingUserRequestSession,
+  requestId: PendingUserRequestId,
+  settle: (entry: PendingUserRequestQueueEntry) => void
+) => {
+  const entryIndex = session.queue.findIndex(entry => entry.request.requestId === requestId)
+  if (entryIndex < 0) {
+    return
+  }
+
+  const [entry] = session.queue.splice(entryIndex, 1)
+  if (!entry) {
+    return
+  }
+
+  entriesByRequestId.delete(entry.request.requestId)
+  settle(entry)
+
+  if (entryIndex === 0) {
+    promoteNextRequest(session)
+  }
 }
 
 export const usePendingUserRequest = (
@@ -103,11 +146,14 @@ export const usePendingUserRequest = (
     const session = resolveSession(normalized.threadId ?? currentThreadId.value)
 
     return await new Promise((resolve, reject) => {
-      session.queue.push({
+      const entry: PendingUserRequestQueueEntry = {
         request: normalized,
         resolve,
-        reject
-      })
+        reject,
+        submitting: false
+      }
+      session.queue.push(entry)
+      entriesByRequestId.set(normalized.requestId, entry)
 
       if (!session.current.value) {
         promoteNextRequest(session)
@@ -115,26 +161,56 @@ export const usePendingUserRequest = (
     })
   }
 
-  const resolveCurrentRequest = (response: unknown) => {
-    const session = resolveSession(currentThreadId.value)
-    const current = session.queue.shift()
-    if (!current) {
-      return
+  const resolveRequest = (requestId: PendingUserRequestId, response: unknown) => {
+    const entry = entriesByRequestId.get(requestId)
+    if (!entry || entry.submitting) {
+      return false
     }
 
-    current.resolve(response)
-    promoteNextRequest(session)
+    entry.submitting = true
+    entry.resolve(response)
+
+    for (const session of projectSessions(projectId)) {
+      if (session.queue[0]?.request.requestId === requestId) {
+        promoteNextRequest(session)
+        break
+      }
+    }
+
+    return true
   }
 
-  const rejectCurrentRequest = (error: unknown) => {
-    const session = resolveSession(currentThreadId.value)
-    const current = session.queue.shift()
-    if (!current) {
-      return
+  const rejectRequest = (requestId: PendingUserRequestId, error: unknown) => {
+    const entry = entriesByRequestId.get(requestId)
+    if (!entry) {
+      return false
     }
 
-    current.reject(error)
-    promoteNextRequest(session)
+    const session = projectSessions(projectId).find(candidate =>
+      candidate.queue.some(queueEntry => queueEntry.request.requestId === requestId)
+    ) ?? resolveSession(currentThreadId.value)
+    resolveSessionEntry(session, requestId, entry => {
+      entry.reject(error)
+    })
+    return true
+  }
+
+  const markRequestResolved = (requestId: PendingUserRequestId) => {
+    const entry = entriesByRequestId.get(requestId)
+    if (!entry) {
+      return false
+    }
+
+    const session = projectSessions(projectId).find(candidate =>
+      candidate.queue.some(queueEntry => queueEntry.request.requestId === requestId)
+    )
+    if (!session) {
+      entriesByRequestId.delete(requestId)
+      return false
+    }
+
+    resolveSessionEntry(session, requestId, () => {})
+    return true
   }
 
   const cancelAllPendingRequests = () => {
@@ -154,8 +230,9 @@ export const usePendingUserRequest = (
     pendingRequest: computed(() => resolveSession(currentThreadId.value).current.value),
     hasPendingRequest: computed(() => resolveSession(currentThreadId.value).current.value !== null),
     handleServerRequest,
-    resolveCurrentRequest,
-    rejectCurrentRequest,
+    resolveRequest,
+    rejectRequest,
+    markRequestResolved,
     cancelAllPendingRequests
   }
 }

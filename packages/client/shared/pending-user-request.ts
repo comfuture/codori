@@ -1,4 +1,12 @@
 import type { CodexRpcServerRequest } from './codex-rpc'
+import type { RequestId } from './generated/codex-app-server/RequestId'
+import type { ToolRequestUserInputAnswer } from './generated/codex-app-server/v2/ToolRequestUserInputAnswer'
+import type { ToolRequestUserInputParams } from './generated/codex-app-server/v2/ToolRequestUserInputParams'
+import type { ToolRequestUserInputOption } from './generated/codex-app-server/v2/ToolRequestUserInputOption'
+import type { ToolRequestUserInputQuestion } from './generated/codex-app-server/v2/ToolRequestUserInputQuestion'
+import type { ToolRequestUserInputResponse } from './generated/codex-app-server/v2/ToolRequestUserInputResponse'
+
+type PendingRequestId = RequestId
 
 const isObjectRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -17,23 +25,22 @@ const asBoolean = (value: unknown) => value === true
 const asStringArray = (value: unknown) =>
   Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : []
 
-export type PendingRequestUserInputOption = {
-  label: string
+export type PendingRequestUserInputOption = Omit<ToolRequestUserInputOption, 'description'> & {
   description: string | null
 }
 
 export type PendingRequestUserInputQuestion = {
-  header: string | null
-  id: string
-  question: string
+  header: ToolRequestUserInputQuestion['header'] | null
+  id: ToolRequestUserInputQuestion['id']
+  question: ToolRequestUserInputQuestion['question']
   options: PendingRequestUserInputOption[]
-  isOther: boolean
-  isSecret: boolean
+  isOther: ToolRequestUserInputQuestion['isOther']
+  isSecret: ToolRequestUserInputQuestion['isSecret']
 }
 
 export type PendingRequestUserInput = {
   kind: 'requestUserInput'
-  requestId: number
+  requestId: PendingRequestId
   threadId: string | null
   turnId: string | null
   itemId: string | null
@@ -86,7 +93,7 @@ export type PendingElicitationField =
 
 export type PendingMcpElicitationForm = {
   kind: 'mcpElicitationForm'
-  requestId: number
+  requestId: PendingRequestId
   threadId: string | null
   message: string | null
   fields: PendingElicitationField[]
@@ -94,7 +101,7 @@ export type PendingMcpElicitationForm = {
 
 export type PendingMcpElicitationUrl = {
   kind: 'mcpElicitationUrl'
-  requestId: number
+  requestId: PendingRequestId
   threadId: string | null
   message: string | null
   url: string
@@ -105,6 +112,10 @@ export type PendingUserRequest =
   | PendingRequestUserInput
   | PendingMcpElicitationForm
   | PendingMcpElicitationUrl
+
+export type PendingUserRequestState = PendingUserRequest & {
+  submitting: boolean
+}
 
 const parseRequestUserInputOption = (value: unknown): PendingRequestUserInputOption | null => {
   if (!isObjectRecord(value)) {
@@ -268,8 +279,9 @@ export const parsePendingUserRequest = (request: CodexRpcServerRequest): Pending
 
   switch (request.method) {
     case 'item/tool/requestUserInput': {
-      const questions = Array.isArray(params?.questions)
-        ? params.questions
+      const typedParams = params as Partial<ToolRequestUserInputParams> | null
+      const questions = Array.isArray(typedParams?.questions)
+        ? typedParams.questions
           .map(parseRequestUserInputQuestion)
           .filter((question): question is PendingRequestUserInputQuestion => question !== null)
         : []
@@ -280,9 +292,9 @@ export const parsePendingUserRequest = (request: CodexRpcServerRequest): Pending
       return {
         kind: 'requestUserInput',
         requestId: request.id,
-        threadId: asTrimmedString(params?.threadId),
-        turnId: asTrimmedString(params?.turnId),
-        itemId: asTrimmedString(params?.itemId),
+        threadId: asTrimmedString(typedParams?.threadId),
+        turnId: asTrimmedString(typedParams?.turnId),
+        itemId: asTrimmedString(typedParams?.itemId),
         questions
       }
     }
@@ -339,16 +351,18 @@ export const parsePendingUserRequest = (request: CodexRpcServerRequest): Pending
   }
 }
 
-const sanitizeAnswerList = (answers: string[]) =>
+const sanitizeAnswerList = (answers: string[]): ToolRequestUserInputAnswer['answers'] =>
   answers
     .map(answer => answer.trim())
     .filter(answer => answer.length > 0)
 
 export const buildRequestUserInputResponse = (
   answers: Record<string, string[]>
-) => ({
+): ToolRequestUserInputResponse => ({
   answers: Object.fromEntries(
-    Object.entries(answers).map(([questionId, questionAnswers]) => [questionId, sanitizeAnswerList(questionAnswers)])
+    Object.entries(answers).map(([questionId, questionAnswers]) => [questionId, {
+      answers: sanitizeAnswerList(questionAnswers)
+    }])
   )
 })
 

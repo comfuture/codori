@@ -54,7 +54,9 @@ describe('pending user request shared helpers', () => {
       scope: [' UI ', '', 'drawer copy']
     })).toEqual({
       answers: {
-        scope: ['UI', 'drawer copy']
+        scope: {
+          answers: ['UI', 'drawer copy']
+        }
       }
     })
   })
@@ -150,12 +152,16 @@ describe('pending user request shared helpers', () => {
     }, {
       handler: async () => ({
         answers: {
-          choice: ['Drawer flow']
+          choice: {
+            answers: ['Drawer flow']
+          }
         }
       })
     })).resolves.toEqual({
       answers: {
-        choice: ['Drawer flow']
+        choice: {
+          answers: ['Drawer flow']
+        }
       }
     })
 
@@ -191,17 +197,24 @@ describe('pending user request shared helpers', () => {
 
     expect(manager.pendingRequest.value?.kind).toBe('requestUserInput')
 
-    manager.resolveCurrentRequest({
+    expect(manager.resolveRequest(11, {
       answers: {
-        choice: ['Ship']
+        choice: {
+          answers: ['Ship']
+        }
       }
-    })
+    })).toBe(true)
 
     await expect(responsePromise).resolves.toEqual({
       answers: {
-        choice: ['Ship']
+        choice: {
+          answers: ['Ship']
+        }
       }
     })
+    expect(manager.pendingRequest.value?.requestId).toBe(11)
+    expect(manager.pendingRequest.value?.submitting).toBe(true)
+    expect(manager.markRequestResolved(11)).toBe(true)
     expect(manager.pendingRequest.value).toBeNull()
   })
 
@@ -229,17 +242,22 @@ describe('pending user request shared helpers', () => {
     activeThreadId.value = 'thread-a'
     expect(manager.pendingRequest.value?.threadId).toBe('thread-a')
 
-    manager.resolveCurrentRequest({
+    expect(manager.resolveRequest(14, {
       answers: {
-        choice: ['Ship']
+        choice: {
+          answers: ['Ship']
+        }
       }
-    })
+    })).toBe(true)
 
     await expect(responsePromise).resolves.toEqual({
       answers: {
-        choice: ['Ship']
+        choice: {
+          answers: ['Ship']
+        }
       }
     })
+    expect(manager.markRequestResolved(14)).toBe(true)
   })
 
   it('promotes draft-scoped live requests when a new thread starts', async () => {
@@ -266,17 +284,22 @@ describe('pending user request shared helpers', () => {
     expect(manager.pendingRequest.value?.kind).toBe('requestUserInput')
     expect(manager.pendingRequest.value?.threadId).toBeNull()
 
-    manager.resolveCurrentRequest({
+    expect(manager.resolveRequest(17, {
       answers: {
-        scope: ['ChatWorkspace']
+        scope: {
+          answers: ['ChatWorkspace']
+        }
       }
-    })
+    })).toBe(true)
 
     await expect(responsePromise).resolves.toEqual({
       answers: {
-        scope: ['ChatWorkspace']
+        scope: {
+          answers: ['ChatWorkspace']
+        }
       }
     })
+    expect(manager.markRequestResolved(17)).toBe(true)
     expect(manager.pendingRequest.value).toBeNull()
   })
 
@@ -300,18 +323,172 @@ describe('pending user request shared helpers', () => {
     expect(manager.pendingRequest.value?.kind).toBe('requestUserInput')
     expect(manager.pendingRequest.value?.threadId).toBeNull()
 
-    manager.resolveCurrentRequest({
+    expect(manager.resolveRequest(18, {
       answers: {
-        scope: ['Route thread']
+        scope: {
+          answers: ['Route thread']
+        }
       }
-    })
+    })).toBe(true)
 
     await expect(responsePromise).resolves.toEqual({
       answers: {
-        scope: ['Route thread']
+        scope: {
+          answers: ['Route thread']
+        }
       }
     })
+    expect(manager.markRequestResolved(18)).toBe(true)
     expect(manager.pendingRequest.value).toBeNull()
+  })
+
+  it('preserves pending requests across manager instances for the same thread', async () => {
+    const projectId = `project-${Date.now()}`
+    const currentThreadId = ref<string | null>('thread-route')
+    const firstManager = usePendingUserRequest(projectId, currentThreadId)
+    const responsePromise = firstManager.handleServerRequest({
+      id: 19,
+      method: 'item/tool/requestUserInput',
+      params: {
+        threadId: 'thread-route',
+        questions: [{
+          id: 'scope',
+          question: 'Pick a scope',
+          options: [{ label: 'Preserved' }]
+        }]
+      }
+    })
+
+    const secondManager = usePendingUserRequest(projectId, currentThreadId)
+    expect(secondManager.pendingRequest.value?.kind).toBe('requestUserInput')
+    expect(secondManager.pendingRequest.value?.threadId).toBe('thread-route')
+
+    expect(secondManager.resolveRequest(19, {
+      answers: {
+        scope: {
+          answers: ['Preserved']
+        }
+      }
+    })).toBe(true)
+
+    await expect(responsePromise).resolves.toEqual({
+      answers: {
+        scope: {
+          answers: ['Preserved']
+        }
+      }
+    })
+    expect(secondManager.markRequestResolved(19)).toBe(true)
+  })
+
+  it('resolves requests by id even after the visible thread session changes', async () => {
+    const projectId = `project-${Date.now()}`
+    const currentThreadId = ref<string | null>('thread-a')
+    const manager = usePendingUserRequest(projectId, currentThreadId)
+    const responsePromise = manager.handleServerRequest({
+      id: 191,
+      method: 'item/tool/requestUserInput',
+      params: {
+        threadId: 'thread-a',
+        questions: [{
+          id: 'scope',
+          question: 'Pick a scope',
+          options: [{ label: 'Chat surface' }]
+        }]
+      }
+    })
+
+    currentThreadId.value = 'thread-b'
+    expect(manager.pendingRequest.value).toBeNull()
+
+    expect(manager.resolveRequest(191, {
+      answers: {
+        scope: {
+          answers: ['Chat surface']
+        }
+      }
+    })).toBe(true)
+
+    await expect(responsePromise).resolves.toEqual({
+      answers: {
+        scope: {
+          answers: ['Chat surface']
+        }
+      }
+    })
+    expect(manager.markRequestResolved(191)).toBe(true)
+  })
+
+  it('ignores stale responses after the queue advances to the next request', async () => {
+    const activeThreadId = ref('thread-stale')
+    const manager = usePendingUserRequest(`project-${Date.now()}`, activeThreadId)
+    const firstResponse = manager.handleServerRequest({
+      id: 20,
+      method: 'item/tool/requestUserInput',
+      params: {
+        threadId: 'thread-stale',
+        questions: [{
+          id: 'first',
+          question: 'First choice',
+          options: [{ label: 'One' }]
+        }]
+      }
+    })
+    const secondResponse = manager.handleServerRequest({
+      id: 21,
+      method: 'item/tool/requestUserInput',
+      params: {
+        threadId: 'thread-stale',
+        questions: [{
+          id: 'second',
+          question: 'Second choice',
+          options: [{ label: 'Two' }]
+        }]
+      }
+    })
+
+    expect(manager.resolveRequest(20, {
+      answers: {
+        first: {
+          answers: ['One']
+        }
+      }
+    })).toBe(true)
+
+    await expect(firstResponse).resolves.toEqual({
+      answers: {
+        first: {
+          answers: ['One']
+        }
+      }
+    })
+    expect(manager.pendingRequest.value?.requestId).toBe(20)
+    expect(manager.pendingRequest.value?.submitting).toBe(true)
+
+    expect(manager.resolveRequest(20, {
+      answers: {}
+    })).toBe(false)
+    expect(manager.pendingRequest.value?.requestId).toBe(20)
+
+    expect(manager.markRequestResolved(20)).toBe(true)
+    expect(manager.pendingRequest.value?.requestId).toBe(21)
+
+    expect(manager.resolveRequest(21, {
+      answers: {
+        second: {
+          answers: ['Two']
+        }
+      }
+    })).toBe(true)
+
+    await expect(secondResponse).resolves.toEqual({
+      answers: {
+        second: {
+          answers: ['Two']
+        }
+      }
+    })
+    expect(manager.markRequestResolved(21)).toBe(true)
   })
 
   it('cancels pending requests on teardown with protocol-specific responses', async () => {

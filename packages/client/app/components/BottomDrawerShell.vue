@@ -5,12 +5,16 @@ withDefaults(defineProps<{
   description?: string
   hideHeader?: boolean
   bodyClass?: string
+  handle?: boolean
+  dismissible?: boolean
 }>(), {
   open: false,
   title: '',
   description: '',
   hideHeader: false,
-  bodyClass: ''
+  bodyClass: '',
+  handle: true,
+  dismissible: true
 })
 
 const emit = defineEmits<{
@@ -22,7 +26,8 @@ const emit = defineEmits<{
   <UDrawer
     :open="open"
     direction="bottom"
-    :handle="true"
+    :handle="handle"
+    :dismissible="dismissible"
     :ui="{
       content: 'inset-x-auto right-auto bottom-0 left-1/2 w-[90vw] max-w-[52rem] -translate-x-1/2 rounded-t-2xl rounded-b-none border-x border-t border-default bg-default shadow-2xl md:w-[min(50vw,52rem)]',
       container: 'gap-0 p-0',

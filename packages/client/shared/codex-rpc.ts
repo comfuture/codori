@@ -7,14 +7,16 @@ type JsonRpcError = {
 export type { ReasoningEffort } from './chat-prompt-controls'
 import type { ReasoningEffort } from './chat-prompt-controls'
 
+type JsonRpcId = string | number
+
 type JsonRpcRequest = {
-  id: number
+  id: JsonRpcId
   method: string
   params?: unknown
 }
 
 type JsonRpcResponse = {
-  id: number
+  id: JsonRpcId
   result?: unknown
   error?: JsonRpcError
 }
@@ -268,6 +270,9 @@ const isObjectRecord = (value: unknown): value is Record<string, unknown> =>
 const asError = (value: unknown) =>
   value instanceof Error ? value : new Error(typeof value === 'string' ? value : 'Unknown RPC error.')
 
+const isJsonRpcId = (value: unknown): value is JsonRpcId =>
+  typeof value === 'number' || typeof value === 'string'
+
 export const toServerRequestResponse = async (
   request: JsonRpcServerRequest,
   options?: {
@@ -351,6 +356,13 @@ export const notificationThreadUpdatedAt = (notification: CodexRpcNotification) 
   return typeof directUpdatedAt === 'number' ? directUpdatedAt : undefined
 }
 
+export const notificationRequestId = (notification: CodexRpcNotification) => {
+  const params = isObjectRecord(notification.params) ? notification.params : null
+  const directRequestId = params?.requestId
+
+  return isJsonRpcId(directRequestId) ? directRequestId : null
+}
+
 export class CodexRpcClient {
   private readonly url: string
 
@@ -362,7 +374,7 @@ export class CodexRpcClient {
 
   private nextRequestId = 1
 
-  private pending = new Map<number, PendingRequest>()
+  private pending = new Map<JsonRpcId, PendingRequest>()
 
   private listeners = new Set<(notification: CodexRpcNotification) => void>()
 
@@ -527,11 +539,11 @@ export class CodexRpcClient {
         return null
       }
 
-      if (typeof parsed.id === 'number' && typeof parsed.method === 'string') {
+      if (isJsonRpcId(parsed.id) && typeof parsed.method === 'string') {
         return parsed as JsonRpcServerRequest
       }
 
-      if (typeof parsed.id === 'number') {
+      if (isJsonRpcId(parsed.id)) {
         return parsed as JsonRpcResponse
       }
 
