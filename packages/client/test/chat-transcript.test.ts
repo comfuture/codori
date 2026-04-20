@@ -84,6 +84,53 @@ describe('chat transcript stability', () => {
     }])
   })
 
+  it('maps plan items to dedicated plan parts and replaces streamed plan content', () => {
+    expect(itemToMessages({
+      type: 'plan',
+      id: 'plan-1',
+      text: '## Proposed plan'
+    })).toEqual<ChatMessage[]>([{
+      id: 'plan-1',
+      role: 'assistant',
+      parts: [{
+        type: 'plan',
+        text: '## Proposed plan',
+        state: 'done'
+      }]
+    }])
+
+    const streamedMessages = upsertStreamingMessage([], {
+      id: 'plan-1',
+      role: 'assistant',
+      pending: true,
+      parts: [{
+        type: 'plan',
+        text: '## Partial',
+        state: 'streaming'
+      }]
+    })
+
+    expect(replaceStreamingMessage(streamedMessages, {
+      id: 'plan-1',
+      role: 'assistant',
+      pending: false,
+      parts: [{
+        type: 'plan',
+        text: '## Final plan',
+        state: 'done'
+      }]
+    })).toEqual<ChatMessage[]>([{
+      id: 'plan-1',
+      role: 'assistant',
+      pending: false,
+      parts: [{
+        type: 'plan',
+        text: '## Final plan',
+        state: 'done'
+      }]
+    }])
+  })
+
   it('keeps chat loading state in submitted mode until real assistant output appears', () => {
     expect(resolveChatMessagesStatus('submitted', true)).toBe('submitted')
     expect(resolveChatMessagesStatus('streaming', true)).toBe('submitted')

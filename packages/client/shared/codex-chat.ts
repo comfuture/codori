@@ -109,6 +109,11 @@ export type ChatPart =
       state?: 'done' | 'streaming'
     }
   | {
+      type: 'plan'
+      text: string
+      state?: 'done' | 'streaming'
+    }
+  | {
       type: 'attachment'
       attachment: {
         kind: 'image'
@@ -239,7 +244,7 @@ export const itemToMessages = (item: CodexThreadItem): ChatMessage[] => {
         id: item.id,
         role: 'assistant',
         parts: [{
-          type: 'text',
+          type: 'plan',
           text: item.text,
           state: 'done'
         }]

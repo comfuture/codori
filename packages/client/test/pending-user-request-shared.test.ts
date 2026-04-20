@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { nextTick, ref } from 'vue'
 import { describe, expect, it } from 'vitest'
 import { usePendingUserRequest } from '../app/composables/usePendingUserRequest'
 import { toServerRequestResponse } from '../shared/codex-rpc'
@@ -240,6 +240,78 @@ describe('pending user request shared helpers', () => {
         choice: ['Ship']
       }
     })
+  })
+
+  it('promotes draft-scoped live requests when a new thread starts', async () => {
+    const activeThreadId = ref<string | null>(null)
+    const manager = usePendingUserRequest(`project-${Date.now()}`, activeThreadId)
+    const responsePromise = manager.handleServerRequest({
+      id: 17,
+      method: 'item/tool/requestUserInput',
+      params: {
+        questions: [{
+          id: 'scope',
+          question: 'Pick a scope',
+          options: [{ label: 'ChatWorkspace' }]
+        }]
+      }
+    })
+
+    expect(manager.pendingRequest.value?.kind).toBe('requestUserInput')
+    expect(manager.pendingRequest.value?.threadId).toBeNull()
+
+    activeThreadId.value = 'thread-live'
+    await nextTick()
+
+    expect(manager.pendingRequest.value?.kind).toBe('requestUserInput')
+    expect(manager.pendingRequest.value?.threadId).toBeNull()
+
+    manager.resolveCurrentRequest({
+      answers: {
+        scope: ['ChatWorkspace']
+      }
+    })
+
+    await expect(responsePromise).resolves.toEqual({
+      answers: {
+        scope: ['ChatWorkspace']
+      }
+    })
+    expect(manager.pendingRequest.value).toBeNull()
+  })
+
+  it('uses the visible route thread when request-user-input arrives before thread hydration', async () => {
+    const projectId = `project-${Date.now()}`
+    const currentThreadId = ref<string | null>('thread-route')
+    const activeThreadId = ref<string | null>(null)
+    const manager = usePendingUserRequest(projectId, currentThreadId, activeThreadId)
+    const responsePromise = manager.handleServerRequest({
+      id: 18,
+      method: 'item/tool/requestUserInput',
+      params: {
+        questions: [{
+          id: 'scope',
+          question: 'Pick a scope',
+          options: [{ label: 'Route thread' }]
+        }]
+      }
+    })
+
+    expect(manager.pendingRequest.value?.kind).toBe('requestUserInput')
+    expect(manager.pendingRequest.value?.threadId).toBeNull()
+
+    manager.resolveCurrentRequest({
+      answers: {
+        scope: ['Route thread']
+      }
+    })
+
+    await expect(responsePromise).resolves.toEqual({
+      answers: {
+        scope: ['Route thread']
+      }
+    })
+    expect(manager.pendingRequest.value).toBeNull()
   })
 
   it('cancels pending requests on teardown with protocol-specific responses', async () => {

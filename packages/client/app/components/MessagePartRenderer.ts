@@ -4,6 +4,7 @@ import { EVENT_PART, ITEM_PART, type ChatMessage, type ChatPart } from '~~/share
 import MessagePartAttachment from './message-part/Attachment.vue'
 import MessagePartEvent from './message-part/Event.vue'
 import MessagePartItem from './message-part/Item'
+import MessagePartPlan from './message-part/Plan.vue'
 import MessagePartText from './message-part/Text.vue'
 
 export default defineComponent({
@@ -33,6 +34,10 @@ export default defineComponent({
           return h(MessagePartText, {
             role: props.message?.role,
             projectId: props.projectId,
+            part: props.part
+          })
+        case 'plan':
+          return h(MessagePartPlan, {
             part: props.part
           })
         case 'reasoning':

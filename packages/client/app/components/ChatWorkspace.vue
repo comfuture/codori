@@ -164,6 +164,7 @@ const props = defineProps<{
   projectId: string
   threadId?: string | null
 }>()
+const routeThreadId = computed(() => props.threadId ?? null)
 
 const router = useRouter()
 const runtimeConfig = useRuntimeConfig()
@@ -243,7 +244,11 @@ const {
   handleServerRequest,
   resolveCurrentRequest,
   cancelAllPendingRequests
-} = usePendingUserRequest(props.projectId, activeThreadId)
+} = usePendingUserRequest(
+  props.projectId,
+  computed(() => activeThreadId.value ?? routeThreadId.value),
+  activeThreadId
+)
 
 type MentionAutocompletePaletteItem =
   | {
@@ -351,7 +356,6 @@ const promptSubmitStatus = computed(() =>
     hasDraftContent: hasDraftContent.value
   })
 )
-const routeThreadId = computed(() => props.threadId ?? null)
 const projectTitle = computed(() => selectedProject.value?.projectId ?? props.projectId)
 const currentThreadCollaborationModeKey = computed(() =>
   resolveThreadCollaborationModeKey(activeThreadId.value ?? routeThreadId.value)
@@ -2676,6 +2680,32 @@ const appendTextPartDelta = (
   })
 }
 
+const appendPlanPartDelta = (
+  messageId: string,
+  delta: string,
+  fallbackMessage: ChatMessage
+) => {
+  updateMessage(messageId, fallbackMessage, (message) => {
+    const partIndex = message.parts.findIndex(part => part.type === 'plan')
+    const existingPlanPart = partIndex === -1 ? null : message.parts[partIndex] as Extract<ChatPart, { type: 'plan' }>
+    const nextText = existingPlanPart ? `${existingPlanPart.text}${delta}` : delta
+    const nextPlanPart: Extract<ChatPart, { type: 'plan' }> = {
+      type: 'plan',
+      text: nextText,
+      state: 'streaming'
+    }
+    const nextParts = partIndex === -1
+      ? [...message.parts, nextPlanPart]
+      : message.parts.map((part, index) => index === partIndex ? nextPlanPart : part)
+
+    return {
+      ...message,
+      pending: true,
+      parts: nextParts
+    }
+  })
+}
+
 const updateItemPart = (
   messageId: string,
   fallbackMessage: ChatMessage,
@@ -3326,12 +3356,12 @@ const applyNotification = (notification: CodexRpcNotification) => {
       const params = notification.params as { itemId: string, delta: string }
       latestPlanTurnId.value = notificationTurnId(notification) ?? currentLiveStream()?.turnId ?? null
       markAwaitingAssistantOutput(false)
-      appendTextPartDelta(params.itemId, params.delta, {
+      appendPlanPartDelta(params.itemId, params.delta, {
         id: params.itemId,
         role: 'assistant',
         pending: true,
         parts: [{
-          type: 'text',
+          type: 'plan',
           text: '',
           state: 'streaming'
         }]
