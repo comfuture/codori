@@ -1,4 +1,4 @@
-import { computed, ref, type Ref } from 'vue'
+import { computed, ref, watch, type Ref } from 'vue'
 import type { CodexRpcServerRequest } from '../../shared/codex-rpc'
 import {
   buildPendingUserRequestDismissResponse,
@@ -41,6 +41,24 @@ const promoteNextRequest = (session: PendingUserRequestSession) => {
   session.current.value = session.queue[0]?.request ?? null
 }
 
+const movePendingRequests = (
+  sourceSession: PendingUserRequestSession,
+  targetSession: PendingUserRequestSession
+) => {
+  if (sourceSession === targetSession || sourceSession.queue.length === 0) {
+    return
+  }
+
+  const targetWasEmpty = targetSession.queue.length === 0
+  targetSession.queue.push(...sourceSession.queue)
+  sourceSession.queue.splice(0, sourceSession.queue.length)
+  sourceSession.current.value = null
+
+  if (targetWasEmpty) {
+    promoteNextRequest(targetSession)
+  }
+}
+
 const resolveQueuedRequest = (session: PendingUserRequestSession, responseFactory: (request: PendingUserRequest) => unknown) => {
   while (session.queue.length > 0) {
     const entry = session.queue.shift()
@@ -54,8 +72,27 @@ const resolveQueuedRequest = (session: PendingUserRequestSession, responseFactor
   session.current.value = null
 }
 
-export const usePendingUserRequest = (projectId: string, activeThreadId: Ref<string | null>) => {
+export const usePendingUserRequest = (
+  projectId: string,
+  currentThreadId: Ref<string | null>,
+  activeThreadId: Ref<string | null> = currentThreadId
+) => {
   const resolveSession = (threadId: string | null) => getSession(projectId, threadId)
+
+  watch(activeThreadId, (nextThreadId, previousThreadId) => {
+    if (!nextThreadId || previousThreadId !== null) {
+      return
+    }
+
+    const draftSession = sessions.get(sessionKey(projectId, null))
+    if (!draftSession || draftSession.queue.length === 0) {
+      return
+    }
+
+    const activeSession = resolveSession(nextThreadId)
+    movePendingRequests(draftSession, activeSession)
+    sessions.delete(sessionKey(projectId, null))
+  })
 
   const handleServerRequest = async (request: CodexRpcServerRequest) => {
     const normalized = parsePendingUserRequest(request)
@@ -63,7 +100,7 @@ export const usePendingUserRequest = (projectId: string, activeThreadId: Ref<str
       return null
     }
 
-    const session = resolveSession(normalized.threadId ?? activeThreadId.value)
+    const session = resolveSession(normalized.threadId ?? currentThreadId.value)
 
     return await new Promise((resolve, reject) => {
       session.queue.push({
@@ -79,7 +116,7 @@ export const usePendingUserRequest = (projectId: string, activeThreadId: Ref<str
   }
 
   const resolveCurrentRequest = (response: unknown) => {
-    const session = resolveSession(activeThreadId.value)
+    const session = resolveSession(currentThreadId.value)
     const current = session.queue.shift()
     if (!current) {
       return
@@ -90,7 +127,7 @@ export const usePendingUserRequest = (projectId: string, activeThreadId: Ref<str
   }
 
   const rejectCurrentRequest = (error: unknown) => {
-    const session = resolveSession(activeThreadId.value)
+    const session = resolveSession(currentThreadId.value)
     const current = session.queue.shift()
     if (!current) {
       return
@@ -114,8 +151,8 @@ export const usePendingUserRequest = (projectId: string, activeThreadId: Ref<str
   }
 
   return {
-    pendingRequest: computed(() => resolveSession(activeThreadId.value).current.value),
-    hasPendingRequest: computed(() => resolveSession(activeThreadId.value).current.value !== null),
+    pendingRequest: computed(() => resolveSession(currentThreadId.value).current.value),
+    hasPendingRequest: computed(() => resolveSession(currentThreadId.value).current.value !== null),
     handleServerRequest,
     resolveCurrentRequest,
     rejectCurrentRequest,

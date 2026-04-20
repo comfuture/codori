@@ -66,7 +66,11 @@ const lastMessageSignature = computed(() => {
         return [part.type, part.attachment.name, part.attachment.url ?? part.attachment.localPath ?? '']
       }
 
-      return [part.type, JSON.stringify(part.data).length]
+      if ('data' in part) {
+        return [part.type, JSON.stringify(part.data).length]
+      }
+
+      return [part.type, 'text' in part ? part.text.length : 0]
     })
   })
 })
