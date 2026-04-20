@@ -2,6 +2,10 @@
 @import "@nuxt/ui";
 @import "katex/dist/katex.min.css";
 
+:root {
+  --app-viewport-height: 100dvh;
+}
+
 html,
 body,
 #__nuxt {
@@ -10,6 +14,14 @@ body,
 
 body {
   margin: 0;
+}
+
+.app-shell-min-height {
+  min-height: var(--app-viewport-height, 100dvh);
+}
+
+.app-shell-height {
+  height: var(--app-viewport-height, 100dvh);
 }
 
 .cd-markdown {
