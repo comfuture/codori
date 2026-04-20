@@ -362,16 +362,10 @@ const currentThreadCollaborationModeMask = computed(() =>
 const planCollaborationModeMask = computed(() =>
   findCollaborationModeMask(collaborationModeMasks.value, 'plan')
 )
-const defaultCollaborationModeMask = computed(() =>
-  findCollaborationModeMask(collaborationModeMasks.value, 'default')
-)
 const currentCollaborationModeLabel = computed(() =>
   currentThreadCollaborationModeMask.value?.mode === 'plan'
     ? currentThreadCollaborationModeMask.value.name
     : null
-)
-const collaborationModeToggleVisible = computed(() =>
-  collaborationModeMasks.value.length > 0
 )
 const isPlanModeActive = computed(() =>
   currentThreadCollaborationModeMask.value?.mode === 'plan'
@@ -1423,30 +1417,6 @@ const resolveSlashCommandIcon = (command: SlashCommandDefinition) => {
   }
 
   return 'i-lucide-terminal'
-}
-
-const activatePlanModeFromToggle = async () => {
-  try {
-    await setCurrentThreadCollaborationMode('plan')
-    error.value = null
-    status.value = 'ready'
-    closePlanImplementationPrompt()
-    await focusPromptAt(input.value.length)
-  } catch (caughtError) {
-    setComposerError(caughtError instanceof Error ? caughtError.message : String(caughtError))
-  }
-}
-
-const activateDefaultModeFromToggle = async () => {
-  try {
-    await setCurrentThreadCollaborationMode('default')
-    error.value = null
-    status.value = 'ready'
-    closePlanImplementationPrompt()
-    await focusPromptAt(input.value.length)
-  } catch (caughtError) {
-    setComposerError(caughtError instanceof Error ? caughtError.message : String(caughtError))
-  }
 }
 
 const completeSlashCommand = async (command: SlashCommandDefinition) => {
@@ -4779,33 +4749,6 @@ watch(
                     aria-label="Attach image"
                     @click="openFilePicker"
                   />
-
-                  <div
-                    v-if="collaborationModeToggleVisible"
-                    class="flex items-center gap-1 rounded-full border border-default/70 bg-default/70 p-0.5"
-                  >
-                    <UButton
-                      type="button"
-                      color="neutral"
-                      :variant="isPlanModeActive ? 'ghost' : 'soft'"
-                      :disabled="isComposerDisabled || isBusy || collaborationModesLoading || (!defaultCollaborationModeMask && collaborationModesLoaded)"
-                      class="rounded-full"
-                      @click="activateDefaultModeFromToggle"
-                    >
-                      Default
-                    </UButton>
-
-                    <UButton
-                      type="button"
-                      color="neutral"
-                      :variant="isPlanModeActive ? 'soft' : 'ghost'"
-                      :disabled="isComposerDisabled || isBusy || collaborationModesLoading || (!planCollaborationModeMask && collaborationModesLoaded)"
-                      class="rounded-full"
-                      @click="activatePlanModeFromToggle"
-                    >
-                      Plan
-                    </UButton>
-                  </div>
 
                   <USelect
                     v-model="selectedModel"
