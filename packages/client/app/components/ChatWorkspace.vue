@@ -11,6 +11,7 @@ import {
 import LocalFileViewerModal from './LocalFileViewerModal.vue'
 import MessageContent from './MessageContent.vue'
 import PlanTaskListPanel from './PlanTaskListPanel.vue'
+import PlanImplementationPromptDrawer from './PlanImplementationPromptDrawer.vue'
 import ReviewStartDrawer from './ReviewStartDrawer.vue'
 import PendingUserRequestDrawer from './PendingUserRequestDrawer.vue'
 import UsageStatusModal from './UsageStatusModal.vue'
@@ -55,6 +56,15 @@ import {
   type McpToolCallItem
 } from '~~/shared/codex-chat'
 import { buildTurnStartInput, type PersistedProjectAttachment } from '~~/shared/chat-attachments'
+import {
+  buildCollaborationModeFromMask,
+  findCollaborationModeMask,
+  normalizeCollaborationModeListResponse,
+  resolveThreadCollaborationModeKey,
+  type CollaborationMode,
+  type CollaborationModeListResponse,
+  type CollaborationModeMask
+} from '~~/shared/collaboration-mode'
 import {
   type ConfigReadResponse,
   type ModelListResponse,
@@ -102,6 +112,7 @@ import {
   toSlashCommandCompletion,
   type SlashCommandDefinition
 } from '~~/shared/slash-commands'
+import { resolveSlashCommandDispatch } from '~~/shared/slash-command-dispatch'
 import {
   buildFileAutocompletePathSegments,
   normalizeFileAutocompleteQuery,
@@ -206,6 +217,11 @@ const {
   messages,
   subagentPanels,
   threadPlans,
+  threadCollaborationModeMasks,
+  collaborationModeMasks,
+  collaborationModesLoaded,
+  collaborationModesLoading,
+  collaborationModesError,
   status,
   error,
   activeThreadId,
@@ -311,6 +327,8 @@ const reviewBranches = ref<string[]>([])
 const reviewCurrentBranch = ref<string | null>(null)
 const reviewBranchesLoading = ref(false)
 const reviewBranchesError = ref<string | null>(null)
+const latestPlanTurnId = ref<string | null>(null)
+const planImplementationPromptTurnId = ref<string | null>(null)
 const isBusy = computed(() =>
   status.value === 'submitted'
   || status.value === 'streaming'
@@ -327,11 +345,6 @@ const isComposerDisabled = computed(() =>
   || hasPendingRequest.value
   || reviewStartPending.value
 )
-const composerPlaceholder = computed(() =>
-  hasPendingRequest.value
-    ? 'Respond to the pending request below to let Codex continue'
-    : 'Describe the change you want Codex to make'
-)
 const promptSubmitStatus = computed(() =>
   resolvePromptSubmitStatus({
     status: status.value,
@@ -340,6 +353,36 @@ const promptSubmitStatus = computed(() =>
 )
 const routeThreadId = computed(() => props.threadId ?? null)
 const projectTitle = computed(() => selectedProject.value?.projectId ?? props.projectId)
+const currentThreadCollaborationModeKey = computed(() =>
+  resolveThreadCollaborationModeKey(activeThreadId.value ?? routeThreadId.value)
+)
+const currentThreadCollaborationModeMask = computed(() =>
+  threadCollaborationModeMasks.value[currentThreadCollaborationModeKey.value] ?? null
+)
+const planCollaborationModeMask = computed(() =>
+  findCollaborationModeMask(collaborationModeMasks.value, 'plan')
+)
+const defaultCollaborationModeMask = computed(() =>
+  findCollaborationModeMask(collaborationModeMasks.value, 'default')
+)
+const currentCollaborationModeLabel = computed(() =>
+  currentThreadCollaborationModeMask.value?.mode === 'plan'
+    ? currentThreadCollaborationModeMask.value.name
+    : null
+)
+const collaborationModeToggleVisible = computed(() =>
+  collaborationModeMasks.value.length > 0
+)
+const isPlanModeActive = computed(() =>
+  currentThreadCollaborationModeMask.value?.mode === 'plan'
+)
+const composerPlaceholder = computed(() =>
+  hasPendingRequest.value
+    ? 'Respond to the pending request below to let Codex continue'
+    : isPlanModeActive.value
+      ? 'Describe what you want Codex to plan'
+      : 'Describe the change you want Codex to make'
+)
 const chatMessagesStatus = computed(() =>
   resolveChatMessagesStatus(status.value, awaitingAssistantOutput.value)
 )
@@ -354,7 +397,18 @@ const showWelcomeState = computed(() =>
 )
 
 const slashCommands = computed(() =>
-  SLASH_COMMANDS.filter(() => !hasPendingRequest.value)
+  SLASH_COMMANDS
+    .filter(() => !hasPendingRequest.value)
+    .map((command) => {
+      if (command.name !== 'plan' || !collaborationModesLoaded.value || planCollaborationModeMask.value) {
+        return command
+      }
+
+      return {
+        ...command,
+        description: 'Plan mode is unavailable in the current runtime.'
+      }
+    })
 )
 
 const activeSlashMatch = computed(() =>
@@ -870,7 +924,8 @@ const hasActiveTurnEngagement = () =>
   Boolean(currentLiveStream() || session.pendingLiveStream)
 
 const shouldSubmitWithTurnSteer = () =>
-  shouldSubmitViaTurnSteer({
+  !currentThreadCollaborationModeMask.value
+  && shouldSubmitViaTurnSteer({
     activeThreadId: activeThreadId.value,
     liveStreamThreadId: session.liveStream?.threadId ?? null,
     liveStreamTurnId: session.liveStream?.turnId ?? null,
@@ -1355,6 +1410,10 @@ const moveMentionAutocompleteHighlight = (delta: number) => {
 }
 
 const resolveSlashCommandIcon = (command: SlashCommandDefinition) => {
+  if (command.name === 'plan') {
+    return 'i-lucide-list-checks'
+  }
+
   if (command.name === 'review') {
     return 'i-lucide-search-check'
   }
@@ -1364,6 +1423,30 @@ const resolveSlashCommandIcon = (command: SlashCommandDefinition) => {
   }
 
   return 'i-lucide-terminal'
+}
+
+const activatePlanModeFromToggle = async () => {
+  try {
+    await setCurrentThreadCollaborationMode('plan')
+    error.value = null
+    status.value = 'ready'
+    closePlanImplementationPrompt()
+    await focusPromptAt(input.value.length)
+  } catch (caughtError) {
+    setComposerError(caughtError instanceof Error ? caughtError.message : String(caughtError))
+  }
+}
+
+const activateDefaultModeFromToggle = async () => {
+  try {
+    await setCurrentThreadCollaborationMode('default')
+    error.value = null
+    status.value = 'ready'
+    closePlanImplementationPrompt()
+    await focusPromptAt(input.value.length)
+  } catch (caughtError) {
+    setComposerError(caughtError instanceof Error ? caughtError.message : String(caughtError))
+  }
 }
 
 const completeSlashCommand = async (command: SlashCommandDefinition) => {
@@ -1869,54 +1952,227 @@ const clearThreadPlanState = (threadId: string) => {
   threadPlans.value = nextThreadPlans
 }
 
+const setThreadCollaborationModeMask = (
+  threadId: string | null | undefined,
+  mask: CollaborationModeMask | null
+) => {
+  const key = resolveThreadCollaborationModeKey(threadId)
+  const nextThreadModes = { ...threadCollaborationModeMasks.value }
+
+  if (mask) {
+    nextThreadModes[key] = mask
+  } else {
+    delete nextThreadModes[key]
+  }
+
+  threadCollaborationModeMasks.value = nextThreadModes
+}
+
+const moveDraftCollaborationModeToThread = (threadId: string) => {
+  const draftKey = resolveThreadCollaborationModeKey(null)
+  const draftMode = threadCollaborationModeMasks.value[draftKey]
+  if (!draftMode) {
+    return
+  }
+
+  const nextThreadModes = { ...threadCollaborationModeMasks.value }
+  nextThreadModes[threadId] = draftMode
+  delete nextThreadModes[draftKey]
+  threadCollaborationModeMasks.value = nextThreadModes
+}
+
+const buildCurrentTurnCollaborationMode = () =>
+  buildCollaborationModeFromMask(currentThreadCollaborationModeMask.value, {
+    model: selectedModel.value,
+    reasoning_effort: selectedEffort.value
+  })
+
+let pendingCollaborationModesLoad: Promise<void> | null = null
+
+const loadCollaborationModes = async (options?: { force?: boolean }) => {
+  if (collaborationModesLoaded.value && !options?.force) {
+    return
+  }
+
+  if (pendingCollaborationModesLoad) {
+    await pendingCollaborationModesLoad
+    return
+  }
+
+  const loadPromise = (async () => {
+    collaborationModesLoading.value = true
+    collaborationModesError.value = null
+
+    try {
+      await ensureProjectRuntime()
+      const response = await getClient(props.projectId).request<CollaborationModeListResponse>('collaborationMode/list', {})
+      collaborationModeMasks.value = normalizeCollaborationModeListResponse(response)
+    } catch (caughtError) {
+      collaborationModeMasks.value = []
+      collaborationModesError.value = caughtError instanceof Error ? caughtError.message : String(caughtError)
+    } finally {
+      collaborationModesLoaded.value = true
+      collaborationModesLoading.value = false
+    }
+  })()
+
+  pendingCollaborationModesLoad = loadPromise
+
+  try {
+    await loadPromise
+  } finally {
+    if (pendingCollaborationModesLoad === loadPromise) {
+      pendingCollaborationModesLoad = null
+    }
+  }
+}
+
+const ensurePlanModeAvailable = async () => {
+  if (!collaborationModesLoaded.value || (collaborationModesLoading.value && !planCollaborationModeMask.value)) {
+    await loadCollaborationModes()
+  }
+
+  if (!planCollaborationModeMask.value && collaborationModesError.value) {
+    await loadCollaborationModes({ force: true })
+  }
+
+  if (planCollaborationModeMask.value) {
+    return planCollaborationModeMask.value
+  }
+
+  throw new Error(collaborationModesError.value ?? 'Plan mode is unavailable in the current runtime.')
+}
+
+const setCurrentThreadCollaborationMode = async (mode: 'plan' | 'default') => {
+  if (isBusy.value) {
+    throw new Error('Cannot switch collaboration mode while a turn is running.')
+  }
+
+  await loadCollaborationModes()
+  if (collaborationModesError.value && !findCollaborationModeMask(collaborationModeMasks.value, mode)) {
+    await loadCollaborationModes({ force: true })
+  }
+  const mask = findCollaborationModeMask(collaborationModeMasks.value, mode)
+  if (!mask) {
+    throw new Error(
+      mode === 'plan'
+        ? collaborationModesError.value ?? 'Plan mode is unavailable in the current runtime.'
+        : collaborationModesError.value ?? 'Default collaboration mode is unavailable in the current runtime.'
+    )
+  }
+
+  setThreadCollaborationModeMask(activeThreadId.value ?? routeThreadId.value, mask)
+}
+
+const closePlanImplementationPrompt = () => {
+  planImplementationPromptTurnId.value = null
+}
+
+const maybeOpenPlanImplementationPrompt = (turnId: string | null) => {
+  if (
+    !turnId
+    || latestPlanTurnId.value !== turnId
+    || !isPlanModeActive.value
+    || hasPendingRequest.value
+  ) {
+    return
+  }
+
+  planImplementationPromptTurnId.value = turnId
+}
+
+type SlashCommandSubmissionResult = {
+  consumed: boolean
+  replacementText?: string
+}
+
 const handleSlashCommandSubmission = async (
   rawText: string,
   submittedAttachments: DraftAttachment[]
-) => {
+): Promise<SlashCommandSubmissionResult> => {
   const slashCommand = parseSubmittedSlashCommand(rawText)
   if (!slashCommand) {
-    return false
+    return {
+      consumed: false
+    }
   }
 
-  const command = slashCommands.value.find(candidate => candidate.name === slashCommand.name)
-  if (!command) {
-    return false
+  if (!slashCommands.value.some(candidate => candidate.name === slashCommand.name)) {
+    return {
+      consumed: false
+    }
   }
 
-  if (submittedAttachments.length > 0) {
-    setComposerError('Slash commands do not support image attachments yet.')
-    return true
-  }
+  const dispatchAction = resolveSlashCommandDispatch({
+    slashCommand,
+    attachmentsCount: submittedAttachments.length,
+    planModeAvailable: Boolean(planCollaborationModeMask.value) || !collaborationModesLoaded.value,
+    planModeUnavailableMessage: collaborationModesError.value
+  })
 
-  switch (command.name) {
-    case 'review': {
-      if (!slashCommand.isBare) {
-        setComposerError('`/review` currently only supports the bare command. Choose the diff target in the review drawer.')
-        return true
+  switch (dispatchAction.type) {
+    case 'passThrough':
+      return {
+        consumed: false
       }
-
+    case 'error':
+      setComposerError(dispatchAction.message)
+      return {
+        consumed: true
+      }
+    case 'openReview':
       error.value = null
       status.value = 'ready'
       clearSlashCommandDraft()
       openReviewDrawer(rawText.trim())
       await focusPromptAt(0)
-      return true
-    }
-    case 'usage':
-    case 'status': {
-      if (!slashCommand.isBare) {
-        setComposerError(`\`/${command.name}\` currently only supports the bare command.`)
-        return true
+      return {
+        consumed: true
+      }
+    case 'openUsageStatus':
+      error.value = null
+      status.value = 'ready'
+      clearSlashCommandDraft()
+      usageStatusModalOpen.value = true
+      return {
+        consumed: true
+      }
+    case 'activatePlanMode':
+      try {
+        await setCurrentThreadCollaborationMode('plan')
+      } catch (caughtError) {
+        setComposerError(caughtError instanceof Error ? caughtError.message : String(caughtError))
+        return {
+          consumed: true
+        }
       }
 
       error.value = null
       status.value = 'ready'
       clearSlashCommandDraft()
-      usageStatusModalOpen.value = true
-      return true
-    }
-    default:
-      return false
+      closePlanImplementationPrompt()
+      await focusPromptAt(0)
+      return {
+        consumed: true
+      }
+    case 'submitPlanPrompt':
+      try {
+        await ensurePlanModeAvailable()
+        setThreadCollaborationModeMask(activeThreadId.value ?? routeThreadId.value, planCollaborationModeMask.value)
+      } catch (caughtError) {
+        setComposerError(caughtError instanceof Error ? caughtError.message : String(caughtError))
+        return {
+          consumed: true
+        }
+      }
+
+      error.value = null
+      status.value = 'ready'
+      closePlanImplementationPrompt()
+      return {
+        consumed: false,
+        replacementText: dispatchAction.text
+      }
   }
 }
 
@@ -2029,6 +2285,7 @@ const submitTurnStart = async (input: {
   text: string
   submittedAttachments: DraftAttachment[]
   additionalInput?: ReturnType<typeof buildMentionAutocompleteSubmission>['pluginInput']
+  collaborationMode?: CollaborationMode | null
   uploadedAttachments?: PersistedProjectAttachment[]
   optimisticMessageId: string
   queueOptimisticMessage?: boolean
@@ -2039,6 +2296,7 @@ const submitTurnStart = async (input: {
     text,
     submittedAttachments,
     additionalInput = [],
+    collaborationMode = null,
     uploadedAttachments: existingUploadedAttachments,
     optimisticMessageId,
     queueOptimisticMessage: shouldQueueOptimisticMessage = true
@@ -2055,6 +2313,7 @@ const submitTurnStart = async (input: {
     input: buildTurnStartInput(text, uploadedAttachments, additionalInput),
     cwd: selectedProject.value?.projectPath ?? null,
     approvalPolicy: 'never',
+    collaborationMode,
     ...buildTurnOverrides(selectedModel.value, selectedEffort.value)
   })
 
@@ -2237,6 +2496,8 @@ const hydrateThread = async (threadId: string) => {
     loadVersion.value = requestVersion
     error.value = null
     tokenUsage.value = null
+    latestPlanTurnId.value = null
+    closePlanImplementationPrompt()
 
     try {
       await ensureProjectRuntime()
@@ -2365,6 +2626,8 @@ const resetDraftThread = () => {
   subagentPanels.value = []
   error.value = null
   tokenUsage.value = null
+  latestPlanTurnId.value = null
+  closePlanImplementationPrompt()
   markAwaitingAssistantOutput(false)
   status.value = 'ready'
 }
@@ -2387,6 +2650,7 @@ const ensureThread = async () => {
   })
 
   activeThreadId.value = response.thread.id
+  moveDraftCollaborationModeToThread(response.thread.id)
   threadTitle.value = resolveThreadSummaryTitle(response.thread)
   syncThreadSummary(response.thread)
   return {
@@ -3008,6 +3272,11 @@ const applyNotification = (notification: CodexRpcNotification) => {
         clearThreadPlanState(threadId)
       }
 
+      if (nextTurnId) {
+        latestPlanTurnId.value = null
+      }
+      closePlanImplementationPrompt()
+
       if (liveStream) {
         setLiveStreamTurnId(liveStream, nextTurnId)
         setLiveStreamInterruptRequested(liveStream, false)
@@ -3025,6 +3294,9 @@ const applyNotification = (notification: CodexRpcNotification) => {
       const params = notification.params as { item: CodexThreadItem }
       if (params.item.type === 'collabAgentToolCall') {
         applySubagentActivityItem(params.item)
+      }
+      if (params.item.type === 'plan') {
+        latestPlanTurnId.value = notificationTurnId(notification) ?? currentLiveStream()?.turnId ?? null
       }
       if (params.item.type === 'userMessage') {
         for (const nextMessage of itemToMessages(params.item)) {
@@ -3045,6 +3317,9 @@ const applyNotification = (notification: CodexRpcNotification) => {
       const params = notification.params as { item: CodexThreadItem }
       if (params.item.type === 'collabAgentToolCall') {
         applySubagentActivityItem(params.item)
+      }
+      if (params.item.type === 'plan') {
+        latestPlanTurnId.value = notificationTurnId(notification) ?? currentLiveStream()?.turnId ?? null
       }
       markAssistantOutputStartedForItem(params.item)
       for (const nextMessage of itemToMessages(params.item)) {
@@ -3079,6 +3354,7 @@ const applyNotification = (notification: CodexRpcNotification) => {
     }
     case 'item/plan/delta': {
       const params = notification.params as { itemId: string, delta: string }
+      latestPlanTurnId.value = notificationTurnId(notification) ?? currentLiveStream()?.turnId ?? null
       markAwaitingAssistantOutput(false)
       appendTextPartDelta(params.itemId, params.delta, {
         id: params.itemId,
@@ -3253,6 +3529,7 @@ const applyNotification = (notification: CodexRpcNotification) => {
       return
     }
     case 'turn/completed': {
+      maybeOpenPlanImplementationPrompt(notificationTurnId(notification) ?? liveStream?.turnId ?? null)
       markAwaitingAssistantOutput(false)
       clearPendingOptimisticMessages(liveStream, { discardSnapshots: true })
       if (liveStream) {
@@ -3300,18 +3577,22 @@ const sendMessage = async () => {
   const submittedAttachments = attachments.value.slice()
   const submittedSkillMentions = cloneSkillMentions()
   const submittedMentionSelections = cloneMentionSelections()
+  let effectiveRawText = rawText
 
-  if (!rawText.trim() && submittedAttachments.length === 0) {
+  if (!effectiveRawText.trim() && submittedAttachments.length === 0) {
     sendMessageLocked.value = false
     return
   }
 
-  if (await handleSlashCommandSubmission(rawText, submittedAttachments)) {
+  const slashResult = await handleSlashCommandSubmission(effectiveRawText, submittedAttachments)
+  if (slashResult.consumed) {
     sendMessageLocked.value = false
     return
   }
 
-  if (hasSkillAutocompleteMentions(rawText)) {
+  effectiveRawText = slashResult.replacementText ?? effectiveRawText
+
+  if (hasSkillAutocompleteMentions(effectiveRawText)) {
     try {
       await ensureSkillAutocompleteCatalogCurrent()
     } catch (caughtError) {
@@ -3331,7 +3612,7 @@ const sendMessage = async () => {
   }
 
   const text = preprocessSkillMentionsForSubmission(
-    rawText,
+    effectiveRawText,
     submittedSkillMentions,
     skillAutocompleteCatalog.value
   ).trim()
@@ -3346,7 +3627,7 @@ const sendMessage = async () => {
   try {
     await loadPromptControls()
   } catch (caughtError) {
-    restoreDraftIfPristine(rawText, submittedAttachments, submittedSkillMentions, submittedMentionSelections)
+    restoreDraftIfPristine(effectiveRawText, submittedAttachments, submittedSkillMentions, submittedMentionSelections)
     error.value = caughtError instanceof Error ? caughtError.message : String(caughtError)
     status.value = 'error'
     sendMessageLocked.value = false
@@ -3388,6 +3669,7 @@ const sendMessage = async () => {
     markAwaitingAssistantOutput(shouldAwaitAssistantOutput(submissionMethod))
     let startedLiveStream: LiveStream | null = null
     let executedSubmissionMethod = submissionMethod
+    const collaborationMode = buildCurrentTurnCollaborationMode()
 
     try {
       const client = getClient(props.projectId)
@@ -3426,6 +3708,7 @@ const sendMessage = async () => {
             text,
             submittedAttachments,
             additionalInput: submittedMentionInput.pluginInput,
+            collaborationMode,
             uploadedAttachments,
             optimisticMessageId,
             queueOptimisticMessage: false
@@ -3442,6 +3725,7 @@ const sendMessage = async () => {
         text,
         submittedAttachments,
         additionalInput: submittedMentionInput.pluginInput,
+        collaborationMode,
         optimisticMessageId
       })
     } catch (caughtError) {
@@ -3456,19 +3740,38 @@ const sendMessage = async () => {
           clearPendingOptimisticMessages(clearLiveStream(new Error(messageText)))
         }
         session.pendingLiveStream = null
-        restoreDraftIfPristine(rawText, submittedAttachments, submittedSkillMentions, submittedMentionSelections)
+        restoreDraftIfPristine(effectiveRawText, submittedAttachments, submittedSkillMentions, submittedMentionSelections)
         error.value = messageText
         status.value = 'error'
         return
       }
 
-      restoreDraftIfPristine(rawText, submittedAttachments, submittedSkillMentions, submittedMentionSelections)
+      restoreDraftIfPristine(effectiveRawText, submittedAttachments, submittedSkillMentions, submittedMentionSelections)
       error.value = messageText
       status.value = 'error'
     }
   } finally {
     sendMessageLocked.value = false
   }
+}
+
+const implementCurrentPlan = async () => {
+  if (hasDraftContent.value) {
+    setComposerError('Clear the current draft before starting plan implementation.')
+    return
+  }
+
+  try {
+    await setCurrentThreadCollaborationMode('default')
+  } catch (caughtError) {
+    setComposerError(caughtError instanceof Error ? caughtError.message : String(caughtError))
+    return
+  }
+
+  closePlanImplementationPrompt()
+  applyDraftTextState('Implement the plan.')
+  await nextTick()
+  await sendMessage()
 }
 
 const stopActiveTurn = async () => {
@@ -3974,6 +4277,22 @@ watch(
 )
 
 watch(
+  () => selectedProject.value?.status ?? null,
+  (projectStatus) => {
+    if (
+      projectStatus !== 'running'
+      || collaborationModesLoaded.value
+      || collaborationModesLoading.value
+    ) {
+      return
+    }
+
+    void loadCollaborationModes()
+  },
+  { immediate: true }
+)
+
+watch(
   [mentionAutocompleteOpen, normalizedMentionAutocompleteQuery, () => selectedProject.value?.projectPath ?? null],
   async ([open, query, projectPath]) => {
     const requestSequence = ++fileAutocompleteRequestSequence
@@ -4355,6 +4674,17 @@ watch(
             </div>
           </div>
 
+          <div
+            v-if="currentCollaborationModeLabel"
+            class="mb-2 flex items-center gap-2 px-1 text-xs text-primary"
+          >
+            <UIcon
+              name="i-lucide-list-checks"
+              class="size-3.5"
+            />
+            <span>{{ currentCollaborationModeLabel }} mode</span>
+          </div>
+
           <UChatPrompt
             ref="chatPromptRef"
             v-model="input"
@@ -4449,6 +4779,33 @@ watch(
                     aria-label="Attach image"
                     @click="openFilePicker"
                   />
+
+                  <div
+                    v-if="collaborationModeToggleVisible"
+                    class="flex items-center gap-1 rounded-full border border-default/70 bg-default/70 p-0.5"
+                  >
+                    <UButton
+                      type="button"
+                      color="neutral"
+                      :variant="isPlanModeActive ? 'ghost' : 'soft'"
+                      :disabled="isComposerDisabled || isBusy || collaborationModesLoading || (!defaultCollaborationModeMask && collaborationModesLoaded)"
+                      class="rounded-full"
+                      @click="activateDefaultModeFromToggle"
+                    >
+                      Default
+                    </UButton>
+
+                    <UButton
+                      type="button"
+                      color="neutral"
+                      :variant="isPlanModeActive ? 'soft' : 'ghost'"
+                      :disabled="isComposerDisabled || isBusy || collaborationModesLoading || (!planCollaborationModeMask && collaborationModesLoaded)"
+                      class="rounded-full"
+                      @click="activatePlanModeFromToggle"
+                    >
+                      Plan
+                    </UButton>
+                  </div>
 
                   <USelect
                     v-model="selectedModel"
@@ -4593,6 +4950,17 @@ watch(
   <PendingUserRequestDrawer
     :request="pendingRequest"
     @respond="respondToPendingRequest"
+  />
+
+  <PlanImplementationPromptDrawer
+    :open="Boolean(planImplementationPromptTurnId)"
+    @implement="implementCurrentPlan"
+    @stay-in-plan="closePlanImplementationPrompt"
+    @update:open="(open) => {
+      if (!open) {
+        closePlanImplementationPrompt()
+      }
+    }"
   />
 
   <LocalFileViewerModal />

@@ -30,15 +30,28 @@ describe('slash command helpers', () => {
   })
 
   it('filters available commands by prefix and formats completion text', () => {
-    expect(filterSlashCommands(SLASH_COMMANDS, '')).toHaveLength(3)
+    expect(filterSlashCommands(SLASH_COMMANDS, '')).toHaveLength(4)
+    expect(filterSlashCommands(SLASH_COMMANDS, 'pl').map(command => command.name)).toEqual(['plan'])
     expect(filterSlashCommands(SLASH_COMMANDS, 're').map(command => command.name)).toEqual(['review'])
     expect(filterSlashCommands(SLASH_COMMANDS, 'us').map(command => command.name)).toEqual(['usage'])
     expect(filterSlashCommands(SLASH_COMMANDS, 'st').map(command => command.name)).toEqual(['status'])
-    expect(toSlashCommandCompletion(SLASH_COMMANDS[0]!)).toBe('/review ')
-    expect(toSlashCommandCompletion(SLASH_COMMANDS[1]!)).toBe('/usage ')
+    expect(toSlashCommandCompletion(SLASH_COMMANDS[0]!)).toBe('/plan ')
+    expect(toSlashCommandCompletion(SLASH_COMMANDS[1]!)).toBe('/review ')
   })
 
   it('parses submitted slash commands and inline args', () => {
+    expect(parseSubmittedSlashCommand('/plan')).toEqual({
+      name: 'plan',
+      args: '',
+      isBare: true
+    })
+
+    expect(parseSubmittedSlashCommand('/plan draft a migration')).toEqual({
+      name: 'plan',
+      args: 'draft a migration',
+      isBare: false
+    })
+
     expect(parseSubmittedSlashCommand('/review')).toEqual({
       name: 'review',
       args: '',

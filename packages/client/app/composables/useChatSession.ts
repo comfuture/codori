@@ -1,5 +1,6 @@
 import { ref, type Ref } from 'vue'
 import type { ChatMessage, SubagentAgentStatus, VisualSubagentPanel } from '~~/shared/codex-chat'
+import type { CollaborationModeMask } from '~~/shared/collaboration-mode'
 import type { CodexRpcNotification } from '~~/shared/codex-rpc'
 import type { ThreadPlanState } from '~~/shared/turn-plan'
 import {
@@ -40,6 +41,11 @@ export type ChatSession = {
   messages: Ref<ChatMessage[]>
   subagentPanels: Ref<SubagentPanelState[]>
   threadPlans: Ref<Record<string, ThreadPlanState>>
+  threadCollaborationModeMasks: Ref<Record<string, CollaborationModeMask>>
+  collaborationModeMasks: Ref<CollaborationModeMask[]>
+  collaborationModesLoaded: Ref<boolean>
+  collaborationModesLoading: Ref<boolean>
+  collaborationModesError: Ref<string | null>
   status: Ref<ChatStatus>
   error: Ref<string | null>
   activeThreadId: Ref<string | null>
@@ -64,6 +70,11 @@ const createSession = (): ChatSession => ({
   messages: ref<ChatMessage[]>([]),
   subagentPanels: ref<SubagentPanelState[]>([]),
   threadPlans: ref<Record<string, ThreadPlanState>>({}),
+  threadCollaborationModeMasks: ref<Record<string, CollaborationModeMask>>({}),
+  collaborationModeMasks: ref<CollaborationModeMask[]>([]),
+  collaborationModesLoaded: ref(false),
+  collaborationModesLoading: ref(false),
+  collaborationModesError: ref<string | null>(null),
   status: ref<ChatStatus>('ready'),
   error: ref<string | null>(null),
   activeThreadId: ref<string | null>(null),
