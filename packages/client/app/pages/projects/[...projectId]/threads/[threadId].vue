@@ -233,7 +233,7 @@ watch(
 </script>
 
 <template>
-  <div class="flex h-screen h-dvh min-h-0 flex-1 min-w-0">
+  <div class="app-shell-height flex h-screen h-dvh min-h-0 flex-1 min-w-0">
     <UDashboardPanel
       id="thread-shell"
       class="min-h-0 min-w-0 flex-1"
