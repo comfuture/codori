@@ -1,4 +1,4 @@
-export type SlashCommandName = 'review' | 'usage' | 'status'
+export type SlashCommandName = 'plan' | 'review' | 'usage' | 'status'
 
 export type SlashCommandDefinition = {
   name: SlashCommandName
@@ -22,6 +22,12 @@ export type SubmittedSlashCommand = {
 }
 
 export const SLASH_COMMANDS: SlashCommandDefinition[] = [{
+  name: 'plan',
+  description: 'Switch to Plan mode and optionally submit the first planning prompt.',
+  supportsInlineArgs: true,
+  completeOnSpace: false,
+  executeOnEnter: true
+}, {
   name: 'review',
   description: 'Review current changes or compare against a base branch.',
   supportsInlineArgs: false,
