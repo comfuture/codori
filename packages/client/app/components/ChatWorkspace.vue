@@ -10,6 +10,7 @@ import {
 } from 'vue'
 import LocalFileViewerModal from './LocalFileViewerModal.vue'
 import MessageContent from './MessageContent.vue'
+import PlanTaskListPanel from './PlanTaskListPanel.vue'
 import ReviewStartDrawer from './ReviewStartDrawer.vue'
 import PendingUserRequestDrawer from './PendingUserRequestDrawer.vue'
 import UsageStatusModal from './UsageStatusModal.vue'
@@ -142,6 +143,10 @@ import {
   resolveSubagentAccent,
   toSubagentAvatarText
 } from '~~/shared/subagent-panels'
+import {
+  applyTurnPlanUpdate,
+  normalizeTurnPlanUpdate
+} from '~~/shared/turn-plan'
 
 const props = defineProps<{
   projectId: string
@@ -191,12 +196,15 @@ const skillAutocompleteListRef = ref<HTMLElement | null>(null)
 const mentionAutocompleteDropdownRef = ref<HTMLElement | null>(null)
 const mentionAutocompleteListRef = ref<HTMLElement | null>(null)
 const scrollViewport = ref<HTMLElement | null>(null)
+const stickyFooterRef = ref<HTMLElement | null>(null)
+const stickyFooterHeight = ref(140)
 const pinnedToBottom = ref(true)
 const session = useChatSession(props.projectId)
 const { syncThreadSummary, updateThreadSummaryTitle } = useThreadSummaries(props.projectId)
 const {
   messages,
   subagentPanels,
+  threadPlans,
   status,
   error,
   activeThreadId,
@@ -334,6 +342,9 @@ const projectTitle = computed(() => selectedProject.value?.projectId ?? props.pr
 const chatMessagesStatus = computed(() =>
   resolveChatMessagesStatus(status.value, awaitingAssistantOutput.value)
 )
+const chatSpacingOffset = computed(() =>
+  Math.max(140, stickyFooterHeight.value + 24)
+)
 const showWelcomeState = computed(() =>
   !routeThreadId.value
   && !activeThreadId.value
@@ -420,6 +431,15 @@ const activeAgentMentionEntries = computed(() =>
       status: panel.status
     } satisfies AgentMentionAutocompleteEntry))
 )
+
+const currentThreadPlan = computed(() => {
+  const threadId = activeThreadId.value ?? routeThreadId.value
+  if (!threadId) {
+    return null
+  }
+
+  return threadPlans.value[threadId] ?? null
+})
 
 const agentMentionAccentIndexByThreadId = computed(() => {
   const entries = new Map<string, number>()
@@ -825,6 +845,7 @@ let promptControlsPromise: Promise<void> | null = null
 let pendingThreadHydration: Promise<void> | null = null
 let releaseServerRequestHandler: (() => void) | null = null
 let releaseSkillNotificationSubscription: (() => void) | null = null
+let footerResizeObserver: ResizeObserver | null = null
 let skipNextSkillMentionSync = false
 let skipNextMentionSelectionSync = false
 let skillAutocompleteRequestSequence = 0
@@ -1797,6 +1818,43 @@ const startReview = async (target: ReviewTarget) => {
     setComposerError(caughtError instanceof Error ? caughtError.message : String(caughtError))
   } finally {
     reviewStartPending.value = false
+  }
+}
+
+const updateThreadPlanState = (threadId: string, params: unknown) => {
+  const nextPlanUpdate = normalizeTurnPlanUpdate(params)
+  if (!nextPlanUpdate) {
+    return
+  }
+
+  const nextPlanState = applyTurnPlanUpdate(threadPlans.value[threadId], {
+    ...nextPlanUpdate,
+    threadId
+  })
+  if (!nextPlanState) {
+    const nextThreadPlans = { ...threadPlans.value }
+    delete nextThreadPlans[threadId]
+    threadPlans.value = nextThreadPlans
+    return
+  }
+
+  threadPlans.value = {
+    ...threadPlans.value,
+    [threadId]: nextPlanState
+  }
+}
+
+const setThreadPlanPanelOpen = (open: boolean) => {
+  if (!currentThreadPlan.value?.threadId) {
+    return
+  }
+
+  threadPlans.value = {
+    ...threadPlans.value,
+    [currentThreadPlan.value.threadId]: {
+      ...currentThreadPlan.value,
+      panelOpen: open
+    }
   }
 }
 
@@ -3127,6 +3185,15 @@ const applyNotification = (notification: CodexRpcNotification) => {
       }
       return
     }
+    case 'turn/plan/updated': {
+      const threadId = notificationThreadId(notification) ?? currentLiveStream()?.threadId ?? activeThreadId.value
+      if (!threadId) {
+        return
+      }
+
+      updateThreadPlanState(threadId, notification.params)
+      return
+    }
     case 'error': {
       const params = notification.params as { error?: { message?: string } }
       const messageText = params.error?.message ?? 'The stream failed.'
@@ -3608,6 +3675,20 @@ onMounted(() => {
   void getClient(props.projectId).connect().catch(() => {})
   void loadPromptControls()
   void scheduleScrollToBottom('auto')
+
+  if (import.meta.client) {
+    footerResizeObserver = new ResizeObserver((entries) => {
+      const nextHeight = entries[0]?.contentRect.height
+      if (typeof nextHeight === 'number' && Number.isFinite(nextHeight)) {
+        stickyFooterHeight.value = Math.ceil(nextHeight)
+      }
+    })
+
+    if (stickyFooterRef.value) {
+      footerResizeObserver.observe(stickyFooterRef.value)
+      stickyFooterHeight.value = Math.ceil(stickyFooterRef.value.getBoundingClientRect().height)
+    }
+  }
 })
 
 onBeforeUnmount(() => {
@@ -3616,6 +3697,8 @@ onBeforeUnmount(() => {
   releaseServerRequestHandler = null
   releaseSkillNotificationSubscription?.()
   releaseSkillNotificationSubscription = null
+  footerResizeObserver?.disconnect()
+  footerResizeObserver = null
 })
 
 watch(() => props.threadId ?? null, (threadId) => {
@@ -3988,7 +4071,7 @@ watch(
         :should-auto-scroll="false"
         :should-scroll-to-bottom="false"
         :auto-scroll="false"
-        :spacing-offset="140"
+        :spacing-offset="chatSpacingOffset"
         :user="{
           ui: {
             root: 'scroll-mt-4',
@@ -4019,8 +4102,20 @@ watch(
       </UChatMessages>
     </div>
 
-    <div class="sticky bottom-0 shrink-0 border-t border-default bg-default/95 px-4 py-3 backdrop-blur md:px-6">
-      <div class="mx-auto w-full max-w-5xl">
+    <div
+      ref="stickyFooterRef"
+      class="sticky bottom-0 shrink-0 px-4 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] pt-10 md:px-6 md:pt-8"
+    >
+      <div class="pointer-events-none absolute inset-x-0 inset-y-0 bg-gradient-to-b from-transparent via-default/88 to-default" />
+
+      <div class="relative mx-auto w-full max-w-5xl">
+        <PlanTaskListPanel
+          v-if="currentThreadPlan"
+          :plan="currentThreadPlan"
+          class="mb-3"
+          @toggle="setThreadPlanPanelOpen"
+        />
+
         <UAlert
           v-if="composerError"
           color="error"

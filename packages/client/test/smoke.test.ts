@@ -723,6 +723,7 @@ describe('client package', () => {
   it('ignores further streaming deltas after interruption is acknowledged', () => {
     expect(shouldIgnoreNotificationAfterInterrupt('item/agentMessage/delta')).toBe(true)
     expect(shouldIgnoreNotificationAfterInterrupt('item/started')).toBe(true)
+    expect(shouldIgnoreNotificationAfterInterrupt('turn/plan/updated')).toBe(true)
     expect(shouldIgnoreNotificationAfterInterrupt('item/completed')).toBe(false)
     expect(shouldIgnoreNotificationAfterInterrupt('turn/completed')).toBe(false)
   })
