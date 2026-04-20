@@ -39,7 +39,7 @@ const sidebarUi = computed(() =>
 
 <template>
   <UDashboardGroup
-    class="min-h-screen"
+    class="min-h-screen min-h-dvh"
     storage="local"
     storage-key="codori-dashboard"
     :persistent="true"
