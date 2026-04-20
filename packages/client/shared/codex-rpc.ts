@@ -55,6 +55,10 @@ export type CodexUserInput =
       type: 'localImage'
       path: string
     }
+  | {
+      type: 'image'
+      url: string
+    }
 
 export type CodexThreadItem =
   | {
