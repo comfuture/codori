@@ -510,7 +510,7 @@ export class CodexRpcClient {
             clientInfo: {
               name: '@codori/client',
               title: 'Codori Client',
-              version: '0.1.0'
+              version: '0.1.1'
             },
             capabilities: {
               experimentalApi: true,
