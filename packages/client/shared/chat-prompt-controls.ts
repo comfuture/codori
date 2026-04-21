@@ -1,3 +1,5 @@
+import type { ReasoningEffort } from './generated/codex-app-server/ReasoningEffort'
+
 export const FALLBACK_REASONING_EFFORTS = [
   'none',
   'minimal',
@@ -5,9 +7,7 @@ export const FALLBACK_REASONING_EFFORTS = [
   'medium',
   'high',
   'xhigh'
-] as const
-
-export type ReasoningEffort = typeof FALLBACK_REASONING_EFFORTS[number]
+] as const satisfies readonly ReasoningEffort[]
 
 export type ModelOption = {
   id: string

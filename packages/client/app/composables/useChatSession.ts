@@ -1,12 +1,12 @@
 import { ref, type Ref } from 'vue'
 import type { ChatMessage, SubagentAgentStatus, VisualSubagentPanel } from '~~/shared/codex-chat'
 import type { CollaborationModeMask } from '~~/shared/collaboration-mode'
+import type { ReasoningEffort } from '~~/shared/generated/codex-app-server/ReasoningEffort'
 import type { CodexRpcNotification } from '~~/shared/codex-rpc'
 import type { ThreadPlanState } from '~~/shared/turn-plan'
 import {
   FALLBACK_MODELS,
   type ModelOption,
-  type ReasoningEffort,
   type TokenUsageSnapshot
 } from '~~/shared/chat-prompt-controls'
 

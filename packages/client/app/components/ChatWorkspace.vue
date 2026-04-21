@@ -78,6 +78,7 @@ import type { ThreadItem } from '~~/shared/generated/codex-app-server/v2/ThreadI
 import type { ThreadResumeResponse } from '~~/shared/generated/codex-app-server/v2/ThreadResumeResponse'
 import type { ThreadStartResponse } from '~~/shared/generated/codex-app-server/v2/ThreadStartResponse'
 import type { TurnStartResponse } from '~~/shared/generated/codex-app-server/v2/TurnStartResponse'
+import type { ReasoningEffort } from '~~/shared/generated/codex-app-server/ReasoningEffort'
 import {
   notificationRequestId,
   notificationTurnStatus,
@@ -100,8 +101,7 @@ import {
   resolveContextWindowState,
   resolveEffortOptions,
   shouldShowContextWindowIndicator,
-  visibleModelOptions,
-  type ReasoningEffort
+  visibleModelOptions
 } from '~~/shared/chat-prompt-controls'
 import { shouldQueuePlanImplementationPrompt } from '~~/shared/plan-implementation-prompt'
 import {
