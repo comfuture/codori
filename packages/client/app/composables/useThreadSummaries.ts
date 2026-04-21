@@ -1,5 +1,5 @@
 import { ref, type Ref } from 'vue'
-import type { CodexThread } from '~~/shared/codex-rpc'
+import type { Thread } from '~~/shared/generated/codex-app-server/v2/Thread'
 
 export type ThreadSummary = {
   id: string
@@ -17,7 +17,7 @@ type UseThreadSummariesResult = ThreadSummariesState & {
   setThreads: (nextThreads: ThreadSummary[]) => void
   setLoading: (nextLoading: boolean) => void
   setError: (nextError: string | null) => void
-  syncThreadSummary: (thread: Pick<CodexThread, 'id' | 'name' | 'preview' | 'updatedAt'>) => void
+  syncThreadSummary: (thread: Pick<Thread, 'id' | 'name' | 'preview' | 'updatedAt'>) => void
   updateThreadSummaryTitle: (threadId: string, title: string, updatedAt?: number) => void
 }
 
@@ -49,7 +49,7 @@ export const normalizeThreadTitleCandidate = (value: string | null | undefined) 
   return stripped
 }
 
-export const resolveThreadSummaryTitle = (thread: Pick<CodexThread, 'id' | 'name' | 'preview'>) => {
+export const resolveThreadSummaryTitle = (thread: Pick<Thread, 'id' | 'name' | 'preview'>) => {
   const nextTitle = normalizeThreadTitleCandidate(thread.name) || normalizeThreadTitleCandidate(thread.preview)
   return nextTitle || `Thread ${thread.id}`
 }
@@ -97,7 +97,7 @@ const createApi = (state: ThreadSummariesState): UseThreadSummariesResult => ({
   setError: (nextError: string | null) => {
     state.error.value = nextError
   },
-  syncThreadSummary: (thread: Pick<CodexThread, 'id' | 'name' | 'preview' | 'updatedAt'>) => {
+  syncThreadSummary: (thread: Pick<Thread, 'id' | 'name' | 'preview' | 'updatedAt'>) => {
     state.threads.value = mergeThreadSummary(state.threads.value, {
       id: thread.id,
       title: resolveThreadSummaryTitle(thread),
