@@ -5,6 +5,7 @@ import { useChatToolState } from './use-chat-tool-state'
 
 const props = defineProps<{
   item: SubagentActivityItem
+  agentStates?: SubagentAgentState[]
 }>()
 
 const hiddenActions = new Set<SubagentActivityItem['tool']>([
@@ -13,7 +14,7 @@ const hiddenActions = new Set<SubagentActivityItem['tool']>([
 ])
 
 const isHidden = computed(() => hiddenActions.has(props.item.tool))
-const stateEntries = computed<SubagentAgentState[]>(() => props.item.agentsStates ?? [])
+const stateEntries = computed<SubagentAgentState[]>(() => props.agentStates ?? [])
 
 const shortThreadId = (value: string) => value.slice(0, 8)
 

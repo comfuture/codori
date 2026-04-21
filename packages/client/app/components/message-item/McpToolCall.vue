@@ -5,6 +5,7 @@ import { useChatToolState } from './use-chat-tool-state'
 
 const props = defineProps<{
   item: McpToolCallItem
+  progressMessages?: string[]
 }>()
 
 const formatPrettyJson = (value: unknown) => {
@@ -47,7 +48,7 @@ const { open, isLoading, isStreaming } = useChatToolState(() => props.item.statu
       </div>
 
       <div
-        v-if="item.progressMessages?.length"
+        v-if="progressMessages?.length"
         class="rounded-xl border border-default/70 bg-elevated/30 px-3 py-3"
       >
         <p class="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">
@@ -55,7 +56,7 @@ const { open, isLoading, isStreaming } = useChatToolState(() => props.item.statu
         </p>
         <ul class="space-y-1">
           <li
-            v-for="(message, index) in item.progressMessages"
+            v-for="(message, index) in progressMessages"
             :key="`${item.id}-progress-${index}`"
             class="text-xs leading-6 text-toned"
           >

@@ -36,17 +36,9 @@ export type ThreadEventData =
 
 export type CommandExecutionItem = Extract<CodexThreadItem, { type: 'commandExecution' }>
 
-export type FileChangeItem = Extract<CodexThreadItem, { type: 'fileChange' }> & {
-  liveOutput?: string | null
-}
-
-export type McpToolCallItem = Extract<CodexThreadItem, { type: 'mcpToolCall' }> & {
-  progressMessages?: string[]
-}
-
-export type DynamicToolCallItem = Extract<CodexThreadItem, { type: 'dynamicToolCall' }> & {
-  progressMessages?: string[]
-}
+export type FileChangeItem = Extract<CodexThreadItem, { type: 'fileChange' }>
+export type McpToolCallItem = Extract<CodexThreadItem, { type: 'mcpToolCall' }>
+export type DynamicToolCallItem = Extract<CodexThreadItem, { type: 'dynamicToolCall' }>
 
 export type SubagentTool = Extract<CodexThreadItem, { type: 'collabAgentToolCall' }>['tool']
 export type SubagentToolStatus = 'inProgress' | 'completed' | 'failed'
@@ -66,9 +58,7 @@ export type SubagentAgentState = {
   message: string | null
 }
 
-export type SubagentActivityItem = Omit<Extract<CodexThreadItem, { type: 'collabAgentToolCall' }>, 'agentsStates'> & {
-  agentsStates: SubagentAgentState[]
-}
+export type SubagentActivityItem = Extract<CodexThreadItem, { type: 'collabAgentToolCall' }>
 
 export type VisualSubagentPanel = {
   threadId: string
@@ -88,18 +78,22 @@ export type ItemData =
   | {
       kind: 'file_change'
       item: FileChangeItem
+      liveOutput?: string | null
     }
   | {
       kind: 'mcp_tool_call'
       item: McpToolCallItem
+      progressMessages?: string[]
     }
   | {
       kind: 'dynamic_tool_call'
       item: DynamicToolCallItem
+      progressMessages?: string[]
     }
   | {
       kind: 'subagent_activity'
       item: SubagentActivityItem
+      agentStates: SubagentAgentState[]
     }
   | {
       kind: 'web_search'
@@ -168,6 +162,17 @@ export const asAgentMessageItem = (input: {
 
 export const isSubagentActiveStatus = (status: SubagentAgentStatus) =>
   status === null || status === 'pendingInit' || status === 'running'
+
+const flattenSubagentAgentStates = (
+  item: SubagentActivityItem
+): SubagentAgentState[] => [
+  ...item.receiverThreadIds,
+  ...Object.keys(item.agentsStates).filter(threadId => !item.receiverThreadIds.includes(threadId))
+].map((threadId) => ({
+  threadId,
+  status: item.agentsStates[threadId]?.status ?? null,
+  message: item.agentsStates[threadId]?.message ?? null
+}))
 
 const streamingState = (pending?: boolean) => pending ? 'streaming' : 'done'
 
@@ -342,17 +347,8 @@ export const itemToMessages = (item: CodexThreadItem): ChatMessage[] => {
           type: ITEM_PART,
           data: {
             kind: 'subagent_activity',
-            item: {
-              ...item,
-              agentsStates: [
-                ...item.receiverThreadIds,
-                ...Object.keys(item.agentsStates).filter(threadId => !item.receiverThreadIds.includes(threadId))
-              ].map((threadId) => ({
-                threadId,
-                status: item.agentsStates[threadId]?.status ?? null,
-                message: item.agentsStates[threadId]?.message ?? null
-              }))
-            }
+            item,
+            agentStates: flattenSubagentAgentStates(item)
           }
         }]
       }]

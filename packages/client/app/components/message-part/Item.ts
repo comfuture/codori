@@ -35,13 +35,25 @@ export default defineComponent({
         case 'command_execution':
           return h(MessageItemCommandExecution, { item: itemData.item })
         case 'file_change':
-          return h(MessageItemFileChange, { item: itemData.item })
+          return h(MessageItemFileChange, {
+            item: itemData.item,
+            liveOutput: itemData.liveOutput
+          })
         case 'mcp_tool_call':
-          return h(MessageItemMcpToolCall, { item: itemData.item })
+          return h(MessageItemMcpToolCall, {
+            item: itemData.item,
+            progressMessages: itemData.progressMessages
+          })
         case 'dynamic_tool_call':
-          return h(MessageItemDynamicToolCall, { item: itemData.item })
+          return h(MessageItemDynamicToolCall, {
+            item: itemData.item,
+            progressMessages: itemData.progressMessages
+          })
         case 'subagent_activity':
-          return h(MessageItemSubagentActivity, { item: itemData.item })
+          return h(MessageItemSubagentActivity, {
+            item: itemData.item,
+            agentStates: itemData.agentStates
+          })
         case 'web_search':
           return h(MessageItemWebSearch, {
             item: itemData.item,

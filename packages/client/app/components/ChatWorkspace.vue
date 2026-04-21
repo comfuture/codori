@@ -2880,9 +2880,9 @@ const fallbackFileChangeMessage = (itemId: string): ChatMessage => ({
         type: 'fileChange',
         id: itemId,
         changes: [],
-        status: 'inProgress',
-        liveOutput: ''
-      }
+        status: 'inProgress'
+      },
+      liveOutput: ''
     }
   }]
 })
@@ -2904,9 +2904,9 @@ const fallbackMcpToolMessage = (itemId: string): ChatMessage => ({
         result: null,
         error: null,
         status: 'inProgress',
-        durationMs: null,
-        progressMessages: []
-      }
+        durationMs: null
+      },
+      progressMessages: []
     }
   }]
 })
@@ -3272,13 +3272,16 @@ const applySubagentNotification = (threadId: string, notification: CodexRpcNotif
         const baseItem: FileChangeItem = itemData.kind === 'file_change'
           ? itemData.item
           : fallbackItem.item
+        const liveOutput = itemData.kind === 'file_change'
+          ? itemData.liveOutput
+          : fallbackItem.liveOutput
         return {
           kind: 'file_change',
           item: {
             ...baseItem,
-            liveOutput: `${baseItem.liveOutput ?? ''}${params.delta}`,
             status: 'inProgress'
-          }
+          },
+          liveOutput: `${liveOutput ?? ''}${params.delta}`
         }
       })
       return
@@ -3290,13 +3293,16 @@ const applySubagentNotification = (threadId: string, notification: CodexRpcNotif
         const baseItem: McpToolCallItem = itemData.kind === 'mcp_tool_call'
           ? itemData.item
           : fallbackItem.item
+        const progressMessages = itemData.kind === 'mcp_tool_call'
+          ? itemData.progressMessages
+          : fallbackItem.progressMessages
         return {
           kind: 'mcp_tool_call',
           item: {
             ...baseItem,
-            progressMessages: [...(baseItem.progressMessages ?? []), params.message],
             status: 'inProgress'
-          }
+          },
+          progressMessages: [...(progressMessages ?? []), params.message]
         }
       })
       return
@@ -3563,13 +3569,16 @@ const applyNotification = (notification: CodexRpcNotification) => {
         const baseItem: FileChangeItem = itemData.kind === 'file_change'
           ? itemData.item
           : fallbackItem.item
+        const liveOutput = itemData.kind === 'file_change'
+          ? itemData.liveOutput
+          : fallbackItem.liveOutput
         return {
           kind: 'file_change',
           item: {
             ...baseItem,
-            liveOutput: `${baseItem.liveOutput ?? ''}${params.delta}`,
             status: 'inProgress'
-          }
+          },
+          liveOutput: `${liveOutput ?? ''}${params.delta}`
         }
       })
       status.value = 'streaming'
@@ -3582,13 +3591,16 @@ const applyNotification = (notification: CodexRpcNotification) => {
         const baseItem: McpToolCallItem = itemData.kind === 'mcp_tool_call'
           ? itemData.item
           : fallbackItem.item
+        const progressMessages = itemData.kind === 'mcp_tool_call'
+          ? itemData.progressMessages
+          : fallbackItem.progressMessages
         return {
           kind: 'mcp_tool_call',
           item: {
             ...baseItem,
-            progressMessages: [...(baseItem.progressMessages ?? []), params.message],
             status: 'inProgress'
-          }
+          },
+          progressMessages: [...(progressMessages ?? []), params.message]
         }
       })
       status.value = 'streaming'

@@ -440,12 +440,18 @@ describe('client package', () => {
             prompt: 'Inspect the API surface.',
             model: 'gpt-5.4-mini',
             reasoningEffort: 'medium',
-            agentsStates: [{
-              threadId: 'child-thread',
-              status: 'running',
-              message: 'Scanning files'
-            }]
-          }
+            agentsStates: {
+              'child-thread': {
+                status: 'running',
+                message: 'Scanning files'
+              }
+            }
+          },
+          agentStates: [{
+            threadId: 'child-thread',
+            status: 'running',
+            message: 'Scanning files'
+          }]
         }
       }]
     }])
