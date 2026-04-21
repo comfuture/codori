@@ -2,11 +2,6 @@ import { computed, ref, type ComputedRef, type Ref } from 'vue'
 import type { DraftAttachment } from './useChatAttachments'
 import type { ChatStatus, LiveStream } from './useChatSession'
 import {
-  type ReviewStartParams,
-  type ReviewStartResponse,
-  type ReviewTarget
-} from '~~/shared/codex-rpc'
-import {
   itemToMessages,
   upsertStreamingMessage,
   type ChatMessage
@@ -15,6 +10,9 @@ import {
   resolveProjectGitBranchesUrl,
   type ProjectGitBranchesResponse
 } from '~~/shared/codori'
+import type { ReviewStartParams } from '~~/shared/generated/codex-app-server/v2/ReviewStartParams'
+import type { ReviewStartResponse } from '~~/shared/generated/codex-app-server/v2/ReviewStartResponse'
+import type { ReviewTarget } from '~~/shared/generated/codex-app-server/v2/ReviewTarget'
 import type { TokenUsageSnapshot } from '~~/shared/chat-prompt-controls'
 
 type ReviewRpcClient = {

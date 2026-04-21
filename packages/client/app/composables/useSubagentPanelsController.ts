@@ -1,4 +1,4 @@
-import { ref, type Ref } from 'vue'
+import type { Ref } from 'vue'
 import type { LiveStream, SubagentPanelState } from './useChatSession'
 import {
   ITEM_PART,
@@ -12,15 +12,16 @@ import {
   type ChatPart,
   type FileChangeItem,
   type ItemData,
-  type McpToolCallItem
+  type McpToolCallItem,
+  type WebSearchStatus
 } from '~~/shared/codex-chat'
 import {
   notificationTurnId,
-  type CodexRpcNotification,
-  type CodexThread,
-  type CodexThreadItem,
-  type ThreadReadResponse
+  type CodexRpcNotification
 } from '~~/shared/codex-rpc'
+import type { Thread } from '~~/shared/generated/codex-app-server/v2/Thread'
+import type { ThreadItem } from '~~/shared/generated/codex-app-server/v2/ThreadItem'
+import type { ThreadReadResponse } from '~~/shared/generated/codex-app-server/v2/ThreadReadResponse'
 
 type ThreadReadClient = {
   request<T>(method: 'thread/read', params: { threadId: string, includeTurns: true }): Promise<T>
@@ -39,7 +40,7 @@ const shortThreadId = (value: string) => value.slice(0, 8)
 
 const resolveSubagentName = (
   threadId: string,
-  thread?: Pick<CodexThread, 'agentNickname' | 'name' | 'preview'> | null
+  thread?: Pick<Thread, 'agentNickname' | 'name' | 'preview'> | null
 ) => {
   const candidate = thread?.agentNickname?.trim()
     || thread?.name?.trim()
@@ -79,9 +80,14 @@ const fallbackCommandMessage = (itemId: string): ChatMessage => ({
         type: 'commandExecution',
         id: itemId,
         command: 'Command',
+        cwd: '',
+        processId: null,
+        source: 'agent',
+        commandActions: [],
         aggregatedOutput: '',
         exitCode: null,
-        status: 'inProgress'
+        status: 'inProgress',
+        durationMs: null
       }
     }
   }]
@@ -99,9 +105,9 @@ const fallbackFileChangeMessage = (itemId: string): ChatMessage => ({
         type: 'fileChange',
         id: itemId,
         changes: [],
-        status: 'inProgress',
-        liveOutput: ''
-      }
+        status: 'inProgress'
+      },
+      liveOutput: ''
     }
   }]
 })
@@ -123,8 +129,9 @@ const fallbackMcpToolMessage = (itemId: string): ChatMessage => ({
         result: null,
         error: null,
         status: 'inProgress',
-        progressMessages: []
-      }
+        durationMs: null
+      },
+      progressMessages: []
     }
   }]
 })
@@ -278,8 +285,42 @@ export const useSubagentPanelsController = (options: UseSubagentPanelsController
     )
   }
 
-  const seedSubagentStreamingMessage = (threadId: string, item: CodexThreadItem) => {
-    const [seed] = itemToMessages(item)
+  const updateWebSearchMessageStatus = (
+    chatMessages: ChatMessage[],
+    status: WebSearchStatus
+  ) => chatMessages.map((message) => {
+    const partIndex = message.parts.findIndex(isItemPart)
+    if (partIndex === -1) {
+      return message
+    }
+
+    const itemPart = message.parts[partIndex] as Extract<ChatPart, { type: typeof ITEM_PART }>
+    if (itemPart.data.kind !== 'web_search') {
+      return message
+    }
+    if (!message.pending && itemPart.data.status !== 'inProgress') {
+      return message
+    }
+
+    const nextPart: Extract<ChatPart, { type: typeof ITEM_PART }> = {
+      ...itemPart,
+      data: {
+        ...itemPart.data,
+        status
+      }
+    }
+
+    return {
+      ...message,
+      pending: status === 'inProgress',
+      parts: message.parts.map((part, index) => index === partIndex ? nextPart : part)
+    }
+  })
+
+  const seedSubagentStreamingMessage = (threadId: string, item: ThreadItem) => {
+    const [seed] = itemToMessages(item, {
+      webSearchStatus: item.type === 'webSearch' ? 'inProgress' : undefined
+    })
     if (!seed) {
       return
     }
@@ -348,7 +389,7 @@ export const useSubagentPanelsController = (options: UseSubagentPanelsController
     await bootstrapPromise
   }
 
-  const applySubagentActivityItem = (item: Extract<CodexThreadItem, { type: 'collabAgentToolCall' }>) => {
+  const applySubagentActivityItem = (item: Extract<ThreadItem, { type: 'collabAgentToolCall' }>) => {
     const orderedThreadIds = [
       ...item.receiverThreadIds,
       ...Object.keys(item.agentsStates).filter(threadId => !item.receiverThreadIds.includes(threadId))
@@ -372,7 +413,7 @@ export const useSubagentPanelsController = (options: UseSubagentPanelsController
     }
   }
 
-  const rebuildSubagentPanelsFromThread = (thread: CodexThread) => {
+  const rebuildSubagentPanelsFromThread = (thread: Thread) => {
     options.subagentPanels.value = []
     for (const turn of thread.turns) {
       for (const item of turn.items) {
@@ -414,7 +455,7 @@ export const useSubagentPanelsController = (options: UseSubagentPanelsController
         return
       }
       case 'item/started': {
-        const params = notification.params as { item: CodexThreadItem }
+        const params = notification.params as { item: ThreadItem }
         if (params.item.type === 'collabAgentToolCall') {
           applySubagentActivityItem(params.item)
         }
@@ -422,7 +463,7 @@ export const useSubagentPanelsController = (options: UseSubagentPanelsController
         return
       }
       case 'item/completed': {
-        const params = notification.params as { item: CodexThreadItem }
+        const params = notification.params as { item: ThreadItem }
         if (params.item.type === 'collabAgentToolCall') {
           applySubagentActivityItem(params.item)
         }
@@ -515,13 +556,16 @@ export const useSubagentPanelsController = (options: UseSubagentPanelsController
           const baseItem: FileChangeItem = itemData.kind === 'file_change'
             ? itemData.item
             : fallbackItem.item
+          const liveOutput = itemData.kind === 'file_change'
+            ? itemData.liveOutput
+            : fallbackItem.liveOutput
           return {
             kind: 'file_change',
             item: {
               ...baseItem,
-              liveOutput: `${baseItem.liveOutput ?? ''}${params.delta}`,
               status: 'inProgress'
-            }
+            },
+            liveOutput: `${liveOutput ?? ''}${params.delta}`
           }
         })
         return
@@ -533,13 +577,16 @@ export const useSubagentPanelsController = (options: UseSubagentPanelsController
           const baseItem: McpToolCallItem = itemData.kind === 'mcp_tool_call'
             ? itemData.item
             : fallbackItem.item
+          const progressMessages = itemData.kind === 'mcp_tool_call'
+            ? itemData.progressMessages
+            : fallbackItem.progressMessages
           return {
             kind: 'mcp_tool_call',
             item: {
               ...baseItem,
-              progressMessages: [...(baseItem.progressMessages ?? []), params.message],
               status: 'inProgress'
-            }
+            },
+            progressMessages: [...(progressMessages ?? []), params.message]
           }
         })
         return
@@ -559,6 +606,9 @@ export const useSubagentPanelsController = (options: UseSubagentPanelsController
         const params = notification.params as { error?: { message?: string } }
         const messageText = params.error?.message ?? 'The turn failed.'
         pushSubagentEventMessage(threadId, 'turn.failed', messageText)
+        updateSubagentPanelMessages(threadId, (panelMessages) =>
+          updateWebSearchMessageStatus(panelMessages, 'failed')
+        )
         upsertSubagentPanel(threadId, (existingPanel) => ({
           ...(existingPanel ?? createSubagentPanelState(threadId)),
           status: 'errored',

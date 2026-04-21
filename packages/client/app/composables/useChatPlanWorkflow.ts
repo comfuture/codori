@@ -1,14 +1,14 @@
 import { computed, nextTick, watch, type ComputedRef, type Ref } from 'vue'
-import type { ReasoningEffort } from '~~/shared/chat-prompt-controls'
+import type { ReasoningEffort } from '~~/shared/generated/codex-app-server/ReasoningEffort'
 import {
   buildCollaborationModeFromMask,
   findCollaborationModeMask,
   normalizeCollaborationModeListResponse,
   resolveThreadCollaborationModeKey,
   type CollaborationMode,
-  type CollaborationModeListResponse,
   type CollaborationModeMask
 } from '~~/shared/collaboration-mode'
+import type { CollaborationModeListResponse } from '~~/shared/generated/codex-app-server/v2/CollaborationModeListResponse'
 import { shouldQueuePlanImplementationPrompt } from '~~/shared/plan-implementation-prompt'
 import {
   applyTurnPlanUpdate,
