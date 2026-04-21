@@ -1,23 +1,76 @@
 import { nextTick, ref } from 'vue'
 import { describe, expect, it } from 'vitest'
 import { usePendingUserRequest } from '../app/composables/usePendingUserRequest'
-import { toServerRequestResponse } from '../shared/codex-rpc'
+import { toServerRequestResponse, type CodexRpcServerRequest } from '../shared/codex-rpc'
 import {
   buildMcpElicitationResponse,
   buildRequestUserInputResponse,
   parsePendingUserRequest
 } from '../shared/pending-user-request'
 
+const makeRequestUserInputRequest = (input: {
+  id: string | number
+  threadId?: string | null
+  turnId?: string | null
+  itemId?: string | null
+  questions: Array<Record<string, unknown>>
+}): CodexRpcServerRequest => ({
+  id: input.id,
+  method: 'item/tool/requestUserInput',
+  params: {
+    ...(input.threadId != null ? { threadId: input.threadId } : {}),
+    ...(input.turnId != null ? { turnId: input.turnId } : {}),
+    ...(input.itemId != null ? { itemId: input.itemId } : {}),
+    questions: input.questions
+  }
+})
+
+const makeMcpElicitationRequest = (input: {
+  id: string | number
+  mode: 'form' | 'url'
+  threadId?: string | null
+  turnId?: string | null
+  serverName?: string
+  message: string
+  requestedSchema?: Record<string, unknown>
+  url?: string
+  elicitationId?: string
+}): CodexRpcServerRequest => ({
+  id: input.id,
+  method: 'mcpServer/elicitation/request',
+  params: input.mode === 'form'
+    ? {
+        mode: 'form',
+        ...(input.threadId != null ? { threadId: input.threadId } : {}),
+        ...(input.turnId !== undefined ? { turnId: input.turnId } : {}),
+        serverName: input.serverName ?? 'test-server',
+        _meta: null,
+        message: input.message,
+        requestedSchema: input.requestedSchema ?? {
+          type: 'object',
+          properties: {}
+        }
+      }
+    : {
+        mode: 'url',
+        ...(input.threadId != null ? { threadId: input.threadId } : {}),
+        ...(input.turnId !== undefined ? { turnId: input.turnId } : {}),
+        serverName: input.serverName ?? 'test-server',
+        _meta: null,
+        message: input.message,
+        url: input.url ?? 'https://example.com/auth',
+        elicitationId: input.elicitationId ?? 'elic-1'
+      }
+})
+
 describe('pending user request shared helpers', () => {
   it('parses request-user-input questions and builds answers payloads', () => {
-    const parsed = parsePendingUserRequest({
+    const parsed = parsePendingUserRequest(makeRequestUserInputRequest({
       id: 7,
-      method: 'item/tool/requestUserInput',
-      params: {
-        threadId: 'thread-1',
-        turnId: 'turn-1',
-        itemId: 'item-1',
-        questions: [{
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      itemId: 'item-1',
+      questions: [{
           header: 'Scope',
           id: 'scope',
           question: 'What should Codex focus on?',
@@ -28,8 +81,7 @@ describe('pending user request shared helpers', () => {
           isOther: true,
           isSecret: false
         }]
-      }
-    })
+    }))
 
     expect(parsed).toEqual({
       kind: 'requestUserInput',
@@ -62,13 +114,11 @@ describe('pending user request shared helpers', () => {
   })
 
   it('parses MCP elicitation form and url requests', () => {
-    expect(parsePendingUserRequest({
+    expect(parsePendingUserRequest(makeMcpElicitationRequest({
       id: 9,
-      method: 'mcpServer/elicitation/request',
-      params: {
-        mode: 'form',
-        message: 'Need confirmation',
-        requestedSchema: {
+      mode: 'form',
+      message: 'Need confirmation',
+      requestedSchema: {
           type: 'object',
           properties: {
             email: {
@@ -83,8 +133,7 @@ describe('pending user request shared helpers', () => {
           },
           required: ['email']
         }
-      }
-    })).toEqual({
+    }))).toEqual({
       kind: 'mcpElicitationForm',
       requestId: 9,
       threadId: null,
@@ -109,16 +158,11 @@ describe('pending user request shared helpers', () => {
       }]
     })
 
-    expect(parsePendingUserRequest({
+    expect(parsePendingUserRequest(makeMcpElicitationRequest({
       id: 10,
-      method: 'mcpServer/elicitation/request',
-      params: {
-        mode: 'url',
-        message: 'Open the auth flow',
-        url: 'https://example.com/auth',
-        elicitationId: 'elic-1'
-      }
-    })).toEqual({
+      mode: 'url',
+      message: 'Open the auth flow'
+    }))).toEqual({
       kind: 'mcpElicitationUrl',
       requestId: 10,
       threadId: null,
@@ -140,16 +184,13 @@ describe('pending user request shared helpers', () => {
   })
 
   it('delegates interactive server requests to the UI handler before falling back', async () => {
-    await expect(toServerRequestResponse({
+    await expect(toServerRequestResponse(makeRequestUserInputRequest({
       id: 12,
-      method: 'item/tool/requestUserInput',
-      params: {
-        questions: [{
+      questions: [{
           id: 'choice',
           question: 'Pick one'
         }]
-      }
-    }, {
+    }), {
       handler: async () => ({
         answers: {
           choice: {
@@ -165,14 +206,11 @@ describe('pending user request shared helpers', () => {
       }
     })
 
-    await expect(toServerRequestResponse({
+    await expect(toServerRequestResponse(makeMcpElicitationRequest({
       id: 13,
-      method: 'mcpServer/elicitation/request',
-      params: {
-        mode: 'url',
-        url: 'https://example.com/auth'
-      }
-    }, {
+      mode: 'url',
+      message: 'Open the auth flow'
+    }), {
       handler: async () => null
     })).resolves.toEqual({
       action: 'decline',
@@ -183,17 +221,14 @@ describe('pending user request shared helpers', () => {
 
   it('holds an incoming request until the UI resolves it', async () => {
     const manager = usePendingUserRequest(`project-${Date.now()}`, ref('thread-1'))
-    const responsePromise = manager.handleServerRequest({
+    const responsePromise = manager.handleServerRequest(makeRequestUserInputRequest({
       id: 11,
-      method: 'item/tool/requestUserInput',
-      params: {
-        questions: [{
+      questions: [{
           id: 'choice',
           question: 'Pick one',
           options: [{ label: 'Ship', description: 'Proceed' }]
         }]
-      }
-    })
+    }))
 
     expect(manager.pendingRequest.value?.kind).toBe('requestUserInput')
 
@@ -220,18 +255,15 @@ describe('pending user request shared helpers', () => {
   it('only exposes requests for the active thread session', async () => {
     const activeThreadId = ref('thread-a')
     const manager = usePendingUserRequest(`project-${Date.now()}`, activeThreadId)
-    const responsePromise = manager.handleServerRequest({
+    const responsePromise = manager.handleServerRequest(makeRequestUserInputRequest({
       id: 14,
-      method: 'item/tool/requestUserInput',
-      params: {
-        threadId: 'thread-a',
-        questions: [{
+      threadId: 'thread-a',
+      questions: [{
           id: 'choice',
           question: 'Pick one',
           options: [{ label: 'Ship' }]
         }]
-      }
-    })
+    }))
 
     expect(manager.pendingRequest.value?.threadId).toBe('thread-a')
 
@@ -262,17 +294,14 @@ describe('pending user request shared helpers', () => {
   it('promotes draft-scoped live requests when a new thread starts', async () => {
     const activeThreadId = ref<string | null>(null)
     const manager = usePendingUserRequest(`project-${Date.now()}`, activeThreadId)
-    const responsePromise = manager.handleServerRequest({
+    const responsePromise = manager.handleServerRequest(makeRequestUserInputRequest({
       id: 17,
-      method: 'item/tool/requestUserInput',
-      params: {
-        questions: [{
+      questions: [{
           id: 'scope',
           question: 'Pick a scope',
           options: [{ label: 'ChatWorkspace' }]
         }]
-      }
-    })
+    }))
 
     expect(manager.pendingRequest.value?.kind).toBe('requestUserInput')
     expect(manager.pendingRequest.value?.threadId).toBeNull()
@@ -307,17 +336,14 @@ describe('pending user request shared helpers', () => {
     const currentThreadId = ref<string | null>('thread-route')
     const activeThreadId = ref<string | null>(null)
     const manager = usePendingUserRequest(projectId, currentThreadId, activeThreadId)
-    const responsePromise = manager.handleServerRequest({
+    const responsePromise = manager.handleServerRequest(makeRequestUserInputRequest({
       id: 18,
-      method: 'item/tool/requestUserInput',
-      params: {
-        questions: [{
+      questions: [{
           id: 'scope',
           question: 'Pick a scope',
           options: [{ label: 'Route thread' }]
         }]
-      }
-    })
+    }))
 
     expect(manager.pendingRequest.value?.kind).toBe('requestUserInput')
     expect(manager.pendingRequest.value?.threadId).toBeNull()
@@ -345,18 +371,15 @@ describe('pending user request shared helpers', () => {
     const projectId = `project-${Date.now()}`
     const currentThreadId = ref<string | null>('thread-route')
     const firstManager = usePendingUserRequest(projectId, currentThreadId)
-    const responsePromise = firstManager.handleServerRequest({
+    const responsePromise = firstManager.handleServerRequest(makeRequestUserInputRequest({
       id: 19,
-      method: 'item/tool/requestUserInput',
-      params: {
-        threadId: 'thread-route',
-        questions: [{
+      threadId: 'thread-route',
+      questions: [{
           id: 'scope',
           question: 'Pick a scope',
           options: [{ label: 'Preserved' }]
         }]
-      }
-    })
+    }))
 
     const secondManager = usePendingUserRequest(projectId, currentThreadId)
     expect(secondManager.pendingRequest.value?.kind).toBe('requestUserInput')
@@ -384,18 +407,15 @@ describe('pending user request shared helpers', () => {
     const projectId = `project-${Date.now()}`
     const currentThreadId = ref<string | null>('thread-a')
     const manager = usePendingUserRequest(projectId, currentThreadId)
-    const responsePromise = manager.handleServerRequest({
+    const responsePromise = manager.handleServerRequest(makeRequestUserInputRequest({
       id: 191,
-      method: 'item/tool/requestUserInput',
-      params: {
-        threadId: 'thread-a',
-        questions: [{
+      threadId: 'thread-a',
+      questions: [{
           id: 'scope',
           question: 'Pick a scope',
           options: [{ label: 'Chat surface' }]
         }]
-      }
-    })
+    }))
 
     currentThreadId.value = 'thread-b'
     expect(manager.pendingRequest.value).toBeNull()
@@ -422,18 +442,15 @@ describe('pending user request shared helpers', () => {
     const projectId = `project-${Date.now()}`
     const currentThreadId = ref<string | null>('thread-a')
     const manager = usePendingUserRequest(projectId, currentThreadId)
-    const responsePromise = manager.handleServerRequest({
+    const responsePromise = manager.handleServerRequest(makeRequestUserInputRequest({
       id: 192,
-      method: 'item/tool/requestUserInput',
-      params: {
-        threadId: 'thread-a',
-        questions: [{
+      threadId: 'thread-a',
+      questions: [{
           id: 'scope',
           question: 'Pick a scope',
           options: [{ label: 'Chat surface' }]
         }]
-      }
-    })
+    }))
 
     currentThreadId.value = 'thread-b'
     expect(manager.pendingRequest.value).toBeNull()
@@ -459,30 +476,24 @@ describe('pending user request shared helpers', () => {
   it('ignores stale responses after the queue advances to the next request', async () => {
     const activeThreadId = ref('thread-stale')
     const manager = usePendingUserRequest(`project-${Date.now()}`, activeThreadId)
-    const firstResponse = manager.handleServerRequest({
+    const firstResponse = manager.handleServerRequest(makeRequestUserInputRequest({
       id: 20,
-      method: 'item/tool/requestUserInput',
-      params: {
-        threadId: 'thread-stale',
-        questions: [{
+      threadId: 'thread-stale',
+      questions: [{
           id: 'first',
           question: 'First choice',
           options: [{ label: 'One' }]
         }]
-      }
-    })
-    const secondResponse = manager.handleServerRequest({
+    }))
+    const secondResponse = manager.handleServerRequest(makeRequestUserInputRequest({
       id: 21,
-      method: 'item/tool/requestUserInput',
-      params: {
-        threadId: 'thread-stale',
-        questions: [{
+      threadId: 'thread-stale',
+      questions: [{
           id: 'second',
           question: 'Second choice',
           options: [{ label: 'Two' }]
         }]
-      }
-    })
+    }))
 
     expect(manager.resolveRequest(20, {
       answers: {
@@ -532,24 +543,20 @@ describe('pending user request shared helpers', () => {
     const activeThreadId = ref('thread-a')
     const manager = usePendingUserRequest(projectId, activeThreadId)
 
-    const userInputPromise = manager.handleServerRequest({
+    const userInputPromise = manager.handleServerRequest(makeRequestUserInputRequest({
       id: 15,
-      method: 'item/tool/requestUserInput',
-      params: {
-        threadId: 'thread-a',
-        questions: [{
+      threadId: 'thread-a',
+      questions: [{
           id: 'choice',
           question: 'Pick one'
         }]
-      }
-    })
-    const mcpPromise = manager.handleServerRequest({
+    }))
+    const mcpPromise = manager.handleServerRequest(makeMcpElicitationRequest({
       id: 16,
-      method: 'mcpServer/elicitation/request',
-      params: {
-        threadId: 'thread-b',
-        mode: 'form',
-        requestedSchema: {
+      threadId: 'thread-b',
+      mode: 'form',
+      message: 'Need confirmation',
+      requestedSchema: {
           type: 'object',
           properties: {
             email: {
@@ -558,8 +565,7 @@ describe('pending user request shared helpers', () => {
             }
           }
         }
-      }
-    })
+    }))
 
     manager.cancelAllPendingRequests()
 
