@@ -4,6 +4,14 @@ type JsonRpcError = {
   data?: unknown
 }
 
+import type { ItemCompletedNotification as GeneratedItemCompletedNotification } from './generated/codex-app-server/v2/ItemCompletedNotification'
+import type { ItemStartedNotification as GeneratedItemStartedNotification } from './generated/codex-app-server/v2/ItemStartedNotification'
+import type { PlanDeltaNotification as GeneratedPlanDeltaNotification } from './generated/codex-app-server/v2/PlanDeltaNotification'
+import type { ServerRequestResolvedNotification as GeneratedServerRequestResolvedNotification } from './generated/codex-app-server/v2/ServerRequestResolvedNotification'
+import type { TurnCompletedNotification as GeneratedTurnCompletedNotification } from './generated/codex-app-server/v2/TurnCompletedNotification'
+import type { TurnPlanUpdatedNotification as GeneratedTurnPlanUpdatedNotification } from './generated/codex-app-server/v2/TurnPlanUpdatedNotification'
+import type { TurnStatus as GeneratedTurnStatus } from './generated/codex-app-server/v2/TurnStatus'
+import type { UserInput as GeneratedUserInput } from './generated/codex-app-server/v2/UserInput'
 export type { ReasoningEffort } from './chat-prompt-controls'
 import type { ReasoningEffort } from './chat-prompt-controls'
 
@@ -37,30 +45,7 @@ type PendingRequest = {
 
 export type CodexRpcServerRequestHandler = (request: CodexRpcServerRequest) => Promise<unknown> | unknown
 
-export type CodexUserInput =
-  | {
-      type: 'text'
-      text: string
-      text_elements: unknown[]
-    }
-  | {
-      type: 'skill'
-      name: string
-      path: string
-    }
-  | {
-      type: 'mention'
-      name: string
-      path: string
-    }
-  | {
-      type: 'localImage'
-      path: string
-    }
-  | {
-      type: 'image'
-      url: string
-    }
+export type CodexUserInput = GeneratedUserInput
 
 export type CodexThreadItem =
   | {
@@ -165,10 +150,13 @@ export type CodexThreadItem =
 export type CodexTurn = {
   id: string
   items: CodexThreadItem[]
-  status: string
+  status: GeneratedTurnStatus
   error: {
     message: string
   } | null
+  startedAt?: number | null
+  completedAt?: number | null
+  durationMs?: number | null
 }
 
 export type CodexThread = {
@@ -267,6 +255,20 @@ export type CodexRpcNotification = {
 const isObjectRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
 
+const isGeneratedTurnStatus = (value: unknown): value is GeneratedTurnStatus =>
+  value === 'completed'
+  || value === 'interrupted'
+  || value === 'failed'
+  || value === 'inProgress'
+
+const asNotificationParams = <T>(
+  notification: CodexRpcNotification,
+  method: string
+): Partial<T> | null =>
+  notification.method === method && isObjectRecord(notification.params)
+    ? notification.params as Partial<T>
+    : null
+
 const asError = (value: unknown) =>
   value instanceof Error ? value : new Error(typeof value === 'string' ? value : 'Unknown RPC error.')
 
@@ -310,6 +312,36 @@ export const toServerRequestResponse = async (
 }
 
 export const notificationThreadId = (notification: CodexRpcNotification) => {
+  const resolvedRequest = asNotificationParams<GeneratedServerRequestResolvedNotification>(notification, 'serverRequest/resolved')
+  if (typeof resolvedRequest?.threadId === 'string') {
+    return resolvedRequest.threadId
+  }
+
+  const planDelta = asNotificationParams<GeneratedPlanDeltaNotification>(notification, 'item/plan/delta')
+  if (typeof planDelta?.threadId === 'string') {
+    return planDelta.threadId
+  }
+
+  const planUpdated = asNotificationParams<GeneratedTurnPlanUpdatedNotification>(notification, 'turn/plan/updated')
+  if (typeof planUpdated?.threadId === 'string') {
+    return planUpdated.threadId
+  }
+
+  const itemStarted = asNotificationParams<GeneratedItemStartedNotification>(notification, 'item/started')
+  if (typeof itemStarted?.threadId === 'string') {
+    return itemStarted.threadId
+  }
+
+  const itemCompleted = asNotificationParams<GeneratedItemCompletedNotification>(notification, 'item/completed')
+  if (typeof itemCompleted?.threadId === 'string') {
+    return itemCompleted.threadId
+  }
+
+  const turnCompleted = asNotificationParams<GeneratedTurnCompletedNotification>(notification, 'turn/completed')
+  if (typeof turnCompleted?.threadId === 'string') {
+    return turnCompleted.threadId
+  }
+
   const params = isObjectRecord(notification.params) ? notification.params : null
   const directThreadId = params?.threadId
   if (typeof directThreadId === 'string') {
@@ -325,6 +357,31 @@ export const notificationThreadId = (notification: CodexRpcNotification) => {
 }
 
 export const notificationTurnId = (notification: CodexRpcNotification) => {
+  const planDelta = asNotificationParams<GeneratedPlanDeltaNotification>(notification, 'item/plan/delta')
+  if (typeof planDelta?.turnId === 'string') {
+    return planDelta.turnId
+  }
+
+  const planUpdated = asNotificationParams<GeneratedTurnPlanUpdatedNotification>(notification, 'turn/plan/updated')
+  if (typeof planUpdated?.turnId === 'string') {
+    return planUpdated.turnId
+  }
+
+  const itemStarted = asNotificationParams<GeneratedItemStartedNotification>(notification, 'item/started')
+  if (typeof itemStarted?.turnId === 'string') {
+    return itemStarted.turnId
+  }
+
+  const itemCompleted = asNotificationParams<GeneratedItemCompletedNotification>(notification, 'item/completed')
+  if (typeof itemCompleted?.turnId === 'string') {
+    return itemCompleted.turnId
+  }
+
+  const turnCompleted = asNotificationParams<GeneratedTurnCompletedNotification>(notification, 'turn/completed')
+  if (turnCompleted?.turn && typeof turnCompleted.turn === 'object' && typeof turnCompleted.turn.id === 'string') {
+    return turnCompleted.turn.id
+  }
+
   const params = isObjectRecord(notification.params) ? notification.params : null
 
   const directTurnId = params?.turnId
@@ -357,10 +414,31 @@ export const notificationThreadUpdatedAt = (notification: CodexRpcNotification) 
 }
 
 export const notificationRequestId = (notification: CodexRpcNotification) => {
+  const resolvedRequest = asNotificationParams<GeneratedServerRequestResolvedNotification>(notification, 'serverRequest/resolved')
+  if (typeof resolvedRequest?.requestId === 'string' || typeof resolvedRequest?.requestId === 'number') {
+    return resolvedRequest.requestId
+  }
+
   const params = isObjectRecord(notification.params) ? notification.params : null
   const directRequestId = params?.requestId
 
   return isJsonRpcId(directRequestId) ? directRequestId : null
+}
+
+export const notificationTurnStatus = (notification: CodexRpcNotification): GeneratedTurnStatus | null => {
+  const turnCompleted = asNotificationParams<GeneratedTurnCompletedNotification>(notification, 'turn/completed')
+  if (turnCompleted?.turn && typeof turnCompleted.turn === 'object' && isGeneratedTurnStatus(turnCompleted.turn.status)) {
+    return turnCompleted.turn.status
+  }
+
+  const params = isObjectRecord(notification.params) ? notification.params : null
+  const directStatus = params?.status
+  if (isGeneratedTurnStatus(directStatus)) {
+    return directStatus
+  }
+
+  const turn = isObjectRecord(params?.turn) ? params.turn : null
+  return isGeneratedTurnStatus(turn?.status) ? turn.status : null
 }
 
 export class CodexRpcClient {

@@ -195,15 +195,18 @@ export const usePendingUserRequest = (
     return true
   }
 
-  const markRequestResolved = (requestId: PendingUserRequestId) => {
+  const markRequestResolved = (requestId: PendingUserRequestId, threadId?: string | null) => {
     const entry = entriesByRequestId.get(requestId)
     if (!entry) {
       return false
     }
 
-    const session = projectSessions(projectId).find(candidate =>
+    const session = (threadId !== undefined
+      ? projectSessions(projectId).find(candidate => candidate.current.value?.threadId === threadId)
+      : null)
+      ?? projectSessions(projectId).find(candidate =>
       candidate.queue.some(queueEntry => queueEntry.request.requestId === requestId)
-    )
+      )
     if (!session) {
       entriesByRequestId.delete(requestId)
       return false

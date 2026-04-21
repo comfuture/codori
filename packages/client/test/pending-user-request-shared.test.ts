@@ -419,6 +419,44 @@ describe('pending user request shared helpers', () => {
     expect(manager.markRequestResolved(191)).toBe(true)
   })
 
+  it('can resolve a pending request using the generated thread id from serverRequest/resolved', async () => {
+    const projectId = `project-${Date.now()}`
+    const currentThreadId = ref<string | null>('thread-a')
+    const manager = usePendingUserRequest(projectId, currentThreadId)
+    const responsePromise = manager.handleServerRequest({
+      id: 192,
+      method: 'item/tool/requestUserInput',
+      params: {
+        threadId: 'thread-a',
+        questions: [{
+          id: 'scope',
+          question: 'Pick a scope',
+          options: [{ label: 'Chat surface' }]
+        }]
+      }
+    })
+
+    currentThreadId.value = 'thread-b'
+    expect(manager.pendingRequest.value).toBeNull()
+
+    expect(manager.resolveRequest(192, {
+      answers: {
+        scope: {
+          answers: ['Chat surface']
+        }
+      }
+    })).toBe(true)
+
+    await expect(responsePromise).resolves.toEqual({
+      answers: {
+        scope: {
+          answers: ['Chat surface']
+        }
+      }
+    })
+    expect(manager.markRequestResolved(192, 'thread-a')).toBe(true)
+  })
+
   it('ignores stale responses after the queue advances to the next request', async () => {
     const activeThreadId = ref('thread-stale')
     const manager = usePendingUserRequest(`project-${Date.now()}`, activeThreadId)
