@@ -5,6 +5,7 @@ type JsonRpcError = {
 }
 
 import type { InitializeResponse } from './generated/codex-app-server/InitializeResponse'
+import type { ServerNotification } from './generated/codex-app-server/ServerNotification'
 import type { ItemCompletedNotification as GeneratedItemCompletedNotification } from './generated/codex-app-server/v2/ItemCompletedNotification'
 import type { ItemStartedNotification as GeneratedItemStartedNotification } from './generated/codex-app-server/v2/ItemStartedNotification'
 import type { PlanDeltaNotification as GeneratedPlanDeltaNotification } from './generated/codex-app-server/v2/PlanDeltaNotification'
@@ -43,10 +44,17 @@ type PendingRequest = {
 
 export type CodexRpcServerRequestHandler = (request: CodexRpcServerRequest) => Promise<unknown> | unknown
 
-export type CodexRpcNotification = {
-  method: string
-  params?: unknown
-}
+type LegacyCodexRpcNotification =
+  | {
+      method: 'turn/failed'
+      params?: unknown
+    }
+  | {
+      method: 'stream/error'
+      params?: unknown
+    }
+
+export type CodexRpcNotification = ServerNotification | LegacyCodexRpcNotification
 
 const isObjectRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -64,6 +72,9 @@ const asNotificationParams = <T>(
   notification.method === method && isObjectRecord(notification.params)
     ? notification.params as Partial<T>
     : null
+
+const notificationParams = (notification: CodexRpcNotification) =>
+  isObjectRecord(notification.params) ? notification.params : null
 
 const asError = (value: unknown) =>
   value instanceof Error ? value : new Error(typeof value === 'string' ? value : 'Unknown RPC error.')
@@ -138,7 +149,7 @@ export const notificationThreadId = (notification: CodexRpcNotification) => {
     return turnCompleted.threadId
   }
 
-  const params = isObjectRecord(notification.params) ? notification.params : null
+  const params = notificationParams(notification)
   const directThreadId = params?.threadId
   if (typeof directThreadId === 'string') {
     return directThreadId
@@ -178,7 +189,7 @@ export const notificationTurnId = (notification: CodexRpcNotification) => {
     return turnCompleted.turn.id
   }
 
-  const params = isObjectRecord(notification.params) ? notification.params : null
+  const params = notificationParams(notification)
 
   const directTurnId = params?.turnId
   if (typeof directTurnId === 'string') {
@@ -194,7 +205,7 @@ export const notificationTurnId = (notification: CodexRpcNotification) => {
 }
 
 export const notificationThreadName = (notification: CodexRpcNotification) => {
-  const params = isObjectRecord(notification.params) ? notification.params : null
+  const params = notificationParams(notification)
   const thread = isObjectRecord(params?.thread) ? params.thread : null
   const directName = thread?.name ?? params?.name ?? params?.title
 
@@ -202,7 +213,7 @@ export const notificationThreadName = (notification: CodexRpcNotification) => {
 }
 
 export const notificationThreadUpdatedAt = (notification: CodexRpcNotification) => {
-  const params = isObjectRecord(notification.params) ? notification.params : null
+  const params = notificationParams(notification)
   const thread = isObjectRecord(params?.thread) ? params.thread : null
   const directUpdatedAt = thread?.updatedAt ?? params?.updatedAt
 
@@ -215,7 +226,7 @@ export const notificationRequestId = (notification: CodexRpcNotification) => {
     return resolvedRequest.requestId
   }
 
-  const params = isObjectRecord(notification.params) ? notification.params : null
+  const params = notificationParams(notification)
   const directRequestId = params?.requestId
 
   return isJsonRpcId(directRequestId) ? directRequestId : null
@@ -227,7 +238,7 @@ export const notificationTurnStatus = (notification: CodexRpcNotification): Gene
     return turnCompleted.turn.status
   }
 
-  const params = isObjectRecord(notification.params) ? notification.params : null
+  const params = notificationParams(notification)
   const directStatus = params?.status
   if (isGeneratedTurnStatus(directStatus)) {
     return directStatus
@@ -395,7 +406,7 @@ export class CodexRpcClient {
     }
   }
 
-  private async parsePayload(raw: unknown): Promise<JsonRpcResponse | JsonRpcNotification | JsonRpcServerRequest | null> {
+  private async parsePayload(raw: unknown): Promise<JsonRpcResponse | CodexRpcNotification | JsonRpcServerRequest | null> {
     const text = typeof raw === 'string'
       ? raw
       : raw instanceof ArrayBuffer
@@ -422,7 +433,7 @@ export class CodexRpcClient {
       }
 
       if (typeof parsed.method === 'string') {
-        return parsed as JsonRpcNotification
+        return parsed as CodexRpcNotification
       }
 
       return null
