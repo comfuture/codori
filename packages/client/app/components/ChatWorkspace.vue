@@ -30,6 +30,7 @@ import {
 } from '../utils/chat-turn-engagement'
 import { isFocusWithinContainer } from '../utils/slash-prompt-focus'
 import { useChatAttachments, type DraftAttachment } from '../composables/useChatAttachments'
+import { useChatPlanWorkflow } from '../composables/useChatPlanWorkflow'
 import { useChatReviewWorkflow } from '../composables/useChatReviewWorkflow'
 import { usePendingUserRequest } from '../composables/usePendingUserRequest'
 import { useChatSession, type LiveStream, type SubagentPanelState } from '../composables/useChatSession'
@@ -61,12 +62,7 @@ import {
 } from '~~/shared/codex-chat'
 import { buildTurnStartInput, type PersistedProjectAttachment } from '~~/shared/chat-attachments'
 import {
-  buildCollaborationModeFromMask,
-  findCollaborationModeMask,
-  normalizeCollaborationModeListResponse,
-  resolveThreadCollaborationModeKey,
-  type CollaborationMode,
-  type CollaborationModeMask
+  type CollaborationMode
 } from '~~/shared/collaboration-mode'
 import type { ReviewStartResponse } from '~~/shared/generated/codex-app-server/v2/ReviewStartResponse'
 import type { ReviewStartParams } from '~~/shared/generated/codex-app-server/v2/ReviewStartParams'
@@ -105,7 +101,6 @@ import {
   shouldShowContextWindowIndicator,
   visibleModelOptions
 } from '~~/shared/chat-prompt-controls'
-import { shouldQueuePlanImplementationPrompt } from '~~/shared/plan-implementation-prompt'
 import { toProjectThreadRoute } from '~~/shared/codori'
 import {
   filterSlashCommands,
@@ -157,12 +152,6 @@ import {
   resolveSubagentAccent,
   toSubagentAvatarText
 } from '~~/shared/subagent-panels'
-import {
-  applyTurnPlanUpdate,
-  normalizeTurnPlanUpdate,
-  shouldResetThreadPlanState
-} from '~~/shared/turn-plan'
-
 const props = defineProps<{
   projectId: string
   threadId?: string | null
@@ -332,7 +321,6 @@ const fileAutocompleteLoading = ref(false)
 const fileAutocompleteError = ref<string | null>(null)
 const fileAutocompleteResults = ref<NormalizedFuzzyFileSearchMatch[]>([])
 const usageStatusModalOpen = ref(false)
-let planImplementationPromptFlushToken = 0
 const isWorkflowBusy = computed(() =>
   status.value === 'submitted'
   || status.value === 'streaming'
@@ -355,29 +343,6 @@ const promptSubmitStatus = computed(() =>
   })
 )
 const projectTitle = computed(() => selectedProject.value?.projectId ?? props.projectId)
-const currentThreadCollaborationModeKey = computed(() =>
-  resolveThreadCollaborationModeKey(activeThreadId.value ?? routeThreadId.value)
-)
-const currentPlanPromptThreadId = computed(() =>
-  activeThreadId.value ?? routeThreadId.value
-)
-const isPlanImplementationPromptOpen = computed(() =>
-  Boolean(planImplementationPromptTurnId.value && planImplementationPromptThreadId.value === currentPlanPromptThreadId.value)
-)
-const currentThreadCollaborationModeMask = computed(() =>
-  threadCollaborationModeMasks.value[currentThreadCollaborationModeKey.value] ?? null
-)
-const planCollaborationModeMask = computed(() =>
-  findCollaborationModeMask(collaborationModeMasks.value, 'plan')
-)
-const currentCollaborationModeLabel = computed(() =>
-  currentThreadCollaborationModeMask.value?.mode === 'plan'
-    ? currentThreadCollaborationModeMask.value.name
-    : null
-)
-const isPlanModeActive = computed(() =>
-  currentThreadCollaborationModeMask.value?.mode === 'plan'
-)
 const composerPlaceholder = computed(() =>
   hasPendingRequest.value
     ? 'Respond to the pending request below to let Codex continue'
@@ -488,15 +453,6 @@ const activeAgentMentionEntries = computed(() =>
       status: panel.status
     } satisfies AgentMentionAutocompleteEntry))
 )
-
-const currentThreadPlan = computed(() => {
-  const threadId = activeThreadId.value ?? routeThreadId.value
-  if (!threadId) {
-    return null
-  }
-
-  return threadPlans.value[threadId] ?? null
-})
 
 const agentMentionAccentIndexByThreadId = computed(() => {
   const entries = new Map<string, number>()
@@ -1781,228 +1737,6 @@ const ensureSkillAutocompleteCatalogCurrent = async () => {
   })
 }
 
-const updateThreadPlanState = (threadId: string, params: unknown) => {
-  const nextPlanUpdate = normalizeTurnPlanUpdate(params)
-  if (!nextPlanUpdate) {
-    return
-  }
-
-  const nextPlanState = applyTurnPlanUpdate(threadPlans.value[threadId], {
-    ...nextPlanUpdate,
-    threadId
-  })
-  if (!nextPlanState) {
-    const nextThreadPlans = { ...threadPlans.value }
-    delete nextThreadPlans[threadId]
-    threadPlans.value = nextThreadPlans
-    return
-  }
-
-  threadPlans.value = {
-    ...threadPlans.value,
-    [threadId]: nextPlanState
-  }
-}
-
-const setThreadPlanPanelOpen = (open: boolean) => {
-  if (!currentThreadPlan.value?.threadId) {
-    return
-  }
-
-  threadPlans.value = {
-    ...threadPlans.value,
-    [currentThreadPlan.value.threadId]: {
-      ...currentThreadPlan.value,
-      panelOpen: open
-    }
-  }
-}
-
-const clearThreadPlanState = (threadId: string) => {
-  if (!(threadId in threadPlans.value)) {
-    return
-  }
-
-  const nextThreadPlans = { ...threadPlans.value }
-  delete nextThreadPlans[threadId]
-  threadPlans.value = nextThreadPlans
-}
-
-const setThreadCollaborationModeMask = (
-  threadId: string | null | undefined,
-  mask: CollaborationModeMask | null
-) => {
-  const key = resolveThreadCollaborationModeKey(threadId)
-  const nextThreadModes = { ...threadCollaborationModeMasks.value }
-
-  if (mask) {
-    nextThreadModes[key] = mask
-  } else {
-    delete nextThreadModes[key]
-  }
-
-  threadCollaborationModeMasks.value = nextThreadModes
-}
-
-const moveDraftCollaborationModeToThread = (threadId: string) => {
-  const draftKey = resolveThreadCollaborationModeKey(null)
-  const draftMode = threadCollaborationModeMasks.value[draftKey]
-  if (!draftMode) {
-    return
-  }
-
-  const nextThreadModes = { ...threadCollaborationModeMasks.value }
-  nextThreadModes[threadId] = draftMode
-  delete nextThreadModes[draftKey]
-  threadCollaborationModeMasks.value = nextThreadModes
-}
-
-const buildCurrentTurnCollaborationMode = () =>
-  buildCollaborationModeFromMask(currentThreadCollaborationModeMask.value, {
-    model: selectedModel.value,
-    reasoning_effort: selectedEffort.value
-  })
-
-let pendingCollaborationModesLoad: Promise<void> | null = null
-
-const loadCollaborationModes = async (options?: { force?: boolean }) => {
-  if (collaborationModesLoaded.value && !options?.force) {
-    return
-  }
-
-  if (pendingCollaborationModesLoad) {
-    await pendingCollaborationModesLoad
-    return
-  }
-
-  const loadPromise = (async () => {
-    collaborationModesLoading.value = true
-    collaborationModesError.value = null
-
-    try {
-      await ensureProjectRuntime()
-      const response = await getClient(props.projectId).request<CollaborationModeListResponse>('collaborationMode/list', {})
-      collaborationModeMasks.value = normalizeCollaborationModeListResponse(response)
-    } catch (caughtError) {
-      collaborationModeMasks.value = []
-      collaborationModesError.value = caughtError instanceof Error ? caughtError.message : String(caughtError)
-    } finally {
-      collaborationModesLoaded.value = true
-      collaborationModesLoading.value = false
-    }
-  })()
-
-  pendingCollaborationModesLoad = loadPromise
-
-  try {
-    await loadPromise
-  } finally {
-    if (pendingCollaborationModesLoad === loadPromise) {
-      pendingCollaborationModesLoad = null
-    }
-  }
-}
-
-const ensurePlanModeAvailable = async () => {
-  if (!collaborationModesLoaded.value || (collaborationModesLoading.value && !planCollaborationModeMask.value)) {
-    await loadCollaborationModes()
-  }
-
-  if (!planCollaborationModeMask.value && collaborationModesError.value) {
-    await loadCollaborationModes({ force: true })
-  }
-
-  if (planCollaborationModeMask.value) {
-    return planCollaborationModeMask.value
-  }
-
-  throw new Error(collaborationModesError.value ?? 'Plan mode is unavailable in the current runtime.')
-}
-
-const setCurrentThreadCollaborationMode = async (mode: 'plan' | 'default') => {
-  if (isBusy.value) {
-    throw new Error('Cannot switch collaboration mode while a turn is running.')
-  }
-
-  await loadCollaborationModes()
-  if (collaborationModesError.value && !findCollaborationModeMask(collaborationModeMasks.value, mode)) {
-    await loadCollaborationModes({ force: true })
-  }
-  const mask = findCollaborationModeMask(collaborationModeMasks.value, mode)
-  if (!mask) {
-    throw new Error(
-      mode === 'plan'
-        ? collaborationModesError.value ?? 'Plan mode is unavailable in the current runtime.'
-        : collaborationModesError.value ?? 'Default collaboration mode is unavailable in the current runtime.'
-    )
-  }
-
-  setThreadCollaborationModeMask(activeThreadId.value ?? routeThreadId.value, mask)
-}
-
-const closePlanImplementationPrompt = () => {
-  planImplementationPromptFlushToken += 1
-  queuedPlanImplementationPromptTurnId.value = null
-  queuedPlanImplementationPromptThreadId.value = null
-  planImplementationPromptTurnId.value = null
-  planImplementationPromptThreadId.value = null
-}
-
-const flushPlanImplementationPrompt = async () => {
-  if (
-    !queuedPlanImplementationPromptTurnId.value
-    || !queuedPlanImplementationPromptThreadId.value
-    || hasPendingRequest.value
-  ) {
-    return
-  }
-
-  const turnId = queuedPlanImplementationPromptTurnId.value
-  const threadId = queuedPlanImplementationPromptThreadId.value
-  if (session.shownPlanImplementationPromptTurnIds.has(turnId)) {
-    queuedPlanImplementationPromptTurnId.value = null
-    queuedPlanImplementationPromptThreadId.value = null
-    return
-  }
-
-  if (currentPlanPromptThreadId.value !== threadId) {
-    return
-  }
-
-  const flushToken = ++planImplementationPromptFlushToken
-  await nextTick()
-  if (
-    flushToken !== planImplementationPromptFlushToken
-    || hasPendingRequest.value
-    || queuedPlanImplementationPromptTurnId.value !== turnId
-    || queuedPlanImplementationPromptThreadId.value !== threadId
-    || currentPlanPromptThreadId.value !== threadId
-  ) {
-    return
-  }
-
-  planImplementationPromptTurnId.value = turnId
-  planImplementationPromptThreadId.value = threadId
-}
-
-const maybeQueuePlanImplementationPrompt = (input: {
-  threadId: string | null
-  turnId: string | null
-  turnStatus: string | null | undefined
-}) => {
-  if (!shouldQueuePlanImplementationPrompt({
-    turnId: input.turnId,
-    latestPlanTurnId: latestPlanTurnId.value,
-    turnStatus: input.turnStatus
-  })) {
-    return
-  }
-
-  queuedPlanImplementationPromptThreadId.value = input.threadId
-  queuedPlanImplementationPromptTurnId.value = input.turnId
-  flushPlanImplementationPrompt()
-}
-
 type SlashCommandSubmissionResult = {
   consumed: boolean
   replacementText?: string
@@ -2114,22 +1848,6 @@ const handleUsageStatusOpenChange = (open: boolean) => {
   usageStatusModalOpen.value = open
 }
 
-watch(hasPendingRequest, (nextValue) => {
-  if (!nextValue) {
-    flushPlanImplementationPrompt()
-  }
-})
-
-watch(currentPlanPromptThreadId, () => {
-  void flushPlanImplementationPrompt()
-})
-
-watch(isPlanImplementationPromptOpen, (open) => {
-  if (open && planImplementationPromptTurnId.value) {
-    session.shownPlanImplementationPromptTurnIds.add(planImplementationPromptTurnId.value)
-  }
-})
-
 const removeOptimisticMessage = (messageId: string) => {
   messages.value = removeChatMessage(messages.value, messageId)
   optimisticAttachmentSnapshots.delete(messageId)
@@ -2200,6 +1918,51 @@ const {
   handleReviewDrawerOpenChange,
   handleReviewDrawerBack
 } = reviewWorkflow
+
+const planWorkflow = useChatPlanWorkflow({
+  projectId: props.projectId,
+  routeThreadId,
+  activeThreadId,
+  hasPendingRequest,
+  isBusy: computed(() => isWorkflowBusy.value || reviewStartPending.value),
+  selectedProjectStatus: computed(() => selectedProject.value?.status ?? null),
+  selectedModel,
+  selectedEffort,
+  threadPlans,
+  threadCollaborationModeMasks,
+  collaborationModeMasks,
+  collaborationModesLoaded,
+  collaborationModesLoading,
+  collaborationModesError,
+  latestPlanTurnId,
+  queuedPlanImplementationPromptTurnId,
+  queuedPlanImplementationPromptThreadId,
+  planImplementationPromptTurnId,
+  planImplementationPromptThreadId,
+  shownPlanImplementationPromptTurnIds: session.shownPlanImplementationPromptTurnIds,
+  ensureProjectRuntime: async () => await ensureProjectRuntime(),
+  getClient
+})
+
+const {
+  currentThreadCollaborationModeMask,
+  planCollaborationModeMask,
+  currentCollaborationModeLabel,
+  isPlanModeActive,
+  currentThreadPlan,
+  isPlanImplementationPromptOpen,
+  setThreadPlanPanelOpen,
+  clearThreadPlanState,
+  updateThreadPlanState,
+  shouldResetThreadPlanForTurn,
+  setThreadCollaborationModeMask,
+  moveDraftCollaborationModeToThread,
+  buildCurrentTurnCollaborationMode,
+  ensurePlanModeAvailable,
+  setCurrentThreadCollaborationMode,
+  closePlanImplementationPrompt,
+  maybeQueuePlanImplementationPrompt
+} = planWorkflow
 
 const isBusy = computed(() =>
   isWorkflowBusy.value
@@ -3345,7 +3108,7 @@ const applyNotification = (notification: CodexRpcNotification) => {
         return
       }
 
-      if (threadId && shouldResetThreadPlanState(threadPlans.value[threadId], nextTurnId)) {
+      if (threadId && shouldResetThreadPlanForTurn(threadId, nextTurnId)) {
         clearThreadPlanState(threadId)
       }
 
@@ -4400,22 +4163,6 @@ watch(
     }
   },
   { flush: 'post' }
-)
-
-watch(
-  () => selectedProject.value?.status ?? null,
-  (projectStatus) => {
-    if (
-      projectStatus !== 'running'
-      || collaborationModesLoaded.value
-      || collaborationModesLoading.value
-    ) {
-      return
-    }
-
-    void loadCollaborationModes()
-  },
-  { immediate: true }
 )
 
 watch(
