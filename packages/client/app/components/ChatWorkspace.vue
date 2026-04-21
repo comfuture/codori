@@ -2602,6 +2602,125 @@ const updateWebSearchMessageStatus = (
     parts: message.parts.map((part, index) => index === partIndex ? nextPart : part)
   }
 })
+
+const applyTurnStartedNotification = (
+  notification: CodexRpcNotification,
+  liveStream: LiveStream | null
+) => {
+  const threadId = notificationThreadId(notification) ?? currentLiveStream()?.threadId ?? activeThreadId.value
+  const nextTurnId = notificationTurnId(notification)
+  if (liveStream && !shouldAdvanceLiveStreamTurn({
+    lockedTurnId: liveStream.lockedTurnId,
+    nextTurnId
+  })) {
+    return
+  }
+
+  if (threadId && shouldResetThreadPlanForTurn(threadId, nextTurnId)) {
+    clearThreadPlanState(threadId)
+  }
+
+  if (nextTurnId) {
+    latestPlanTurnId.value = null
+  }
+  closePlanImplementationPrompt()
+
+  if (liveStream) {
+    setLiveStreamTurnId(liveStream, nextTurnId)
+    setLiveStreamInterruptRequested(liveStream, false)
+  }
+  messages.value = upsertStreamingMessage(
+    messages.value,
+    eventToMessage(`event-turn-started-${nextTurnId ?? Date.now()}`, {
+      kind: 'turn.started'
+    })
+  )
+  status.value = 'streaming'
+}
+
+const applyItemStartedNotification = (notification: CodexRpcNotification) => {
+  const params = notification.params as { item: ThreadItem }
+  if (params.item.type === 'collabAgentToolCall') {
+    applySubagentActivityItem(params.item)
+  }
+  if (params.item.type === 'plan') {
+    latestPlanTurnId.value = notificationTurnId(notification) ?? currentLiveStream()?.turnId ?? null
+  }
+  if (params.item.type === 'userMessage') {
+    for (const nextMessage of itemToMessages(params.item)) {
+      reconcilePendingUserMessage({
+        ...nextMessage,
+        pending: false
+      })
+    }
+    status.value = 'streaming'
+    return
+  }
+  markAssistantOutputStartedForItem(params.item)
+  seedStreamingMessage(params.item)
+  status.value = 'streaming'
+}
+
+const applyItemCompletedNotification = (notification: CodexRpcNotification) => {
+  const params = notification.params as { item: ThreadItem }
+  if (params.item.type === 'collabAgentToolCall') {
+    applySubagentActivityItem(params.item)
+  }
+  if (params.item.type === 'plan') {
+    latestPlanTurnId.value = notificationTurnId(notification) ?? currentLiveStream()?.turnId ?? null
+  }
+  markAssistantOutputStartedForItem(params.item)
+  for (const nextMessage of itemToMessages(params.item)) {
+    const confirmedMessage = {
+      ...nextMessage,
+      pending: false
+    }
+    if (params.item.type === 'userMessage') {
+      reconcilePendingUserMessage(confirmedMessage)
+      continue
+    }
+
+    messages.value = replaceStreamingMessage(messages.value, confirmedMessage)
+  }
+}
+
+const applyTerminalNotification = (
+  kind: 'turn.failed' | 'stream.error',
+  messageText: string,
+  liveStream: LiveStream | null
+) => {
+  markAwaitingAssistantOutput(false)
+  pushEventMessage(kind, messageText)
+  clearPendingOptimisticMessages(liveStream, { discardSnapshots: true })
+  if (liveStream) {
+    liveStream.lockedTurnId = null
+  }
+  clearLiveStream(new Error(messageText))
+  error.value = messageText
+  status.value = 'error'
+}
+
+const applyTurnCompletedNotification = (
+  notification: CodexRpcNotification,
+  liveStream: LiveStream | null
+) => {
+  if (notificationTurnStatus(notification) === 'failed') {
+    messages.value = updateWebSearchMessageStatus(messages.value, 'failed')
+  }
+  maybeQueuePlanImplementationPrompt({
+    threadId: notificationThreadId(notification) ?? liveStream?.threadId ?? activeThreadId.value,
+    turnId: notificationTurnId(notification) ?? liveStream?.turnId ?? null,
+    turnStatus: notificationTurnStatus(notification)
+  })
+  markAwaitingAssistantOutput(false)
+  clearPendingOptimisticMessages(liveStream, { discardSnapshots: true })
+  if (liveStream) {
+    liveStream.lockedTurnId = null
+  }
+  error.value = null
+  status.value = 'ready'
+  clearLiveStream()
+}
 const applyNotification = (notification: CodexRpcNotification) => {
   const liveStream = currentLiveStream()
   if (liveStream?.interruptAcknowledged && shouldIgnoreNotificationAfterInterrupt(notification.method)) {
@@ -2647,81 +2766,15 @@ const applyNotification = (notification: CodexRpcNotification) => {
       return
     }
     case 'turn/started': {
-      const threadId = notificationThreadId(notification) ?? currentLiveStream()?.threadId ?? activeThreadId.value
-      const nextTurnId = notificationTurnId(notification)
-      if (liveStream && !shouldAdvanceLiveStreamTurn({
-        lockedTurnId: liveStream.lockedTurnId,
-        nextTurnId
-      })) {
-        return
-      }
-
-      if (threadId && shouldResetThreadPlanForTurn(threadId, nextTurnId)) {
-        clearThreadPlanState(threadId)
-      }
-
-      if (nextTurnId) {
-        latestPlanTurnId.value = null
-      }
-      closePlanImplementationPrompt()
-
-      if (liveStream) {
-        setLiveStreamTurnId(liveStream, nextTurnId)
-        setLiveStreamInterruptRequested(liveStream, false)
-      }
-      messages.value = upsertStreamingMessage(
-        messages.value,
-        eventToMessage(`event-turn-started-${nextTurnId ?? Date.now()}`, {
-          kind: 'turn.started'
-        })
-      )
-      status.value = 'streaming'
+      applyTurnStartedNotification(notification, liveStream)
       return
     }
     case 'item/started': {
-      const params = notification.params as { item: ThreadItem }
-      if (params.item.type === 'collabAgentToolCall') {
-        applySubagentActivityItem(params.item)
-      }
-      if (params.item.type === 'plan') {
-        latestPlanTurnId.value = notificationTurnId(notification) ?? currentLiveStream()?.turnId ?? null
-      }
-      if (params.item.type === 'userMessage') {
-        for (const nextMessage of itemToMessages(params.item)) {
-          reconcilePendingUserMessage({
-            ...nextMessage,
-            pending: false
-          })
-        }
-        status.value = 'streaming'
-        return
-      }
-      markAssistantOutputStartedForItem(params.item)
-      seedStreamingMessage(params.item)
-      status.value = 'streaming'
+      applyItemStartedNotification(notification)
       return
     }
     case 'item/completed': {
-      const params = notification.params as { item: ThreadItem }
-      if (params.item.type === 'collabAgentToolCall') {
-        applySubagentActivityItem(params.item)
-      }
-      if (params.item.type === 'plan') {
-        latestPlanTurnId.value = notificationTurnId(notification) ?? currentLiveStream()?.turnId ?? null
-      }
-      markAssistantOutputStartedForItem(params.item)
-      for (const nextMessage of itemToMessages(params.item)) {
-        const confirmedMessage = {
-          ...nextMessage,
-          pending: false
-        }
-        if (params.item.type === 'userMessage') {
-          reconcilePendingUserMessage(confirmedMessage)
-          continue
-        }
-
-        messages.value = replaceStreamingMessage(messages.value, confirmedMessage)
-      }
+      applyItemCompletedNotification(notification)
       return
     }
     case 'item/agentMessage/delta': {
@@ -2883,63 +2936,21 @@ const applyNotification = (notification: CodexRpcNotification) => {
     }
     case 'error': {
       const params = notification.params as { error?: { message?: string } }
-      const messageText = params.error?.message ?? 'The stream failed.'
-      markAwaitingAssistantOutput(false)
-      pushEventMessage('stream.error', messageText)
-      clearPendingOptimisticMessages(liveStream, { discardSnapshots: true })
-      if (liveStream) {
-        liveStream.lockedTurnId = null
-      }
-      clearLiveStream(new Error(messageText))
-      error.value = messageText
-      status.value = 'error'
+      applyTerminalNotification('stream.error', params.error?.message ?? 'The stream failed.', liveStream)
       return
     }
     case 'turn/failed': {
       const params = notification.params as { error?: { message?: string } }
-      const messageText = params.error?.message ?? 'The turn failed.'
-      markAwaitingAssistantOutput(false)
-      pushEventMessage('turn.failed', messageText)
-      clearPendingOptimisticMessages(liveStream, { discardSnapshots: true })
-      if (liveStream) {
-        liveStream.lockedTurnId = null
-      }
-      clearLiveStream(new Error(messageText))
-      error.value = messageText
-      status.value = 'error'
+      applyTerminalNotification('turn.failed', params.error?.message ?? 'The turn failed.', liveStream)
       return
     }
     case 'stream/error': {
       const params = notification.params as { message?: string }
-      const messageText = params.message ?? 'The stream failed.'
-      markAwaitingAssistantOutput(false)
-      pushEventMessage('stream.error', messageText)
-      clearPendingOptimisticMessages(liveStream, { discardSnapshots: true })
-      if (liveStream) {
-        liveStream.lockedTurnId = null
-      }
-      clearLiveStream(new Error(messageText))
-      error.value = messageText
-      status.value = 'error'
+      applyTerminalNotification('stream.error', params.message ?? 'The stream failed.', liveStream)
       return
     }
     case 'turn/completed': {
-      if (notificationTurnStatus(notification) === 'failed') {
-        messages.value = updateWebSearchMessageStatus(messages.value, 'failed')
-      }
-      maybeQueuePlanImplementationPrompt({
-        threadId: notificationThreadId(notification) ?? liveStream?.threadId ?? activeThreadId.value,
-        turnId: notificationTurnId(notification) ?? liveStream?.turnId ?? null,
-        turnStatus: notificationTurnStatus(notification)
-      })
-      markAwaitingAssistantOutput(false)
-      clearPendingOptimisticMessages(liveStream, { discardSnapshots: true })
-      if (liveStream) {
-        liveStream.lockedTurnId = null
-      }
-      error.value = null
-      status.value = 'ready'
-      clearLiveStream()
+      applyTurnCompletedNotification(notification, liveStream)
       return
     }
     default:
