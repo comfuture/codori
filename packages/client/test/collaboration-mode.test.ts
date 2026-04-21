@@ -28,7 +28,7 @@ describe('collaboration mode helpers', () => {
       name: 'Default',
       mode: 'default',
       model: null,
-      reasoning_effort: undefined
+      reasoning_effort: null
     }])
   })
 
