@@ -35,6 +35,13 @@ const projectSessions = (projectId: string) => {
     .map(([, session]) => session)
 }
 
+const findProjectSessionByRequestId = (
+  projectId: string,
+  requestId: PendingUserRequestId
+) => projectSessions(projectId).find(candidate =>
+  candidate.queue.some(queueEntry => queueEntry.request.requestId === requestId)
+)
+
 const getSession = (projectId: string, threadId: string | null): PendingUserRequestSession => {
   const key = sessionKey(projectId, threadId)
   const existing = sessions.get(key)
@@ -163,19 +170,15 @@ export const usePendingUserRequest = (
 
   const resolveRequest = (requestId: PendingUserRequestId, response: unknown) => {
     const entry = entriesByRequestId.get(requestId)
-    if (!entry || entry.submitting) {
+    const session = findProjectSessionByRequestId(projectId, requestId)
+    if (!entry || entry.submitting || !session) {
       return false
     }
 
     entry.submitting = true
-    entry.resolve(response)
-
-    for (const session of projectSessions(projectId)) {
-      if (session.queue[0]?.request.requestId === requestId) {
-        promoteNextRequest(session)
-        break
-      }
-    }
+    resolveSessionEntry(session, requestId, entry => {
+      entry.resolve(response)
+    })
 
     return true
   }
@@ -186,9 +189,8 @@ export const usePendingUserRequest = (
       return false
     }
 
-    const session = projectSessions(projectId).find(candidate =>
-      candidate.queue.some(queueEntry => queueEntry.request.requestId === requestId)
-    ) ?? resolveSession(currentThreadId.value)
+    const session = findProjectSessionByRequestId(projectId, requestId)
+      ?? resolveSession(currentThreadId.value)
     resolveSessionEntry(session, requestId, entry => {
       entry.reject(error)
     })
@@ -204,9 +206,7 @@ export const usePendingUserRequest = (
     const session = (threadId !== undefined
       ? projectSessions(projectId).find(candidate => candidate.current.value?.threadId === threadId)
       : null)
-      ?? projectSessions(projectId).find(candidate =>
-      candidate.queue.some(queueEntry => queueEntry.request.requestId === requestId)
-      )
+      ?? findProjectSessionByRequestId(projectId, requestId)
     if (!session) {
       entriesByRequestId.delete(requestId)
       return false
