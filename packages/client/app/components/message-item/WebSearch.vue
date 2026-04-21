@@ -1,12 +1,15 @@
 <script setup lang="ts">
-import type { CodexThreadItem } from '~~/shared/codex-rpc'
+import { computed } from 'vue'
+import type { ThreadItem } from '~~/shared/generated/codex-app-server/v2/ThreadItem'
 import { useChatToolState } from './use-chat-tool-state'
 
 const props = defineProps<{
-  item: Extract<CodexThreadItem, { type: 'webSearch' }>
+  item: Extract<ThreadItem, { type: 'webSearch' }>
+  pending?: boolean
 }>()
 
-const { open, isLoading, isStreaming } = useChatToolState(() => props.item.status, props.item.status === 'failed')
+const derivedStatus = computed(() => props.pending ? 'inProgress' : 'completed')
+const { open, isLoading, isStreaming } = useChatToolState(() => derivedStatus.value)
 </script>
 
 <template>
@@ -18,7 +21,6 @@ const { open, isLoading, isStreaming } = useChatToolState(() => props.item.statu
     :streaming="isStreaming"
     variant="inline"
     :open="open"
-    :default-open="item.status === 'failed'"
     @update:open="open = $event"
   />
 </template>

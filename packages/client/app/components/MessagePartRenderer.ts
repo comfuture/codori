@@ -59,7 +59,8 @@ export default defineComponent({
           })
         case ITEM_PART:
           return h(MessagePartItem, {
-            part: props.part
+            part: props.part,
+            messagePending: props.message?.pending ?? false
           })
         default:
           return h('pre', {

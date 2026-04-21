@@ -1,4 +1,11 @@
-import type { CodexThread, CodexThreadItem, CodexTurn, CodexUserInput } from './codex-rpc'
+import type { MessagePhase } from './generated/codex-app-server/MessagePhase'
+import type { UserInput as GeneratedUserInput } from './generated/codex-app-server/v2/UserInput'
+import type { MemoryCitation } from './generated/codex-app-server/v2/MemoryCitation'
+import type { ThreadItem } from './generated/codex-app-server/v2/ThreadItem'
+import type { CodexThread, CodexTurn } from './codex-rpc'
+
+export type CodexUserInput = GeneratedUserInput
+export type CodexThreadItem = ThreadItem
 
 export const EVENT_PART = 'data-thread-event' as const
 export const ITEM_PART = 'data-thread-item' as const
@@ -144,6 +151,19 @@ export type ChatMessage = {
   pending?: boolean
   parts: ChatPart[]
 }
+
+export const asAgentMessageItem = (input: {
+  id: string
+  text: string
+  phase?: MessagePhase | null
+  memoryCitation?: MemoryCitation | null
+}): Extract<CodexThreadItem, { type: 'agentMessage' }> => ({
+  type: 'agentMessage',
+  id: input.id,
+  text: input.text,
+  phase: input.phase ?? null,
+  memoryCitation: input.memoryCitation ?? null
+})
 
 export const isSubagentActiveStatus = (status: SubagentAgentStatus) =>
   status === null || status === 'pendingInit' || status === 'running'
@@ -339,7 +359,6 @@ export const itemToMessages = (item: CodexThreadItem): ChatMessage[] => {
       return [{
         id: item.id,
         role: 'system',
-        pending: item.status === 'inProgress',
         parts: [{
           type: ITEM_PART,
           data: {

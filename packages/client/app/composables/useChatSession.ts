@@ -72,38 +72,42 @@ export type ChatSession = {
 
 const sessions = new Map<string, ChatSession>()
 
-const createSession = (): ChatSession => ({
-  messages: ref<ChatMessage[]>([]),
-  subagentPanels: ref<SubagentPanelState[]>([]),
-  threadPlans: ref<Record<string, ThreadPlanState>>({}),
-  threadCollaborationModeMasks: ref<Record<string, CollaborationModeMask>>({}),
-  collaborationModeMasks: ref<CollaborationModeMask[]>([]),
-  collaborationModesLoaded: ref(false),
-  collaborationModesLoading: ref(false),
-  collaborationModesError: ref<string | null>(null),
-  status: ref<ChatStatus>('ready'),
-  error: ref<string | null>(null),
-  activeThreadId: ref<string | null>(null),
-  threadTitle: ref<string | null>(null),
-  pendingThreadId: ref<string | null>(null),
-  autoRedirectThreadId: ref<string | null>(null),
-  loadVersion: ref(0),
-  promptControlsLoaded: ref(false),
-  promptControlsLoading: ref(false),
-  availableModels: ref<ModelOption[]>(FALLBACK_MODELS),
-  selectedModel: ref(FALLBACK_MODELS[0]!.model),
-  selectedEffort: ref(FALLBACK_MODELS[0]!.defaultReasoningEffort),
-  modelContextWindow: ref<number | null>(null),
-  tokenUsage: ref<TokenUsageSnapshot | null>(null),
-  latestPlanTurnId: ref<string | null>(null),
-  queuedPlanImplementationPromptTurnId: ref<string | null>(null),
-  queuedPlanImplementationPromptThreadId: ref<string | null>(null),
-  planImplementationPromptTurnId: ref<string | null>(null),
-  planImplementationPromptThreadId: ref<string | null>(null),
-  shownPlanImplementationPromptTurnIds: new Set<string>(),
-  pendingLiveStream: null,
-  liveStream: null
-})
+const createSession = (): ChatSession => {
+  const session: ChatSession = {
+    messages: ref([]) as Ref<ChatMessage[]>,
+    subagentPanels: ref([]) as Ref<SubagentPanelState[]>,
+    threadPlans: ref({}) as Ref<Record<string, ThreadPlanState>>,
+    threadCollaborationModeMasks: ref({}) as Ref<Record<string, CollaborationModeMask>>,
+    collaborationModeMasks: ref([]) as Ref<CollaborationModeMask[]>,
+    collaborationModesLoaded: ref(false),
+    collaborationModesLoading: ref(false),
+    collaborationModesError: ref(null) as Ref<string | null>,
+    status: ref('ready') as Ref<ChatStatus>,
+    error: ref(null) as Ref<string | null>,
+    activeThreadId: ref(null) as Ref<string | null>,
+    threadTitle: ref(null) as Ref<string | null>,
+    pendingThreadId: ref(null) as Ref<string | null>,
+    autoRedirectThreadId: ref(null) as Ref<string | null>,
+    loadVersion: ref(0),
+    promptControlsLoaded: ref(false),
+    promptControlsLoading: ref(false),
+    availableModels: ref(FALLBACK_MODELS) as Ref<ModelOption[]>,
+    selectedModel: ref(FALLBACK_MODELS[0]!.model),
+    selectedEffort: ref(FALLBACK_MODELS[0]!.defaultReasoningEffort),
+    modelContextWindow: ref(null) as Ref<number | null>,
+    tokenUsage: ref(null) as Ref<TokenUsageSnapshot | null>,
+    latestPlanTurnId: ref(null) as Ref<string | null>,
+    queuedPlanImplementationPromptTurnId: ref(null) as Ref<string | null>,
+    queuedPlanImplementationPromptThreadId: ref(null) as Ref<string | null>,
+    planImplementationPromptTurnId: ref(null) as Ref<string | null>,
+    planImplementationPromptThreadId: ref(null) as Ref<string | null>,
+    shownPlanImplementationPromptTurnIds: new Set<string>(),
+    pendingLiveStream: null,
+    liveStream: null
+  }
+
+  return session
+}
 
 export const useChatSession = (projectId: string) => {
   const existing = sessions.get(projectId)
