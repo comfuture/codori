@@ -30,6 +30,7 @@ import {
 } from '../utils/chat-turn-engagement'
 import { isFocusWithinContainer } from '../utils/slash-prompt-focus'
 import { useChatAttachments, type DraftAttachment } from '../composables/useChatAttachments'
+import { useChatReviewWorkflow } from '../composables/useChatReviewWorkflow'
 import { usePendingUserRequest } from '../composables/usePendingUserRequest'
 import { useChatSession, type LiveStream, type SubagentPanelState } from '../composables/useChatSession'
 import { useProjects } from '../composables/useProjects'
@@ -105,11 +106,7 @@ import {
   visibleModelOptions
 } from '~~/shared/chat-prompt-controls'
 import { shouldQueuePlanImplementationPrompt } from '~~/shared/plan-implementation-prompt'
-import {
-  resolveProjectGitBranchesUrl,
-  toProjectThreadRoute,
-  type ProjectGitBranchesResponse
-} from '~~/shared/codori'
+import { toProjectThreadRoute } from '~~/shared/codori'
 import {
   filterSlashCommands,
   findActiveSlashCommand,
@@ -309,7 +306,6 @@ const submitError = computed(() => composerError.value ? new Error(composerError
 const interruptRequested = ref(false)
 const awaitingAssistantOutput = ref(false)
 const sendMessageLocked = ref(false)
-const reviewStartPending = ref(false)
 const promptSelectionStart = ref(0)
 const promptSelectionEnd = ref(0)
 const isPromptFocused = ref(false)
@@ -335,20 +331,12 @@ const insertedSkillMentions = ref<SkillAutocompleteSelection[]>([])
 const fileAutocompleteLoading = ref(false)
 const fileAutocompleteError = ref<string | null>(null)
 const fileAutocompleteResults = ref<NormalizedFuzzyFileSearchMatch[]>([])
-const reviewDrawerOpen = ref(false)
-const reviewDrawerMode = ref<'target' | 'branch'>('target')
-const reviewDrawerCommandText = ref('/review')
 const usageStatusModalOpen = ref(false)
-const reviewBranches = ref<string[]>([])
-const reviewCurrentBranch = ref<string | null>(null)
-const reviewBranchesLoading = ref(false)
-const reviewBranchesError = ref<string | null>(null)
 let planImplementationPromptFlushToken = 0
-const isBusy = computed(() =>
+const isWorkflowBusy = computed(() =>
   status.value === 'submitted'
   || status.value === 'streaming'
   || isUploading.value
-  || reviewStartPending.value
 )
 const hasDraftContent = computed(() =>
   input.value.trim().length > 0
@@ -696,10 +684,6 @@ const slashDropdownOpen = computed(() =>
 
 const highlightedSlashCommand = computed(() =>
   filteredSlashCommands.value[slashHighlightIndex.value] ?? filteredSlashCommands.value[0] ?? null
-)
-
-const reviewBaseBranches = computed(() =>
-  reviewBranches.value.filter(branch => branch !== reviewCurrentBranch.value)
 )
 
 const starterPrompts = computed(() => {
@@ -1323,26 +1307,6 @@ const setComposerError = (messageText: string) => {
   status.value = 'error'
 }
 
-const resetReviewDrawerState = () => {
-  reviewDrawerMode.value = 'target'
-  reviewDrawerCommandText.value = '/review'
-  reviewBranchesLoading.value = false
-  reviewBranchesError.value = null
-}
-
-const closeReviewDrawer = () => {
-  reviewDrawerOpen.value = false
-  resetReviewDrawerState()
-}
-
-const openReviewDrawer = (commandText = '/review') => {
-  dismissedSlashMatchKey.value = null
-  reviewDrawerCommandText.value = commandText
-  reviewDrawerMode.value = 'target'
-  reviewBranchesError.value = null
-  reviewDrawerOpen.value = true
-}
-
 const clearSlashCommandDraft = () => {
   // Successful slash commands consume the draft immediately. Leaving `/usage`
   // or `/review` in the prompt after opening the modal/drawer makes the next
@@ -1817,98 +1781,6 @@ const ensureSkillAutocompleteCatalogCurrent = async () => {
   })
 }
 
-const fetchProjectGitBranches = async () => {
-  reviewBranchesLoading.value = true
-  reviewBranchesError.value = null
-
-  try {
-    const response = await fetch(resolveProjectGitBranchesUrl({
-      projectId: props.projectId,
-      configuredBase: String(runtimeConfig.public.serverBase ?? '')
-    }))
-
-    const body = await response.json() as ProjectGitBranchesResponse | { error?: { message?: string } }
-    if (!response.ok) {
-      throw new Error(body && typeof body === 'object' && 'error' in body
-        ? body.error?.message ?? 'Failed to load local branches.'
-        : 'Failed to load local branches.')
-    }
-
-    const result = body as ProjectGitBranchesResponse
-    reviewCurrentBranch.value = result.currentBranch
-    reviewBranches.value = result.branches
-  } finally {
-    reviewBranchesLoading.value = false
-  }
-}
-
-const openBaseBranchPicker = async () => {
-  reviewDrawerMode.value = 'branch'
-
-  try {
-    await fetchProjectGitBranches()
-    if (!reviewBaseBranches.value.length) {
-      reviewBranchesError.value = 'No local base branches are available to compare against.'
-    }
-  } catch (caughtError) {
-    reviewBranchesError.value = caughtError instanceof Error ? caughtError.message : String(caughtError)
-  }
-}
-
-const startReview = async (target: ReviewTarget) => {
-  if (reviewStartPending.value) {
-    return
-  }
-
-  if (hasPendingRequest.value || isBusy.value) {
-    setComposerError('Review can only start when the current thread is idle.')
-    return
-  }
-
-  reviewStartPending.value = true
-  const draftText = reviewDrawerCommandText.value
-  const submittedAttachments = attachments.value.slice()
-  input.value = ''
-  clearAttachments({ revoke: false })
-
-  try {
-    const client = getClient(props.projectId)
-    const liveStream = await ensurePendingLiveStream()
-    error.value = null
-    status.value = 'submitted'
-    tokenUsage.value = null
-    markAwaitingAssistantOutput(true)
-
-    const response = await client.request<ReviewStartResponse>('review/start', {
-      threadId: liveStream.threadId,
-      delivery: 'inline',
-      target
-    } satisfies ReviewStartParams)
-
-    for (const item of response.turn.items) {
-      if (item.type === 'userMessage') {
-        continue
-      }
-
-      for (const nextMessage of itemToMessages(item)) {
-        messages.value = upsertStreamingMessage(messages.value, {
-          ...nextMessage,
-          pending: false
-        })
-      }
-    }
-
-    lockLiveStreamTurnId(liveStream, response.turn.id)
-    replayBufferedNotifications(liveStream)
-    closeReviewDrawer()
-  } catch (caughtError) {
-    restoreDraftIfPristine(draftText, submittedAttachments)
-    setComposerError(caughtError instanceof Error ? caughtError.message : String(caughtError))
-  } finally {
-    reviewStartPending.value = false
-  }
-}
-
 const updateThreadPlanState = (threadId: string, params: unknown) => {
   const nextPlanUpdate = normalizeTurnPlanUpdate(params)
   if (!nextPlanUpdate) {
@@ -2238,15 +2110,6 @@ const activateSlashCommand = async (
   await handleSlashCommandSubmission(`/${command.name}`, attachments.value.slice())
 }
 
-const handleReviewDrawerOpenChange = (open: boolean) => {
-  if (open) {
-    reviewDrawerOpen.value = true
-    return
-  }
-
-  closeReviewDrawer()
-}
-
 const handleUsageStatusOpenChange = (open: boolean) => {
   usageStatusModalOpen.value = open
 }
@@ -2266,11 +2129,6 @@ watch(isPlanImplementationPromptOpen, (open) => {
     session.shownPlanImplementationPromptTurnIds.add(planImplementationPromptTurnId.value)
   }
 })
-
-const handleReviewDrawerBack = () => {
-  reviewDrawerMode.value = 'target'
-  reviewBranchesError.value = null
-}
 
 const removeOptimisticMessage = (messageId: string) => {
   messages.value = removeChatMessage(messages.value, messageId)
@@ -2301,6 +2159,52 @@ const restoreDraftIfPristine = (
     replaceAttachments(submittedAttachments)
   }
 }
+
+const reviewWorkflow = useChatReviewWorkflow({
+  projectId: props.projectId,
+  serverBase: String(runtimeConfig.public.serverBase ?? ''),
+  input,
+  attachments,
+  hasPendingRequest,
+  isWorkflowBusy,
+  error,
+  status,
+  tokenUsage,
+  messages,
+  setComposerError,
+  markAwaitingAssistantOutput,
+  clearAttachments,
+  restoreDraftIfPristine: (text, submittedAttachments) =>
+    restoreDraftIfPristine(text, submittedAttachments),
+  ensurePendingLiveStream,
+  getClient,
+  lockLiveStreamTurnId,
+  replayBufferedNotifications,
+  clearDismissedSlashMatch: () => {
+    dismissedSlashMatchKey.value = null
+  }
+})
+
+const {
+  reviewDrawerOpen,
+  reviewDrawerMode,
+  reviewBaseBranches,
+  reviewCurrentBranch,
+  reviewBranchesLoading,
+  reviewBranchesError,
+  reviewStartPending,
+  openReviewDrawer,
+  closeReviewDrawer,
+  openBaseBranchPicker,
+  startReview,
+  handleReviewDrawerOpenChange,
+  handleReviewDrawerBack
+} = reviewWorkflow
+
+const isBusy = computed(() =>
+  isWorkflowBusy.value
+  || reviewStartPending.value
+)
 
 const untrackPendingUserMessage = (messageId: string) => {
   const liveStream = currentLiveStream()
