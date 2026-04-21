@@ -1,8 +1,9 @@
 import type { MessagePhase } from './generated/codex-app-server/MessagePhase'
 import type { UserInput as GeneratedUserInput } from './generated/codex-app-server/v2/UserInput'
 import type { MemoryCitation } from './generated/codex-app-server/v2/MemoryCitation'
+import type { Thread } from './generated/codex-app-server/v2/Thread'
 import type { ThreadItem } from './generated/codex-app-server/v2/ThreadItem'
-import type { CodexThread, CodexTurn } from './codex-rpc'
+import type { Turn } from './generated/codex-app-server/v2/Turn'
 
 export type CodexUserInput = GeneratedUserInput
 export type CodexThreadItem = ThreadItem
@@ -227,7 +228,7 @@ const getUserMessageText = (item: Extract<CodexThreadItem, { type: 'userMessage'
 
 const shouldHideReviewBootstrapUserMessage = (
   item: Extract<CodexThreadItem, { type: 'userMessage' }>,
-  turn: CodexTurn
+  turn: Turn
 ) => {
   const reviewLifecycle = turn.items.find((candidate): candidate is Extract<CodexThreadItem, { type: 'enteredReviewMode' | 'exitedReviewMode' }> =>
     (candidate.type === 'enteredReviewMode' || candidate.type === 'exitedReviewMode')
@@ -416,7 +417,7 @@ export const itemToMessages = (item: CodexThreadItem): ChatMessage[] => {
   }
 }
 
-export const threadToMessages = (thread: CodexThread) =>
+export const threadToMessages = (thread: Thread) =>
   thread.turns.flatMap((turn) =>
     turn.items.flatMap((item) => {
       if (item.type === 'userMessage' && shouldHideReviewBootstrapUserMessage(item, turn)) {
@@ -427,7 +428,7 @@ export const threadToMessages = (thread: CodexThread) =>
     })
   )
 
-export const findLatestPlanTurnId = (turns: CodexTurn[]) => {
+export const findLatestPlanTurnId = (turns: Turn[]) => {
   for (let index = turns.length - 1; index >= 0; index -= 1) {
     const turn = turns[index]
     if (turn && turn.items.some(item => item.type === 'plan')) {
@@ -438,7 +439,7 @@ export const findLatestPlanTurnId = (turns: CodexTurn[]) => {
   return null
 }
 
-export const findLatestCompletedPlanTurnId = (turns: CodexTurn[]) => {
+export const findLatestCompletedPlanTurnId = (turns: Turn[]) => {
   for (let index = turns.length - 1; index >= 0; index -= 1) {
     const turn = turns[index]
     if (turn && turn.status === 'completed' && turn.items.some(item => item.type === 'plan')) {

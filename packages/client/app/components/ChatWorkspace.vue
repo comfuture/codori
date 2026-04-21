@@ -67,7 +67,13 @@ import {
   type CollaborationModeListResponse,
   type CollaborationModeMask
 } from '~~/shared/collaboration-mode'
+import type { ReviewStartResponse } from '~~/shared/generated/codex-app-server/v2/ReviewStartResponse'
+import type { Thread } from '~~/shared/generated/codex-app-server/v2/Thread'
+import type { ThreadReadResponse } from '~~/shared/generated/codex-app-server/v2/ThreadReadResponse'
 import type { ThreadItem } from '~~/shared/generated/codex-app-server/v2/ThreadItem'
+import type { ThreadResumeResponse } from '~~/shared/generated/codex-app-server/v2/ThreadResumeResponse'
+import type { ThreadStartResponse } from '~~/shared/generated/codex-app-server/v2/ThreadStartResponse'
+import type { TurnStartResponse } from '~~/shared/generated/codex-app-server/v2/TurnStartResponse'
 import {
   type ConfigReadResponse,
   notificationRequestId,
@@ -78,14 +84,8 @@ import {
   notificationThreadUpdatedAt,
   notificationTurnId,
   type CodexRpcNotification,
-  type CodexThread,
   type ReviewStartParams,
-  type ReviewStartResponse,
   type ReviewTarget,
-  type ThreadReadResponse,
-  type ThreadResumeResponse,
-  type ThreadStartResponse,
-  type TurnStartResponse
 } from '~~/shared/codex-rpc'
 import {
   buildTurnOverrides,
@@ -2440,7 +2440,7 @@ const shortThreadId = (value: string) => value.slice(0, 8)
 
 const resolveSubagentName = (
   threadId: string,
-  thread?: Pick<CodexThread, 'agentNickname' | 'name' | 'preview'> | null
+  thread?: Pick<Thread, 'agentNickname' | 'name' | 'preview'> | null
 ) => {
   const candidate = thread?.agentNickname?.trim()
     || thread?.name?.trim()
@@ -3129,7 +3129,7 @@ const applySubagentActivityItem = (item: Extract<ThreadItem, { type: 'collabAgen
   }
 }
 
-const rebuildSubagentPanelsFromThread = (thread: CodexThread) => {
+const rebuildSubagentPanelsFromThread = (thread: Thread) => {
   subagentPanels.value = []
   for (const turn of thread.turns) {
     for (const item of turn.items) {

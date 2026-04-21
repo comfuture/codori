@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest'
+import type { Thread } from '../shared/generated/codex-app-server/v2/Thread'
+import type { Turn } from '../shared/generated/codex-app-server/v2/Turn'
 import {
   asAgentMessageItem,
   findLatestCompletedPlanTurnId,
@@ -11,6 +13,36 @@ import {
 } from '../shared/codex-chat'
 import { mergeThreadSummary, renameThreadSummary } from '../app/composables/useThreadSummaries'
 import { resolveChatMessagesStatus } from '../app/utils/chat-messages-status'
+
+const makeTurn = (input: Pick<Turn, 'id' | 'items' | 'status' | 'error'> & Partial<Pick<Turn, 'startedAt' | 'completedAt' | 'durationMs'>>): Turn => ({
+  id: input.id,
+  items: input.items,
+  status: input.status,
+  error: input.error,
+  startedAt: input.startedAt ?? null,
+  completedAt: input.completedAt ?? null,
+  durationMs: input.durationMs ?? null
+})
+
+const makeThread = (input: Pick<Thread, 'id' | 'preview' | 'cwd' | 'createdAt' | 'updatedAt' | 'name' | 'turns'>): Thread => ({
+  id: input.id,
+  forkedFromId: null,
+  preview: input.preview,
+  ephemeral: false,
+  modelProvider: 'openai',
+  createdAt: input.createdAt,
+  updatedAt: input.updatedAt,
+  status: { type: 'idle' },
+  path: null,
+  cwd: input.cwd,
+  cliVersion: '0.0.0-test',
+  source: 'appServer',
+  agentNickname: null,
+  agentRole: null,
+  gitInfo: null,
+  name: input.name,
+  turns: input.turns
+})
 
 describe('chat transcript stability', () => {
   it('replaces a streamed text message with the completed server payload', () => {
@@ -135,7 +167,7 @@ describe('chat transcript stability', () => {
   })
 
   it('tracks the latest turn that contains a plan item', () => {
-    expect(findLatestPlanTurnId([{
+    expect(findLatestPlanTurnId([makeTurn({
       id: 'turn-1',
       status: 'completed',
       error: null,
@@ -143,7 +175,7 @@ describe('chat transcript stability', () => {
         id: 'agent-1',
         text: 'hello'
       })]
-    }, {
+    }), makeTurn({
       id: 'turn-2',
       status: 'completed',
       error: null,
@@ -152,7 +184,7 @@ describe('chat transcript stability', () => {
         id: 'plan-1',
         text: 'first plan'
       }]
-    }, {
+    }), makeTurn({
       id: 'turn-3',
       status: 'completed',
       error: null,
@@ -164,9 +196,9 @@ describe('chat transcript stability', () => {
         id: 'plan-2',
         text: 'latest plan'
       }]
-    }])).toBe('turn-3')
+    })])).toBe('turn-3')
 
-    expect(findLatestPlanTurnId([{
+    expect(findLatestPlanTurnId([makeTurn({
       id: 'turn-1',
       status: 'completed',
       error: null,
@@ -174,11 +206,11 @@ describe('chat transcript stability', () => {
         id: 'agent-1',
         text: 'hello'
       })]
-    }])).toBeNull()
+    })])).toBeNull()
   })
 
   it('tracks the latest completed turn that contains a plan item', () => {
-    expect(findLatestCompletedPlanTurnId([{
+    expect(findLatestCompletedPlanTurnId([makeTurn({
       id: 'turn-1',
       status: 'completed',
       error: null,
@@ -187,7 +219,7 @@ describe('chat transcript stability', () => {
         id: 'plan-1',
         text: 'first plan'
       }]
-    }, {
+    }), makeTurn({
       id: 'turn-2',
       status: 'inProgress',
       error: null,
@@ -196,9 +228,9 @@ describe('chat transcript stability', () => {
         id: 'plan-2',
         text: 'still streaming'
       }]
-    }])).toBe('turn-1')
+    })])).toBe('turn-1')
 
-    expect(findLatestCompletedPlanTurnId([{
+    expect(findLatestCompletedPlanTurnId([makeTurn({
       id: 'turn-1',
       status: 'inProgress',
       error: null,
@@ -207,7 +239,7 @@ describe('chat transcript stability', () => {
         id: 'plan-1',
         text: 'not done'
       }]
-    }])).toBeNull()
+    })])).toBeNull()
   })
 
   it('keeps chat loading state in submitted mode until real assistant output appears', () => {
@@ -326,14 +358,14 @@ describe('chat transcript stability', () => {
   })
 
   it('hides the synthetic review bootstrap user message when hydrating a thread', () => {
-    expect(threadToMessages({
+    expect(threadToMessages(makeThread({
       id: 'thread-1',
       preview: '',
       cwd: '/tmp',
       createdAt: 0,
       updatedAt: 0,
       name: null,
-      turns: [{
+      turns: [makeTurn({
         id: 'turn-1',
         status: 'completed',
         error: null,
@@ -358,8 +390,8 @@ describe('chat transcript stability', () => {
             text_elements: []
           }]
         }]
-      }]
-    })).toEqual<ChatMessage[]>([{
+      })]
+    }))).toEqual<ChatMessage[]>([{
       id: 'turn-1-review-started',
       role: 'system',
       parts: [{
