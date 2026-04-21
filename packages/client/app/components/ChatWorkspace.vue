@@ -67,6 +67,7 @@ import {
   type CollaborationModeListResponse,
   type CollaborationModeMask
 } from '~~/shared/collaboration-mode'
+import type { ThreadItem } from '~~/shared/generated/codex-app-server/v2/ThreadItem'
 import {
   type ConfigReadResponse,
   notificationRequestId,
@@ -78,7 +79,6 @@ import {
   notificationTurnId,
   type CodexRpcNotification,
   type CodexThread,
-  type CodexThreadItem,
   type ReviewStartParams,
   type ReviewStartResponse,
   type ReviewTarget,
@@ -2280,7 +2280,7 @@ const markAwaitingAssistantOutput = (nextValue: boolean) => {
   awaitingAssistantOutput.value = nextValue
 }
 
-const markAssistantOutputStartedForItem = (item: CodexThreadItem) => {
+const markAssistantOutputStartedForItem = (item: ThreadItem) => {
   if (item.type !== 'userMessage') {
     markAwaitingAssistantOutput(false)
   }
@@ -2745,7 +2745,7 @@ const ensureThread = async () => {
   }
 }
 
-const seedStreamingMessage = (item: CodexThreadItem) => {
+const seedStreamingMessage = (item: ThreadItem) => {
   const [seed] = itemToMessages(item)
   if (!seed) {
     return
@@ -2855,9 +2855,14 @@ const fallbackCommandMessage = (itemId: string): ChatMessage => ({
         type: 'commandExecution',
         id: itemId,
         command: 'Command',
+        cwd: '',
+        processId: null,
+        source: 'agent',
+        commandActions: [],
         aggregatedOutput: '',
         exitCode: null,
-        status: 'inProgress'
+        status: 'inProgress',
+        durationMs: null
       }
     }
   }]
@@ -2899,6 +2904,7 @@ const fallbackMcpToolMessage = (itemId: string): ChatMessage => ({
         result: null,
         error: null,
         status: 'inProgress',
+        durationMs: null,
         progressMessages: []
       }
     }
@@ -3029,7 +3035,7 @@ const pushSubagentEventMessage = (threadId: string, kind: 'turn.failed' | 'strea
   )
 }
 
-const seedSubagentStreamingMessage = (threadId: string, item: CodexThreadItem) => {
+const seedSubagentStreamingMessage = (threadId: string, item: ThreadItem) => {
   const [seed] = itemToMessages(item)
   if (!seed) {
     return
@@ -3099,7 +3105,7 @@ const bootstrapSubagentPanel = async (threadId: string) => {
   await bootstrapPromise
 }
 
-const applySubagentActivityItem = (item: Extract<CodexThreadItem, { type: 'collabAgentToolCall' }>) => {
+const applySubagentActivityItem = (item: Extract<ThreadItem, { type: 'collabAgentToolCall' }>) => {
   const orderedThreadIds = [
     ...item.receiverThreadIds,
     ...Object.keys(item.agentsStates).filter(threadId => !item.receiverThreadIds.includes(threadId))
@@ -3165,7 +3171,7 @@ const applySubagentNotification = (threadId: string, notification: CodexRpcNotif
       return
     }
     case 'item/started': {
-      const params = notification.params as { item: CodexThreadItem }
+      const params = notification.params as { item: ThreadItem }
       if (params.item.type === 'collabAgentToolCall') {
         applySubagentActivityItem(params.item)
       }
@@ -3173,7 +3179,7 @@ const applySubagentNotification = (threadId: string, notification: CodexRpcNotif
       return
     }
     case 'item/completed': {
-      const params = notification.params as { item: CodexThreadItem }
+      const params = notification.params as { item: ThreadItem }
       if (params.item.type === 'collabAgentToolCall') {
         applySubagentActivityItem(params.item)
       }
@@ -3412,7 +3418,7 @@ const applyNotification = (notification: CodexRpcNotification) => {
       return
     }
     case 'item/started': {
-      const params = notification.params as { item: CodexThreadItem }
+      const params = notification.params as { item: ThreadItem }
       if (params.item.type === 'collabAgentToolCall') {
         applySubagentActivityItem(params.item)
       }
@@ -3435,7 +3441,7 @@ const applyNotification = (notification: CodexRpcNotification) => {
       return
     }
     case 'item/completed': {
-      const params = notification.params as { item: CodexThreadItem }
+      const params = notification.params as { item: ThreadItem }
       if (params.item.type === 'collabAgentToolCall') {
         applySubagentActivityItem(params.item)
       }

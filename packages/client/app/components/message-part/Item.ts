@@ -18,6 +18,10 @@ export default defineComponent({
     part: {
       type: Object as PropType<ChatPart | null>,
       default: null
+    },
+    messagePending: {
+      type: Boolean,
+      default: false
     }
   },
   setup(props) {
@@ -39,7 +43,10 @@ export default defineComponent({
         case 'subagent_activity':
           return h(MessageItemSubagentActivity, { item: itemData.item })
         case 'web_search':
-          return h(MessageItemWebSearch, { item: itemData.item })
+          return h(MessageItemWebSearch, {
+            item: itemData.item,
+            pending: props.messagePending
+          })
         case 'context_compaction':
           return h(MessageItemContextCompaction)
         default:

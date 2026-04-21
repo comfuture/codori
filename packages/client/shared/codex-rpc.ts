@@ -8,6 +8,7 @@ import type { ItemCompletedNotification as GeneratedItemCompletedNotification } 
 import type { ItemStartedNotification as GeneratedItemStartedNotification } from './generated/codex-app-server/v2/ItemStartedNotification'
 import type { PlanDeltaNotification as GeneratedPlanDeltaNotification } from './generated/codex-app-server/v2/PlanDeltaNotification'
 import type { ServerRequestResolvedNotification as GeneratedServerRequestResolvedNotification } from './generated/codex-app-server/v2/ServerRequestResolvedNotification'
+import type { ThreadItem as GeneratedThreadItem } from './generated/codex-app-server/v2/ThreadItem'
 import type { TurnCompletedNotification as GeneratedTurnCompletedNotification } from './generated/codex-app-server/v2/TurnCompletedNotification'
 import type { TurnPlanUpdatedNotification as GeneratedTurnPlanUpdatedNotification } from './generated/codex-app-server/v2/TurnPlanUpdatedNotification'
 import type { TurnStatus as GeneratedTurnStatus } from './generated/codex-app-server/v2/TurnStatus'
@@ -47,105 +48,7 @@ export type CodexRpcServerRequestHandler = (request: CodexRpcServerRequest) => P
 
 export type CodexUserInput = GeneratedUserInput
 
-export type CodexThreadItem =
-  | {
-      type: 'userMessage'
-      id: string
-      content: CodexUserInput[]
-    }
-  | {
-      type: 'agentMessage'
-      id: string
-      text: string
-    }
-  | {
-      type: 'plan'
-      id: string
-      text: string
-    }
-  | {
-      type: 'reasoning'
-      id: string
-      summary: string[]
-      content: string[]
-    }
-  | {
-      type: 'commandExecution'
-      id: string
-      command: string
-      aggregatedOutput: string | null
-      exitCode: number | null
-      status: string
-    }
-  | {
-      type: 'fileChange'
-      id: string
-      changes: Array<{
-        path: string
-        kind?: unknown
-        diff?: string | null
-      }>
-      status: string
-    }
-  | {
-      type: 'mcpToolCall'
-      id: string
-      server: string
-      tool: string
-      arguments: unknown
-      result: {
-        content?: unknown[]
-        structuredContent?: unknown
-      } | null
-      error: {
-        message: string
-      } | null
-      status: string
-    }
-  | {
-      type: 'dynamicToolCall'
-      id: string
-      tool: string
-      arguments: unknown
-      status: string
-      contentItems: Array<{ type: 'inputText', text: string } | { type: 'inputImage', imageUrl: string }> | null
-      success: boolean | null
-    }
-  | {
-      type: 'collabAgentToolCall'
-      id: string
-      tool: 'spawnAgent' | 'sendInput' | 'resumeAgent' | 'wait' | 'closeAgent'
-      status: string
-      senderThreadId: string
-      receiverThreadIds: string[]
-      prompt: string | null
-      model: string | null
-      reasoningEffort: string | null
-      agentsStates: Record<string, {
-        status: 'pendingInit' | 'running' | 'interrupted' | 'completed' | 'errored' | 'shutdown' | 'notFound' | null
-        message: string | null
-      } | undefined>
-    }
-  | {
-      type: 'webSearch'
-      id: string
-      query: string
-      status?: string
-    }
-  | {
-      type: 'contextCompaction'
-      id: string
-    }
-  | {
-      type: 'enteredReviewMode'
-      id: string
-      review: string
-    }
-  | {
-      type: 'exitedReviewMode'
-      id: string
-      review: string
-    }
+export type CodexThreadItem = GeneratedThreadItem
 
 export type CodexTurn = {
   id: string

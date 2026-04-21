@@ -15,6 +15,7 @@ import {
 import { resolveChatMessagesStatus, shouldAwaitAssistantOutput } from '../app/utils/chat-messages-status'
 import {
   ITEM_PART,
+  asAgentMessageItem,
   isSubagentActiveStatus,
   itemToMessages,
   type VisualSubagentPanel
@@ -145,9 +146,10 @@ describe('client package', () => {
 
   it('maps agent thread items into chat messages', () => {
     expect(itemToMessages({
-      type: 'agentMessage',
-      id: 'agent-1',
-      text: 'Working on it'
+      ...asAgentMessageItem({
+        id: 'agent-1',
+        text: 'Working on it'
+      })
     })).toEqual([{
       id: 'agent-1',
       role: 'assistant',
@@ -377,7 +379,8 @@ describe('client package', () => {
       arguments: { path: '/tmp/demo.txt' },
       result: null,
       error: null,
-      status: 'inProgress'
+      status: 'inProgress',
+      durationMs: null
     })).toEqual([{
       id: 'tool-1',
       role: 'system',
@@ -394,7 +397,8 @@ describe('client package', () => {
             arguments: { path: '/tmp/demo.txt' },
             result: null,
             error: null,
-            status: 'inProgress'
+            status: 'inProgress',
+            durationMs: null
           }
         }
       }]

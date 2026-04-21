@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { FileChangeItem } from '~~/shared/codex-chat'
+import type { PatchChangeKind } from '~~/shared/generated/codex-app-server/v2/PatchChangeKind'
 import { useChatToolState } from './use-chat-tool-state'
 
 const props = defineProps<{
@@ -26,7 +27,7 @@ const filePreview = computed(() => {
 
 const title = computed(() => {
   const hasChanges = changes.value.length > 0
-  const deletedOnly = hasChanges && changes.value.every(change => change.kind === 'delete')
+  const deletedOnly = hasChanges && changes.value.every(change => change.kind.type === 'delete')
 
   switch (props.item.status) {
     case 'inProgress':
@@ -42,8 +43,8 @@ const icon = computed(() =>
   props.item.status === 'failed' ? 'i-lucide-triangle-alert' : 'i-lucide-file-pen-line'
 )
 
-const changeKindIcon = (kind?: string) => {
-  switch (kind) {
+const changeKindIcon = (kind?: PatchChangeKind) => {
+  switch (kind?.type) {
     case 'add':
       return 'i-lucide-plus'
     case 'delete':
@@ -55,8 +56,8 @@ const changeKindIcon = (kind?: string) => {
   }
 }
 
-const changeKindClass = (kind?: string) => {
-  switch (kind) {
+const changeKindClass = (kind?: PatchChangeKind) => {
+  switch (kind?.type) {
     case 'add':
       return 'text-success'
     case 'delete':
@@ -97,9 +98,9 @@ const { open, isLoading, isStreaming } = useChatToolState(() => props.item.statu
         >
           <div class="flex items-center gap-2 text-xs font-medium text-muted">
             <UIcon
-              :name="changeKindIcon(change.kind as string | undefined)"
+              :name="changeKindIcon(change.kind)"
               class="size-3.5"
-              :class="changeKindClass(change.kind as string | undefined)"
+              :class="changeKindClass(change.kind)"
             />
             <span class="font-mono text-toned">{{ change.path }}</span>
           </div>

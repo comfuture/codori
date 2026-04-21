@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  asAgentMessageItem,
   findLatestCompletedPlanTurnId,
   findLatestPlanTurnId,
   itemToMessages,
@@ -138,11 +139,10 @@ describe('chat transcript stability', () => {
       id: 'turn-1',
       status: 'completed',
       error: null,
-      items: [{
-        type: 'agentMessage',
+      items: [asAgentMessageItem({
         id: 'agent-1',
         text: 'hello'
-      }]
+      })]
     }, {
       id: 'turn-2',
       status: 'completed',
@@ -156,11 +156,10 @@ describe('chat transcript stability', () => {
       id: 'turn-3',
       status: 'completed',
       error: null,
-      items: [{
-        type: 'agentMessage',
+      items: [asAgentMessageItem({
         id: 'agent-2',
         text: 'follow-up'
-      }, {
+      }), {
         type: 'plan',
         id: 'plan-2',
         text: 'latest plan'
@@ -171,11 +170,10 @@ describe('chat transcript stability', () => {
       id: 'turn-1',
       status: 'completed',
       error: null,
-      items: [{
-        type: 'agentMessage',
+      items: [asAgentMessageItem({
         id: 'agent-1',
         text: 'hello'
-      }]
+      })]
     }])).toBeNull()
   })
 
