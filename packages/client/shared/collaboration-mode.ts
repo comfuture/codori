@@ -1,4 +1,4 @@
-import type { ReasoningEffort } from './chat-prompt-controls'
+import type { ReasoningEffort } from './generated/codex-app-server/ReasoningEffort'
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
