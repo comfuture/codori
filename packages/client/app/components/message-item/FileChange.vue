@@ -6,6 +6,7 @@ import { useChatToolState } from './use-chat-tool-state'
 
 const props = defineProps<{
   item: FileChangeItem
+  liveOutput?: string | null
 }>()
 
 const changes = computed(() => props.item.changes ?? [])
@@ -86,9 +87,9 @@ const { open, isLoading, isStreaming } = useChatToolState(() => props.item.statu
   >
     <div class="space-y-3">
       <pre
-        v-if="item.liveOutput"
+        v-if="liveOutput"
         class="overflow-x-auto rounded-xl border border-default/70 bg-elevated/40 px-3 py-3 text-xs leading-6 text-toned"
-      >{{ item.liveOutput }}</pre>
+      >{{ liveOutput }}</pre>
 
       <ul class="space-y-3">
         <li

@@ -5,6 +5,7 @@ import { useChatToolState } from './use-chat-tool-state'
 
 const props = defineProps<{
   item: DynamicToolCallItem
+  progressMessages?: string[]
 }>()
 
 const inputSummary = computed(() =>
@@ -95,6 +96,19 @@ const { open, isLoading, isStreaming } = useChatToolState(() => props.item.statu
         v-if="item.arguments != null"
         class="overflow-x-auto rounded-xl border border-default/70 bg-elevated/30 px-3 py-3 text-xs leading-6 text-toned"
       >{{ JSON.stringify(item.arguments, null, 2) }}</pre>
+
+      <ul
+        v-if="progressMessages?.length"
+        class="space-y-1 rounded-xl border border-default/70 bg-elevated/30 px-3 py-3"
+      >
+        <li
+          v-for="(message, index) in progressMessages"
+          :key="`${item.id}-progress-${index}`"
+          class="text-xs leading-6 text-toned"
+        >
+          {{ message }}
+        </li>
+      </ul>
 
       <p
         v-if="item.success !== null"
