@@ -1,14 +1,10 @@
+import type { TurnPlanStep } from './generated/codex-app-server/v2/TurnPlanStep'
+import type { TurnPlanStepStatus } from './generated/codex-app-server/v2/TurnPlanStepStatus'
+
 type ObjectRecord = Record<string, unknown>
 
 const isObjectRecord = (value: unknown): value is ObjectRecord =>
   typeof value === 'object' && value !== null
-
-export type TurnPlanStepStatus = 'pending' | 'inProgress' | 'completed'
-
-export type TurnPlanStep = {
-  step: string
-  status: TurnPlanStepStatus
-}
 
 export type TurnPlanUpdate = {
   threadId: string | null
