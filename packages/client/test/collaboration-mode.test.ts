@@ -28,8 +28,29 @@ describe('collaboration mode helpers', () => {
       name: 'Default',
       mode: 'default',
       model: null,
-      reasoning_effort: null
+      reasoning_effort: undefined
     }])
+  })
+
+  it('preserves explicit null reasoning effort overrides', () => {
+    const defaultMask = findCollaborationModeMask([{
+      name: 'Default',
+      mode: 'default',
+      model: null,
+      reasoning_effort: null
+    }], 'default')
+
+    expect(buildCollaborationModeFromMask(defaultMask, {
+      model: 'gpt-5.4',
+      reasoning_effort: 'high'
+    })).toEqual({
+      mode: 'default',
+      settings: {
+        model: 'gpt-5.4',
+        reasoning_effort: null,
+        developer_instructions: null
+      }
+    })
   })
 
   it('builds a concrete collaboration mode from a mask and base prompt settings', () => {

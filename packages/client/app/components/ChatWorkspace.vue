@@ -63,13 +63,13 @@ import {
   findCollaborationModeMask,
   normalizeCollaborationModeListResponse,
   resolveThreadCollaborationModeKey,
-  type CollaborationMode
+  type CollaborationMode,
+  type CollaborationModeMask
 } from '~~/shared/collaboration-mode'
 import type { ReviewStartResponse } from '~~/shared/generated/codex-app-server/v2/ReviewStartResponse'
 import type { ReviewStartParams } from '~~/shared/generated/codex-app-server/v2/ReviewStartParams'
 import type { ReviewTarget } from '~~/shared/generated/codex-app-server/v2/ReviewTarget'
 import type { CollaborationModeListResponse } from '~~/shared/generated/codex-app-server/v2/CollaborationModeListResponse'
-import type { CollaborationModeMask } from '~~/shared/generated/codex-app-server/v2/CollaborationModeMask'
 import type { ConfigReadResponse } from '~~/shared/generated/codex-app-server/v2/ConfigReadResponse'
 import type { ModelListResponse } from '~~/shared/generated/codex-app-server/v2/ModelListResponse'
 import type { Thread } from '~~/shared/generated/codex-app-server/v2/Thread'

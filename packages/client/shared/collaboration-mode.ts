@@ -1,6 +1,6 @@
 import type { ReasoningEffort } from './generated/codex-app-server/ReasoningEffort'
-import type { CollaborationModeListResponse } from './generated/codex-app-server/v2/CollaborationModeListResponse'
-import type { CollaborationModeMask } from './generated/codex-app-server/v2/CollaborationModeMask'
+import type { CollaborationModeListResponse as GeneratedCollaborationModeListResponse } from './generated/codex-app-server/v2/CollaborationModeListResponse'
+import type { CollaborationModeMask as GeneratedCollaborationModeMask } from './generated/codex-app-server/v2/CollaborationModeMask'
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -35,7 +35,14 @@ const asReasoningEffort = (value: unknown): ReasoningEffort | null | undefined =
   }
 }
 
-export type CollaborationModeKind = NonNullable<CollaborationModeMask['mode']>
+export type CollaborationModeKind = NonNullable<GeneratedCollaborationModeMask['mode']>
+
+export type CollaborationModeMask = {
+  name: string
+  mode: CollaborationModeKind | null
+  model: string | null
+  reasoning_effort?: ReasoningEffort | null
+}
 
 export type CollaborationModeSettings = {
   model: string
@@ -73,11 +80,11 @@ const normalizeCollaborationModeMask = (value: unknown): CollaborationModeMask |
     name,
     mode: asModeKind(value.mode),
     model: asTrimmedString(value.model),
-    reasoning_effort: asReasoningEffort(reasoningSource) ?? null
+    reasoning_effort: asReasoningEffort(reasoningSource)
   }
 }
 
-export const normalizeCollaborationModeListResponse = (value: CollaborationModeListResponse | unknown): CollaborationModeMask[] => {
+export const normalizeCollaborationModeListResponse = (value: GeneratedCollaborationModeListResponse | unknown): CollaborationModeMask[] => {
   if (!isRecord(value) || !Array.isArray(value.data)) {
     return []
   }
@@ -108,7 +115,9 @@ export const buildCollaborationModeFromMask = (
     mode: mask.mode,
     settings: {
       model: mask.model ?? base.model,
-      reasoning_effort: mask.reasoning_effort ?? base.reasoning_effort,
+      reasoning_effort: mask.reasoning_effort === undefined
+        ? base.reasoning_effort
+        : mask.reasoning_effort,
       developer_instructions: null
     }
   }
