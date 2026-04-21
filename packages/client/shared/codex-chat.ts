@@ -1,12 +1,9 @@
 import type { MessagePhase } from './generated/codex-app-server/MessagePhase'
-import type { UserInput as GeneratedUserInput } from './generated/codex-app-server/v2/UserInput'
 import type { MemoryCitation } from './generated/codex-app-server/v2/MemoryCitation'
 import type { Thread } from './generated/codex-app-server/v2/Thread'
 import type { ThreadItem } from './generated/codex-app-server/v2/ThreadItem'
 import type { Turn } from './generated/codex-app-server/v2/Turn'
-
-export type CodexUserInput = GeneratedUserInput
-export type CodexThreadItem = ThreadItem
+import type { UserInput } from './generated/codex-app-server/v2/UserInput'
 
 export const EVENT_PART = 'data-thread-event' as const
 export const ITEM_PART = 'data-thread-item' as const
@@ -34,13 +31,13 @@ export type ThreadEventData =
       message: string
     }
 
-export type CommandExecutionItem = Extract<CodexThreadItem, { type: 'commandExecution' }>
+export type CommandExecutionItem = Extract<ThreadItem, { type: 'commandExecution' }>
 
-export type FileChangeItem = Extract<CodexThreadItem, { type: 'fileChange' }>
-export type McpToolCallItem = Extract<CodexThreadItem, { type: 'mcpToolCall' }>
-export type DynamicToolCallItem = Extract<CodexThreadItem, { type: 'dynamicToolCall' }>
+export type FileChangeItem = Extract<ThreadItem, { type: 'fileChange' }>
+export type McpToolCallItem = Extract<ThreadItem, { type: 'mcpToolCall' }>
+export type DynamicToolCallItem = Extract<ThreadItem, { type: 'dynamicToolCall' }>
 
-export type SubagentTool = Extract<CodexThreadItem, { type: 'collabAgentToolCall' }>['tool']
+export type SubagentTool = Extract<ThreadItem, { type: 'collabAgentToolCall' }>['tool']
 export type SubagentToolStatus = 'inProgress' | 'completed' | 'failed'
 export type SubagentAgentStatus =
   | 'pendingInit'
@@ -58,7 +55,7 @@ export type SubagentAgentState = {
   message: string | null
 }
 
-export type SubagentActivityItem = Extract<CodexThreadItem, { type: 'collabAgentToolCall' }>
+export type SubagentActivityItem = Extract<ThreadItem, { type: 'collabAgentToolCall' }>
 
 export type VisualSubagentPanel = {
   threadId: string
@@ -97,11 +94,11 @@ export type ItemData =
     }
   | {
       kind: 'web_search'
-      item: Extract<CodexThreadItem, { type: 'webSearch' }>
+      item: Extract<ThreadItem, { type: 'webSearch' }>
     }
   | {
       kind: 'context_compaction'
-      item: Extract<CodexThreadItem, { type: 'contextCompaction' }>
+      item: Extract<ThreadItem, { type: 'contextCompaction' }>
     }
 
 export type ChatPart =
@@ -152,7 +149,7 @@ export const asAgentMessageItem = (input: {
   text: string
   phase?: MessagePhase | null
   memoryCitation?: MemoryCitation | null
-}): Extract<CodexThreadItem, { type: 'agentMessage' }> => ({
+}): Extract<ThreadItem, { type: 'agentMessage' }> => ({
   type: 'agentMessage',
   id: input.id,
   text: input.text,
@@ -184,7 +181,7 @@ const attachmentMediaTypeFromUrl = (url: string) => {
   return match?.[1] || 'image/*'
 }
 
-const userInputToParts = (input: CodexUserInput): ChatPart[] => {
+const userInputToParts = (input: UserInput): ChatPart[] => {
   if (input.type === 'text') {
     if (!input.text.trim()) {
       return []
@@ -224,18 +221,18 @@ const userInputToParts = (input: CodexUserInput): ChatPart[] => {
   }]
 }
 
-const getUserMessageText = (item: Extract<CodexThreadItem, { type: 'userMessage' }>) =>
+const getUserMessageText = (item: Extract<ThreadItem, { type: 'userMessage' }>) =>
   item.content
-    .filter((input): input is Extract<CodexUserInput, { type: 'text' }> => input.type === 'text')
+    .filter((input): input is Extract<UserInput, { type: 'text' }> => input.type === 'text')
     .map(input => input.text.trim())
     .filter(Boolean)
     .join('\n')
 
 const shouldHideReviewBootstrapUserMessage = (
-  item: Extract<CodexThreadItem, { type: 'userMessage' }>,
+  item: Extract<ThreadItem, { type: 'userMessage' }>,
   turn: Turn
 ) => {
-  const reviewLifecycle = turn.items.find((candidate): candidate is Extract<CodexThreadItem, { type: 'enteredReviewMode' | 'exitedReviewMode' }> =>
+  const reviewLifecycle = turn.items.find((candidate): candidate is Extract<ThreadItem, { type: 'enteredReviewMode' | 'exitedReviewMode' }> =>
     (candidate.type === 'enteredReviewMode' || candidate.type === 'exitedReviewMode')
     && candidate.id === item.id
   )
@@ -247,7 +244,7 @@ const shouldHideReviewBootstrapUserMessage = (
   return getUserMessageText(item) === reviewLifecycle.review.trim()
 }
 
-export const itemToMessages = (item: CodexThreadItem): ChatMessage[] => {
+export const itemToMessages = (item: ThreadItem): ChatMessage[] => {
   switch (item.type) {
     case 'userMessage':
       return [{
