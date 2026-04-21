@@ -5,6 +5,7 @@ type JsonRpcError = {
 }
 
 import type { InitializeResponse } from './generated/codex-app-server/InitializeResponse'
+import type { ServerRequest } from './generated/codex-app-server/ServerRequest'
 import type { ServerNotification } from './generated/codex-app-server/ServerNotification'
 import type { ItemCompletedNotification as GeneratedItemCompletedNotification } from './generated/codex-app-server/v2/ItemCompletedNotification'
 import type { ItemStartedNotification as GeneratedItemStartedNotification } from './generated/codex-app-server/v2/ItemStartedNotification'
@@ -33,7 +34,24 @@ type JsonRpcNotification = {
   params?: unknown
 }
 
-export type CodexRpcServerRequest = JsonRpcRequest
+type LegacyCodexRpcServerRequest =
+  | {
+      id: JsonRpcId
+      method: 'item/tool/requestUserInput'
+      params: {
+        questions: Array<Record<string, unknown>>
+        threadId?: string
+        turnId?: string
+        itemId?: string
+      }
+    }
+  | {
+      id: JsonRpcId
+      method: 'mcpServer/elicitation/request'
+      params: Record<string, unknown>
+    }
+
+export type CodexRpcServerRequest = ServerRequest | LegacyCodexRpcServerRequest
 
 type JsonRpcServerRequest = CodexRpcServerRequest
 

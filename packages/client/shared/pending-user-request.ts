@@ -275,11 +275,11 @@ const parseElicitationField = (
 }
 
 export const parsePendingUserRequest = (request: CodexRpcServerRequest): PendingUserRequest | null => {
-  const params = isObjectRecord(request.params) ? request.params : null
-
   switch (request.method) {
     case 'item/tool/requestUserInput': {
-      const typedParams = params as Partial<ToolRequestUserInputParams> | null
+      const typedParams = isObjectRecord(request.params)
+        ? request.params as Partial<ToolRequestUserInputParams>
+        : null
       const questions = Array.isArray(typedParams?.questions)
         ? typedParams.questions
           .map(parseRequestUserInputQuestion)
@@ -299,6 +299,9 @@ export const parsePendingUserRequest = (request: CodexRpcServerRequest): Pending
       }
     }
     case 'mcpServer/elicitation/request': {
+      const params = isObjectRecord(request.params)
+        ? request.params as Record<string, unknown>
+        : null
       const mode = asTrimmedString(params?.mode)
       if (mode === 'url') {
         const url = asTrimmedString(params?.url)
