@@ -2175,7 +2175,7 @@ const scheduleScrollToBottom = async (behavior: ScrollBehavior = 'auto') => {
   })
 }
 
-const ensureProjectRuntime = async () => {
+async function ensureProjectRuntime() {
   if (!loaded.value) {
     await refreshProjects()
   }
