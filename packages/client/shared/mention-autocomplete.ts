@@ -1,5 +1,5 @@
 import type { SubagentAgentStatus } from './codex-chat'
-import type { CodexUserInput } from './codex-rpc'
+import type { UserInput } from './generated/codex-app-server/v2/UserInput'
 import { encodeProjectIdSegment } from './codori'
 import { resolveApiUrl, shouldUseServerProxy } from './network'
 
@@ -54,7 +54,7 @@ export type PluginMentionAutocompleteEntry = {
 }
 
 export type MentionAutocompleteSubmission = {
-  pluginInput: Extract<CodexUserInput, { type: 'mention' }>[]
+  pluginInput: Extract<UserInput, { type: 'mention' }>[]
   agentThreadIds: string[]
 }
 

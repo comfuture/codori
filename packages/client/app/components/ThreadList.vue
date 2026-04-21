@@ -10,7 +10,7 @@ import {
   useThreadSummaries,
   type ThreadSummary
 } from '../composables/useThreadSummaries'
-import type { ThreadListResponse } from '~~/shared/codex-rpc'
+import type { ThreadListResponse } from '~~/shared/generated/codex-app-server/v2/ThreadListResponse'
 import { toProjectThreadRoute } from '~~/shared/codori'
 
 const props = defineProps<{

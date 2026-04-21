@@ -1,4 +1,4 @@
-import type { CodexUserInput } from './codex-rpc'
+import type { UserInput } from './generated/codex-app-server/v2/UserInput'
 import { encodeProjectIdSegment } from './codori'
 import { resolveApiUrl, shouldUseServerProxy } from './network'
 
@@ -79,9 +79,9 @@ export const validateAttachmentSelection = <T extends FileLike>(
 export const buildTurnStartInput = (
   text: string,
   attachments: Array<{ path: string }>,
-  additionalInput: CodexUserInput[] = []
-): CodexUserInput[] => {
-  const input: CodexUserInput[] = []
+  additionalInput: UserInput[] = []
+): UserInput[] => {
+  const input: UserInput[] = []
   const trimmedText = text.trim()
 
   if (trimmedText) {

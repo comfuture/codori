@@ -4,17 +4,14 @@ type JsonRpcError = {
   data?: unknown
 }
 
+import type { InitializeResponse } from './generated/codex-app-server/InitializeResponse'
 import type { ItemCompletedNotification as GeneratedItemCompletedNotification } from './generated/codex-app-server/v2/ItemCompletedNotification'
 import type { ItemStartedNotification as GeneratedItemStartedNotification } from './generated/codex-app-server/v2/ItemStartedNotification'
 import type { PlanDeltaNotification as GeneratedPlanDeltaNotification } from './generated/codex-app-server/v2/PlanDeltaNotification'
 import type { ServerRequestResolvedNotification as GeneratedServerRequestResolvedNotification } from './generated/codex-app-server/v2/ServerRequestResolvedNotification'
-import type { ThreadItem as GeneratedThreadItem } from './generated/codex-app-server/v2/ThreadItem'
 import type { TurnCompletedNotification as GeneratedTurnCompletedNotification } from './generated/codex-app-server/v2/TurnCompletedNotification'
 import type { TurnPlanUpdatedNotification as GeneratedTurnPlanUpdatedNotification } from './generated/codex-app-server/v2/TurnPlanUpdatedNotification'
 import type { TurnStatus as GeneratedTurnStatus } from './generated/codex-app-server/v2/TurnStatus'
-import type { UserInput as GeneratedUserInput } from './generated/codex-app-server/v2/UserInput'
-export type { ReasoningEffort } from './chat-prompt-controls'
-import type { ReasoningEffort } from './chat-prompt-controls'
 
 type JsonRpcId = string | number
 
@@ -45,110 +42,6 @@ type PendingRequest = {
 }
 
 export type CodexRpcServerRequestHandler = (request: CodexRpcServerRequest) => Promise<unknown> | unknown
-
-export type CodexUserInput = GeneratedUserInput
-
-export type CodexThreadItem = GeneratedThreadItem
-
-export type CodexTurn = {
-  id: string
-  items: CodexThreadItem[]
-  status: GeneratedTurnStatus
-  error: {
-    message: string
-  } | null
-  startedAt?: number | null
-  completedAt?: number | null
-  durationMs?: number | null
-}
-
-export type CodexThread = {
-  id: string
-  preview: string
-  cwd: string
-  createdAt: number
-  updatedAt: number
-  name: string | null
-  agentNickname?: string | null
-  agentRole?: string | null
-  turns: CodexTurn[]
-}
-
-export type InitializeResponse = {
-  userAgent: string
-  platformFamily: string
-  platformOs: string
-}
-
-export type ThreadListResponse = {
-  data: CodexThread[]
-  nextCursor: string | null
-}
-
-export type ThreadStartResponse = {
-  thread: CodexThread
-  model?: string | null
-  reasoningEffort?: ReasoningEffort | null
-}
-
-export type ThreadResumeResponse = {
-  thread: CodexThread
-  model?: string | null
-  reasoningEffort?: ReasoningEffort | null
-}
-
-export type ThreadReadResponse = {
-  thread: CodexThread
-}
-
-export type TurnStartResponse = {
-  turn: {
-    id: string
-  }
-}
-
-export type ReviewTarget =
-  | {
-      type: 'uncommittedChanges'
-    }
-  | {
-      type: 'baseBranch'
-      branch: string
-    }
-  | {
-      type: 'commit'
-      sha: string
-      title?: string | null
-    }
-  | {
-      type: 'custom'
-      instructions: string
-    }
-
-export type ReviewDelivery = 'inline' | 'detached'
-
-export type ReviewStartParams = {
-  threadId: string
-  delivery?: ReviewDelivery
-  target: ReviewTarget
-}
-
-export type ReviewStartResponse = {
-  reviewThreadId: string
-  turn: CodexTurn
-}
-
-export type ModelListResponse = {
-  data?: unknown[]
-}
-
-export type ConfigReadResponse = {
-  config?: {
-    model?: string | null
-    model_context_window?: number | string | null
-    model_reasoning_effort?: ReasoningEffort | null
-  } | null
-}
 
 export type CodexRpcNotification = {
   method: string
