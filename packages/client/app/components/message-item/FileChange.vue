@@ -28,7 +28,7 @@ const filePreview = computed(() => {
 
 const title = computed(() => {
   const hasChanges = changes.value.length > 0
-  const deletedOnly = hasChanges && changes.value.every(change => change.kind.type === 'delete')
+  const deletedOnly = hasChanges && changes.value.every(change => change.kind?.type === 'delete')
 
   switch (props.item.status) {
     case 'inProgress':
