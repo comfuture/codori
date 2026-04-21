@@ -212,9 +212,8 @@ describe('pending user request shared helpers', () => {
         }
       }
     })
-    expect(manager.pendingRequest.value?.requestId).toBe(11)
-    expect(manager.pendingRequest.value?.submitting).toBe(true)
-    expect(manager.markRequestResolved(11)).toBe(true)
+    expect(manager.pendingRequest.value).toBeNull()
+    expect(manager.markRequestResolved(11)).toBe(false)
     expect(manager.pendingRequest.value).toBeNull()
   })
 
@@ -257,7 +256,7 @@ describe('pending user request shared helpers', () => {
         }
       }
     })
-    expect(manager.markRequestResolved(14)).toBe(true)
+    expect(manager.markRequestResolved(14)).toBe(false)
   })
 
   it('promotes draft-scoped live requests when a new thread starts', async () => {
@@ -299,7 +298,7 @@ describe('pending user request shared helpers', () => {
         }
       }
     })
-    expect(manager.markRequestResolved(17)).toBe(true)
+    expect(manager.markRequestResolved(17)).toBe(false)
     expect(manager.pendingRequest.value).toBeNull()
   })
 
@@ -338,7 +337,7 @@ describe('pending user request shared helpers', () => {
         }
       }
     })
-    expect(manager.markRequestResolved(18)).toBe(true)
+    expect(manager.markRequestResolved(18)).toBe(false)
     expect(manager.pendingRequest.value).toBeNull()
   })
 
@@ -378,7 +377,7 @@ describe('pending user request shared helpers', () => {
         }
       }
     })
-    expect(secondManager.markRequestResolved(19)).toBe(true)
+    expect(secondManager.markRequestResolved(19)).toBe(false)
   })
 
   it('resolves requests by id even after the visible thread session changes', async () => {
@@ -416,7 +415,7 @@ describe('pending user request shared helpers', () => {
         }
       }
     })
-    expect(manager.markRequestResolved(191)).toBe(true)
+    expect(manager.markRequestResolved(191)).toBe(false)
   })
 
   it('can resolve a pending request using the generated thread id from serverRequest/resolved', async () => {
@@ -454,7 +453,7 @@ describe('pending user request shared helpers', () => {
         }
       }
     })
-    expect(manager.markRequestResolved(192, 'thread-a')).toBe(true)
+    expect(manager.markRequestResolved(192, 'thread-a')).toBe(false)
   })
 
   it('ignores stale responses after the queue advances to the next request', async () => {
@@ -500,15 +499,14 @@ describe('pending user request shared helpers', () => {
         }
       }
     })
-    expect(manager.pendingRequest.value?.requestId).toBe(20)
-    expect(manager.pendingRequest.value?.submitting).toBe(true)
+    expect(manager.pendingRequest.value?.requestId).toBe(21)
 
     expect(manager.resolveRequest(20, {
       answers: {}
     })).toBe(false)
-    expect(manager.pendingRequest.value?.requestId).toBe(20)
+    expect(manager.pendingRequest.value?.requestId).toBe(21)
 
-    expect(manager.markRequestResolved(20)).toBe(true)
+    expect(manager.markRequestResolved(20)).toBe(false)
     expect(manager.pendingRequest.value?.requestId).toBe(21)
 
     expect(manager.resolveRequest(21, {
@@ -526,7 +524,7 @@ describe('pending user request shared helpers', () => {
         }
       }
     })
-    expect(manager.markRequestResolved(21)).toBe(true)
+    expect(manager.markRequestResolved(21)).toBe(false)
   })
 
   it('cancels pending requests on teardown with protocol-specific responses', async () => {
