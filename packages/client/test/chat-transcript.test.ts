@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { Thread } from '../shared/generated/codex-app-server/v2/Thread'
 import type { Turn } from '../shared/generated/codex-app-server/v2/Turn'
 import {
+  ITEM_PART,
   asAgentMessageItem,
   findLatestCompletedPlanTurnId,
   findLatestPlanTurnId,
@@ -408,6 +409,72 @@ describe('chat transcript stability', () => {
         type: 'text',
         text: 'Full review instructions',
         state: 'done'
+      }]
+    }])
+  })
+
+  it('keeps hydrated web-search items pending for in-progress turns', () => {
+    expect(threadToMessages(makeThread({
+      id: 'thread-1',
+      preview: '',
+      cwd: '/tmp',
+      createdAt: 0,
+      updatedAt: 0,
+      name: null,
+      turns: [makeTurn({
+        id: 'turn-1',
+        status: 'inProgress',
+        error: null,
+        items: [{
+          type: 'webSearch',
+          id: 'search-1',
+          query: 'codori',
+          action: null
+        }]
+      }), makeTurn({
+        id: 'turn-2',
+        status: 'completed',
+        error: null,
+        items: [{
+          type: 'webSearch',
+          id: 'search-2',
+          query: 'codex app server',
+          action: null
+        }]
+      })]
+    }))).toEqual<ChatMessage[]>([{
+      id: 'search-1',
+      role: 'system',
+      pending: true,
+      parts: [{
+        type: ITEM_PART,
+        data: {
+          kind: 'web_search',
+          item: {
+            type: 'webSearch',
+            id: 'search-1',
+            query: 'codori',
+            action: null
+          },
+          status: 'inProgress'
+        }
+      }]
+    }, {
+      id: 'search-2',
+      role: 'system',
+      pending: false,
+      parts: [{
+        type: ITEM_PART,
+        data: {
+          kind: 'web_search',
+          item: {
+            type: 'webSearch',
+            id: 'search-2',
+            query: 'codex app server',
+            action: null
+          },
+          status: 'completed'
+        }
       }]
     }])
   })

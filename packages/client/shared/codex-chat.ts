@@ -67,6 +67,8 @@ export type VisualSubagentPanel = {
   lastSeenAt: number
 }
 
+export type WebSearchStatus = 'inProgress' | 'completed' | 'failed'
+
 export type ItemData =
   | {
       kind: 'command_execution'
@@ -95,6 +97,7 @@ export type ItemData =
   | {
       kind: 'web_search'
       item: Extract<ThreadItem, { type: 'webSearch' }>
+      status: WebSearchStatus
     }
   | {
       kind: 'context_compaction'
@@ -244,7 +247,13 @@ const shouldHideReviewBootstrapUserMessage = (
   return getUserMessageText(item) === reviewLifecycle.review.trim()
 }
 
-export const itemToMessages = (item: ThreadItem): ChatMessage[] => {
+export const itemToMessages = (
+  item: ThreadItem,
+  options: {
+    webSearchPending?: boolean
+    webSearchStatus?: WebSearchStatus
+  } = {}
+): ChatMessage[] => {
   switch (item.type) {
     case 'userMessage':
       return [{
@@ -353,11 +362,13 @@ export const itemToMessages = (item: ThreadItem): ChatMessage[] => {
       return [{
         id: item.id,
         role: 'system',
+        pending: options.webSearchPending,
         parts: [{
           type: ITEM_PART,
           data: {
             kind: 'web_search',
-            item
+            item,
+            status: options.webSearchStatus ?? 'completed'
           }
         }]
       }]
@@ -417,7 +428,16 @@ export const threadToMessages = (thread: Thread) =>
         return []
       }
 
-      return itemToMessages(item)
+      return itemToMessages(item, {
+        webSearchPending: item.type === 'webSearch' && turn.status === 'inProgress',
+        webSearchStatus: item.type === 'webSearch'
+          ? (turn.status === 'failed'
+            ? 'failed'
+            : turn.status === 'inProgress'
+              ? 'inProgress'
+              : 'completed')
+          : undefined
+      })
     })
   )
 

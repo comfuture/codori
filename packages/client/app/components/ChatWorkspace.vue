@@ -55,7 +55,8 @@ import {
   type ChatPart,
   type FileChangeItem,
   type ItemData,
-  type McpToolCallItem
+  type McpToolCallItem,
+  type WebSearchStatus
 } from '~~/shared/codex-chat'
 import { buildTurnStartInput, type PersistedProjectAttachment } from '~~/shared/chat-attachments'
 import {
@@ -2746,7 +2747,9 @@ const ensureThread = async () => {
 }
 
 const seedStreamingMessage = (item: ThreadItem) => {
-  const [seed] = itemToMessages(item)
+  const [seed] = itemToMessages(item, {
+    webSearchStatus: item.type === 'webSearch' ? 'inProgress' : undefined
+  })
   if (!seed) {
     return
   }
@@ -3036,7 +3039,9 @@ const pushSubagentEventMessage = (threadId: string, kind: 'turn.failed' | 'strea
 }
 
 const seedSubagentStreamingMessage = (threadId: string, item: ThreadItem) => {
-  const [seed] = itemToMessages(item)
+  const [seed] = itemToMessages(item, {
+    webSearchStatus: item.type === 'webSearch' ? 'inProgress' : undefined
+  })
   if (!seed) {
     return
   }
@@ -3048,6 +3053,38 @@ const seedSubagentStreamingMessage = (threadId: string, item: ThreadItem) => {
     })
   )
 }
+
+const updateWebSearchMessageStatus = (
+  chatMessages: ChatMessage[],
+  status: WebSearchStatus
+) => chatMessages.map((message) => {
+  const partIndex = message.parts.findIndex(isItemPart)
+  if (partIndex === -1) {
+    return message
+  }
+
+  const itemPart = message.parts[partIndex] as Extract<ChatPart, { type: typeof ITEM_PART }>
+  if (itemPart.data.kind !== 'web_search') {
+    return message
+  }
+  if (!message.pending && itemPart.data.status !== 'inProgress') {
+    return message
+  }
+
+  const nextPart: Extract<ChatPart, { type: typeof ITEM_PART }> = {
+    ...itemPart,
+    data: {
+      ...itemPart.data,
+      status
+    }
+  }
+
+  return {
+    ...message,
+    pending: status === 'inProgress',
+    parts: message.parts.map((part, index) => index === partIndex ? nextPart : part)
+  }
+})
 
 const bootstrapSubagentPanel = async (threadId: string) => {
   if (!threadId) {
@@ -3322,6 +3359,9 @@ const applySubagentNotification = (threadId: string, notification: CodexRpcNotif
       const params = notification.params as { error?: { message?: string } }
       const messageText = params.error?.message ?? 'The turn failed.'
       pushSubagentEventMessage(threadId, 'turn.failed', messageText)
+      updateSubagentPanelMessages(threadId, (panelMessages) =>
+        updateWebSearchMessageStatus(panelMessages, 'failed')
+      )
       upsertSubagentPanel(threadId, (existingPanel) => ({
         ...(existingPanel ?? createSubagentPanelState(threadId)),
         status: 'errored',
@@ -3669,6 +3709,9 @@ const applyNotification = (notification: CodexRpcNotification) => {
       return
     }
     case 'turn/completed': {
+      if (notificationTurnStatus(notification) === 'failed') {
+        messages.value = updateWebSearchMessageStatus(messages.value, 'failed')
+      }
       maybeQueuePlanImplementationPrompt({
         threadId: notificationThreadId(notification) ?? liveStream?.threadId ?? activeThreadId.value,
         turnId: notificationTurnId(notification) ?? liveStream?.turnId ?? null,

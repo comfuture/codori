@@ -57,7 +57,7 @@ export default defineComponent({
         case 'web_search':
           return h(MessageItemWebSearch, {
             item: itemData.item,
-            pending: props.messagePending
+            status: itemData.status
           })
         case 'context_compaction':
           return h(MessageItemContextCompaction)
