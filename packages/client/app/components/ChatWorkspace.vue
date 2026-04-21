@@ -34,7 +34,7 @@ import { useChatPlanWorkflow } from '../composables/useChatPlanWorkflow'
 import { useChatReviewWorkflow } from '../composables/useChatReviewWorkflow'
 import { useSubagentPanelsController } from '../composables/useSubagentPanelsController'
 import { usePendingUserRequest } from '../composables/usePendingUserRequest'
-import { useChatSession, type LiveStream, type SubagentPanelState } from '../composables/useChatSession'
+import { useChatSession, type LiveStream } from '../composables/useChatSession'
 import { useProjects } from '../composables/useProjects'
 import { useRpc } from '../composables/useRpc'
 import { useChatSubmitGuard } from '../composables/useChatSubmitGuard'
@@ -65,13 +65,8 @@ import { buildTurnStartInput, type PersistedProjectAttachment } from '~~/shared/
 import {
   type CollaborationMode
 } from '~~/shared/collaboration-mode'
-import type { ReviewStartResponse } from '~~/shared/generated/codex-app-server/v2/ReviewStartResponse'
-import type { ReviewStartParams } from '~~/shared/generated/codex-app-server/v2/ReviewStartParams'
-import type { ReviewTarget } from '~~/shared/generated/codex-app-server/v2/ReviewTarget'
-import type { CollaborationModeListResponse } from '~~/shared/generated/codex-app-server/v2/CollaborationModeListResponse'
 import type { ConfigReadResponse } from '~~/shared/generated/codex-app-server/v2/ConfigReadResponse'
 import type { ModelListResponse } from '~~/shared/generated/codex-app-server/v2/ModelListResponse'
-import type { Thread } from '~~/shared/generated/codex-app-server/v2/Thread'
 import type { ThreadReadResponse } from '~~/shared/generated/codex-app-server/v2/ThreadReadResponse'
 import type { ThreadItem } from '~~/shared/generated/codex-app-server/v2/ThreadItem'
 import type { ThreadResumeResponse } from '~~/shared/generated/codex-app-server/v2/ThreadResumeResponse'
@@ -1912,7 +1907,6 @@ const {
   reviewBranchesError,
   reviewStartPending,
   openReviewDrawer,
-  closeReviewDrawer,
   openBaseBranchPicker,
   startReview,
   handleReviewDrawerOpenChange,
@@ -1940,7 +1934,7 @@ const planWorkflow = useChatPlanWorkflow({
   planImplementationPromptTurnId,
   planImplementationPromptThreadId,
   shownPlanImplementationPromptTurnIds: session.shownPlanImplementationPromptTurnIds,
-  ensureProjectRuntime: async () => await ensureProjectRuntime(),
+  ensureProjectRuntime,
   getClient
 })
 
@@ -1967,7 +1961,7 @@ const {
 const subagentPanelsController = useSubagentPanelsController({
   projectId: props.projectId,
   subagentPanels,
-  ensureProjectRuntime: async () => await ensureProjectRuntime(),
+  ensureProjectRuntime,
   getClient,
   isActiveTurnStatus,
   currentLiveStream
