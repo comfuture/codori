@@ -44,6 +44,8 @@ import { resolveChatMessagesStatus, shouldAwaitAssistantOutput } from '../utils/
 import {
   ITEM_PART,
   eventToMessage,
+  findLatestCompletedPlanTurnId,
+  findLatestPlanTurnId,
   isSubagentActiveStatus,
   itemToMessages,
   replaceStreamingMessage,
@@ -68,6 +70,7 @@ import {
 import {
   type ConfigReadResponse,
   notificationRequestId,
+  notificationTurnStatus,
   type ModelListResponse,
   notificationThreadName,
   notificationThreadId,
@@ -100,6 +103,7 @@ import {
   visibleModelOptions,
   type ReasoningEffort
 } from '~~/shared/chat-prompt-controls'
+import { shouldQueuePlanImplementationPrompt } from '~~/shared/plan-implementation-prompt'
 import {
   resolveProjectGitBranchesUrl,
   toProjectThreadRoute,
@@ -237,7 +241,12 @@ const {
   selectedModel,
   selectedEffort,
   modelContextWindow,
-  tokenUsage
+  tokenUsage,
+  latestPlanTurnId,
+  queuedPlanImplementationPromptTurnId,
+  queuedPlanImplementationPromptThreadId,
+  planImplementationPromptTurnId,
+  planImplementationPromptThreadId
 } = session
 const {
   pendingRequest,
@@ -333,8 +342,7 @@ const reviewBranches = ref<string[]>([])
 const reviewCurrentBranch = ref<string | null>(null)
 const reviewBranchesLoading = ref(false)
 const reviewBranchesError = ref<string | null>(null)
-const latestPlanTurnId = ref<string | null>(null)
-const planImplementationPromptTurnId = ref<string | null>(null)
+let planImplementationPromptFlushToken = 0
 const isBusy = computed(() =>
   status.value === 'submitted'
   || status.value === 'streaming'
@@ -360,6 +368,12 @@ const promptSubmitStatus = computed(() =>
 const projectTitle = computed(() => selectedProject.value?.projectId ?? props.projectId)
 const currentThreadCollaborationModeKey = computed(() =>
   resolveThreadCollaborationModeKey(activeThreadId.value ?? routeThreadId.value)
+)
+const currentPlanPromptThreadId = computed(() =>
+  activeThreadId.value ?? routeThreadId.value
+)
+const isPlanImplementationPromptOpen = computed(() =>
+  Boolean(planImplementationPromptTurnId.value && planImplementationPromptThreadId.value === currentPlanPromptThreadId.value)
 )
 const currentThreadCollaborationModeMask = computed(() =>
   threadCollaborationModeMasks.value[currentThreadCollaborationModeKey.value] ?? null
@@ -962,7 +976,7 @@ const subscribeThreadNotifications = (threadId: string, liveStream: LiveStream) 
       return
     }
 
-    if (targetThreadId !== threadId) {
+    if (targetThreadId && targetThreadId !== threadId) {
       if (liveStream.observedSubagentThreadIds.has(targetThreadId)) {
         applySubagentNotification(targetThreadId, notification)
       }
@@ -2054,20 +2068,66 @@ const setCurrentThreadCollaborationMode = async (mode: 'plan' | 'default') => {
 }
 
 const closePlanImplementationPrompt = () => {
+  planImplementationPromptFlushToken += 1
+  queuedPlanImplementationPromptTurnId.value = null
+  queuedPlanImplementationPromptThreadId.value = null
   planImplementationPromptTurnId.value = null
+  planImplementationPromptThreadId.value = null
 }
 
-const maybeOpenPlanImplementationPrompt = (turnId: string | null) => {
+const flushPlanImplementationPrompt = async () => {
   if (
-    !turnId
-    || latestPlanTurnId.value !== turnId
-    || !isPlanModeActive.value
+    !queuedPlanImplementationPromptTurnId.value
+    || !queuedPlanImplementationPromptThreadId.value
     || hasPendingRequest.value
   ) {
     return
   }
 
+  const turnId = queuedPlanImplementationPromptTurnId.value
+  const threadId = queuedPlanImplementationPromptThreadId.value
+  if (session.shownPlanImplementationPromptTurnIds.has(turnId)) {
+    queuedPlanImplementationPromptTurnId.value = null
+    queuedPlanImplementationPromptThreadId.value = null
+    return
+  }
+
+  if (currentPlanPromptThreadId.value !== threadId) {
+    return
+  }
+
+  const flushToken = ++planImplementationPromptFlushToken
+  await nextTick()
+  if (
+    flushToken !== planImplementationPromptFlushToken
+    || hasPendingRequest.value
+    || queuedPlanImplementationPromptTurnId.value !== turnId
+    || queuedPlanImplementationPromptThreadId.value !== threadId
+    || currentPlanPromptThreadId.value !== threadId
+  ) {
+    return
+  }
+
   planImplementationPromptTurnId.value = turnId
+  planImplementationPromptThreadId.value = threadId
+}
+
+const maybeQueuePlanImplementationPrompt = (input: {
+  threadId: string | null
+  turnId: string | null
+  turnStatus: string | null | undefined
+}) => {
+  if (!shouldQueuePlanImplementationPrompt({
+    turnId: input.turnId,
+    latestPlanTurnId: latestPlanTurnId.value,
+    turnStatus: input.turnStatus
+  })) {
+    return
+  }
+
+  queuedPlanImplementationPromptThreadId.value = input.threadId
+  queuedPlanImplementationPromptTurnId.value = input.turnId
+  flushPlanImplementationPrompt()
 }
 
 type SlashCommandSubmissionResult = {
@@ -2189,6 +2249,22 @@ const handleReviewDrawerOpenChange = (open: boolean) => {
 const handleUsageStatusOpenChange = (open: boolean) => {
   usageStatusModalOpen.value = open
 }
+
+watch(hasPendingRequest, (nextValue) => {
+  if (!nextValue) {
+    flushPlanImplementationPrompt()
+  }
+})
+
+watch(currentPlanPromptThreadId, () => {
+  void flushPlanImplementationPrompt()
+})
+
+watch(isPlanImplementationPromptOpen, (open) => {
+  if (open && planImplementationPromptTurnId.value) {
+    session.shownPlanImplementationPromptTurnIds.add(planImplementationPromptTurnId.value)
+  }
+})
 
 const handleReviewDrawerBack = () => {
   reviewDrawerMode.value = 'target'
@@ -2486,7 +2562,6 @@ const hydrateThread = async (threadId: string) => {
     error.value = null
     tokenUsage.value = null
     latestPlanTurnId.value = null
-    closePlanImplementationPrompt()
 
     try {
       await ensureProjectRuntime()
@@ -2508,7 +2583,7 @@ const hydrateThread = async (threadId: string) => {
             return
           }
 
-          if (targetThreadId !== threadId) {
+          if (targetThreadId && targetThreadId !== threadId) {
             if (nextLiveStream.observedSubagentThreadIds.has(targetThreadId)) {
               applySubagentNotification(targetThreadId, notification)
             }
@@ -2559,13 +2634,35 @@ const hydrateThread = async (threadId: string) => {
       threadTitle.value = resolveThreadSummaryTitle(response.thread)
       syncThreadSummary(response.thread)
       messages.value = threadToMessages(response.thread)
+      latestPlanTurnId.value = findLatestPlanTurnId(response.thread.turns)
+      maybeQueuePlanImplementationPrompt({
+        threadId: response.thread.id,
+        turnId: findLatestCompletedPlanTurnId(response.thread.turns),
+        turnStatus: 'completed'
+      })
       rebuildSubagentPanelsFromThread(response.thread)
       markAwaitingAssistantOutput(false)
       const activeTurn = [...response.thread.turns].reverse().find(turn => isActiveTurnStatus(turn.status))
+      const liveStream = session.liveStream
+
+      if (liveStream) {
+        const bufferedTurnId = activeTurn?.id
+          ?? liveStream.bufferedNotifications
+            .map(notificationTurnId)
+            .find((turnId): turnId is string => Boolean(turnId))
+
+        if (bufferedTurnId) {
+          setLiveStreamTurnId(liveStream, bufferedTurnId)
+        }
+
+        replayBufferedNotifications(liveStream)
+      }
 
       if (!activeTurn) {
         clearLiveStream()
-        status.value = 'ready'
+        if (!error.value) {
+          status.value = 'ready'
+        }
         return
       }
 
@@ -3279,7 +3376,7 @@ const applyNotification = (notification: CodexRpcNotification) => {
         return
       }
 
-      markRequestResolved(requestId)
+      markRequestResolved(requestId, notificationThreadId(notification))
       return
     }
     case 'turn/started': {
@@ -3507,6 +3604,7 @@ const applyNotification = (notification: CodexRpcNotification) => {
         return
       }
 
+      latestPlanTurnId.value = notificationTurnId(notification) ?? currentLiveStream()?.turnId ?? latestPlanTurnId.value
       updateThreadPlanState(threadId, notification.params)
       return
     }
@@ -3553,7 +3651,11 @@ const applyNotification = (notification: CodexRpcNotification) => {
       return
     }
     case 'turn/completed': {
-      maybeOpenPlanImplementationPrompt(notificationTurnId(notification) ?? liveStream?.turnId ?? null)
+      maybeQueuePlanImplementationPrompt({
+        threadId: notificationThreadId(notification) ?? liveStream?.threadId ?? activeThreadId.value,
+        turnId: notificationTurnId(notification) ?? liveStream?.turnId ?? null,
+        turnStatus: notificationTurnStatus(notification)
+      })
       markAwaitingAssistantOutput(false)
       clearPendingOptimisticMessages(liveStream, { discardSnapshots: true })
       if (liveStream) {
@@ -3809,6 +3911,25 @@ const implementCurrentPlan = async () => {
 
   closePlanImplementationPrompt()
   applyDraftTextState('Implement the plan.')
+  await nextTick()
+  await sendMessage()
+}
+
+const requestPlanRevision = async (prompt: string) => {
+  if (hasDraftContent.value) {
+    setComposerError('Clear the current draft before requesting a plan update.')
+    return
+  }
+
+  try {
+    await setCurrentThreadCollaborationMode('plan')
+  } catch (caughtError) {
+    setComposerError(caughtError instanceof Error ? caughtError.message : String(caughtError))
+    return
+  }
+
+  closePlanImplementationPrompt()
+  applyDraftTextState(prompt)
   await nextTick()
   await sendMessage()
 }
@@ -4966,9 +5087,9 @@ watch(
   />
 
   <PlanImplementationPromptDrawer
-    :open="Boolean(planImplementationPromptTurnId)"
+    :open="isPlanImplementationPromptOpen"
     @implement="implementCurrentPlan"
-    @stay-in-plan="closePlanImplementationPrompt"
+    @revise-plan="requestPlanRevision"
     @update:open="(open) => {
       if (!open) {
         closePlanImplementationPrompt()

@@ -408,6 +408,28 @@ export const threadToMessages = (thread: CodexThread) =>
     })
   )
 
+export const findLatestPlanTurnId = (turns: CodexTurn[]) => {
+  for (let index = turns.length - 1; index >= 0; index -= 1) {
+    const turn = turns[index]
+    if (turn && turn.items.some(item => item.type === 'plan')) {
+      return turn.id
+    }
+  }
+
+  return null
+}
+
+export const findLatestCompletedPlanTurnId = (turns: CodexTurn[]) => {
+  for (let index = turns.length - 1; index >= 0; index -= 1) {
+    const turn = turns[index]
+    if (turn && turn.status === 'completed' && turn.items.some(item => item.type === 'plan')) {
+      return turn.id
+    }
+  }
+
+  return null
+}
+
 export const eventToMessage = (id: string, data: ThreadEventData): ChatMessage => ({
   id,
   role: 'system',

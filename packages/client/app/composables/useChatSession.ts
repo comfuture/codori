@@ -60,6 +60,12 @@ export type ChatSession = {
   selectedEffort: Ref<ReasoningEffort>
   modelContextWindow: Ref<number | null>
   tokenUsage: Ref<TokenUsageSnapshot | null>
+  latestPlanTurnId: Ref<string | null>
+  queuedPlanImplementationPromptTurnId: Ref<string | null>
+  queuedPlanImplementationPromptThreadId: Ref<string | null>
+  planImplementationPromptTurnId: Ref<string | null>
+  planImplementationPromptThreadId: Ref<string | null>
+  shownPlanImplementationPromptTurnIds: Set<string>
   pendingLiveStream: Promise<LiveStream> | null
   liveStream: LiveStream | null
 }
@@ -89,6 +95,12 @@ const createSession = (): ChatSession => ({
   selectedEffort: ref(FALLBACK_MODELS[0]!.defaultReasoningEffort),
   modelContextWindow: ref<number | null>(null),
   tokenUsage: ref<TokenUsageSnapshot | null>(null),
+  latestPlanTurnId: ref<string | null>(null),
+  queuedPlanImplementationPromptTurnId: ref<string | null>(null),
+  queuedPlanImplementationPromptThreadId: ref<string | null>(null),
+  planImplementationPromptTurnId: ref<string | null>(null),
+  planImplementationPromptThreadId: ref<string | null>(null),
+  shownPlanImplementationPromptTurnIds: new Set<string>(),
   pendingLiveStream: null,
   liveStream: null
 })

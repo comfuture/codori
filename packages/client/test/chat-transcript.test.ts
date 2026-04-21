@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
+  findLatestCompletedPlanTurnId,
+  findLatestPlanTurnId,
   itemToMessages,
   threadToMessages,
   replaceStreamingMessage,
@@ -129,6 +131,85 @@ describe('chat transcript stability', () => {
         state: 'done'
       }]
     }])
+  })
+
+  it('tracks the latest turn that contains a plan item', () => {
+    expect(findLatestPlanTurnId([{
+      id: 'turn-1',
+      status: 'completed',
+      error: null,
+      items: [{
+        type: 'agentMessage',
+        id: 'agent-1',
+        text: 'hello'
+      }]
+    }, {
+      id: 'turn-2',
+      status: 'completed',
+      error: null,
+      items: [{
+        type: 'plan',
+        id: 'plan-1',
+        text: 'first plan'
+      }]
+    }, {
+      id: 'turn-3',
+      status: 'completed',
+      error: null,
+      items: [{
+        type: 'agentMessage',
+        id: 'agent-2',
+        text: 'follow-up'
+      }, {
+        type: 'plan',
+        id: 'plan-2',
+        text: 'latest plan'
+      }]
+    }])).toBe('turn-3')
+
+    expect(findLatestPlanTurnId([{
+      id: 'turn-1',
+      status: 'completed',
+      error: null,
+      items: [{
+        type: 'agentMessage',
+        id: 'agent-1',
+        text: 'hello'
+      }]
+    }])).toBeNull()
+  })
+
+  it('tracks the latest completed turn that contains a plan item', () => {
+    expect(findLatestCompletedPlanTurnId([{
+      id: 'turn-1',
+      status: 'completed',
+      error: null,
+      items: [{
+        type: 'plan',
+        id: 'plan-1',
+        text: 'first plan'
+      }]
+    }, {
+      id: 'turn-2',
+      status: 'inProgress',
+      error: null,
+      items: [{
+        type: 'plan',
+        id: 'plan-2',
+        text: 'still streaming'
+      }]
+    }])).toBe('turn-1')
+
+    expect(findLatestCompletedPlanTurnId([{
+      id: 'turn-1',
+      status: 'inProgress',
+      error: null,
+      items: [{
+        type: 'plan',
+        id: 'plan-1',
+        text: 'not done'
+      }]
+    }])).toBeNull()
   })
 
   it('keeps chat loading state in submitted mode until real assistant output appears', () => {
