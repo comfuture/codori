@@ -1,10 +1,13 @@
 import { resolveApiUrl, shouldUseServerProxy } from './network'
 
 export type ProjectRuntimeStatus = 'running' | 'stopped' | 'error'
+export type WorkspaceKind = 'project' | 'projectless'
 
 export type ProjectRecord = {
   projectId: string
   projectPath: string
+  workspaceKind: WorkspaceKind
+  createdAt: number | null
   status: ProjectRuntimeStatus
   pid: number | null
   port: number | null
@@ -29,6 +32,10 @@ export type ServiceUpdateStatus = {
 }
 
 export type ProjectsResponse = {
+  projects: ProjectRecord[]
+}
+
+export type ProjectlessChatsResponse = {
   projects: ProjectRecord[]
 }
 
@@ -72,6 +79,9 @@ export const toProjectThreadRoute = (projectId: string, threadId: string) =>
   `/projects/${projectId}/threads/${encodeURIComponent(threadId)}`
 
 export const encodeProjectIdSegment = (projectId: string) => encodeURIComponent(projectId)
+
+export const isProjectlessProjectId = (projectId: string | null | undefined) =>
+  Boolean(projectId?.startsWith('projectless/'))
 
 export const resolveProjectGitBranchesUrl = (input: {
   projectId: string

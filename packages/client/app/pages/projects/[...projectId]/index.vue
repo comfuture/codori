@@ -8,10 +8,23 @@ import { normalizeProjectIdParam } from '~~/shared/codori'
 const route = useRoute()
 const router = useRouter()
 const { togglePanel } = useThreadPanel()
-const { loaded, refreshProjects, getProject, pendingProjectId } = useProjects()
+const {
+  loaded,
+  projectlessLoaded,
+  refreshProjects,
+  refreshProjectlessChats,
+  getProject,
+  pendingProjectId
+} = useProjects()
 
 const projectId = computed(() => normalizeProjectIdParam(route.params.projectId as string | string[] | undefined))
 const selectedProject = computed(() => getProject(projectId.value))
+const projectName = computed(() => selectedProject.value?.projectId ?? projectId.value ?? 'Project')
+const projectIcon = computed(() =>
+  selectedProject.value?.workspaceKind === 'projectless'
+    ? 'i-lucide-message-square'
+    : 'i-lucide-folder-git-2'
+)
 const rpcStatus = computed(() => {
   if (!projectId.value) {
     return 'Offline'
@@ -44,6 +57,9 @@ onMounted(() => {
   if (!loaded.value) {
     void refreshProjects()
   }
+  if (projectId.value?.startsWith('projectless/') && !projectlessLoaded.value) {
+    void refreshProjectlessChats()
+  }
 })
 </script>
 
@@ -56,8 +72,8 @@ onMounted(() => {
     >
       <template #header>
         <UDashboardNavbar
-          :title="projectId ?? 'Project'"
-          icon="i-lucide-folder-git-2"
+          :title="projectName"
+          :icon="projectIcon"
         >
           <template #right>
             <div class="flex items-center gap-2">

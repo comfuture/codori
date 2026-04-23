@@ -34,6 +34,7 @@ export const shouldRefreshWorkspaceGitBranchOnEnvironmentSignal = (signal: strin
 type UseWorkspaceGitBranchOptions = {
   projectId: string
   serverBase: string
+  supportsGit?: () => boolean
 }
 
 type RefreshWorkspaceGitBranchOptions = {
@@ -74,6 +75,8 @@ export const useWorkspaceGitBranch = (options: UseWorkspaceGitBranchOptions) => 
   let lastEnvironmentRefreshAttemptAt = 0
   let inflightRefresh: Promise<ProjectGitBranchesResponse> | null = null
 
+  const supportsGit = () => options.supportsGit?.() ?? true
+
   const applyBranchState = (result: ProjectGitBranchesResponse) => {
     currentBranch.value = result.currentBranch
     branches.value = result.branches
@@ -84,6 +87,18 @@ export const useWorkspaceGitBranch = (options: UseWorkspaceGitBranchOptions) => 
   }
 
   const refreshBranches = async (refreshOptions: RefreshWorkspaceGitBranchOptions = {}) => {
+    if (!supportsGit()) {
+      currentBranch.value = null
+      branches.value = []
+      loaded.value = true
+      loading.value = false
+      error.value = null
+      return {
+        currentBranch: null,
+        branches: []
+      }
+    }
+
     const forceRefresh = refreshOptions.force === true
     const silentRefresh = refreshOptions.silent === true
 
@@ -178,6 +193,11 @@ export const useWorkspaceGitBranch = (options: UseWorkspaceGitBranchOptions) => 
     branch: string,
     fallbackMessage: string
   ) => {
+    if (!supportsGit()) {
+      error.value = 'Git branch operations are not available for projectless chats.'
+      return null
+    }
+
     const trimmedBranch = branch.trim()
     if (!trimmedBranch) {
       error.value = 'Branch name is required.'
@@ -229,7 +249,7 @@ export const useWorkspaceGitBranch = (options: UseWorkspaceGitBranchOptions) => 
     )
 
   const showBranchControl = computed(() =>
-    loaded.value && (Boolean(currentBranch.value) || branches.value.length > 0)
+    supportsGit() && loaded.value && (Boolean(currentBranch.value) || branches.value.length > 0)
   )
 
   const availableBranches = computed(() =>
