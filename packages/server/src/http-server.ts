@@ -30,7 +30,12 @@ import {
   type ServiceUpdateController,
   type ServiceUpdateStatus
 } from './service-update.js'
-import type { DeleteProjectlessChatResult, ProjectStatusRecord, StartProjectResult } from './types.js'
+import type {
+  DeleteProjectlessChatResult,
+  ProjectStatusRecord,
+  StartProjectResult,
+  UpdateProjectlessChatTitleResult
+} from './types.js'
 
 type MaybePromise<T> = T | Promise<T>
 
@@ -41,6 +46,7 @@ export type RuntimeManagerLike = {
   cloneProject?: (input: { repositoryUrl: string, destination?: string | null }) => MaybePromise<ProjectStatusRecord>
   createProjectlessChat?: () => MaybePromise<StartProjectResult>
   deleteProjectlessChat?: (projectId: string) => MaybePromise<DeleteProjectlessChatResult>
+  updateProjectlessChatTitle?: (projectId: string, title: string) => MaybePromise<UpdateProjectlessChatTitleResult>
   startProject: (projectId: string) => MaybePromise<StartProjectResult>
   stopProject: (projectId: string) => MaybePromise<ProjectStatusRecord>
   noteProjectActivity?: (projectId: string) => MaybePromise<ProjectStatusRecord | void>
@@ -70,6 +76,10 @@ type ProjectlessChatsResponse = {
 }
 
 type DeleteProjectlessChatResponse = DeleteProjectlessChatResult
+
+type ProjectlessChatTitleRequest = {
+  title?: string
+}
 
 type ServiceUpdateResponse = {
   serviceUpdate: ServiceUpdateStatus
@@ -141,6 +151,8 @@ const toStatusCode = (error: CodoriError) => {
     case 'MISSING_ROOT':
     case 'PROJECT_NOT_GIT_REPOSITORY':
     case 'PROJECT_DELETE_UNAVAILABLE':
+    case 'PROJECT_TITLE_UPDATE_UNAVAILABLE':
+    case 'INVALID_PROJECT_TITLE':
       return 400
     case 'DESTINATION_EXISTS':
     case 'GIT_OPERATION_FAILED':
@@ -366,6 +378,25 @@ export const createHttpServer = async (
       }
 
       return await resolveValue(manager.deleteProjectlessChat(getProjectIdFromRequest(request.params.projectId)))
+    }
+  )
+
+  app.post<{ Params: { projectId: string }, Body: ProjectlessChatTitleRequest }>(
+    '/api/projectless-chats/:projectId/title',
+    async (request: FastifyRequest<{ Params: { projectId: string }, Body: ProjectlessChatTitleRequest }>): Promise<ProjectResponse> => {
+      if (!manager.updateProjectlessChatTitle) {
+        throw new CodoriError(
+          'INVALID_CONFIG',
+          'Projectless chat title updates are not available because the runtime manager does not support them.'
+        )
+      }
+
+      return {
+        project: await resolveValue(manager.updateProjectlessChatTitle(
+          getProjectIdFromRequest(request.params.projectId),
+          request.body?.title ?? ''
+        ))
+      }
     }
   )
 

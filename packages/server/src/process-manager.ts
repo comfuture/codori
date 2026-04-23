@@ -24,7 +24,8 @@ import type {
   ProjectRecord,
   ProjectStatusRecord,
   RuntimeRecord,
-  StartProjectResult
+  StartProjectResult,
+  UpdateProjectlessChatTitleResult
 } from './types.js'
 
 type CommandFactory = (port: number, project: ProjectRecord) => {
@@ -222,6 +223,14 @@ export class RuntimeManager {
       workspaceKind: 'projectless' as const,
       createdAt: now
     }
+  }
+
+  private writeProjectlessMarker(project: ProjectRecord) {
+    writeFileSync(join(project.path, PROJECTLESS_MARKER_FILE), `${JSON.stringify({
+      projectId: project.id,
+      title: project.title ?? DEFAULT_PROJECTLESS_CHAT_TITLE,
+      createdAt: project.createdAt ?? Date.now()
+    }, null, 2)}\n`)
   }
 
   private resolveProject(projectId: string) {
@@ -453,6 +462,28 @@ export class RuntimeManager {
     rmSync(project.path, { recursive: true, force: true })
 
     return { projectId }
+  }
+
+  updateProjectlessChatTitle(projectId: string, title: string): UpdateProjectlessChatTitleResult {
+    const project = this.resolveProject(projectId)
+    if (project.workspaceKind !== 'projectless') {
+      throw new CodoriError(
+        'PROJECT_TITLE_UPDATE_UNAVAILABLE',
+        'Only projectless chats can be titled through this endpoint.'
+      )
+    }
+
+    const nextTitle = title.trim()
+    if (!nextTitle) {
+      throw new CodoriError('INVALID_PROJECT_TITLE', 'Projectless chat title must not be empty.')
+    }
+
+    const updatedProject: ProjectRecord = {
+      ...project,
+      title: nextTitle
+    }
+    this.writeProjectlessMarker(updatedProject)
+    return this.getProjectStatus(projectId)
   }
 
   async stopProject(projectId: string) {

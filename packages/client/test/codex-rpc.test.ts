@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   CodexRpcClient,
   notificationRequestId,
+  notificationThreadName,
   notificationThreadId,
   notificationTurnId,
   notificationTurnStatus,
@@ -56,6 +57,19 @@ describe('Codex RPC payload parsing', () => {
     expect(notificationThreadId(notification)).toBe('thread-1')
     expect(notificationTurnId(notification)).toBe('turn-1')
     expect(notificationTurnStatus(notification)).toBe('completed')
+  })
+
+  it('parses generated thread name update notifications', () => {
+    const notification: CodexRpcNotification = {
+      method: 'thread/name/updated',
+      params: {
+        threadId: 'thread-1',
+        threadName: 'Investigate projectless chat titles'
+      }
+    }
+
+    expect(notificationThreadId(notification)).toBe('thread-1')
+    expect(notificationThreadName(notification)).toBe('Investigate projectless chat titles')
   })
 
   it('parses generated plan update notifications', () => {
