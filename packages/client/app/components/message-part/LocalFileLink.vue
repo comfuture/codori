@@ -2,12 +2,14 @@
 import { computed } from 'vue'
 import { useProjects } from '../../composables/useProjects'
 import { useLocalFileViewer } from '../../composables/useLocalFileViewer'
-import { isLocalFileWithinProject, parseLocalFileHref } from '../../../shared/local-files'
+import { isLocalFileWithinProject, parseLocalFileHref, type WorkspaceLocalFileScope } from '../../../shared/local-files'
 
 const props = defineProps<{
   href?: string | null
   title?: string | null
   projectId?: string | null
+  workspace?: WorkspaceLocalFileScope | null
+  workspaceRootPath?: string | null
 }>()
 
 const { getProject } = useProjects()
@@ -16,22 +18,32 @@ const { openViewer } = useLocalFileViewer()
 const parsedTarget = computed(() =>
   props.href ? parseLocalFileHref(props.href) : null
 )
-const projectPath = computed(() =>
-  props.projectId ? getProject(props.projectId)?.projectPath ?? null : null
+const workspaceScope = computed<WorkspaceLocalFileScope | null>(() =>
+  props.workspace ?? (props.projectId ? { kind: 'project', id: props.projectId } : null)
 )
-const isProjectLocalFile = computed(() =>
+const workspacePath = computed(() => {
+  const workspace = workspaceScope.value
+  if (!workspace) {
+    return null
+  }
+
+  return props.workspaceRootPath
+    ?? (workspace.kind === 'project' ? getProject(workspace.id)?.projectPath ?? null : null)
+})
+const isWorkspaceLocalFile = computed(() =>
   parsedTarget.value
-  && isLocalFileWithinProject(parsedTarget.value.path, projectPath.value)
+  && isLocalFileWithinProject(parsedTarget.value.path, workspacePath.value)
 )
 
 const onClick = (event: MouseEvent) => {
-  if (!props.projectId || !parsedTarget.value || !isProjectLocalFile.value) {
+  const workspace = workspaceScope.value
+  if (!workspace || !parsedTarget.value || !isWorkspaceLocalFile.value) {
     return
   }
 
   event.preventDefault()
   openViewer({
-    projectId: props.projectId,
+    ...(workspace.kind === 'project' ? { projectId: workspace.id } : { workspace }),
     path: parsedTarget.value.path,
     line: parsedTarget.value.line,
     column: parsedTarget.value.column

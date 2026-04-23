@@ -1,6 +1,7 @@
 import { defineComponent, h, type PropType } from 'vue'
 import { UChatReasoning } from '#components'
 import { EVENT_PART, ITEM_PART, type ChatMessage, type ChatPart } from '~~/shared/codex-chat'
+import type { WorkspaceAttachmentScope } from '~~/shared/chat-attachments'
 import MessagePartAttachment from './message-part/Attachment.vue'
 import MessagePartEvent from './message-part/Event.vue'
 import MessagePartItem from './message-part/Item'
@@ -16,6 +17,14 @@ export default defineComponent({
     },
     projectId: {
       type: String as PropType<string | undefined>,
+      default: undefined
+    },
+    workspace: {
+      type: Object as PropType<WorkspaceAttachmentScope | undefined>,
+      default: undefined
+    },
+    workspaceRootPath: {
+      type: String as PropType<string | null | undefined>,
       default: undefined
     },
     part: {
@@ -34,6 +43,8 @@ export default defineComponent({
           return h(MessagePartText, {
             role: props.message?.role,
             projectId: props.projectId,
+            workspace: props.workspace,
+            workspaceRootPath: props.workspaceRootPath,
             part: props.part
           })
         case 'plan':
@@ -51,6 +62,7 @@ export default defineComponent({
         case 'attachment':
           return h(MessagePartAttachment, {
             projectId: props.projectId,
+            workspace: props.workspace,
             part: props.part
           })
         case EVENT_PART:

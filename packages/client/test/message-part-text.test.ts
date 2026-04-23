@@ -306,6 +306,32 @@ describe('message part text markdown rendering', () => {
     })
   })
 
+  it('routes chat-local absolute file links to the in-app viewer', async () => {
+    const wrapper = mount(MessagePartText, {
+      attachTo: document.body,
+      props: {
+        role: 'assistant',
+        workspace: { kind: 'chat', id: 'chat-demo' },
+        workspaceRootPath: '/Users/comfuture/Documents/Chats/chat-demo',
+        part: {
+          type: 'text',
+          text: '[notes.md](/Users/comfuture/Documents/Chats/chat-demo/notes.md:3)',
+          state: 'done'
+        }
+      }
+    })
+
+    await settle()
+    await wrapper.get('a').trigger('click')
+
+    expect(openViewerMock).toHaveBeenCalledWith({
+      workspace: { kind: 'chat', id: 'chat-demo' },
+      path: '/Users/comfuture/Documents/Chats/chat-demo/notes.md',
+      line: 3,
+      column: null
+    })
+  })
+
   it('renders markdown links in user messages and routes local files to the viewer', async () => {
     const wrapper = mount(MessagePartText, {
       attachTo: document.body,

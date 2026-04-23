@@ -8,10 +8,13 @@ import { computed, defineComponent, h, onMounted, ref, watch } from 'vue'
 import LocalFileLink from './LocalFileLink.vue'
 import ReviewPriorityBadge from './ReviewPriorityBadge.vue'
 import { reviewPriorityBadgePlugin } from '../../utils/review-priority-badge'
+import type { WorkspaceLocalFileScope } from '../../../shared/local-files'
 
 const props = defineProps<{
   role?: 'user' | 'assistant' | 'system'
   projectId?: string | null
+  workspace?: WorkspaceLocalFileScope | null
+  workspaceRootPath?: string | null
   part?: {
     type: 'text'
     text: string
@@ -144,7 +147,9 @@ const ChatMarkdownLocalFileLink = defineComponent({
     return () => h(LocalFileLink, {
       href: linkProps.href,
       title: linkProps.title,
-      projectId: props.projectId ?? null
+      projectId: props.projectId ?? null,
+      workspace: props.workspace ?? null,
+      workspaceRootPath: props.workspaceRootPath ?? null
     }, slots)
   }
 })
