@@ -50,7 +50,7 @@ const openUrl = () => {
 <template>
   <div class="space-y-3">
     <section class="rounded-lg border border-default/70 bg-elevated/20 p-3">
-      <p class="text-[11px] font-semibold uppercase tracking-[0.18em] text-primary">
+      <p class="text-[11px] font-semibold text-primary">
         External action
       </p>
       <h3 class="mt-1.5 text-sm font-semibold text-highlighted">

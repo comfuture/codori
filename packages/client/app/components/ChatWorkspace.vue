@@ -3960,8 +3960,8 @@ watch(
       >
         <div class="flex w-full max-w-4xl flex-col items-center gap-10 text-center">
           <div class="space-y-4">
-            <div class="text-xs font-medium uppercase tracking-[0.28em] text-primary">
-              Ready To Code
+            <div class="text-xs font-medium text-primary">
+              Ready to code
             </div>
             <div class="space-y-2">
               <h1 class="text-balance text-4xl font-semibold tracking-tight text-highlighted md:text-5xl">
@@ -4101,7 +4101,7 @@ watch(
                   :key="section.key"
                   class="mt-2 first:mt-0"
                 >
-                  <div class="px-3 pb-1 pt-1 text-[11px] font-medium uppercase tracking-[0.14em] text-muted">
+                  <div class="px-3 pb-1 pt-1 text-[11px] font-medium text-muted">
                     {{ section.title }}
                   </div>
                   <div
@@ -4151,7 +4151,7 @@ watch(
                           {{ item.description }}
                         </span>
                       </div>
-                      <span class="shrink-0 text-[11px] uppercase tracking-[0.12em] text-muted">
+                      <span class="shrink-0 text-[11px] text-muted">
                         {{ item.plugin.marketplaceName }}
                       </span>
                     </template>
@@ -4220,7 +4220,7 @@ watch(
                     {{ resolveSkillAutocompleteDescription(skill) }}
                   </span>
                 </div>
-                <div class="shrink-0 text-[11px] uppercase tracking-[0.12em] text-muted">
+                <div class="shrink-0 text-[11px] text-muted">
                   {{ skill.scope }}
                 </div>
               </div>
@@ -4457,8 +4457,8 @@ watch(
                     <template #content>
                       <div class="w-72 space-y-3 p-4">
                         <div class="space-y-1">
-                          <div class="text-xs font-semibold uppercase tracking-[0.22em] text-primary">
-                            Context Window
+                          <div class="text-xs font-semibold text-primary">
+                            Context window
                           </div>
                           <div class="text-sm font-medium text-highlighted">
                             {{ selectedModelOption?.displayName ?? 'Selected model' }}
@@ -4467,7 +4467,7 @@ watch(
 
                         <div class="grid grid-cols-2 gap-3 text-sm">
                           <div class="rounded-2xl border border-default bg-elevated/35 px-3 py-2">
-                            <div class="text-[11px] uppercase tracking-[0.18em] text-muted">
+                            <div class="text-[11px] font-medium text-muted">
                               Remaining
                             </div>
                             <div class="mt-1 font-semibold text-highlighted">
@@ -4478,7 +4478,7 @@ watch(
                             </div>
                           </div>
                           <div class="rounded-2xl border border-default bg-elevated/35 px-3 py-2">
-                            <div class="text-[11px] uppercase tracking-[0.18em] text-muted">
+                            <div class="text-[11px] font-medium text-muted">
                               Used
                             </div>
                             <div class="mt-1 font-semibold text-highlighted">
@@ -4492,7 +4492,7 @@ watch(
 
                         <div class="grid grid-cols-2 gap-3 text-sm">
                           <div class="rounded-2xl border border-default bg-elevated/35 px-3 py-2">
-                            <div class="text-[11px] uppercase tracking-[0.18em] text-muted">
+                            <div class="text-[11px] font-medium text-muted">
                               Input
                             </div>
                             <div class="mt-1 font-semibold text-highlighted">
@@ -4503,7 +4503,7 @@ watch(
                             </div>
                           </div>
                           <div class="rounded-2xl border border-default bg-elevated/35 px-3 py-2">
-                            <div class="text-[11px] uppercase tracking-[0.18em] text-muted">
+                            <div class="text-[11px] font-medium text-muted">
                               Output
                             </div>
                             <div class="mt-1 font-semibold text-highlighted">

@@ -83,8 +83,8 @@ const requestBranchCreate = () => {
       <div class="w-[min(24rem,calc(100vw-2rem))] space-y-3 p-3">
         <div class="flex items-center justify-between gap-3">
           <div class="min-w-0">
-            <div class="text-[11px] font-semibold uppercase tracking-[0.18em] text-primary">
-              Workspace Branch
+            <div class="text-xs font-semibold text-primary">
+              Workspace branch
             </div>
             <div class="truncate text-sm font-medium text-highlighted">
               {{ currentBranch ?? 'Detached HEAD' }}
@@ -105,8 +105,8 @@ const requestBranchCreate = () => {
         />
 
         <div class="space-y-2">
-          <div class="text-xs font-medium uppercase tracking-[0.16em] text-muted">
-            Switch Branch
+          <div class="text-xs font-medium text-muted">
+            Switch branch
           </div>
 
           <UInput
@@ -147,8 +147,8 @@ const requestBranchCreate = () => {
         </div>
 
         <div class="space-y-2">
-          <div class="text-xs font-medium uppercase tracking-[0.16em] text-muted">
-            Create Branch
+          <div class="text-xs font-medium text-muted">
+            Create branch
           </div>
 
           <div class="flex items-center gap-2">

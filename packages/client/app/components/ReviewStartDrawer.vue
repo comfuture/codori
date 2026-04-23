@@ -146,7 +146,7 @@ const description = computed(() =>
 
         <div
           v-if="currentBranch"
-          class="text-xs font-medium uppercase tracking-[0.2em] text-muted"
+          class="text-xs font-medium text-muted"
         >
           Current {{ currentBranch }}
         </div>
