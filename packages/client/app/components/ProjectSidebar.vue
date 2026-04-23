@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { NavigationMenuItem } from '@nuxt/ui'
 import { useRoute } from '#imports'
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useProjects } from '../composables/useProjects'
 import { sortSidebarProjects } from '../utils/project-sidebar-order'
 import { toProjectRoute } from '~~/shared/codori'
@@ -17,6 +17,7 @@ type ProjectNavigationItem = NavigationMenuItem & {
 }
 
 const route = useRoute()
+const addProjectOpen = ref(false)
 const {
   projects,
   loaded,
@@ -68,15 +69,31 @@ const isActiveProject = (item: ProjectNavigationItem) => activeProjectId.value =
       >
         Projects
       </div>
-      <UButton
-        icon="i-lucide-refresh-cw"
-        color="neutral"
-        variant="ghost"
-        size="xs"
-        :loading="loading"
-        :square="props.collapsed"
-        @click="refreshProjects"
-      />
+      <div class="flex items-center gap-1">
+        <UTooltip text="Add project">
+          <UButton
+            icon="i-lucide-plus"
+            color="neutral"
+            variant="ghost"
+            size="xs"
+            :square="props.collapsed"
+            aria-label="Add project"
+            @click="addProjectOpen = true"
+          />
+        </UTooltip>
+        <UTooltip text="Refresh projects">
+          <UButton
+            icon="i-lucide-refresh-cw"
+            color="neutral"
+            variant="ghost"
+            size="xs"
+            :loading="loading"
+            :square="props.collapsed"
+            aria-label="Refresh projects"
+            @click="refreshProjects"
+          />
+        </UTooltip>
+      </div>
     </div>
 
     <div
@@ -143,5 +160,7 @@ const isActiveProject = (item: ProjectNavigationItem) => activeProjectId.value =
         </template>
       </UNavigationMenu>
     </div>
+
+    <AddProjectModal v-model:open="addProjectOpen" />
   </div>
 </template>
