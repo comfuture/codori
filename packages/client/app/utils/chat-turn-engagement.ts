@@ -61,6 +61,10 @@ export const shouldApplyNotificationToCurrentTurn = (input: {
 export const shouldApplyThreadAgnosticNotification = (method: string) =>
   method === 'serverRequest/resolved'
 
+export const shouldApplyNotificationWithoutTurnId = (method: string) =>
+  shouldApplyThreadAgnosticNotification(method)
+  || method === 'thread/name/updated'
+
 export const shouldAdvanceLiveStreamTurn = (input: {
   lockedTurnId?: string | null
   nextTurnId: string | null

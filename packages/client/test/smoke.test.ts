@@ -7,6 +7,7 @@ import {
   resolveTurnSubmissionMethod,
   shouldAdvanceLiveStreamTurn,
   shouldApplyNotificationToCurrentTurn,
+  shouldApplyNotificationWithoutTurnId,
   shouldSubmitViaTurnSteer,
   shouldAwaitThreadHydration,
   shouldRetrySteerWithTurnStart,
@@ -594,6 +595,12 @@ describe('client package', () => {
       notificationMethod: 'item/agentMessage/delta',
       notificationTurnId: 'turn-1'
     })).toBe(true)
+  })
+
+  it('applies thread-level notifications before an active turn id exists', () => {
+    expect(shouldApplyNotificationWithoutTurnId('thread/name/updated')).toBe(true)
+    expect(shouldApplyNotificationWithoutTurnId('serverRequest/resolved')).toBe(true)
+    expect(shouldApplyNotificationWithoutTurnId('item/agentMessage/delta')).toBe(false)
   })
 
   it('keeps a locked review turn pinned when unrelated turns start', () => {
