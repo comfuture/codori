@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { ref, toValue, type MaybeRefOrGetter } from 'vue'
 import { useRuntimeConfig } from '#imports'
 import { $fetch } from 'ofetch'
 import {
@@ -22,7 +22,7 @@ const createAttachmentId = () =>
     ? crypto.randomUUID()
     : `${Date.now()}-${Math.random().toString(16).slice(2)}`
 
-export const useChatAttachments = (workspace: string | WorkspaceAttachmentScope) => {
+export const useChatAttachments = (workspace: MaybeRefOrGetter<string | WorkspaceAttachmentScope>) => {
   const runtimeConfig = useRuntimeConfig()
   const attachments = ref<DraftAttachment[]>([])
   const isDragging = ref(false)
@@ -171,9 +171,12 @@ export const useChatAttachments = (workspace: string | WorkspaceAttachmentScope)
     try {
       const response = await $fetch<ProjectAttachmentUploadResponse>(
         resolveAttachmentUploadUrl({
-          workspace: typeof workspace === 'string'
-            ? { kind: 'project', id: workspace }
-            : workspace,
+          workspace: (() => {
+            const resolvedWorkspace = toValue(workspace)
+            return typeof resolvedWorkspace === 'string'
+              ? { kind: 'project' as const, id: resolvedWorkspace }
+              : resolvedWorkspace
+          })(),
           configuredBase: String(runtimeConfig.public.serverBase ?? '')
         }),
         {

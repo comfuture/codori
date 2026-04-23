@@ -117,6 +117,8 @@ export const encodeProjectIdSegment = (projectId: string) => encodeURIComponent(
 
 export const toChatRoute = (chatId: string) => `/chats/${encodeURIComponent(chatId)}`
 
+export const toChatsRoute = () => '/chats'
+
 export const encodeChatIdSegment = (chatId: string) => encodeURIComponent(chatId)
 
 export const resolveProjectGitBranchesUrl = (input: {

@@ -35,14 +35,23 @@ import { useChatAttachments, type DraftAttachment } from '../composables/useChat
 import { useChatPlanWorkflow } from '../composables/useChatPlanWorkflow'
 import { useChatReviewWorkflow } from '../composables/useChatReviewWorkflow'
 import { useSubagentPanelsController } from '../composables/useSubagentPanelsController'
-import { usePendingUserRequest } from '../composables/usePendingUserRequest'
-import { useChatSession, type LiveStream } from '../composables/useChatSession'
+import {
+  promotePendingUserRequestSessions,
+  usePendingUserRequest
+} from '../composables/usePendingUserRequest'
+import {
+  promoteChatSession,
+  useChatSession,
+  type LiveStream
+} from '../composables/useChatSession'
 import { useChats } from '../composables/useChats'
 import { useProjects } from '../composables/useProjects'
 import { useRpc } from '../composables/useRpc'
 import { useChatSubmitGuard } from '../composables/useChatSubmitGuard'
 import { useWorkspaceGitBranch } from '../composables/useWorkspaceGitBranch'
+import { sortSidebarProjects } from '../utils/project-sidebar-order'
 import {
+  promoteThreadSummaries,
   normalizeThreadTitleCandidate,
   resolveThreadSummaryTitle,
   useThreadSummaries
@@ -102,7 +111,7 @@ import {
   shouldShowContextWindowIndicator,
   visibleModelOptions
 } from '~~/shared/chat-prompt-controls'
-import { toProjectThreadRoute } from '~~/shared/codori'
+import { toChatRoute, toProjectRoute, toProjectThreadRoute } from '~~/shared/codori'
 import {
   filterSlashCommands,
   findActiveSlashCommand,
@@ -160,11 +169,26 @@ const props = defineProps<{
   threadId?: string | null
 }>()
 const workspaceKind = props.workspaceKind ?? 'project'
-const workspaceId = workspaceKind === 'chat' ? props.chatId ?? '' : props.projectId ?? ''
-const workspaceSessionKey = `${workspaceKind}:${workspaceId}`
-const workspaceScope = workspaceKind === 'chat'
-  ? { kind: 'chat' as const, id: workspaceId }
-  : { kind: 'project' as const, id: workspaceId }
+const initialWorkspaceId = workspaceKind === 'chat' ? props.chatId ?? 'draft' : props.projectId ?? ''
+const routeChatId = computed(() => {
+  if (workspaceKind !== 'chat') {
+    return null
+  }
+
+  return props.chatId?.trim() || null
+})
+const activeChatId = ref<string | null>(routeChatId.value)
+const workspaceId = computed(() =>
+  workspaceKind === 'chat'
+    ? activeChatId.value ?? ''
+    : props.projectId ?? ''
+)
+const workspaceSessionKey = `${workspaceKind}:${initialWorkspaceId}`
+const workspaceScope = computed(() =>
+  workspaceKind === 'chat'
+    ? { kind: 'chat' as const, id: workspaceId.value }
+    : { kind: 'project' as const, id: workspaceId.value }
+)
 const routeThreadId = computed(() => props.threadId ?? null)
 const defaultChatTitle = 'New Chat'
 
@@ -172,7 +196,9 @@ const router = useRouter()
 const runtimeConfig = useRuntimeConfig()
 const { getWorkspaceClient } = useRpc()
 const {
+  projects,
   loaded,
+  loading: projectsLoading,
   refreshProjects,
   getProject,
   startProject
@@ -181,11 +207,19 @@ const {
   loaded: chatsLoaded,
   refreshChats,
   getChat,
+  createChat,
   renameChat,
   setChatThread,
   startChat
 } = useChats()
-const getRuntimeClient = () => getWorkspaceClient(workspaceScope)
+const getRuntimeClient = () => {
+  const scope = workspaceScope.value
+  if (!scope.id) {
+    throw new Error('Chat session has not started yet.')
+  }
+
+  return getWorkspaceClient(scope)
+}
 const {
   onCompositionStart,
   onCompositionEnd,
@@ -296,7 +330,7 @@ type MentionAutocompletePaletteSection = {
   items: MentionAutocompletePaletteItem[]
 }
 
-const selectedChat = computed(() => workspaceKind === 'chat' ? getChat(workspaceId) : null)
+const selectedChat = computed(() => workspaceKind === 'chat' ? getChat(workspaceId.value) : null)
 const selectedProject = computed(() => {
   if (workspaceKind === 'chat') {
     const chat = selectedChat.value
@@ -309,12 +343,12 @@ const selectedProject = computed(() => {
       : null
   }
 
-  return getProject(workspaceId)
+  return getProject(workspaceId.value)
 })
 const supportsWorkspaceGit = computed(() => workspaceKind === 'project')
 const isChatSessionWorkspace = computed(() => workspaceKind === 'chat')
 const workspaceGitBranch = useWorkspaceGitBranch({
-  projectId: workspaceId,
+  projectId: workspaceId.value,
   serverBase: String(runtimeConfig.public.serverBase ?? ''),
   supportsGit: () => supportsWorkspaceGit.value
 })
@@ -394,7 +428,7 @@ const promptSubmitStatus = computed(() =>
     hasDraftContent: hasDraftContent.value
   })
 )
-const projectTitle = computed(() => selectedProject.value?.projectId ?? workspaceId)
+const projectTitle = computed(() => selectedProject.value?.projectId ?? workspaceId.value)
 const composerPlaceholder = computed(() =>
   hasPendingRequest.value
     ? 'Respond to the pending request below to let Codex continue'
@@ -421,6 +455,24 @@ const showWelcomeState = computed(() =>
 const showChatWelcomeState = computed(() =>
   showWelcomeState.value && isChatSessionWorkspace.value
 )
+const showStarterProjectSelector = computed(() =>
+  showChatWelcomeState.value && !activeChatId.value
+)
+const starterProjectItems = computed(() =>
+  sortSidebarProjects(projects.value, null).map(project => ({
+    label: project.projectId,
+    value: project.projectId,
+    description: project.projectPath
+  }))
+)
+
+const selectStarterProject = async (projectId: unknown) => {
+  if (typeof projectId !== 'string' || !projectId.trim()) {
+    return
+  }
+
+  await router.push(toProjectRoute(projectId))
+}
 
 const slashCommands = computed(() =>
   SLASH_COMMANDS
@@ -916,6 +968,8 @@ let pendingThreadHydration: Promise<void> | null = null
 let releaseServerRequestHandler: (() => void) | null = null
 let releaseSkillNotificationSubscription: (() => void) | null = null
 let releaseWorkspaceGitBranchEnvironmentListeners: (() => void) | null = null
+let runtimeSubscriptionKey: string | null = null
+const linkedChatThreadIds = new Set<string>()
 let footerResizeObserver: ResizeObserver | null = null
 let skipNextSkillMentionSync = false
 let skipNextMentionSelectionSync = false
@@ -1211,7 +1265,12 @@ const syncChatSessionTitle = (title: string) => {
     return
   }
 
-  void renameChat(workspaceId, title).catch(() => {
+  const chatId = workspaceId.value
+  if (!chatId) {
+    return
+  }
+
+  void renameChat(chatId, title).catch(() => {
     // Keep the live UI responsive even if marker persistence fails.
   })
 }
@@ -1520,7 +1579,7 @@ const resolvePluginMentionAvatarText = (plugin: PluginMentionAutocompleteEntry) 
 
 const resolvePluginMentionAvatarSrc = (plugin: PluginMentionAutocompleteEntry) =>
   resolvePluginMentionIconUrl({
-    workspace: workspaceScope,
+    workspace: workspaceScope.value,
     path: plugin.composerIcon ?? plugin.logo,
     configuredBase: String(runtimeConfig.public.serverBase ?? '')
   })
@@ -1989,7 +2048,7 @@ const restoreDraftIfPristine = (
 }
 
 const reviewWorkflow = useChatReviewWorkflow({
-  projectId: workspaceId,
+  projectId: workspaceId.value,
   serverBase: String(runtimeConfig.public.serverBase ?? ''),
   input,
   attachments,
@@ -2030,7 +2089,7 @@ const {
 } = reviewWorkflow
 
 const planWorkflow = useChatPlanWorkflow({
-  projectId: workspaceId,
+  projectId: workspaceId.value,
   routeThreadId,
   activeThreadId,
   hasPendingRequest,
@@ -2075,7 +2134,7 @@ const {
 } = planWorkflow
 
 const subagentPanelsController = useSubagentPanelsController({
-  projectId: workspaceId,
+  projectId: workspaceId.value,
   subagentPanels,
   ensureProjectRuntime,
   getClient: () => getRuntimeClient(),
@@ -2287,6 +2346,40 @@ const scrollToBottom = (behavior: ScrollBehavior = 'auto') => {
   })
 }
 
+const ensureChatSession = async () => {
+  if (workspaceKind !== 'chat') {
+    return null
+  }
+
+  if (activeChatId.value) {
+    return activeChatId.value
+  }
+
+  const chat = await createChat()
+  activeChatId.value = chat.chatId
+  return chat.chatId
+}
+
+const promoteDraftChatSession = (chatId: string) => {
+  if (workspaceKind !== 'chat' || initialWorkspaceId !== 'draft') {
+    return
+  }
+
+  const nextWorkspaceSessionKey = `chat:${chatId}`
+  promoteChatSession(workspaceSessionKey, nextWorkspaceSessionKey)
+  promoteThreadSummaries(workspaceSessionKey, nextWorkspaceSessionKey)
+  promotePendingUserRequestSessions(workspaceSessionKey, nextWorkspaceSessionKey)
+}
+
+const routeDraftChatToSession = async () => {
+  if (workspaceKind !== 'chat' || routeChatId.value || !activeChatId.value) {
+    return
+  }
+
+  promoteDraftChatSession(activeChatId.value)
+  await router.replace(toChatRoute(activeChatId.value))
+}
+
 const scheduleScrollToBottom = async (behavior: ScrollBehavior = 'auto') => {
   await nextTick()
 
@@ -2304,13 +2397,19 @@ const scheduleScrollToBottom = async (behavior: ScrollBehavior = 'auto') => {
 
 async function ensureProjectRuntime() {
   if (workspaceKind === 'chat') {
+    const chatId = await ensureChatSession()
+    if (!chatId) {
+      throw new Error('Chat session could not be created.')
+    }
+    ensureRuntimeSubscriptions()
+
     if (!chatsLoaded.value) {
       await refreshChats()
     }
     if (selectedProject.value?.status === 'running') {
       return
     }
-    await startChat(workspaceId)
+    await startChat(chatId)
     return
   }
 
@@ -2321,7 +2420,7 @@ async function ensureProjectRuntime() {
     return
   }
 
-  await startProject(workspaceId)
+  await startProject(workspaceId.value)
 }
 
 const hydrateThread = async (threadId: string) => {
@@ -2428,7 +2527,10 @@ const hydrateThread = async (threadId: string) => {
       clearLiveStream()
       const errorMessage = caughtError instanceof Error ? caughtError.message : String(caughtError)
       if (workspaceKind === 'chat' && /no rollout found for thread id/i.test(errorMessage)) {
-        await setChatThread(workspaceId, null).catch(() => null)
+        const chatId = workspaceId.value
+        if (chatId) {
+          await setChatThread(chatId, null).catch(() => null)
+        }
         resetDraftThread()
         return
       }
@@ -2465,6 +2567,17 @@ const resetDraftThread = () => {
   markAwaitingAssistantOutput(false)
   status.value = 'ready'
 }
+
+watch(routeChatId, (chatId) => {
+  if (workspaceKind !== 'chat') {
+    return
+  }
+
+  activeChatId.value = chatId
+  if (!chatId) {
+    resetDraftThread()
+  }
+})
 
 const ensureThread = async () => {
   if (activeThreadId.value) {
@@ -2853,6 +2966,10 @@ const applyNotification = (notification: CodexRpcNotification) => {
       }
 
       activeThreadId.value = nextThreadId
+      if (workspaceKind === 'chat' && linkedChatThreadIds.has(nextThreadId)) {
+        refreshWorkspaceGitBranchesInBackground('thread/start')
+        return
+      }
       pendingThreadId.value = pendingThreadId.value ?? nextThreadId
       refreshWorkspaceGitBranchesInBackground('thread/start')
       return
@@ -3265,6 +3382,7 @@ const sendMessage = async () => {
             optimisticMessageId,
             queueOptimisticMessage: false
           })
+          await routeDraftChatToSession()
         }
         return
       }
@@ -3281,6 +3399,7 @@ const sendMessage = async () => {
         collaborationMode,
         optimisticMessageId
       })
+      await routeDraftChatToSession()
     } catch (caughtError) {
       const messageText = caughtError instanceof Error ? caughtError.message : String(caughtError)
 
@@ -3552,15 +3671,34 @@ const onPromptEnter = (event: KeyboardEvent) => {
   void sendMessage()
 }
 
-onMounted(() => {
-  releaseServerRequestHandler = getRuntimeClient().setServerRequestHandler(handleServerRequest)
-  releaseSkillNotificationSubscription = getRuntimeClient().subscribe((notification) => {
+const ensureRuntimeSubscriptions = () => {
+  const scope = workspaceScope.value
+  if (!scope.id) {
+    return false
+  }
+
+  const nextKey = `${scope.kind}:${scope.id}`
+  if (runtimeSubscriptionKey === nextKey) {
+    return true
+  }
+
+  releaseServerRequestHandler?.()
+  releaseSkillNotificationSubscription?.()
+  const client = getRuntimeClient()
+  releaseServerRequestHandler = client.setServerRequestHandler(handleServerRequest)
+  releaseSkillNotificationSubscription = client.subscribe((notification) => {
     if (notification.method !== 'skills/changed') {
       return
     }
 
     skillAutocompleteInvalidationVersion.value += 1
   })
+  runtimeSubscriptionKey = nextKey
+  void client.connect().catch(() => {})
+  return true
+}
+
+onMounted(() => {
   if (!loaded.value) {
     void refreshProjects()
   }
@@ -3568,8 +3706,9 @@ onMounted(() => {
     void refreshChats()
   }
 
-  void getRuntimeClient().connect().catch(() => {})
-  void loadPromptControls()
+  if (ensureRuntimeSubscriptions()) {
+    void loadPromptControls()
+  }
   refreshWorkspaceGitBranchesInBackground('mount')
   void scheduleScrollToBottom('auto')
 
@@ -3618,6 +3757,7 @@ onBeforeUnmount(() => {
   releaseServerRequestHandler = null
   releaseSkillNotificationSubscription?.()
   releaseSkillNotificationSubscription = null
+  runtimeSubscriptionKey = null
   releaseWorkspaceGitBranchEnvironmentListeners?.()
   releaseWorkspaceGitBranchEnvironmentListeners = null
   footerResizeObserver?.disconnect()
@@ -3668,13 +3808,17 @@ watch(pendingThreadId, async (threadId) => {
 
   autoRedirectThreadId.value = threadId
   if (workspaceKind === 'chat') {
-    await setChatThread(workspaceId, threadId)
+    const chatId = workspaceId.value
+    if (chatId) {
+      linkedChatThreadIds.add(threadId)
+      await setChatThread(chatId, threadId)
+    }
     pendingThreadId.value = null
     autoRedirectThreadId.value = null
     return
   }
 
-  await router.push(toProjectThreadRoute(workspaceId, threadId))
+  await router.push(toProjectThreadRoute(workspaceId.value, threadId))
   pendingThreadId.value = null
 })
 
@@ -3967,11 +4111,42 @@ watch(
       >
         <div
           v-if="showChatWelcomeState"
-          class="w-full max-w-5xl text-center"
+          class="flex w-full max-w-5xl flex-col items-center gap-5 text-center"
         >
           <h1 class="text-balance text-3xl font-semibold tracking-tight text-highlighted md:text-4xl">
             What should we work on?
           </h1>
+
+          <div
+            v-if="showStarterProjectSelector"
+            class="flex w-full max-w-md flex-col items-center gap-3"
+          >
+            <div class="flex w-full items-center gap-3 text-xs text-muted">
+              <span class="h-px flex-1 bg-border" />
+              <span>Or</span>
+              <span class="h-px flex-1 bg-border" />
+            </div>
+            <USelectMenu
+              :model-value="null"
+              :items="starterProjectItems"
+              value-key="value"
+              :filter-fields="['label', 'description']"
+              :search-input="{ placeholder: 'Search projects' }"
+              :loading="projectsLoading && starterProjectItems.length === 0"
+              :disabled="starterProjectItems.length === 0"
+              placeholder="Work in a project"
+              color="neutral"
+              variant="ghost"
+              class="w-auto"
+              :ui="{ base: 'bg-transparent px-2 text-center shadow-none ring-0 hover:bg-transparent focus-visible:ring-0', content: 'min-w-72' }"
+              @update:model-value="selectStarterProject"
+            >
+              <span class="truncate text-muted">Work in a project</span>
+            </USelectMenu>
+            <p class="text-xs text-muted">
+              Choose a project instead of starting a projectless chat.
+            </p>
+          </div>
         </div>
 
         <div
