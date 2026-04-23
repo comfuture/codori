@@ -10,7 +10,7 @@ import { resolveProjectAttachmentsDir } from '../src/attachment-store.js'
 import { CodoriError } from '../src/errors.js'
 import { createHttpServer, type RuntimeManagerLike } from '../src/http-server.js'
 import type { ServiceUpdateController } from '../src/service-update.js'
-import type { ProjectStatusRecord, StartProjectResult } from '../src/types.js'
+import type { ChatSessionStatusRecord, ProjectStatusRecord, StartChatSessionResult, StartProjectResult } from '../src/types.js'
 
 const startedApps: Array<Awaited<ReturnType<typeof createHttpServer>>> = []
 const startedSocketServers: WebSocketServer[] = []
@@ -59,9 +59,24 @@ afterEach(async () => {
 const createProjectRecord = (): ProjectStatusRecord => ({
   projectId: 'demo',
   projectPath: '/tmp/demo',
-  title: null,
-  workspaceKind: 'project',
-  createdAt: null,
+  status: 'running',
+  pid: 123,
+  port: 46000,
+  startedAt: 1,
+  lastActivityAt: 1,
+  activeSessionCount: 0,
+  idleTimeoutMs: 30 * 60 * 1000,
+  idleDeadlineAt: 30 * 60 * 1000 + 1,
+  error: null
+})
+
+const createChatRecord = (): ChatSessionStatusRecord => ({
+  chatId: 'chat-test',
+  chatPath: '/tmp/chats/chat-test',
+  threadId: null,
+  title: 'New Chat',
+  createdAt: 1,
+  updatedAt: 1,
   status: 'running',
   pid: 123,
   port: 46000,
@@ -75,31 +90,34 @@ const createProjectRecord = (): ProjectStatusRecord => ({
 
 const createManager = (overrides: Partial<RuntimeManagerLike> = {}): RuntimeManagerLike => ({
   listProjectStatuses: () => [createProjectRecord()],
-  listProjectlessStatuses: () => [],
+  listChatStatuses: () => [],
   getProjectStatus: () => createProjectRecord(),
+  getChatStatus: () => createChatRecord(),
   cloneProject: () => createProjectRecord(),
-  createProjectlessChat: () => ({
-    ...createProjectRecord(),
-    projectId: 'projectless/chat-test',
-    projectPath: '/tmp/projectless/chat-test',
-    title: 'New Chat',
-    workspaceKind: 'projectless',
-    createdAt: 1,
+  createChatSession: () => ({
+    ...createChatRecord(),
     reusedExisting: false
   }),
-  deleteProjectlessChat: projectId => ({
-    projectId
+  deleteChatSession: chatId => ({
+    chatId
   }),
-  updateProjectlessChatTitle: (projectId, title) => ({
-    ...createProjectRecord(),
-    projectId,
-    projectPath: `/tmp/${projectId}`,
-    title,
-    workspaceKind: 'projectless',
-    createdAt: 1
+  updateChatSessionTitle: (chatId, title) => ({
+    ...createChatRecord(),
+    chatId,
+    chatPath: `/tmp/${chatId}`,
+    title
+  }),
+  updateChatSessionThread: (chatId, threadId) => ({
+    ...createChatRecord(),
+    chatId,
+    threadId
   }),
   startProject: () => ({
     ...createProjectRecord(),
+    reusedExisting: true
+  }),
+  startChatSession: () => ({
+    ...createChatRecord(),
     reusedExisting: true
   }),
   stopProject: () => ({
@@ -205,21 +223,20 @@ describe('createHttpServer', () => {
     })
   })
 
-  it('creates and lists recent projectless chats through the management API', async () => {
-    const projectlessRecord: ProjectStatusRecord = {
-      ...createProjectRecord(),
-      projectId: 'projectless/chat-recent',
-      projectPath: '/tmp/projectless/chat-recent',
+  it('creates and lists recent chats through the management API', async () => {
+    const chatRecord: ChatSessionStatusRecord = {
+      ...createChatRecord(),
+      chatId: 'chat-recent',
+      chatPath: '/tmp/chats/chat-recent',
       title: 'Recent chat',
-      workspaceKind: 'projectless',
       createdAt: 10
     }
     const app = await createHttpServer(createManager({
-      listProjectlessStatuses: () => [projectlessRecord],
-      createProjectlessChat: () => ({
-        ...projectlessRecord,
-        projectId: 'projectless/chat-new',
-        projectPath: '/tmp/projectless/chat-new',
+      listChatStatuses: () => [chatRecord],
+      createChatSession: () => ({
+        ...chatRecord,
+        chatId: 'chat-new',
+        chatPath: '/tmp/chats/chat-new',
         title: 'New Chat',
         createdAt: 11,
         reusedExisting: false
@@ -229,23 +246,23 @@ describe('createHttpServer', () => {
 
     const listResponse = await app.inject({
       method: 'GET',
-      url: '/api/projectless-chats'
+      url: '/api/chats'
     })
     expect(listResponse.statusCode).toBe(200)
     expect(listResponse.json()).toEqual({
-      projects: [projectlessRecord]
+      chats: [chatRecord]
     })
 
     const createResponse = await app.inject({
       method: 'POST',
-      url: '/api/projectless-chats'
+      url: '/api/chats'
     })
     expect(createResponse.statusCode).toBe(201)
     expect(createResponse.json()).toEqual({
-      project: {
-        ...projectlessRecord,
-        projectId: 'projectless/chat-new',
-        projectPath: '/tmp/projectless/chat-new',
+      chat: {
+        ...chatRecord,
+        chatId: 'chat-new',
+        chatPath: '/tmp/chats/chat-new',
         title: 'New Chat',
         createdAt: 11,
         reusedExisting: false
@@ -253,93 +270,49 @@ describe('createHttpServer', () => {
     })
   })
 
-  it('deletes a projectless chat through the management API', async () => {
+  it('deletes a chat through the management API', async () => {
     const app = await createHttpServer(createManager({
-      deleteProjectlessChat: projectId => ({ projectId })
+      deleteChatSession: chatId => ({ chatId })
     }))
     startedApps.push(app)
 
     const response = await app.inject({
       method: 'DELETE',
-      url: '/api/projectless-chats/projectless%2Fchat-recent'
+      url: '/api/chats/chat-recent'
     })
 
     expect(response.statusCode).toBe(200)
     expect(response.json()).toEqual({
-      projectId: 'projectless/chat-recent'
+      chatId: 'chat-recent'
     })
   })
 
-  it('updates a projectless chat title through the management API', async () => {
+  it('updates a chat title through the management API', async () => {
     const app = await createHttpServer(createManager({
-      updateProjectlessChatTitle: (projectId, title) => ({
-        ...createProjectRecord(),
-        projectId,
-        projectPath: '/tmp/projectless/chat-recent',
-        title,
-        workspaceKind: 'projectless',
-        createdAt: 10
+      updateChatSessionTitle: (chatId, title) => ({
+        ...createChatRecord(),
+        chatId,
+        chatPath: '/tmp/chats/chat-recent',
+        title
       })
     }))
     startedApps.push(app)
 
     const response = await app.inject({
       method: 'POST',
-      url: '/api/projectless-chats/projectless%2Fchat-recent/title',
+      url: '/api/chats/chat-recent/title',
       payload: {
-        title: 'Investigate projectless chat titles'
+        title: 'Investigate chat titles'
       }
     })
 
     expect(response.statusCode).toBe(200)
     expect(response.json()).toEqual({
-      project: {
-        ...createProjectRecord(),
-        projectId: 'projectless/chat-recent',
-        projectPath: '/tmp/projectless/chat-recent',
-        title: 'Investigate projectless chat titles',
-        workspaceKind: 'projectless',
-        createdAt: 10
-      }
-    })
-  })
-
-  it('does not expose git branch operations for projectless chats', async () => {
-    const projectlessRecord: ProjectStatusRecord = {
-      ...createProjectRecord(),
-      projectId: 'projectless/chat-recent',
-      projectPath: '/tmp/projectless/chat-recent',
-      title: 'Recent chat',
-      workspaceKind: 'projectless'
-    }
-    const app = await createHttpServer(createManager({
-      getProjectStatus: () => projectlessRecord
-    }))
-    startedApps.push(app)
-
-    const listResponse = await app.inject({
-      method: 'GET',
-      url: '/api/projects/projectless%2Fchat-recent/git/branches'
-    })
-    expect(listResponse.statusCode).toBe(200)
-    expect(listResponse.json()).toEqual({
-      currentBranch: null,
-      branches: []
-    })
-
-    const switchResponse = await app.inject({
-      method: 'POST',
-      url: '/api/projects/projectless%2Fchat-recent/git/branches/switch',
-      payload: {
-        branch: 'main'
-      }
-    })
-    expect(switchResponse.statusCode).toBe(400)
-    expect(switchResponse.json()).toEqual({
-      error: {
-        code: 'PROJECT_NOT_GIT_REPOSITORY',
-        message: 'Git branch operations are not available for projectless chats.',
-        details: null
+      chat: {
+        ...createChatRecord(),
+        chatId: 'chat-recent',
+        chatPath: '/tmp/chats/chat-recent',
+        title: 'Investigate chat titles'
       }
     })
   })

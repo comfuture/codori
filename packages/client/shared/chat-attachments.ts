@@ -1,5 +1,5 @@
 import type { UserInput } from './generated/codex-app-server/v2/UserInput'
-import { encodeProjectIdSegment } from './codori'
+import { encodeChatIdSegment, encodeProjectIdSegment } from './codori'
 import { resolveApiUrl, shouldUseServerProxy } from './network'
 
 export const MAX_ATTACHMENTS_PER_MESSAGE = 8
@@ -27,6 +27,15 @@ export type ProjectAttachmentUploadResponse = {
   threadId: string
   files: PersistedProjectAttachment[]
 }
+
+export type WorkspaceAttachmentScope =
+  | { kind: 'project', id: string }
+  | { kind: 'chat', id: string }
+
+const resolveWorkspaceAttachmentPath = (scope: WorkspaceAttachmentScope, suffix = '') =>
+  scope.kind === 'chat'
+    ? `/chats/${encodeChatIdSegment(scope.id)}/attachments${suffix}`
+    : `/projects/${encodeProjectIdSegment(scope.id)}/attachments${suffix}`
 
 export const isSupportedAttachmentType = (mediaType: string) =>
   mediaType.toLowerCase().startsWith('image/')
@@ -105,14 +114,16 @@ export const buildTurnStartInput = (
 }
 
 export const resolveAttachmentPreviewUrl = (input: {
-  projectId: string
+  projectId?: string
+  workspace?: WorkspaceAttachmentScope
   path: string
   configuredBase?: string | null
 }) => {
   const query = new URLSearchParams({
     path: input.path
   })
-  const requestPath = `/projects/${encodeProjectIdSegment(input.projectId)}/attachments/file?${query.toString()}`
+  const workspace = input.workspace ?? { kind: 'project' as const, id: input.projectId ?? '' }
+  const requestPath = `${resolveWorkspaceAttachmentPath(workspace, '/file')}?${query.toString()}`
 
   if (shouldUseServerProxy(input.configuredBase)) {
     return `/api/codori${requestPath}`
@@ -125,10 +136,12 @@ export const resolveAttachmentPreviewUrl = (input: {
 }
 
 export const resolveAttachmentUploadUrl = (input: {
-  projectId: string
+  projectId?: string
+  workspace?: WorkspaceAttachmentScope
   configuredBase?: string | null
 }) => {
-  const requestPath = `/projects/${encodeProjectIdSegment(input.projectId)}/attachments`
+  const workspace = input.workspace ?? { kind: 'project' as const, id: input.projectId ?? '' }
+  const requestPath = resolveWorkspaceAttachmentPath(workspace)
 
   if (shouldUseServerProxy(input.configuredBase)) {
     return `/api/codori${requestPath}`

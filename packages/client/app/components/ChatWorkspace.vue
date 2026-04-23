@@ -36,6 +36,7 @@ import { useChatReviewWorkflow } from '../composables/useChatReviewWorkflow'
 import { useSubagentPanelsController } from '../composables/useSubagentPanelsController'
 import { usePendingUserRequest } from '../composables/usePendingUserRequest'
 import { useChatSession, type LiveStream } from '../composables/useChatSession'
+import { useChats } from '../composables/useChats'
 import { useProjects } from '../composables/useProjects'
 import { useRpc } from '../composables/useRpc'
 import { useChatSubmitGuard } from '../composables/useChatSubmitGuard'
@@ -100,7 +101,7 @@ import {
   shouldShowContextWindowIndicator,
   visibleModelOptions
 } from '~~/shared/chat-prompt-controls'
-import { isProjectlessProjectId, toProjectThreadRoute } from '~~/shared/codori'
+import { toProjectThreadRoute } from '~~/shared/codori'
 import {
   filterSlashCommands,
   findActiveSlashCommand,
@@ -152,23 +153,38 @@ import {
   toSubagentAvatarText
 } from '~~/shared/subagent-panels'
 const props = defineProps<{
-  projectId: string
+  projectId?: string
+  chatId?: string
+  workspaceKind?: 'project' | 'chat'
   threadId?: string | null
+  autoStartThread?: boolean
 }>()
+const workspaceKind = props.workspaceKind ?? 'project'
+const workspaceId = workspaceKind === 'chat' ? props.chatId ?? '' : props.projectId ?? ''
+const workspaceSessionKey = `${workspaceKind}:${workspaceId}`
+const workspaceScope = workspaceKind === 'chat'
+  ? { kind: 'chat' as const, id: workspaceId }
+  : { kind: 'project' as const, id: workspaceId }
 const routeThreadId = computed(() => props.threadId ?? null)
 
 const router = useRouter()
 const runtimeConfig = useRuntimeConfig()
-const { getClient } = useRpc()
+const { getWorkspaceClient } = useRpc()
 const {
   loaded,
-  projectlessLoaded,
   refreshProjects,
-  refreshProjectlessChats,
   getProject,
-  renameProjectlessChat,
   startProject
 } = useProjects()
+const {
+  loaded: chatsLoaded,
+  refreshChats,
+  getChat,
+  renameChat,
+  setChatThread,
+  startChat
+} = useChats()
+const getRuntimeClient = () => getWorkspaceClient(workspaceScope)
 const {
   onCompositionStart,
   onCompositionEnd,
@@ -192,7 +208,7 @@ const {
   onDragOver,
   onDrop,
   uploadAttachments
-} = useChatAttachments(props.projectId)
+} = useChatAttachments(workspaceScope)
 const input = ref('')
 const chatPromptRef = ref<{
   textareaRef?: unknown
@@ -206,8 +222,8 @@ const scrollViewport = ref<HTMLElement | null>(null)
 const stickyFooterRef = ref<HTMLElement | null>(null)
 const stickyFooterHeight = ref(140)
 const pinnedToBottom = ref(true)
-const session = useChatSession(props.projectId)
-const { syncThreadSummary, updateThreadSummaryTitle } = useThreadSummaries(props.projectId)
+const session = useChatSession(workspaceSessionKey)
+const { syncThreadSummary, updateThreadSummaryTitle } = useThreadSummaries(workspaceSessionKey)
 const {
   messages,
   subagentPanels,
@@ -244,7 +260,7 @@ const {
   resolveRequest,
   markRequestResolved
 } = usePendingUserRequest(
-  props.projectId,
+  workspaceSessionKey,
   computed(() => activeThreadId.value ?? routeThreadId.value),
   activeThreadId
 )
@@ -279,17 +295,25 @@ type MentionAutocompletePaletteSection = {
   items: MentionAutocompletePaletteItem[]
 }
 
-const selectedProject = computed(() => getProject(props.projectId))
-const supportsWorkspaceGit = computed(() =>
-  selectedProject.value?.workspaceKind !== 'projectless'
-  && !isProjectlessProjectId(props.projectId)
-)
-const isProjectlessWorkspace = computed(() =>
-  selectedProject.value?.workspaceKind === 'projectless'
-  || isProjectlessProjectId(props.projectId)
-)
+const selectedChat = computed(() => workspaceKind === 'chat' ? getChat(workspaceId) : null)
+const selectedProject = computed(() => {
+  if (workspaceKind === 'chat') {
+    const chat = selectedChat.value
+    return chat
+      ? {
+          projectId: chat.chatId,
+          projectPath: chat.chatPath,
+          status: chat.status
+        }
+      : null
+  }
+
+  return getProject(workspaceId)
+})
+const supportsWorkspaceGit = computed(() => workspaceKind === 'project')
+const isChatSessionWorkspace = computed(() => workspaceKind === 'chat')
 const workspaceGitBranch = useWorkspaceGitBranch({
-  projectId: props.projectId,
+  projectId: workspaceId,
   serverBase: String(runtimeConfig.public.serverBase ?? ''),
   supportsGit: () => supportsWorkspaceGit.value
 })
@@ -369,7 +393,7 @@ const promptSubmitStatus = computed(() =>
     hasDraftContent: hasDraftContent.value
   })
 )
-const projectTitle = computed(() => selectedProject.value?.projectId ?? props.projectId)
+const projectTitle = computed(() => selectedProject.value?.projectId ?? workspaceId)
 const composerPlaceholder = computed(() =>
   hasPendingRequest.value
     ? 'Respond to the pending request below to let Codex continue'
@@ -828,7 +852,7 @@ const loadPromptControls = async () => {
 
     try {
       await ensureProjectRuntime()
-      const client = getClient(props.projectId)
+      const client = getRuntimeClient()
       const initialModel = selectedModel.value
       const initialEffort = selectedEffort.value
       let nextModels = availableModels.value.length > 0 ? availableModels.value : FALLBACK_MODELS
@@ -940,7 +964,7 @@ const createLiveStreamState = (
 })
 
 const subscribeThreadNotifications = (threadId: string, liveStream: LiveStream) => {
-  const client = getClient(props.projectId)
+  const client = getRuntimeClient()
   liveStream.unsubscribe = client.subscribe((notification) => {
     const targetThreadId = notificationThreadId(notification)
     if (!targetThreadId) {
@@ -1155,20 +1179,20 @@ const updateThreadTitleFromUserInput = (threadId: string, text: string) => {
   updateThreadSummaryTitle(threadId, nextTitle)
 }
 
-const syncProjectlessChatTitle = (title: string) => {
-  if (!isProjectlessWorkspace.value) {
+const syncChatSessionTitle = (title: string) => {
+  if (!isChatSessionWorkspace.value) {
     return
   }
 
-  void renameProjectlessChat(props.projectId, title).catch(() => {
+  void renameChat(workspaceId, title).catch(() => {
     // Keep the live UI responsive even if marker persistence fails.
   })
 }
 
-const syncProjectlessChatTitleFromThreadName = (thread: { name: string | null }) => {
+const syncChatSessionTitleFromThreadName = (thread: { name: string | null }) => {
   const nextTitle = normalizeThreadTitleCandidate(thread.name)
   if (nextTitle) {
-    syncProjectlessChatTitle(nextTitle)
+    syncChatSessionTitle(nextTitle)
   }
 }
 
@@ -1457,7 +1481,7 @@ const resolvePluginMentionAvatarText = (plugin: PluginMentionAutocompleteEntry) 
 
 const resolvePluginMentionAvatarSrc = (plugin: PluginMentionAutocompleteEntry) =>
   resolvePluginMentionIconUrl({
-    projectId: props.projectId,
+    workspace: workspaceScope,
     path: plugin.composerIcon ?? plugin.logo,
     configuredBase: String(runtimeConfig.public.serverBase ?? '')
   })
@@ -1705,7 +1729,7 @@ const loadPluginMentionCatalog = async (options?: {
   }
 
   await ensureProjectRuntime()
-  const response = await getClient(props.projectId).request('plugin/list', {
+  const response = await getRuntimeClient().request('plugin/list', {
     cwds: [projectPath]
   })
   const plugins = normalizePluginListResponse(response)
@@ -1742,7 +1766,7 @@ const loadSkillAutocompleteCatalog = async (options?: {
   }
 
   await ensureProjectRuntime()
-  const response = await getClient(props.projectId).request('skills/list', {
+  const response = await getRuntimeClient().request('skills/list', {
     cwds: [projectPath],
     forceReload: options?.forceReload ? true : undefined
   })
@@ -1926,7 +1950,7 @@ const restoreDraftIfPristine = (
 }
 
 const reviewWorkflow = useChatReviewWorkflow({
-  projectId: props.projectId,
+  projectId: workspaceId,
   serverBase: String(runtimeConfig.public.serverBase ?? ''),
   input,
   attachments,
@@ -1943,7 +1967,7 @@ const reviewWorkflow = useChatReviewWorkflow({
   restoreDraftIfPristine: (text, submittedAttachments) =>
     restoreDraftIfPristine(text, submittedAttachments),
   ensurePendingLiveStream,
-  getClient,
+  getClient: () => getRuntimeClient(),
   lockLiveStreamTurnId,
   replayBufferedNotifications,
   clearDismissedSlashMatch: () => {
@@ -1967,7 +1991,7 @@ const {
 } = reviewWorkflow
 
 const planWorkflow = useChatPlanWorkflow({
-  projectId: props.projectId,
+  projectId: workspaceId,
   routeThreadId,
   activeThreadId,
   hasPendingRequest,
@@ -1988,7 +2012,7 @@ const planWorkflow = useChatPlanWorkflow({
   planImplementationPromptThreadId,
   shownPlanImplementationPromptTurnIds: session.shownPlanImplementationPromptTurnIds,
   ensureProjectRuntime,
-  getClient
+  getClient: () => getRuntimeClient()
 })
 
 const {
@@ -2012,10 +2036,10 @@ const {
 } = planWorkflow
 
 const subagentPanelsController = useSubagentPanelsController({
-  projectId: props.projectId,
+  projectId: workspaceId,
   subagentPanels,
   ensureProjectRuntime,
-  getClient,
+  getClient: () => getRuntimeClient(),
   isActiveTurnStatus,
   currentLiveStream
 })
@@ -2097,7 +2121,7 @@ const clearPendingOptimisticMessages = (liveStream: LiveStream | null, options?:
 }
 
 const submitTurnStart = async (input: {
-  client: ReturnType<typeof getClient>
+  client: ReturnType<typeof getRuntimeClient>
   liveStream: LiveStream
   text: string
   submittedAttachments: DraftAttachment[]
@@ -2145,7 +2169,7 @@ const sendMentionedAgentMessage = async (input: {
   submittedAttachments: DraftAttachment[]
   additionalInput: ReturnType<typeof buildMentionAutocompleteSubmission>['pluginInput']
 }) => {
-  const client = getClient(props.projectId)
+  const client = getRuntimeClient()
   const { threadId, text, submittedAttachments, additionalInput } = input
 
   await ensureObservedThreadSubscription()
@@ -2240,18 +2264,25 @@ const scheduleScrollToBottom = async (behavior: ScrollBehavior = 'auto') => {
 }
 
 async function ensureProjectRuntime() {
+  if (workspaceKind === 'chat') {
+    if (!chatsLoaded.value) {
+      await refreshChats()
+    }
+    if (selectedProject.value?.status === 'running') {
+      return
+    }
+    await startChat(workspaceId)
+    return
+  }
+
   if (!loaded.value) {
     await refreshProjects()
   }
-  if (isProjectlessProjectId(props.projectId) && !projectlessLoaded.value) {
-    await refreshProjectlessChats()
-  }
-
   if (selectedProject.value?.status === 'running') {
     return
   }
 
-  await startProject(props.projectId)
+  await startProject(workspaceId)
 }
 
 const hydrateThread = async (threadId: string) => {
@@ -2264,7 +2295,7 @@ const hydrateThread = async (threadId: string) => {
 
     try {
       await ensureProjectRuntime()
-      const client = getClient(props.projectId)
+      const client = getRuntimeClient()
       activeThreadId.value = threadId
 
       const existingLiveStream = session.liveStream
@@ -2333,7 +2364,7 @@ const hydrateThread = async (threadId: string) => {
       activeThreadId.value = response.thread.id
       threadTitle.value = resolveThreadSummaryTitle(response.thread)
       syncThreadSummary(response.thread)
-      syncProjectlessChatTitleFromThreadName(response.thread)
+      syncChatSessionTitleFromThreadName(response.thread)
       messages.value = threadToMessages(response.thread)
       latestPlanTurnId.value = findLatestPlanTurnId(response.thread.turns)
       maybeQueuePlanImplementationPrompt({
@@ -2428,7 +2459,7 @@ const ensureThread = async () => {
   }
 
   await ensureProjectRuntime()
-  const client = getClient(props.projectId)
+  const client = getRuntimeClient()
   const response = await client.request<ThreadStartResponse>('thread/start', {
     cwd: selectedProject.value?.projectPath ?? null,
     approvalPolicy: 'never',
@@ -2437,11 +2468,14 @@ const ensureThread = async () => {
   })
 
   activeThreadId.value = response.thread.id
+  if (workspaceKind === 'chat') {
+    void setChatThread(workspaceId, response.thread.id).catch(() => {})
+  }
   refreshWorkspaceGitBranchesInBackground('thread/start')
   moveDraftCollaborationModeToThread(response.thread.id)
   threadTitle.value = resolveThreadSummaryTitle(response.thread)
   syncThreadSummary(response.thread)
-  syncProjectlessChatTitleFromThreadName(response.thread)
+  syncChatSessionTitleFromThreadName(response.thread)
   return {
     threadId: response.thread.id,
     created: true
@@ -2823,7 +2857,7 @@ const applyNotification = (notification: CodexRpcNotification) => {
 
       if (activeThreadId.value === nextThreadId) {
         threadTitle.value = nextTitle
-        syncProjectlessChatTitle(nextTitle)
+        syncChatSessionTitle(nextTitle)
       }
 
       updateThreadSummaryTitle(nextThreadId, nextTitle, notificationThreadUpdatedAt(notification))
@@ -3176,7 +3210,7 @@ const sendMessage = async () => {
     const collaborationMode = buildCurrentTurnCollaborationMode()
 
     try {
-      const client = getClient(props.projectId)
+      const client = getRuntimeClient()
 
       if (submissionMethod === 'turn/steer') {
         const liveStream = await ensurePendingLiveStream()
@@ -3314,7 +3348,7 @@ const stopActiveTurn = async () => {
 
     setLiveStreamInterruptRequested(liveStream, true)
     error.value = null
-    const client = getClient(props.projectId)
+    const client = getRuntimeClient()
     const turnId = await waitForLiveStreamTurnId(liveStream)
     await client.request('turn/interrupt', {
       threadId: liveStream.threadId,
@@ -3506,8 +3540,8 @@ const onPromptEnter = (event: KeyboardEvent) => {
 }
 
 onMounted(() => {
-  releaseServerRequestHandler = getClient(props.projectId).setServerRequestHandler(handleServerRequest)
-  releaseSkillNotificationSubscription = getClient(props.projectId).subscribe((notification) => {
+  releaseServerRequestHandler = getRuntimeClient().setServerRequestHandler(handleServerRequest)
+  releaseSkillNotificationSubscription = getRuntimeClient().subscribe((notification) => {
     if (notification.method !== 'skills/changed') {
       return
     }
@@ -3517,11 +3551,11 @@ onMounted(() => {
   if (!loaded.value) {
     void refreshProjects()
   }
-  if (isProjectlessProjectId(props.projectId) && !projectlessLoaded.value) {
-    void refreshProjectlessChats()
+  if (workspaceKind === 'chat' && !chatsLoaded.value) {
+    void refreshChats()
   }
 
-  void getClient(props.projectId).connect().catch(() => {})
+  void getRuntimeClient().connect().catch(() => {})
   void loadPromptControls()
   refreshWorkspaceGitBranchesInBackground('mount')
   void scheduleScrollToBottom('auto')
@@ -3586,6 +3620,9 @@ watch(() => props.threadId ?? null, (threadId) => {
     }
 
     resetDraftThread()
+    if (workspaceKind === 'chat' && props.autoStartThread) {
+      void ensureThread()
+    }
     return
   }
 
@@ -3614,7 +3651,14 @@ watch(pendingThreadId, async (threadId) => {
   }
 
   autoRedirectThreadId.value = threadId
-  await router.push(toProjectThreadRoute(props.projectId, threadId))
+  if (workspaceKind === 'chat') {
+    await setChatThread(workspaceId, threadId)
+    pendingThreadId.value = null
+    autoRedirectThreadId.value = null
+    return
+  }
+
+  await router.push(toProjectThreadRoute(workspaceId, threadId))
   pendingThreadId.value = null
 })
 
@@ -3864,10 +3908,10 @@ watch(
 
     try {
       await ensureProjectRuntime()
-      const response = await getClient(props.projectId).request('fuzzyFileSearch', {
+      const response = await getRuntimeClient().request('fuzzyFileSearch', {
         query,
         roots: [projectPath],
-        cancellationToken: `chat-file-autocomplete:${props.projectId}`
+        cancellationToken: `chat-file-autocomplete:${workspaceSessionKey}`
       })
 
       if (requestSequence !== fileAutocompleteRequestSequence) {
@@ -3967,7 +4011,7 @@ watch(
         <template #content="{ message }">
           <MessageContent
             :message="message as ChatMessage"
-            :project-id="projectId"
+            :project-id="workspaceKind === 'project' ? workspaceId : undefined"
           />
         </template>
         <template #indicator>
@@ -4507,7 +4551,8 @@ watch(
   />
 
   <UsageStatusModal
-    :project-id="props.projectId"
+    v-if="workspaceKind === 'project'"
+    :project-id="workspaceId"
     :open="usageStatusModalOpen"
     @update:open="handleUsageStatusOpenChange"
   />

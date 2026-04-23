@@ -13,11 +13,15 @@ const occupiedServers: Array<ReturnType<typeof createServer>> = []
 afterEach(async () => {
   for (const manager of runningManagers.splice(0, runningManagers.length)) {
     const projects = [
-      ...manager.listProjects().map(project => project.id),
-      ...manager.listProjectlessStatuses().map(project => project.projectId)
+      ...manager.listProjects().map(project => ({ kind: 'project' as const, id: project.id })),
+      ...manager.listChatStatuses().map(chat => ({ kind: 'chat' as const, id: chat.chatId }))
     ]
-    for (const projectId of projects) {
-      await manager.stopProject(projectId)
+    for (const workspace of projects) {
+      if (workspace.kind === 'chat') {
+        await manager.stopChatSession(workspace.id)
+      } else {
+        await manager.stopProject(workspace.id)
+      }
     }
     manager.dispose()
   }
@@ -257,7 +261,7 @@ describe('RuntimeManager', () => {
     )
   })
 
-  it('creates and starts a projectless chat under the current user documents directory', async () => {
+  it('creates and starts a chat under the current user Documents/Chats directory', async () => {
     const fixture = createFixture()
     const spawnedCwds: string[] = []
     const manager = createRuntimeManager({
@@ -274,24 +278,22 @@ describe('RuntimeManager', () => {
     })
     runningManagers.push(manager)
 
-    const created = await manager.createProjectlessChat()
+    const created = await manager.createChatSession()
 
     expect(created.status).toBe('running')
     expect(created.reusedExisting).toBe(false)
     expect(created.title).toBe('New Chat')
-    expect(created.workspaceKind).toBe('projectless')
-    expect(created.projectId).toMatch(/^projectless\/chat-/)
-    expect(created.projectPath.startsWith(join(fixture.documentsDir, 'Codex'))).toBe(true)
-    expect(spawnedCwds).toEqual([created.projectPath])
+    expect(created.chatId).toMatch(/^chat-/)
+    expect(created.chatPath.startsWith(join(fixture.documentsDir, 'Chats'))).toBe(true)
+    expect(spawnedCwds).toEqual([created.chatPath])
 
-    const recent = manager.listProjectlessStatuses()
+    const recent = manager.listChatStatuses()
     expect(recent).toHaveLength(1)
-    expect(recent[0]?.projectId).toBe(created.projectId)
+    expect(recent[0]?.chatId).toBe(created.chatId)
     expect(recent[0]?.title).toBe('New Chat')
-    expect(recent[0]?.workspaceKind).toBe('projectless')
   })
 
-  it('deletes a projectless chat and removes its scratch directory', async () => {
+  it('deletes a chat and removes its scratch directory', async () => {
     const fixture = createFixture()
     const manager = createRuntimeManager({
       homeDir: fixture.homeDir,
@@ -304,16 +306,16 @@ describe('RuntimeManager', () => {
     })
     runningManagers.push(manager)
 
-    const created = await manager.createProjectlessChat()
-    const deleted = await manager.deleteProjectlessChat(created.projectId)
+    const created = await manager.createChatSession()
+    const deleted = await manager.deleteChatSession(created.chatId)
 
     expect(deleted).toEqual({
-      projectId: created.projectId
+      chatId: created.chatId
     })
-    expect(manager.listProjectlessStatuses()).toEqual([])
+    expect(manager.listChatStatuses()).toEqual([])
   })
 
-  it('persists projectless chat title updates in the scratch marker', async () => {
+  it('persists chat title and thread updates in the scratch marker', async () => {
     const fixture = createFixture()
     const manager = createRuntimeManager({
       homeDir: fixture.homeDir,
@@ -326,13 +328,16 @@ describe('RuntimeManager', () => {
     })
     runningManagers.push(manager)
 
-    const created = await manager.createProjectlessChat()
-    const updated = manager.updateProjectlessChatTitle(
-      created.projectId,
-      'Investigate projectless chat titles'
+    const created = await manager.createChatSession()
+    const titled = manager.updateChatSessionTitle(
+      created.chatId,
+      'Investigate chat titles'
     )
+    const threaded = manager.updateChatSessionThread(created.chatId, 'thread-1')
 
-    expect(updated.title).toBe('Investigate projectless chat titles')
-    expect(manager.listProjectlessStatuses()[0]?.title).toBe('Investigate projectless chat titles')
+    expect(titled.title).toBe('Investigate chat titles')
+    expect(threaded.threadId).toBe('thread-1')
+    expect(manager.listChatStatuses()[0]?.title).toBe('Investigate chat titles')
+    expect(manager.listChatStatuses()[0]?.threadId).toBe('thread-1')
   })
 })

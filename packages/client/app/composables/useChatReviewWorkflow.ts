@@ -108,7 +108,7 @@ export const useChatReviewWorkflow = (options: UseChatReviewWorkflowOptions) => 
 
   const openBaseBranchPicker = async () => {
     if (!options.supportsGit.value) {
-      reviewBranchesError.value = 'Git branches are not available for projectless chats.'
+      reviewBranchesError.value = 'Git branches are not available for chat sessions.'
       return
     }
 

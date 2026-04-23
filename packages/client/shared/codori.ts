@@ -1,14 +1,28 @@
 import { resolveApiUrl, shouldUseServerProxy } from './network'
 
 export type ProjectRuntimeStatus = 'running' | 'stopped' | 'error'
-export type WorkspaceKind = 'project' | 'projectless'
 
 export type ProjectRecord = {
   projectId: string
   projectPath: string
+  status: ProjectRuntimeStatus
+  pid: number | null
+  port: number | null
+  startedAt: number | null
+  lastActivityAt: number | null
+  activeSessionCount: number
+  idleTimeoutMs: number | null
+  idleDeadlineAt: number | null
+  error: string | null
+}
+
+export type ChatSessionRecord = {
+  chatId: string
+  chatPath: string
+  threadId: string | null
   title: string | null
-  workspaceKind: WorkspaceKind
-  createdAt: number | null
+  createdAt: number
+  updatedAt: number | null
   status: ProjectRuntimeStatus
   pid: number | null
   port: number | null
@@ -24,6 +38,10 @@ export type StartProjectResult = ProjectRecord & {
   reusedExisting: boolean
 }
 
+export type StartChatSessionResult = ChatSessionRecord & {
+  reusedExisting: boolean
+}
+
 export type ServiceUpdateStatus = {
   enabled: boolean
   updateAvailable: boolean
@@ -36,20 +54,28 @@ export type ProjectsResponse = {
   projects: ProjectRecord[]
 }
 
-export type ProjectlessChatsResponse = {
-  projects: ProjectRecord[]
+export type ChatsResponse = {
+  chats: ChatSessionRecord[]
 }
 
-export type DeleteProjectlessChatResponse = {
-  projectId: string
+export type DeleteChatResponse = {
+  chatId: string
 }
 
-export type UpdateProjectlessChatTitleRequest = {
+export type UpdateChatTitleRequest = {
   title: string
+}
+
+export type UpdateChatThreadRequest = {
+  threadId: string
 }
 
 export type ProjectResponse = {
   project: ProjectRecord | StartProjectResult
+}
+
+export type ChatResponse = {
+  chat: ChatSessionRecord | StartChatSessionResult
 }
 
 export type CloneProjectRequest = {
@@ -89,8 +115,9 @@ export const toProjectThreadRoute = (projectId: string, threadId: string) =>
 
 export const encodeProjectIdSegment = (projectId: string) => encodeURIComponent(projectId)
 
-export const isProjectlessProjectId = (projectId: string | null | undefined) =>
-  Boolean(projectId?.startsWith('projectless/'))
+export const toChatRoute = (chatId: string) => `/chats/${encodeURIComponent(chatId)}`
+
+export const encodeChatIdSegment = (chatId: string) => encodeURIComponent(chatId)
 
 export const resolveProjectGitBranchesUrl = (input: {
   projectId: string

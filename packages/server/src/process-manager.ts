@@ -18,14 +18,18 @@ import { findAvailablePort } from './ports.js'
 import { scanProjects } from './project-scanner.js'
 import { RuntimeStore } from './runtime-store.js'
 import type {
+  ChatSessionRecord,
+  ChatSessionStatusRecord,
   CodoriConfig,
   ConfigOverrides,
-  DeleteProjectlessChatResult,
+  DeleteChatSessionResult,
   ProjectRecord,
   ProjectStatusRecord,
   RuntimeRecord,
+  StartChatSessionResult,
   StartProjectResult,
-  UpdateProjectlessChatTitleResult
+  UpdateChatSessionThreadResult,
+  UpdateChatSessionTitleResult
 } from './types.js'
 
 type CommandFactory = (port: number, project: ProjectRecord) => {
@@ -33,8 +37,8 @@ type CommandFactory = (port: number, project: ProjectRecord) => {
   args: string[]
 }
 
-type ProjectSessionLease = {
-  touchActivity: (at?: number) => ProjectStatusRecord
+type RuntimeSessionLease<T> = {
+  touchActivity: (at?: number) => T
   release: () => void
 }
 
@@ -48,11 +52,11 @@ type RuntimeManagerOptions = {
 
 const CODORI_STOP_TIMEOUT_MS = 3_000
 const CODORI_STOP_POLL_MS = 50
-const PROJECTLESS_PARENT_DIR_NAME = 'Codex'
-const PROJECTLESS_PROJECT_ID_PREFIX = 'projectless/'
-const PROJECTLESS_MARKER_FILE = '.codori-projectless.json'
-const PROJECTLESS_RECENT_LIMIT = 5
-const DEFAULT_PROJECTLESS_CHAT_TITLE = 'New Chat'
+const CHAT_PARENT_DIR_NAME = 'Chats'
+const CHAT_MARKER_FILE = '.codori-chat.json'
+const CHAT_RECENT_LIMIT = 5
+const CHAT_RUNTIME_ID_PREFIX = 'chat:'
+const DEFAULT_CHAT_TITLE = 'New Chat'
 
 const defaultCommandFactory: CommandFactory = (port) => ({
   command: process.env.CODORI_CODEX_BIN ?? 'codex',
@@ -133,104 +137,129 @@ export class RuntimeManager {
     return scanProjects(this.config.root)
   }
 
-  private getProjectlessRoot() {
-    return join(this.documentsDir, PROJECTLESS_PARENT_DIR_NAME)
+  private getChatsRoot() {
+    return join(this.documentsDir, CHAT_PARENT_DIR_NAME)
   }
 
-  private readProjectlessProject(projectPath: string): ProjectRecord | null {
-    const markerPath = join(projectPath, PROJECTLESS_MARKER_FILE)
+  private readChatSession(chatPath: string): ChatSessionRecord | null {
+    const markerPath = join(chatPath, CHAT_MARKER_FILE)
     if (!existsSync(markerPath)) {
       return null
     }
 
     try {
       const marker = JSON.parse(readFileSync(markerPath, 'utf8')) as {
-        projectId?: unknown
+        chatId?: unknown
+        threadId?: unknown
         title?: unknown
         createdAt?: unknown
+        updatedAt?: unknown
       }
-      if (typeof marker.projectId !== 'string' || !marker.projectId.startsWith(PROJECTLESS_PROJECT_ID_PREFIX)) {
+      if (typeof marker.chatId !== 'string' || !marker.chatId.startsWith('chat-')) {
         return null
       }
 
       return {
-        id: marker.projectId,
-        path: projectPath,
+        chatId: marker.chatId,
+        chatPath,
+        threadId: typeof marker.threadId === 'string' && marker.threadId.trim()
+          ? marker.threadId.trim()
+          : null,
         title: typeof marker.title === 'string' && marker.title.trim()
           ? marker.title.trim()
-          : DEFAULT_PROJECTLESS_CHAT_TITLE,
-        workspaceKind: 'projectless',
-        createdAt: typeof marker.createdAt === 'number' ? marker.createdAt : null
+          : DEFAULT_CHAT_TITLE,
+        createdAt: typeof marker.createdAt === 'number' ? marker.createdAt : 0,
+        updatedAt: typeof marker.updatedAt === 'number' ? marker.updatedAt : null
       }
     } catch {
       return null
     }
   }
 
-  private listProjectlessProjects(limit = PROJECTLESS_RECENT_LIMIT) {
-    const root = this.getProjectlessRoot()
+  private listChatSessions(limit = CHAT_RECENT_LIMIT) {
+    const root = this.getChatsRoot()
     if (!existsSync(root)) {
       return []
     }
 
-    const projects: ProjectRecord[] = []
+    const chats: ChatSessionRecord[] = []
     for (const entry of readdirSync(root, { withFileTypes: true })) {
       if (!entry.isDirectory()) {
         continue
       }
 
-      const projectPath = join(root, entry.name)
+      const chatPath = join(root, entry.name)
       try {
-        if (!statSync(projectPath).isDirectory()) {
+        if (!statSync(chatPath).isDirectory()) {
           continue
         }
       } catch {
         continue
       }
 
-      const project = this.readProjectlessProject(projectPath)
-      if (project) {
-        projects.push(project)
+      const chat = this.readChatSession(chatPath)
+      if (chat) {
+        chats.push(chat)
       }
     }
 
-    return projects
-      .sort((left, right) => (right.createdAt ?? 0) - (left.createdAt ?? 0))
+    return chats
+      .sort((left, right) => (right.updatedAt ?? right.createdAt) - (left.updatedAt ?? left.createdAt))
       .slice(0, limit)
   }
 
-  private createProjectlessProjectRecord() {
+  private createChatSessionRecord() {
     const now = Date.now()
     const stamp = new Date(now).toISOString()
       .replace(/[-:]/g, '')
       .replace(/\.\d{3}Z$/, '')
       .replace('T', '-')
-    const slug = `chat-${stamp}-${randomUUID().slice(0, 8)}`
-    const projectPath = join(this.getProjectlessRoot(), slug)
-    const projectId = `${PROJECTLESS_PROJECT_ID_PREFIX}${slug}`
+    const chatId = `chat-${stamp}-${randomUUID().slice(0, 8)}`
+    const chatPath = join(this.getChatsRoot(), chatId)
 
-    mkdirSync(projectPath, { recursive: true })
-    writeFileSync(join(projectPath, PROJECTLESS_MARKER_FILE), `${JSON.stringify({
-      projectId,
-      title: DEFAULT_PROJECTLESS_CHAT_TITLE,
-      createdAt: now
-    }, null, 2)}\n`)
-
-    return {
-      id: projectId,
-      path: projectPath,
-      title: DEFAULT_PROJECTLESS_CHAT_TITLE,
-      workspaceKind: 'projectless' as const,
-      createdAt: now
+    mkdirSync(chatPath, { recursive: true })
+    const chat: ChatSessionRecord = {
+      chatId,
+      chatPath,
+      threadId: null,
+      title: DEFAULT_CHAT_TITLE,
+      createdAt: now,
+      updatedAt: now
     }
+    this.writeChatSessionMarker(chat)
+
+    return chat
   }
 
-  private writeProjectlessMarker(project: ProjectRecord) {
-    writeFileSync(join(project.path, PROJECTLESS_MARKER_FILE), `${JSON.stringify({
-      projectId: project.id,
-      title: project.title ?? DEFAULT_PROJECTLESS_CHAT_TITLE,
-      createdAt: project.createdAt ?? Date.now()
+  private writeChatSessionMarker(chat: ChatSessionRecord) {
+    writeFileSync(join(chat.chatPath, CHAT_MARKER_FILE), `${JSON.stringify({
+      chatId: chat.chatId,
+      threadId: chat.threadId,
+      title: chat.title ?? DEFAULT_CHAT_TITLE,
+      createdAt: chat.createdAt,
+      updatedAt: chat.updatedAt ?? Date.now()
     }, null, 2)}\n`)
+  }
+
+  private resolveChatSession(chatId: string) {
+    const chat = this.listChatSessions(Number.POSITIVE_INFINITY)
+      .find(entry => entry.chatId === chatId)
+    if (chat) {
+      return chat
+    }
+
+    throw new CodoriError('CHAT_NOT_FOUND', `Chat "${chatId}" was not found under ${this.getChatsRoot()}.`)
+  }
+
+  private chatRuntimeId(chatId: string) {
+    return `${CHAT_RUNTIME_ID_PREFIX}${chatId}`
+  }
+
+  private chatToRuntimeProject(chat: ChatSessionRecord): ProjectRecord {
+    return {
+      id: this.chatRuntimeId(chat.chatId),
+      path: chat.chatPath
+    }
   }
 
   private resolveProject(projectId: string) {
@@ -239,13 +268,7 @@ export class RuntimeManager {
       return project
     }
 
-    const projectlessProject = this.listProjectlessProjects(Number.POSITIVE_INFINITY)
-      .find(entry => entry.id === projectId)
-    if (projectlessProject) {
-      return projectlessProject
-    }
-
-    throw new CodoriError('PROJECT_NOT_FOUND', `Project "${projectId}" was not found under ${this.config.root} or ${this.getProjectlessRoot()}.`)
+    throw new CodoriError('PROJECT_NOT_FOUND', `Project "${projectId}" was not found under ${this.config.root}.`)
   }
 
   private normalizeStatus(project: ProjectRecord, runtime: RuntimeRecord | null, error: string | null): ProjectStatusRecord {
@@ -253,9 +276,26 @@ export class RuntimeManager {
     return {
       projectId: project.id,
       projectPath: project.path,
-      title: project.title ?? null,
-      workspaceKind: project.workspaceKind ?? 'project',
-      createdAt: project.createdAt ?? null,
+      status: error ? 'error' : runtime ? 'running' : 'stopped',
+      pid: runtime?.pid ?? null,
+      port: runtime?.port ?? null,
+      startedAt: runtime?.startedAt ?? null,
+      lastActivityAt: runtime?.lastActivityAt ?? null,
+      activeSessionCount,
+      idleTimeoutMs: this.config.idleShutdown.enabled ? this.config.idleShutdown.timeoutMs : null,
+      idleDeadlineAt: this.resolveIdleDeadline(runtime, activeSessionCount),
+      error
+    }
+  }
+
+  private normalizeChatStatus(
+    chat: ChatSessionRecord,
+    runtime: RuntimeRecord | null,
+    error: string | null
+  ): ChatSessionStatusRecord {
+    const activeSessionCount = this.getActiveSessionCount(this.chatRuntimeId(chat.chatId))
+    return {
+      ...chat,
       status: error ? 'error' : runtime ? 'running' : 'stopped',
       pid: runtime?.pid ?? null,
       port: runtime?.port ?? null,
@@ -357,7 +397,11 @@ export class RuntimeManager {
     return this.touchProjectRuntime(this.resolveProject(projectId), at)
   }
 
-  acquireProjectSession(projectId: string): ProjectSessionLease {
+  noteChatActivity(chatId: string, at = Date.now()) {
+    return this.touchChatRuntime(this.resolveChatSession(chatId), at)
+  }
+
+  acquireProjectSession(projectId: string): RuntimeSessionLease<ProjectStatusRecord> {
     const project = this.resolveProject(projectId)
     this.incrementActiveSessions(project.id)
     this.touchProjectRuntime(project)
@@ -376,17 +420,41 @@ export class RuntimeManager {
     }
   }
 
+  acquireChatSession(chatId: string): RuntimeSessionLease<ChatSessionStatusRecord> {
+    const chat = this.resolveChatSession(chatId)
+    const runtimeProject = this.chatToRuntimeProject(chat)
+    this.incrementActiveSessions(runtimeProject.id)
+    this.touchProjectRuntime(runtimeProject)
+
+    let released = false
+    return {
+      touchActivity: (at = Date.now()) => this.touchChatRuntime(chat, at),
+      release: () => {
+        if (released) {
+          return
+        }
+
+        released = true
+        this.decrementActiveSessions(runtimeProject.id)
+      }
+    }
+  }
+
   listProjectStatuses() {
     return this.listProjects().map(project => this.readRunningRuntime(project))
   }
 
-  listProjectlessStatuses() {
-    return this.listProjectlessProjects(PROJECTLESS_RECENT_LIMIT)
-      .map(project => this.readRunningRuntime(project))
+  listChatStatuses() {
+    return this.listChatSessions(CHAT_RECENT_LIMIT)
+      .map(chat => this.readRunningChatRuntime(chat))
   }
 
   getProjectStatus(projectId: string) {
     return this.readRunningRuntime(this.resolveProject(projectId))
+  }
+
+  getChatStatus(chatId: string) {
+    return this.readRunningChatRuntime(this.resolveChatSession(chatId))
   }
 
   async cloneProject(input: { repositoryUrl: string, destination?: string | null }) {
@@ -444,50 +512,101 @@ export class RuntimeManager {
     }
   }
 
-  async createProjectlessChat(): Promise<StartProjectResult> {
-    return await this.startResolvedProject(this.createProjectlessProjectRecord())
-  }
-
-  async deleteProjectlessChat(projectId: string): Promise<DeleteProjectlessChatResult> {
-    const project = this.resolveProject(projectId)
-    if (project.workspaceKind !== 'projectless') {
-      throw new CodoriError(
-        'PROJECT_DELETE_UNAVAILABLE',
-        'Only projectless chats can be deleted through this endpoint.'
-      )
+  private readRunningChatRuntime(chat: ChatSessionRecord) {
+    const runtimeProject = this.chatToRuntimeProject(chat)
+    const loaded = this.store.load(runtimeProject.path)
+    if (loaded.kind === 'missing') {
+      return this.normalizeChatStatus(chat, null, null)
     }
 
-    await this.stopProject(projectId)
-    this.activeSessions.delete(projectId)
-    rmSync(project.path, { recursive: true, force: true })
+    if (loaded.kind === 'invalid') {
+      return this.normalizeChatStatus(chat, null, loaded.error)
+    }
 
-    return { projectId }
+    if (!isProcessAlive(loaded.record.pid)) {
+      this.store.remove(runtimeProject.path)
+      return this.normalizeChatStatus(chat, null, null)
+    }
+
+    return this.normalizeChatStatus(chat, loaded.record, null)
   }
 
-  updateProjectlessChatTitle(projectId: string, title: string): UpdateProjectlessChatTitleResult {
-    const project = this.resolveProject(projectId)
-    if (project.workspaceKind !== 'projectless') {
-      throw new CodoriError(
-        'PROJECT_TITLE_UPDATE_UNAVAILABLE',
-        'Only projectless chats can be titled through this endpoint.'
-      )
+  private touchChatRuntime(chat: ChatSessionRecord, at = Date.now()) {
+    const runtimeProject = this.chatToRuntimeProject(chat)
+    const runtime = this.loadActiveRuntime(runtimeProject)
+    if (!runtime) {
+      return this.normalizeChatStatus(chat, null, null)
     }
+
+    return this.normalizeChatStatus(chat, this.touchRuntimeRecord(runtime, at), null)
+  }
+
+  async createChatSession(): Promise<StartChatSessionResult> {
+    return await this.startChatSession(this.createChatSessionRecord().chatId)
+  }
+
+  async startChatSession(chatId: string): Promise<StartChatSessionResult> {
+    const chat = this.resolveChatSession(chatId)
+    const started = await this.startResolvedProject(this.chatToRuntimeProject(chat))
+    return {
+      ...this.getChatStatus(chatId),
+      reusedExisting: started.reusedExisting
+    }
+  }
+
+  async deleteChatSession(chatId: string): Promise<DeleteChatSessionResult> {
+    const chat = this.resolveChatSession(chatId)
+    await this.stopChatSession(chatId)
+    this.activeSessions.delete(this.chatRuntimeId(chatId))
+    rmSync(chat.chatPath, { recursive: true, force: true })
+
+    return { chatId }
+  }
+
+  updateChatSessionTitle(chatId: string, title: string): UpdateChatSessionTitleResult {
+    const chat = this.resolveChatSession(chatId)
 
     const nextTitle = title.trim()
     if (!nextTitle) {
-      throw new CodoriError('INVALID_PROJECT_TITLE', 'Projectless chat title must not be empty.')
+      throw new CodoriError('INVALID_CHAT_TITLE', 'Chat title must not be empty.')
     }
 
-    const updatedProject: ProjectRecord = {
-      ...project,
-      title: nextTitle
+    const updatedChat: ChatSessionRecord = {
+      ...chat,
+      title: nextTitle,
+      updatedAt: Date.now()
     }
-    this.writeProjectlessMarker(updatedProject)
-    return this.getProjectStatus(projectId)
+    this.writeChatSessionMarker(updatedChat)
+    return this.getChatStatus(chatId)
+  }
+
+  updateChatSessionThread(chatId: string, threadId: string): UpdateChatSessionThreadResult {
+    const chat = this.resolveChatSession(chatId)
+    const nextThreadId = threadId.trim()
+    if (!nextThreadId) {
+      throw new CodoriError('MISSING_THREAD_ID', 'Missing thread id.')
+    }
+
+    const updatedChat: ChatSessionRecord = {
+      ...chat,
+      threadId: nextThreadId,
+      updatedAt: Date.now()
+    }
+    this.writeChatSessionMarker(updatedChat)
+    return this.getChatStatus(chatId)
   }
 
   async stopProject(projectId: string) {
-    const project = this.resolveProject(projectId)
+    return await this.stopResolvedProject(this.resolveProject(projectId))
+  }
+
+  async stopChatSession(chatId: string) {
+    const chat = this.resolveChatSession(chatId)
+    await this.stopResolvedProject(this.chatToRuntimeProject(chat))
+    return this.getChatStatus(chatId)
+  }
+
+  private async stopResolvedProject(project: ProjectRecord) {
     const loaded = this.store.load(project.path)
 
     if (loaded.kind === 'missing') {
@@ -524,7 +643,7 @@ export class RuntimeManager {
       const now = Date.now()
       for (const project of [
         ...this.listProjects(),
-        ...this.listProjectlessProjects(Number.POSITIVE_INFINITY)
+        ...this.listChatSessions(Number.POSITIVE_INFINITY).map(chat => this.chatToRuntimeProject(chat))
       ]) {
         const runtime = this.loadActiveRuntime(project)
         if (!runtime) {
@@ -539,7 +658,7 @@ export class RuntimeManager {
           continue
         }
 
-        await this.stopProject(project.id)
+        await this.stopResolvedProject(project)
         stopped += 1
       }
 
