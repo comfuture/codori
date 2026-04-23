@@ -120,7 +120,13 @@ const requestBranchCreate = () => {
           </div>
         </div>
 
-        <div class="flex w-full items-center gap-2 border-t border-default pt-2">
+        <div class="flex items-center gap-2 pt-1 text-xs text-muted">
+          <span class="h-px flex-1 bg-border" />
+          <span>or</span>
+          <span class="h-px flex-1 bg-border" />
+        </div>
+
+        <div class="flex w-full items-center gap-2">
           <UInput
             v-model="newBranchName"
             size="sm"
