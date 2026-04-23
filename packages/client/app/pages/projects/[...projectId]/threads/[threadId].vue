@@ -257,7 +257,7 @@ watch(
           <template #title>
             <div class="min-w-0 overflow-hidden pe-2 space-y-0.5">
               <div class="min-w-0">
-                <div class="truncate text-xs font-medium uppercase tracking-[0.22em] text-muted">
+                <div class="truncate text-xs font-medium text-muted">
                   {{ projectName }}
                 </div>
               </div>

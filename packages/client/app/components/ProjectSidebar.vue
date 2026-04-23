@@ -218,7 +218,7 @@ const isActiveProject = (item: ProjectNavigationItem) => activeProjectId.value =
     <div class="flex items-center justify-between gap-2">
       <div
         v-if="!props.collapsed"
-        class="text-xs font-medium uppercase tracking-[0.24em] text-muted"
+        class="text-xs font-medium text-muted"
       >
         Projects
       </div>

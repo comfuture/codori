@@ -233,7 +233,7 @@ onBeforeUnmount(() => {
                 class="rounded-lg border border-default/80 bg-default/75 p-3"
               >
                 <div class="flex items-start justify-between gap-3">
-                  <div class="text-xs font-semibold uppercase tracking-[0.18em] text-muted">
+                  <div class="text-xs font-semibold text-muted">
                     {{ window.title }}
                   </div>
                   <div class="text-sm font-semibold text-highlighted">

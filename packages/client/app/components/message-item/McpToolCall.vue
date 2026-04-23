@@ -41,7 +41,7 @@ const { open, isLoading, isStreaming } = useChatToolState(() => props.item.statu
         v-if="item.arguments !== undefined"
         class="rounded-xl border border-default/70 bg-elevated/30 px-3 py-3"
       >
-        <p class="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">
+        <p class="mb-2 text-[11px] font-semibold text-muted">
           Arguments
         </p>
         <pre class="overflow-x-auto text-xs leading-6 text-toned">{{ formatPrettyJson(item.arguments) }}</pre>
@@ -51,7 +51,7 @@ const { open, isLoading, isStreaming } = useChatToolState(() => props.item.statu
         v-if="progressMessages?.length"
         class="rounded-xl border border-default/70 bg-elevated/30 px-3 py-3"
       >
-        <p class="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">
+        <p class="mb-2 text-[11px] font-semibold text-muted">
           Progress
         </p>
         <ul class="space-y-1">
@@ -69,7 +69,7 @@ const { open, isLoading, isStreaming } = useChatToolState(() => props.item.statu
         v-if="item.result"
         class="rounded-xl border border-default/70 bg-elevated/30 px-3 py-3"
       >
-        <p class="mb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted">
+        <p class="mb-2 text-[11px] font-semibold text-muted">
           Result
         </p>
         <pre class="overflow-x-auto text-xs leading-6 text-toned">{{ formatPrettyJson(item.result) }}</pre>

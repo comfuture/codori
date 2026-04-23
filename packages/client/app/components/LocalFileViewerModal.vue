@@ -175,8 +175,8 @@ watch(highlightedMarkdown, () => {
       <section class="flex h-full min-h-0 flex-col bg-default">
         <header class="flex items-center justify-between gap-3 border-b border-default px-4 py-3">
           <div class="min-w-0">
-            <div class="truncate text-xs font-medium uppercase tracking-[0.22em] text-primary">
-              Local File Viewer
+            <div class="truncate text-xs font-medium text-primary">
+              Local file viewer
             </div>
             <div class="truncate text-sm font-semibold text-highlighted">
               {{ relativePathLabel }}

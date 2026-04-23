@@ -16,8 +16,8 @@
       <div class="flex w-full items-center justify-center px-6 py-10">
         <div class="flex w-full max-w-3xl flex-col items-center gap-8 text-center">
           <div class="space-y-4">
-            <div class="text-xs font-medium uppercase tracking-[0.28em] text-primary">
-              Remote Coding
+            <div class="text-xs font-medium text-primary">
+              Remote coding
             </div>
             <h1 class="text-balance text-4xl font-semibold tracking-tight text-highlighted md:text-5xl">
               Pick a project and start coding.
