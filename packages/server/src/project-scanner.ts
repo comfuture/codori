@@ -2,7 +2,7 @@ import { readdirSync } from 'node:fs'
 import { join, relative, resolve, sep } from 'node:path'
 import type { ProjectRecord } from './types.js'
 
-const IGNORED_DIRECTORY_NAMES = new Set([
+export const IGNORED_PROJECT_DIRECTORY_NAMES = new Set([
   '.git',
   '.nuxt',
   '.output',
@@ -38,7 +38,7 @@ export const scanProjects = (rootDirectory: string): ProjectRecord[] => {
       if (!entry.isDirectory()) {
         continue
       }
-      if (IGNORED_DIRECTORY_NAMES.has(entry.name)) {
+      if (IGNORED_PROJECT_DIRECTORY_NAMES.has(entry.name)) {
         continue
       }
       queue.push(join(current, entry.name))
@@ -47,4 +47,3 @@ export const scanProjects = (rootDirectory: string): ProjectRecord[] => {
 
   return projects.sort((left, right) => left.id.localeCompare(right.id))
 }
-

@@ -37,6 +37,7 @@ type MaybePromise<T> = T | Promise<T>
 export type RuntimeManagerLike = {
   listProjectStatuses: () => MaybePromise<ProjectStatusRecord[]>
   getProjectStatus: (projectId: string) => MaybePromise<ProjectStatusRecord>
+  cloneProject?: (input: { repositoryUrl: string, destination?: string | null }) => MaybePromise<ProjectStatusRecord>
   startProject: (projectId: string) => MaybePromise<StartProjectResult>
   stopProject: (projectId: string) => MaybePromise<ProjectStatusRecord>
   noteProjectActivity?: (projectId: string) => MaybePromise<ProjectStatusRecord | void>
@@ -118,14 +119,19 @@ const toStatusCode = (error: CodoriError) => {
     case 'PROJECT_NOT_FOUND':
       return 404
     case 'INVALID_CONFIG':
+    case 'INVALID_GIT_URL':
+    case 'INVALID_PROJECT_DESTINATION':
     case 'MISSING_PROJECT_ID':
     case 'MISSING_THREAD_ID':
     case 'INVALID_ATTACHMENT':
     case 'MISSING_ROOT':
       return 400
+    case 'DESTINATION_EXISTS':
     case 'SERVICE_UPDATE_UNAVAILABLE':
     case 'SERVICE_UPDATE_IN_PROGRESS':
       return 409
+    case 'PROJECT_CLONE_FAILED':
+      return 502
     default:
       return 500
   }
@@ -302,6 +308,31 @@ export const createHttpServer = async (
   app.get('/api/projects', async (): Promise<ProjectsResponse> => ({
     projects: await resolveValue(manager.listProjectStatuses())
   }))
+
+  app.post<{ Body: { repositoryUrl?: string, destination?: string | null } }>(
+    '/api/projects/clone',
+    async (request, reply): Promise<ProjectResponse> => {
+      if (!manager.cloneProject) {
+        throw new CodoriError(
+          'INVALID_CONFIG',
+          'Project cloning is not available because the runtime manager does not support it.'
+        )
+      }
+
+      const repositoryUrl = request.body?.repositoryUrl?.trim() ?? ''
+      const destination = typeof request.body?.destination === 'string'
+        ? request.body.destination
+        : null
+
+      reply.status(201)
+      return {
+        project: await resolveValue(manager.cloneProject({
+          repositoryUrl,
+          destination
+        }))
+      }
+    }
+  )
 
   app.get('/api/service/update', async (): Promise<ServiceUpdateResponse> => ({
     serviceUpdate: serviceUpdateController
