@@ -6,7 +6,7 @@ import { useProjects } from '../../../../composables/useProjects'
 import { useThreadSummaries } from '../../../../composables/useThreadSummaries'
 import { useThreadPanel } from '../../../../composables/useThreadPanel'
 import { useVisualSubagentPanels } from '../../../../composables/useVisualSubagentPanels'
-import { normalizeProjectIdParam, toProjectRoute } from '~~/shared/codori'
+import { isProjectlessProjectId, normalizeProjectIdParam, toProjectRoute } from '~~/shared/codori'
 import {
   pruneExpandedSubagentThreadId,
   resolveExpandedSubagentPanel,
@@ -23,8 +23,7 @@ const {
   projectlessLoaded,
   refreshProjects,
   refreshProjectlessChats,
-  getProject,
-  pendingProjectId
+  getProject
 } = useProjects()
 
 const projectId = computed(() => normalizeProjectIdParam(route.params.projectId as string | string[] | undefined))
@@ -46,7 +45,17 @@ const subagentPanels = computed(() =>
   session.value?.subagentPanels.value ?? []
 )
 const { availablePanels, activePanels } = useVisualSubagentPanels(() => subagentPanels.value)
-const projectName = computed(() => selectedProject.value?.projectId ?? projectId.value ?? 'Project')
+const isProjectlessProject = computed(() =>
+  selectedProject.value?.workspaceKind === 'projectless'
+  || isProjectlessProjectId(projectId.value)
+)
+const projectName = computed(() => {
+  if (isProjectlessProject.value) {
+    return selectedProject.value?.title?.trim() || 'New Chat'
+  }
+
+  return selectedProject.value?.projectId ?? projectId.value ?? 'Project'
+})
 const threadTitle = computed(() => {
   if (!projectId.value) {
     return threadId.value ?? 'Thread'
@@ -58,26 +67,6 @@ const threadTitle = computed(() => {
   }
 
   return routeThreadSummaryTitle.value ?? threadId.value ?? 'Thread'
-})
-const rpcStatus = computed(() => {
-  if (!projectId.value) {
-    return 'Offline'
-  }
-
-  if (pendingProjectId.value === projectId.value) {
-    return 'Starting'
-  }
-
-  switch (selectedProject.value?.status) {
-    case 'running':
-      return 'Running'
-    case 'stopped':
-      return 'Stopped'
-    case 'error':
-      return 'Error'
-    default:
-      return 'Checking'
-  }
 })
 const isSubagentsPanelOpen = ref(false)
 const isMobileSubagentsDrawerOpen = ref(false)
@@ -293,14 +282,10 @@ watch(
           </template>
           <template #right>
             <div class="flex items-center gap-1.5 lg:gap-2">
-              <UTooltip :text="`RPC ${rpcStatus}`">
-                <ProjectStatusDot
-                  :status="rpcStatus"
-                  pulse
-                  padded
-                />
-              </UTooltip>
-              <UTooltip text="New thread">
+              <UTooltip
+                v-if="!isProjectlessProject"
+                text="New thread"
+              >
                 <UButton
                   icon="i-lucide-plus"
                   color="primary"
@@ -309,7 +294,10 @@ watch(
                   @click="onNewThread"
                 />
               </UTooltip>
-              <UTooltip text="Previous threads">
+              <UTooltip
+                v-if="!isProjectlessProject"
+                text="Previous threads"
+              >
                 <UButton
                   icon="i-lucide-history"
                   color="neutral"
