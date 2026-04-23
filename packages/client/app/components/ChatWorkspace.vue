@@ -166,6 +166,7 @@ const workspaceScope = workspaceKind === 'chat'
   ? { kind: 'chat' as const, id: workspaceId }
   : { kind: 'project' as const, id: workspaceId }
 const routeThreadId = computed(() => props.threadId ?? null)
+const defaultChatTitle = 'New Chat'
 
 const router = useRouter()
 const runtimeConfig = useRuntimeConfig()
@@ -1186,11 +1187,16 @@ const updateThreadTitleFromUserInput = (threadId: string, text: string) => {
   }
 
   const fallbackTitle = `Thread ${threadId}`
-  if (!threadTitle.value || threadTitle.value === fallbackTitle) {
+  const shouldSyncChatTitle = shouldSyncInitialChatSessionTitle(threadId)
+  const currentTitle = threadTitle.value?.trim() ?? ''
+  if (!currentTitle || currentTitle === fallbackTitle || currentTitle === defaultChatTitle) {
     threadTitle.value = nextTitle
   }
 
   updateThreadSummaryTitle(threadId, nextTitle)
+  if (shouldSyncChatTitle) {
+    syncChatSessionTitle(nextTitle)
+  }
 }
 
 const syncChatSessionTitle = (title: string) => {
@@ -1208,6 +1214,18 @@ const syncChatSessionTitleFromThreadName = (thread: { name: string | null }) => 
   if (nextTitle) {
     syncChatSessionTitle(nextTitle)
   }
+}
+
+const shouldSyncInitialChatSessionTitle = (threadId: string) => {
+  if (!isChatSessionWorkspace.value) {
+    return false
+  }
+
+  const fallbackTitle = `Thread ${threadId}`
+  const currentThreadTitle = threadTitle.value?.trim() ?? ''
+  const currentChatTitle = selectedChat.value?.title?.trim() ?? ''
+  return (!currentThreadTitle || currentThreadTitle === fallbackTitle || currentThreadTitle === defaultChatTitle)
+    && (!currentChatTitle || currentChatTitle === defaultChatTitle)
 }
 
 const formatAttachmentSize = (size: number) => {
