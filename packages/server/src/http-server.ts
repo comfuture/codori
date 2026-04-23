@@ -51,7 +51,7 @@ export type RuntimeManagerLike = {
   createChatSession?: () => MaybePromise<StartChatSessionResult>
   deleteChatSession?: (chatId: string) => MaybePromise<DeleteChatSessionResult>
   updateChatSessionTitle?: (chatId: string, title: string) => MaybePromise<UpdateChatSessionTitleResult>
-  updateChatSessionThread?: (chatId: string, threadId: string) => MaybePromise<UpdateChatSessionThreadResult>
+  updateChatSessionThread?: (chatId: string, threadId: string | null) => MaybePromise<UpdateChatSessionThreadResult>
   startProject: (projectId: string) => MaybePromise<StartProjectResult>
   startChatSession?: (chatId: string) => MaybePromise<StartChatSessionResult>
   stopProject: (projectId: string) => MaybePromise<ProjectStatusRecord>
@@ -98,7 +98,7 @@ type ChatTitleRequest = {
 }
 
 type ChatThreadRequest = {
-  threadId?: string
+  threadId?: string | null
 }
 
 type ServiceUpdateResponse = {
@@ -476,7 +476,7 @@ export const createHttpServer = async (
       return {
         chat: await resolveValue(manager.updateChatSessionThread(
           getChatIdFromRequest(request.params.chatId),
-          request.body?.threadId ?? ''
+          request.body?.threadId ?? null
         ))
       }
     }

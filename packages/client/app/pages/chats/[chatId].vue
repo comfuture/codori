@@ -57,7 +57,6 @@ onMounted(async () => {
           workspace-kind="chat"
           :chat-id="chatId"
           :thread-id="selectedChat?.threadId ?? null"
-          auto-start-thread
           class="min-h-0 flex-1"
         />
       </template>
