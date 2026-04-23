@@ -580,12 +580,11 @@ export class RuntimeManager {
     return this.getChatStatus(chatId)
   }
 
-  updateChatSessionThread(chatId: string, threadId: string): UpdateChatSessionThreadResult {
+  updateChatSessionThread(chatId: string, threadId: string | null): UpdateChatSessionThreadResult {
     const chat = this.resolveChatSession(chatId)
-    const nextThreadId = threadId.trim()
-    if (!nextThreadId) {
-      throw new CodoriError('MISSING_THREAD_ID', 'Missing thread id.')
-    }
+    const nextThreadId = typeof threadId === 'string' && threadId.trim()
+      ? threadId.trim()
+      : null
 
     const updatedChat: ChatSessionRecord = {
       ...chat,

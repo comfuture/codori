@@ -334,10 +334,12 @@ describe('RuntimeManager', () => {
       'Investigate chat titles'
     )
     const threaded = manager.updateChatSessionThread(created.chatId, 'thread-1')
+    const cleared = manager.updateChatSessionThread(created.chatId, null)
 
     expect(titled.title).toBe('Investigate chat titles')
     expect(threaded.threadId).toBe('thread-1')
+    expect(cleared.threadId).toBeNull()
     expect(manager.listChatStatuses()[0]?.title).toBe('Investigate chat titles')
-    expect(manager.listChatStatuses()[0]?.threadId).toBe('thread-1')
+    expect(manager.listChatStatuses()[0]?.threadId).toBeNull()
   })
 })

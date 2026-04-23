@@ -141,11 +141,10 @@ export const useChats = () => {
     return applyChatResponse(response)
   }
 
-  const setChatThread = async (chatId: string, threadId: string) => {
-    const nextThreadId = threadId.trim()
-    if (!nextThreadId) {
-      return null
-    }
+  const setChatThread = async (chatId: string, threadId: string | null) => {
+    const nextThreadId = typeof threadId === 'string' && threadId.trim()
+      ? threadId.trim()
+      : null
 
     chats.value = chats.value.map(chat =>
       chat.chatId === chatId

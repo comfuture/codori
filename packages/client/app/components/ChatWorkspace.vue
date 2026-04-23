@@ -157,7 +157,6 @@ const props = defineProps<{
   chatId?: string
   workspaceKind?: 'project' | 'chat'
   threadId?: string | null
-  autoStartThread?: boolean
 }>()
 const workspaceKind = props.workspaceKind ?? 'project'
 const workspaceId = workspaceKind === 'chat' ? props.chatId ?? '' : props.projectId ?? ''
@@ -2417,7 +2416,14 @@ const hydrateThread = async (threadId: string) => {
       }
     } catch (caughtError) {
       clearLiveStream()
-      error.value = caughtError instanceof Error ? caughtError.message : String(caughtError)
+      const errorMessage = caughtError instanceof Error ? caughtError.message : String(caughtError)
+      if (workspaceKind === 'chat' && /no rollout found for thread id/i.test(errorMessage)) {
+        await setChatThread(workspaceId, null).catch(() => null)
+        resetDraftThread()
+        return
+      }
+
+      error.value = errorMessage
       status.value = 'error'
     }
   })()
@@ -2468,9 +2474,6 @@ const ensureThread = async () => {
   })
 
   activeThreadId.value = response.thread.id
-  if (workspaceKind === 'chat') {
-    void setChatThread(workspaceId, response.thread.id).catch(() => {})
-  }
   refreshWorkspaceGitBranchesInBackground('thread/start')
   moveDraftCollaborationModeToThread(response.thread.id)
   threadTitle.value = resolveThreadSummaryTitle(response.thread)
@@ -3620,9 +3623,12 @@ watch(() => props.threadId ?? null, (threadId) => {
     }
 
     resetDraftThread()
-    if (workspaceKind === 'chat' && props.autoStartThread) {
-      void ensureThread()
-    }
+    return
+  }
+
+  if (workspaceKind === 'chat' && activeThreadId.value === threadId) {
+    autoRedirectThreadId.value = null
+    pendingThreadId.value = null
     return
   }
 

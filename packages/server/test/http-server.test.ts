@@ -317,6 +317,36 @@ describe('createHttpServer', () => {
     })
   })
 
+  it('clears a chat thread through the management API', async () => {
+    const app = await createHttpServer(createManager({
+      updateChatSessionThread: (chatId, threadId) => ({
+        ...createChatRecord(),
+        chatId,
+        chatPath: '/tmp/chats/chat-recent',
+        threadId
+      })
+    }))
+    startedApps.push(app)
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/chats/chat-recent/thread',
+      payload: {
+        threadId: null
+      }
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toEqual({
+      chat: {
+        ...createChatRecord(),
+        chatId: 'chat-recent',
+        chatPath: '/tmp/chats/chat-recent',
+        threadId: null
+      }
+    })
+  })
+
   it('maps clone validation errors to structured API responses', async () => {
     const app = await createHttpServer(createManager({
       cloneProject: () => {

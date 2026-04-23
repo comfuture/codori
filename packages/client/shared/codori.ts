@@ -67,7 +67,7 @@ export type UpdateChatTitleRequest = {
 }
 
 export type UpdateChatThreadRequest = {
-  threadId: string
+  threadId: string | null
 }
 
 export type ProjectResponse = {
