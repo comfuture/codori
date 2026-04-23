@@ -13,7 +13,7 @@ export const proxyServerRequest = async <T>(
   event: H3Event,
   path: string,
   options: {
-    method?: 'GET' | 'POST'
+    method?: 'DELETE' | 'GET' | 'POST'
     body?: unknown
   } = {}
 ) => {
@@ -28,7 +28,7 @@ export const proxyServerFetch = async (
   event: H3Event,
   path: string,
   options: {
-    method?: 'GET' | 'POST'
+    method?: 'DELETE' | 'GET' | 'POST'
     headers?: HeadersInit
     body?: BodyInit | null
   } = {}

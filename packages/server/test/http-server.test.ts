@@ -59,6 +59,7 @@ afterEach(async () => {
 const createProjectRecord = (): ProjectStatusRecord => ({
   projectId: 'demo',
   projectPath: '/tmp/demo',
+  title: null,
   workspaceKind: 'project',
   createdAt: null,
   status: 'running',
@@ -81,9 +82,13 @@ const createManager = (overrides: Partial<RuntimeManagerLike> = {}): RuntimeMana
     ...createProjectRecord(),
     projectId: 'projectless/chat-test',
     projectPath: '/tmp/projectless/chat-test',
+    title: 'New Chat',
     workspaceKind: 'projectless',
     createdAt: 1,
     reusedExisting: false
+  }),
+  deleteProjectlessChat: projectId => ({
+    projectId
   }),
   startProject: () => ({
     ...createProjectRecord(),
@@ -197,6 +202,7 @@ describe('createHttpServer', () => {
       ...createProjectRecord(),
       projectId: 'projectless/chat-recent',
       projectPath: '/tmp/projectless/chat-recent',
+      title: 'Recent chat',
       workspaceKind: 'projectless',
       createdAt: 10
     }
@@ -206,6 +212,7 @@ describe('createHttpServer', () => {
         ...projectlessRecord,
         projectId: 'projectless/chat-new',
         projectPath: '/tmp/projectless/chat-new',
+        title: 'New Chat',
         createdAt: 11,
         reusedExisting: false
       })
@@ -231,9 +238,27 @@ describe('createHttpServer', () => {
         ...projectlessRecord,
         projectId: 'projectless/chat-new',
         projectPath: '/tmp/projectless/chat-new',
+        title: 'New Chat',
         createdAt: 11,
         reusedExisting: false
       }
+    })
+  })
+
+  it('deletes a projectless chat through the management API', async () => {
+    const app = await createHttpServer(createManager({
+      deleteProjectlessChat: projectId => ({ projectId })
+    }))
+    startedApps.push(app)
+
+    const response = await app.inject({
+      method: 'DELETE',
+      url: '/api/projectless-chats/projectless%2Fchat-recent'
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toEqual({
+      projectId: 'projectless/chat-recent'
     })
   })
 
@@ -242,6 +267,7 @@ describe('createHttpServer', () => {
       ...createProjectRecord(),
       projectId: 'projectless/chat-recent',
       projectPath: '/tmp/projectless/chat-recent',
+      title: 'Recent chat',
       workspaceKind: 'projectless'
     }
     const app = await createHttpServer(createManager({

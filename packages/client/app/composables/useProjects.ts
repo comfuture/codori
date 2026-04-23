@@ -4,6 +4,7 @@ import { encodeProjectIdSegment } from '~~/shared/codori'
 import { resolveApiUrl, shouldUseServerProxy } from '~~/shared/network'
 import type {
   CloneProjectRequest,
+  DeleteProjectlessChatResponse,
   ProjectlessChatsResponse,
   ProjectRecord,
   ProjectResponse,
@@ -41,6 +42,7 @@ export const useProjects = () => {
   const projectlessLoading = useState<boolean>('codori-projectless-chats-loading', () => false)
   const clonePending = useState<boolean>('codori-projects-clone-pending', () => false)
   const projectlessCreatePending = useState<boolean>('codori-projectless-chats-create-pending', () => false)
+  const projectlessDeletePendingId = useState<string | null>('codori-projectless-chats-delete-pending-id', () => null)
   const serviceUpdatePending = useState<boolean>('codori-service-update-pending', () => false)
   const pendingProjectId = useState<string | null>('codori-projects-pending-id', () => null)
   const error = useState<string | null>('codori-projects-error', () => null)
@@ -121,6 +123,26 @@ export const useProjects = () => {
       return applyProjectResponse(response)
     } finally {
       projectlessCreatePending.value = false
+    }
+  }
+
+  const deleteProjectlessChat = async (projectId: string) => {
+    if (projectlessDeletePendingId.value) {
+      throw new Error('A chat deletion is already in progress.')
+    }
+
+    projectlessDeletePendingId.value = projectId
+    error.value = null
+    try {
+      const response = await $fetch<DeleteProjectlessChatResponse>(toApiUrl(
+        `/projectless-chats/${encodeProjectIdSegment(projectId)}`
+      ), {
+        method: 'DELETE'
+      })
+      projectlessChats.value = projectlessChats.value.filter(project => project.projectId !== response.projectId)
+      return response
+    } finally {
+      projectlessDeletePendingId.value = null
     }
   }
 
@@ -210,6 +232,7 @@ export const useProjects = () => {
     projectlessLoading,
     clonePending,
     projectlessCreatePending,
+    projectlessDeletePendingId,
     serviceUpdatePending,
     error,
     pendingProjectId,
@@ -218,6 +241,7 @@ export const useProjects = () => {
     triggerServiceUpdate,
     cloneProject,
     createProjectlessChat,
+    deleteProjectlessChat,
     startProject,
     stopProject,
     getProject

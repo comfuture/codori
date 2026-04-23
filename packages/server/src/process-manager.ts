@@ -4,6 +4,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  rmSync,
   statSync,
   writeFileSync
 } from 'node:fs'
@@ -19,6 +20,7 @@ import { RuntimeStore } from './runtime-store.js'
 import type {
   CodoriConfig,
   ConfigOverrides,
+  DeleteProjectlessChatResult,
   ProjectRecord,
   ProjectStatusRecord,
   RuntimeRecord,
@@ -49,6 +51,7 @@ const PROJECTLESS_PARENT_DIR_NAME = 'Codex'
 const PROJECTLESS_PROJECT_ID_PREFIX = 'projectless/'
 const PROJECTLESS_MARKER_FILE = '.codori-projectless.json'
 const PROJECTLESS_RECENT_LIMIT = 5
+const DEFAULT_PROJECTLESS_CHAT_TITLE = 'New Chat'
 
 const defaultCommandFactory: CommandFactory = (port) => ({
   command: process.env.CODORI_CODEX_BIN ?? 'codex',
@@ -142,6 +145,7 @@ export class RuntimeManager {
     try {
       const marker = JSON.parse(readFileSync(markerPath, 'utf8')) as {
         projectId?: unknown
+        title?: unknown
         createdAt?: unknown
       }
       if (typeof marker.projectId !== 'string' || !marker.projectId.startsWith(PROJECTLESS_PROJECT_ID_PREFIX)) {
@@ -151,6 +155,9 @@ export class RuntimeManager {
       return {
         id: marker.projectId,
         path: projectPath,
+        title: typeof marker.title === 'string' && marker.title.trim()
+          ? marker.title.trim()
+          : DEFAULT_PROJECTLESS_CHAT_TITLE,
         workspaceKind: 'projectless',
         createdAt: typeof marker.createdAt === 'number' ? marker.createdAt : null
       }
@@ -204,12 +211,14 @@ export class RuntimeManager {
     mkdirSync(projectPath, { recursive: true })
     writeFileSync(join(projectPath, PROJECTLESS_MARKER_FILE), `${JSON.stringify({
       projectId,
+      title: DEFAULT_PROJECTLESS_CHAT_TITLE,
       createdAt: now
     }, null, 2)}\n`)
 
     return {
       id: projectId,
       path: projectPath,
+      title: DEFAULT_PROJECTLESS_CHAT_TITLE,
       workspaceKind: 'projectless' as const,
       createdAt: now
     }
@@ -235,6 +244,7 @@ export class RuntimeManager {
     return {
       projectId: project.id,
       projectPath: project.path,
+      title: project.title ?? null,
       workspaceKind: project.workspaceKind ?? 'project',
       createdAt: project.createdAt ?? null,
       status: error ? 'error' : runtime ? 'running' : 'stopped',
@@ -427,6 +437,22 @@ export class RuntimeManager {
 
   async createProjectlessChat(): Promise<StartProjectResult> {
     return await this.startResolvedProject(this.createProjectlessProjectRecord())
+  }
+
+  async deleteProjectlessChat(projectId: string): Promise<DeleteProjectlessChatResult> {
+    const project = this.resolveProject(projectId)
+    if (project.workspaceKind !== 'projectless') {
+      throw new CodoriError(
+        'PROJECT_DELETE_UNAVAILABLE',
+        'Only projectless chats can be deleted through this endpoint.'
+      )
+    }
+
+    await this.stopProject(projectId)
+    this.activeSessions.delete(projectId)
+    rmSync(project.path, { recursive: true, force: true })
+
+    return { projectId }
   }
 
   async stopProject(projectId: string) {
