@@ -1,11 +1,11 @@
 import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { rm, stat } from 'node:fs/promises'
-import { basename, isAbsolute, relative, resolve } from 'node:path'
+import { mkdir, realpath, rm, stat } from 'node:fs/promises'
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { isPathInsideDirectory } from './attachment-store.js'
 import { CodoriError } from './errors.js'
-import { IGNORED_PROJECT_DIRECTORY_NAMES, scanProjects } from './project-scanner.js'
+import { IGNORED_PROJECT_DIRECTORY_NAMES } from './project-scanner.js'
 
 export type GitBranchesResult = {
   currentBranch: string | null
@@ -285,6 +285,23 @@ const ensureRootDirectory = async (rootDirectory: string) => {
   }
 }
 
+const ensureCloneParentDirectory = async (projectPath: string, rootDirectory: string) => {
+  const parentPath = dirname(projectPath)
+  await mkdir(parentPath, { recursive: true })
+
+  const [realRootPath, realParentPath] = await Promise.all([
+    realpath(rootDirectory),
+    realpath(parentPath)
+  ])
+
+  if (!isPathInsideDirectory(realParentPath, realRootPath)) {
+    throw new CodoriError(
+      'INVALID_PROJECT_DESTINATION',
+      'Destination must stay inside the configured Codori root after resolving symlinks.'
+    )
+  }
+}
+
 const cleanupCloneDestination = async (projectPath: string) => {
   if (!existsSync(projectPath)) {
     return
@@ -325,6 +342,8 @@ export const cloneProjectIntoRoot = async (input: CloneProjectInput): Promise<Cl
     )
   }
 
+  await ensureCloneParentDirectory(projectPath, rootDirectory)
+
   let cloneUrl = cloneTarget.candidates[0]?.cloneUrl ?? cloneTarget.normalizedRepositoryUrl
   let lastCloneError: unknown = null
 
@@ -358,10 +377,7 @@ export const cloneProjectIntoRoot = async (input: CloneProjectInput): Promise<Cl
     )
   }
 
-  const discoveredProject = scanProjects(rootDirectory)
-    .find(project => project.path === projectPath)
-
-  if (!discoveredProject) {
+  if (!existsSync(join(projectPath, '.git'))) {
     await cleanupCloneDestination(projectPath)
     throw new CodoriError(
       'CLONED_PROJECT_NOT_DISCOVERED',
@@ -370,8 +386,8 @@ export const cloneProjectIntoRoot = async (input: CloneProjectInput): Promise<Cl
   }
 
   return {
-    projectId: discoveredProject.id,
-    projectPath: discoveredProject.path,
+    projectId: destination,
+    projectPath,
     repositoryUrl: cloneTarget.normalizedRepositoryUrl,
     cloneUrl
   }
