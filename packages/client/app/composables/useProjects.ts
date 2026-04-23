@@ -3,6 +3,7 @@ import { $fetch } from 'ofetch'
 import { encodeProjectIdSegment } from '~~/shared/codori'
 import { resolveApiUrl, shouldUseServerProxy } from '~~/shared/network'
 import type {
+  CloneProjectRequest,
   ProjectRecord,
   ProjectResponse,
   ProjectsResponse,
@@ -27,6 +28,7 @@ export const useProjects = () => {
   }))
   const loaded = useState<boolean>('codori-projects-loaded', () => false)
   const loading = useState<boolean>('codori-projects-loading', () => false)
+  const clonePending = useState<boolean>('codori-projects-clone-pending', () => false)
   const serviceUpdatePending = useState<boolean>('codori-service-update-pending', () => false)
   const pendingProjectId = useState<string | null>('codori-projects-pending-id', () => null)
   const error = useState<string | null>('codori-projects-error', () => null)
@@ -98,6 +100,24 @@ export const useProjects = () => {
     }
   }
 
+  const cloneProject = async (input: CloneProjectRequest) => {
+    if (clonePending.value) {
+      throw new Error('A project clone is already in progress.')
+    }
+
+    clonePending.value = true
+    error.value = null
+    try {
+      const response = await $fetch<ProjectResponse>(toApiUrl('/projects/clone'), {
+        method: 'POST',
+        body: input
+      })
+      return applyProjectResponse(response)
+    } finally {
+      clonePending.value = false
+    }
+  }
+
   const getProject = (projectId: string | null) => {
     if (!projectId) {
       return null
@@ -131,11 +151,13 @@ export const useProjects = () => {
     serviceUpdate,
     loaded,
     loading,
+    clonePending,
     serviceUpdatePending,
     error,
     pendingProjectId,
     refreshProjects,
     triggerServiceUpdate,
+    cloneProject,
     startProject,
     stopProject,
     getProject

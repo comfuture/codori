@@ -36,6 +36,11 @@ export type ProjectResponse = {
   project: ProjectRecord | StartProjectResult
 }
 
+export type CloneProjectRequest = {
+  repositoryUrl: string
+  destination?: string | null
+}
+
 export type ServiceUpdateResponse = {
   serviceUpdate: ServiceUpdateStatus
 }
