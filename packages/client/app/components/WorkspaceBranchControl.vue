@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 
 const props = withDefaults(defineProps<{
   currentBranch?: string | null
@@ -22,22 +22,15 @@ const emit = defineEmits<{
   createBranch: [branch: string]
 }>()
 
-const branchSearch = ref('')
 const newBranchName = ref('')
 
 const hasGitBranchData = computed(() =>
   Boolean(props.currentBranch) || (props.branches?.length ?? 0) > 0
 )
 
-const filteredBranches = computed(() => {
-  const normalizedSearch = branchSearch.value.trim().toLowerCase()
-  const availableBranches = (props.branches ?? []).filter(branch => branch !== props.currentBranch)
-  if (!normalizedSearch) {
-    return availableBranches
-  }
-
-  return availableBranches.filter(branch => branch.toLowerCase().includes(normalizedSearch))
-})
+const availableBranches = computed(() =>
+  (props.branches ?? []).filter(branch => branch !== props.currentBranch)
+)
 
 const createDisabled = computed(() =>
   props.loading
@@ -45,10 +38,6 @@ const createDisabled = computed(() =>
   || props.disabled
   || !newBranchName.value.trim()
 )
-
-watch(() => props.currentBranch, () => {
-  branchSearch.value = ''
-})
 
 const requestBranchCreate = () => {
   const branch = newBranchName.value.trim()
@@ -80,18 +69,20 @@ const requestBranchCreate = () => {
     </UButton>
 
     <template #content>
-      <div class="w-[min(24rem,calc(100vw-2rem))] space-y-3 p-3">
-        <div class="flex items-center justify-between gap-3">
-          <div class="min-w-0">
-            <div class="text-xs font-semibold text-primary">
-              Workspace branch
-            </div>
-            <div class="truncate text-sm font-medium text-highlighted">
-              {{ currentBranch ?? 'Detached HEAD' }}
-            </div>
-          </div>
+      <div class="w-[min(20rem,calc(100vw-2rem))] space-y-2 p-2">
+        <div
+          class="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm"
+          data-current-branch=""
+        >
           <UIcon
             name="i-lucide-git-branch"
+            class="size-4 shrink-0 text-muted"
+          />
+          <span class="min-w-0 flex-1 truncate font-mono text-[13px] text-highlighted">
+            {{ currentBranch ?? 'Detached HEAD' }}
+          </span>
+          <UIcon
+            name="i-lucide-check"
             class="size-4 shrink-0 text-primary"
           />
         </div>
@@ -104,26 +95,13 @@ const requestBranchCreate = () => {
           :title="error"
         />
 
-        <div class="space-y-2">
-          <div class="text-xs font-medium text-muted">
-            Switch branch
-          </div>
-
-          <UInput
-            v-model="branchSearch"
-            size="sm"
-            color="neutral"
-            variant="subtle"
-            placeholder="Search local branches"
-            :disabled="loading || submitting || disabled"
-          />
-
-          <div class="max-h-56 space-y-1 overflow-y-auto rounded-2xl border border-default bg-elevated/20 p-1">
+        <div class="max-h-56 overflow-y-auto">
+          <div class="space-y-0.5">
             <button
-              v-for="branch in filteredBranches"
+              v-for="branch in availableBranches"
               :key="branch"
               type="button"
-              class="flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-sm transition hover:bg-elevated"
+              class="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm transition hover:bg-elevated"
               :disabled="loading || submitting || disabled"
               :data-branch-option="branch"
               @click="emit('switchBranch', branch)"
@@ -131,48 +109,39 @@ const requestBranchCreate = () => {
               <span class="truncate font-mono text-[13px] text-highlighted">
                 {{ branch }}
               </span>
-              <UIcon
-                name="i-lucide-arrow-right-left"
-                class="size-3.5 shrink-0 text-muted"
-              />
             </button>
 
             <div
-              v-if="!loading && !filteredBranches.length"
-              class="px-3 py-4 text-sm text-muted"
+              v-if="!loading && !availableBranches.length"
+              class="px-2 py-2 text-sm text-muted"
             >
-              No matching local branches.
+              No other local branches.
             </div>
           </div>
         </div>
 
-        <div class="space-y-2">
-          <div class="text-xs font-medium text-muted">
-            Create branch
-          </div>
-
-          <div class="flex items-center gap-2">
-            <UInput
-              v-model="newBranchName"
-              size="sm"
-              color="neutral"
-              variant="subtle"
-              placeholder="feature/new-branch"
-              :disabled="loading || submitting || disabled"
-              @keydown.enter.prevent="requestBranchCreate"
-            />
-            <UButton
-              type="button"
-              color="primary"
-              size="sm"
-              :loading="submitting"
-              :disabled="createDisabled"
-              data-create-branch=""
-              @click="requestBranchCreate"
-            >
-              Create
-            </UButton>
-          </div>
+        <div class="flex items-center gap-2 border-t border-default pt-2">
+          <UInput
+            v-model="newBranchName"
+            size="sm"
+            color="neutral"
+            variant="ghost"
+            placeholder="create a branch"
+            :disabled="loading || submitting || disabled"
+            @keydown.enter.prevent="requestBranchCreate"
+          />
+          <UButton
+            type="button"
+            color="primary"
+            variant="ghost"
+            size="sm"
+            :loading="submitting"
+            :disabled="createDisabled"
+            data-create-branch=""
+            @click="requestBranchCreate"
+          >
+            Create
+          </UButton>
         </div>
       </div>
     </template>
