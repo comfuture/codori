@@ -35,7 +35,14 @@ type RefreshWorkspaceGitBranchOptions = {
 const MIN_REFRESH_INTERVAL_MS = 750
 
 const readJsonResponse = async <T>(response: Response, fallbackMessage: string): Promise<T> => {
-  const body = await response.json() as T | { error?: { message?: string } }
+  let body: T | { error?: { message?: string } } | null = null
+
+  try {
+    body = await response.json() as T | { error?: { message?: string } }
+  } catch {
+    throw new Error(fallbackMessage)
+  }
+
   if (!response.ok) {
     throw new Error(body && typeof body === 'object' && 'error' in body
       ? body.error?.message ?? fallbackMessage
@@ -122,7 +129,6 @@ export const useWorkspaceGitBranch = (options: UseWorkspaceGitBranchOptions) => 
 
     try {
       return await refreshBranches({
-        force: true,
         silent: loaded.value
       })
     } catch {
@@ -168,7 +174,6 @@ export const useWorkspaceGitBranch = (options: UseWorkspaceGitBranchOptions) => 
       throw caughtError
     } finally {
       submitting.value = false
-      loading.value = false
     }
   }
 
