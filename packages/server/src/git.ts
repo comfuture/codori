@@ -44,6 +44,26 @@ const runGit = async (projectPath: string, args: string[]) => {
   return stdout.trim()
 }
 
+const normalizeBranchName = (value: string) => value.trim()
+
+const ensureValidBranchName = async (projectPath: string, branchName: string) => {
+  const normalizedBranchName = normalizeBranchName(branchName)
+  if (!normalizedBranchName) {
+    throw new CodoriError('INVALID_GIT_BRANCH', 'Branch name is required.')
+  }
+
+  try {
+    await runGit(projectPath, ['check-ref-format', '--branch', normalizedBranchName])
+  } catch {
+    throw new CodoriError(
+      'INVALID_GIT_BRANCH',
+      `Branch name "${normalizedBranchName}" is not a valid local branch name.`
+    )
+  }
+
+  return normalizedBranchName
+}
+
 export const listGitBranches = async (projectPath: string): Promise<GitBranchesResult> => {
   let branchesOutput = ''
   try {
@@ -83,6 +103,37 @@ export const listGitBranches = async (projectPath: string): Promise<GitBranchesR
     branches: [...branchSet]
   }
 }
+
+const runGitBranchMutation = async (
+  projectPath: string,
+  branchName: string,
+  argsFactory: (validatedBranchName: string) => string[]
+) => {
+  const normalizedBranchName = await ensureValidBranchName(projectPath, branchName)
+
+  try {
+    await runGit(projectPath, argsFactory(normalizedBranchName))
+  } catch (error) {
+    throw new CodoriError(
+      'GIT_OPERATION_FAILED',
+      toGitErrorMessage(error)
+    )
+  }
+
+  return await listGitBranches(projectPath)
+}
+
+export const switchGitBranch = async (
+  projectPath: string,
+  branchName: string
+): Promise<GitBranchesResult> =>
+  await runGitBranchMutation(projectPath, branchName, validatedBranchName => ['checkout', '--', validatedBranchName])
+
+export const createGitBranch = async (
+  projectPath: string,
+  branchName: string
+): Promise<GitBranchesResult> =>
+  await runGitBranchMutation(projectPath, branchName, validatedBranchName => ['checkout', '-b', validatedBranchName])
 
 const SCP_STYLE_REPOSITORY_PATTERN = /^(?<user>[A-Za-z0-9._-]+)@(?<host>[^:/\s]+):(?<path>.+)$/u
 const WINDOWS_DRIVE_PATTERN = /^[a-z]:[/\\]/iu

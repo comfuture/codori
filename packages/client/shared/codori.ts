@@ -50,6 +50,10 @@ export type ProjectGitBranchesResponse = {
   branches: string[]
 }
 
+export type ProjectGitBranchMutationRequest = {
+  branch: string
+}
+
 export const normalizeProjectIdParam = (value: string | string[] | undefined) => {
   if (!value) {
     return null
@@ -74,6 +78,32 @@ export const resolveProjectGitBranchesUrl = (input: {
   configuredBase?: string | null
 }) => {
   const requestPath = `/projects/${encodeProjectIdSegment(input.projectId)}/git/branches`
+
+  if (shouldUseServerProxy(input.configuredBase)) {
+    return `/api/codori${requestPath}`
+  }
+
+  return resolveApiUrl(requestPath, input.configuredBase)
+}
+
+export const resolveProjectGitBranchSwitchUrl = (input: {
+  projectId: string
+  configuredBase?: string | null
+}) => {
+  const requestPath = `/projects/${encodeProjectIdSegment(input.projectId)}/git/branches/switch`
+
+  if (shouldUseServerProxy(input.configuredBase)) {
+    return `/api/codori${requestPath}`
+  }
+
+  return resolveApiUrl(requestPath, input.configuredBase)
+}
+
+export const resolveProjectGitBranchCreateUrl = (input: {
+  projectId: string
+  configuredBase?: string | null
+}) => {
+  const requestPath = `/projects/${encodeProjectIdSegment(input.projectId)}/git/branches/create`
 
   if (shouldUseServerProxy(input.configuredBase)) {
     return `/api/codori${requestPath}`

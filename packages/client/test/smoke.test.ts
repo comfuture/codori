@@ -59,7 +59,9 @@ import {
   encodeProjectIdSegment,
   normalizeProjectIdParam,
   projectStatusMeta,
+  resolveProjectGitBranchCreateUrl,
   resolveProjectGitBranchesUrl,
+  resolveProjectGitBranchSwitchUrl,
   toProjectRoute,
   toProjectThreadRoute
 } from '../shared/codori'
@@ -88,10 +90,30 @@ describe('client package', () => {
       configuredBase: 'https://codori.example.com'
     })).toBe('/api/codori/projects/team%2Fapi/git/branches')
 
+    expect(resolveProjectGitBranchSwitchUrl({
+      projectId: 'team/api',
+      configuredBase: 'https://codori.example.com'
+    })).toBe('/api/codori/projects/team%2Fapi/git/branches/switch')
+
+    expect(resolveProjectGitBranchCreateUrl({
+      projectId: 'team/api',
+      configuredBase: 'https://codori.example.com'
+    })).toBe('/api/codori/projects/team%2Fapi/git/branches/create')
+
     expect(resolveProjectGitBranchesUrl({
       projectId: 'team/api',
       configuredBase: ''
     })).toBe('http://127.0.0.1:4310/api/projects/team%2Fapi/git/branches')
+
+    expect(resolveProjectGitBranchSwitchUrl({
+      projectId: 'team/api',
+      configuredBase: ''
+    })).toBe('http://127.0.0.1:4310/api/projects/team%2Fapi/git/branches/switch')
+
+    expect(resolveProjectGitBranchCreateUrl({
+      projectId: 'team/api',
+      configuredBase: ''
+    })).toBe('http://127.0.0.1:4310/api/projects/team%2Fapi/git/branches/create')
   })
 
   it('normalizes structured review previews into a stable thread title', () => {

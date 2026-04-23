@@ -22,7 +22,7 @@ import {
   resolveProjectAttachmentsDir
 } from './attachment-store.js'
 import { CodoriError } from './errors.js'
-import { listGitBranches } from './git.js'
+import { createGitBranch, listGitBranches, switchGitBranch } from './git.js'
 import { LocalFileViewError, readProjectLocalFile } from './local-file-viewer.js'
 import { createRuntimeManager } from './process-manager.js'
 import {
@@ -69,6 +69,10 @@ type ServiceUpdateResponse = {
 type ProjectGitBranchesResponse = {
   currentBranch: string | null
   branches: string[]
+}
+
+type ProjectGitBranchMutationRequest = {
+  branch?: string
 }
 
 type ProjectLocalFileResponse = {
@@ -120,6 +124,7 @@ const toStatusCode = (error: CodoriError) => {
       return 404
     case 'INVALID_CONFIG':
     case 'INVALID_GIT_URL':
+    case 'INVALID_GIT_BRANCH':
     case 'INVALID_PROJECT_DESTINATION':
     case 'MISSING_PROJECT_ID':
     case 'MISSING_THREAD_ID':
@@ -127,6 +132,7 @@ const toStatusCode = (error: CodoriError) => {
     case 'MISSING_ROOT':
       return 400
     case 'DESTINATION_EXISTS':
+    case 'GIT_OPERATION_FAILED':
     case 'SERVICE_UPDATE_UNAVAILABLE':
     case 'SERVICE_UPDATE_IN_PROGRESS':
       return 409
@@ -381,6 +387,26 @@ export const createHttpServer = async (
       const project = await resolveValue(manager.getProjectStatus(projectId))
       await touchProjectActivity(manager, projectId)
       return await listGitBranches(project.projectPath)
+    }
+  )
+
+  app.post<{ Params: { projectId: string }, Body: ProjectGitBranchMutationRequest }>(
+    '/api/projects/:projectId/git/branches/switch',
+    async (request: FastifyRequest<{ Params: { projectId: string }, Body: ProjectGitBranchMutationRequest }>): Promise<ProjectGitBranchesResponse> => {
+      const projectId = getProjectIdFromRequest(request.params.projectId)
+      const project = await resolveValue(manager.getProjectStatus(projectId))
+      await touchProjectActivity(manager, projectId)
+      return await switchGitBranch(project.projectPath, request.body?.branch ?? '')
+    }
+  )
+
+  app.post<{ Params: { projectId: string }, Body: ProjectGitBranchMutationRequest }>(
+    '/api/projects/:projectId/git/branches/create',
+    async (request: FastifyRequest<{ Params: { projectId: string }, Body: ProjectGitBranchMutationRequest }>): Promise<ProjectGitBranchesResponse> => {
+      const projectId = getProjectIdFromRequest(request.params.projectId)
+      const project = await resolveValue(manager.getProjectStatus(projectId))
+      await touchProjectActivity(manager, projectId)
+      return await createGitBranch(project.projectPath, request.body?.branch ?? '')
     }
   )
 

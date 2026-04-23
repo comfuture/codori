@@ -15,6 +15,7 @@ import PlanImplementationPromptDrawer from './PlanImplementationPromptDrawer.vue
 import ReviewStartDrawer from './ReviewStartDrawer.vue'
 import PendingUserRequestDrawer from './PendingUserRequestDrawer.vue'
 import UsageStatusModal from './UsageStatusModal.vue'
+import WorkspaceBranchControl from './WorkspaceBranchControl.vue'
 import {
   reconcileOptimisticUserMessage,
   removeChatMessage,
@@ -38,6 +39,7 @@ import { useChatSession, type LiveStream } from '../composables/useChatSession'
 import { useProjects } from '../composables/useProjects'
 import { useRpc } from '../composables/useRpc'
 import { useChatSubmitGuard } from '../composables/useChatSubmitGuard'
+import { useWorkspaceGitBranch } from '../composables/useWorkspaceGitBranch'
 import {
   normalizeThreadTitleCandidate,
   resolveThreadSummaryTitle,
@@ -274,6 +276,21 @@ type MentionAutocompletePaletteSection = {
 }
 
 const selectedProject = computed(() => getProject(props.projectId))
+const workspaceGitBranch = useWorkspaceGitBranch({
+  projectId: props.projectId,
+  serverBase: String(runtimeConfig.public.serverBase ?? '')
+})
+const {
+  currentBranch: workspaceCurrentBranch,
+  availableBranches: workspaceAvailableBranches,
+  loading: workspaceGitBranchLoading,
+  submitting: workspaceGitBranchSubmitting,
+  error: workspaceGitBranchError,
+  showBranchControl: showWorkspaceBranchControl,
+  refreshBranchesForActivity: refreshWorkspaceGitBranchesForActivity,
+  switchBranch: switchWorkspaceGitBranch,
+  createBranch: createWorkspaceGitBranch
+} = workspaceGitBranch
 const mentionSubmission = computed(() =>
   buildMentionAutocompleteSubmission(insertedMentionSelections.value)
 )
@@ -1982,6 +1999,15 @@ const isBusy = computed(() =>
   isWorkflowBusy.value
   || reviewStartPending.value
 )
+const isWorkspaceBranchControlDisabled = computed(() =>
+  hasPendingRequest.value
+  || isBusy.value
+  || sendMessageLocked.value
+)
+
+const refreshWorkspaceGitBranchesInBackground = (activity: string) => {
+  void refreshWorkspaceGitBranchesForActivity(activity)
+}
 
 const untrackPendingUserMessage = (messageId: string) => {
   const liveStream = currentLiveStream()
@@ -2256,6 +2282,7 @@ const hydrateThread = async (threadId: string) => {
         resumeResponse.model ?? null,
         (resumeResponse.reasoningEffort as ReasoningEffort | null | undefined) ?? null
       )
+      refreshWorkspaceGitBranchesInBackground('thread/resume')
       activeThreadId.value = response.thread.id
       threadTitle.value = resolveThreadSummaryTitle(response.thread)
       syncThreadSummary(response.thread)
@@ -2362,6 +2389,7 @@ const ensureThread = async () => {
   })
 
   activeThreadId.value = response.thread.id
+  refreshWorkspaceGitBranchesInBackground('thread/start')
   moveDraftCollaborationModeToThread(response.thread.id)
   threadTitle.value = resolveThreadSummaryTitle(response.thread)
   syncThreadSummary(response.thread)
@@ -2730,6 +2758,7 @@ const applyNotification = (notification: CodexRpcNotification) => {
 
       activeThreadId.value = nextThreadId
       pendingThreadId.value = pendingThreadId.value ?? nextThreadId
+      refreshWorkspaceGitBranchesInBackground('thread/start')
       return
     }
     case 'thread/name/updated': {
@@ -2760,14 +2789,17 @@ const applyNotification = (notification: CodexRpcNotification) => {
       return
     }
     case 'turn/started': {
+      refreshWorkspaceGitBranchesInBackground('turn/start')
       applyTurnStartedNotification(notification, liveStream)
       return
     }
     case 'item/started': {
+      refreshWorkspaceGitBranchesInBackground('item/start')
       applyItemStartedNotification(notification)
       return
     }
     case 'item/completed': {
+      refreshWorkspaceGitBranchesInBackground('item/completed')
       applyItemCompletedNotification(notification)
       return
     }
@@ -2944,6 +2976,7 @@ const applyNotification = (notification: CodexRpcNotification) => {
       return
     }
     case 'turn/completed': {
+      refreshWorkspaceGitBranchesInBackground('turn/completed')
       applyTurnCompletedNotification(notification, liveStream)
       return
     }
@@ -2980,6 +3013,7 @@ const sendMessage = async () => {
   }
 
   sendMessageLocked.value = true
+  refreshWorkspaceGitBranchesInBackground('submit')
   const rawText = input.value
   const submittedAttachments = attachments.value.slice()
   let submittedSkillMentions = cloneSkillMentions()
@@ -3436,6 +3470,7 @@ onMounted(() => {
 
   void getClient(props.projectId).connect().catch(() => {})
   void loadPromptControls()
+  refreshWorkspaceGitBranchesInBackground('mount')
   void scheduleScrollToBottom('auto')
 
   if (import.meta.client) {
@@ -3465,6 +3500,8 @@ onBeforeUnmount(() => {
 })
 
 watch(() => props.threadId ?? null, (threadId) => {
+  refreshWorkspaceGitBranchesInBackground('thread/load')
+
   if (!threadId) {
     if (isBusy.value || pendingThreadId.value) {
       return
@@ -4193,6 +4230,18 @@ watch(
 
               <div class="flex w-full flex-wrap items-center gap-2 pt-1">
                 <div class="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+                  <WorkspaceBranchControl
+                    v-if="showWorkspaceBranchControl"
+                    :current-branch="workspaceCurrentBranch"
+                    :branches="workspaceAvailableBranches"
+                    :loading="workspaceGitBranchLoading"
+                    :submitting="workspaceGitBranchSubmitting"
+                    :disabled="isWorkspaceBranchControlDisabled"
+                    :error="workspaceGitBranchError"
+                    @switch-branch="(branch) => void switchWorkspaceGitBranch(branch)"
+                    @create-branch="(branch) => void createWorkspaceGitBranch(branch)"
+                  />
+
                   <UButton
                     type="button"
                     color="neutral"
