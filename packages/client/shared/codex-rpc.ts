@@ -356,6 +356,10 @@ export class CodexRpcClient {
         void this.handleMessage(event.data)
       })
       socket.addEventListener('close', () => {
+        if (this.socket !== socket) {
+          return
+        }
+
         this.initialized = false
         this.socket = null
         this.connectPromise = null
@@ -377,6 +381,23 @@ export class CodexRpcClient {
   async request<T>(method: string, params?: unknown) {
     await this.connect()
     return await this.sendRequestNow<T>(method, params)
+  }
+
+  async reconnect() {
+    const socket = this.socket
+    if (socket?.readyState === WebSocket.OPEN || socket?.readyState === WebSocket.CONNECTING) {
+      this.initialized = false
+      this.socket = null
+      this.connectPromise = null
+      const error = new Error('Codex RPC connection reconnecting.')
+      for (const [requestId, pending] of this.pending.entries()) {
+        pending.reject(error)
+        this.pending.delete(requestId)
+      }
+      socket.close()
+    }
+
+    await this.connect()
   }
 
   close() {

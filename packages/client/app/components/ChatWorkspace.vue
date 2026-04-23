@@ -82,6 +82,7 @@ import type { ConfigReadParams } from '~~/shared/generated/codex-app-server/v2/C
 import type { ConfigReadResponse } from '~~/shared/generated/codex-app-server/v2/ConfigReadResponse'
 import type { ModelListResponse } from '~~/shared/generated/codex-app-server/v2/ModelListResponse'
 import type { ThreadReadResponse } from '~~/shared/generated/codex-app-server/v2/ThreadReadResponse'
+import type { Thread } from '~~/shared/generated/codex-app-server/v2/Thread'
 import type { ThreadItem } from '~~/shared/generated/codex-app-server/v2/ThreadItem'
 import type { ThreadResumeResponse } from '~~/shared/generated/codex-app-server/v2/ThreadResumeResponse'
 import type { ThreadStartResponse } from '~~/shared/generated/codex-app-server/v2/ThreadStartResponse'
@@ -965,17 +966,24 @@ const loadPromptControls = async () => {
 const optimisticAttachmentSnapshots = new Map<string, DraftAttachment[]>()
 let promptControlsPromise: Promise<void> | null = null
 let pendingThreadHydration: Promise<void> | null = null
+let pendingThreadReactivationSync: Promise<void> | null = null
 let releaseServerRequestHandler: (() => void) | null = null
 let releaseSkillNotificationSubscription: (() => void) | null = null
 let releaseWorkspaceGitBranchEnvironmentListeners: (() => void) | null = null
+let releaseThreadReactivationListeners: (() => void) | null = null
 let runtimeSubscriptionKey: string | null = null
 const linkedChatThreadIds = new Set<string>()
 let footerResizeObserver: ResizeObserver | null = null
+let lastWorkspaceDeactivatedAt: number | null = null
+let lastThreadReactivationSyncAt = 0
 let skipNextSkillMentionSync = false
 let skipNextMentionSelectionSync = false
 let skillAutocompleteRequestSequence = 0
 let pluginMentionRequestSequence = 0
 let fileAutocompleteRequestSequence = 0
+
+const THREAD_REACTIVATION_SYNC_MIN_INTERVAL_MS = 8_000
+const THREAD_REACTIVATION_INACTIVE_GRACE_MS = 500
 
 const isActiveTurnStatus = (value: string | null | undefined) => {
   if (!value) {
@@ -2423,6 +2431,24 @@ async function ensureProjectRuntime() {
   await startProject(workspaceId.value)
 }
 
+const findActiveTurn = (thread: Thread) =>
+  [...thread.turns].reverse().find(turn => isActiveTurnStatus(turn.status))
+
+const syncThreadSnapshot = (thread: Thread) => {
+  activeThreadId.value = thread.id
+  threadTitle.value = resolveThreadSummaryTitle(thread)
+  syncThreadSummary(thread)
+  syncChatSessionTitleFromThreadName(thread)
+  messages.value = threadToMessages(thread)
+  latestPlanTurnId.value = findLatestPlanTurnId(thread.turns)
+  maybeQueuePlanImplementationPrompt({
+    threadId: thread.id,
+    turnId: findLatestCompletedPlanTurnId(thread.turns),
+    turnStatus: 'completed'
+  })
+  rebuildSubagentPanelsFromThread(thread)
+}
+
 const hydrateThread = async (threadId: string) => {
   const hydratePromise = (async () => {
     const requestVersion = loadVersion.value + 1
@@ -2469,20 +2495,9 @@ const hydrateThread = async (threadId: string) => {
         (resumeResponse.reasoningEffort as ReasoningEffort | null | undefined) ?? null
       )
       refreshWorkspaceGitBranchesInBackground('thread/resume')
-      activeThreadId.value = response.thread.id
-      threadTitle.value = resolveThreadSummaryTitle(response.thread)
-      syncThreadSummary(response.thread)
-      syncChatSessionTitleFromThreadName(response.thread)
-      messages.value = threadToMessages(response.thread)
-      latestPlanTurnId.value = findLatestPlanTurnId(response.thread.turns)
-      maybeQueuePlanImplementationPrompt({
-        threadId: response.thread.id,
-        turnId: findLatestCompletedPlanTurnId(response.thread.turns),
-        turnStatus: 'completed'
-      })
-      rebuildSubagentPanelsFromThread(response.thread)
+      syncThreadSnapshot(response.thread)
       markAwaitingAssistantOutput(false)
-      const activeTurn = [...response.thread.turns].reverse().find(turn => isActiveTurnStatus(turn.status))
+      const activeTurn = findActiveTurn(response.thread)
       const liveStream = session.liveStream
 
       if (liveStream) {
@@ -2549,6 +2564,115 @@ const hydrateThread = async (threadId: string) => {
       pendingThreadHydration = null
     }
   }
+}
+
+const hasPotentiallyMissedThreadOutput = () =>
+  Boolean(
+    activeThreadId.value
+    && (
+      currentLiveStream()
+      || status.value === 'submitted'
+      || status.value === 'streaming'
+    )
+  )
+
+const shouldSyncThreadAfterReactivation = (now: number) => {
+  if (sendMessageLocked.value || pendingThreadHydration || session.pendingLiveStream) {
+    return false
+  }
+
+  if (!hasPotentiallyMissedThreadOutput()) {
+    return false
+  }
+
+  if (import.meta.client && document.visibilityState === 'hidden') {
+    return false
+  }
+
+  if (now - lastThreadReactivationSyncAt < THREAD_REACTIVATION_SYNC_MIN_INTERVAL_MS) {
+    return false
+  }
+
+  if (lastWorkspaceDeactivatedAt === null) {
+    return true
+  }
+
+  return now - lastWorkspaceDeactivatedAt >= THREAD_REACTIVATION_INACTIVE_GRACE_MS
+}
+
+const syncActiveThreadAfterReactivation = (reason: string) => {
+  if (pendingThreadReactivationSync) {
+    return pendingThreadReactivationSync
+  }
+
+  const now = Date.now()
+  if (!shouldSyncThreadAfterReactivation(now)) {
+    return null
+  }
+
+  lastThreadReactivationSyncAt = now
+  const threadId = activeThreadId.value
+  if (!threadId) {
+    return null
+  }
+
+  const syncPromise = (async () => {
+    try {
+      await ensureProjectRuntime()
+      const client = getRuntimeClient()
+      await client.reconnect()
+
+      const response = await client.request<ThreadReadResponse>('thread/read', {
+        threadId,
+        includeTurns: true
+      })
+      if (activeThreadId.value !== threadId) {
+        return
+      }
+
+      syncThreadSnapshot(response.thread)
+      markAwaitingAssistantOutput(false)
+
+      const activeTurn = findActiveTurn(response.thread)
+      if (!activeTurn) {
+        clearLiveStream()
+        if (!error.value) {
+          status.value = 'ready'
+        }
+        if (pinnedToBottom.value) {
+          void scheduleScrollToBottom('auto')
+        }
+        return
+      }
+
+      const liveStream = await ensureObservedThreadSubscription()
+      if (liveStream) {
+        setLiveStreamTurnId(liveStream, activeTurn.id)
+        replayBufferedNotifications(liveStream)
+      }
+      status.value = 'streaming'
+      if (pinnedToBottom.value) {
+        void scheduleScrollToBottom('auto')
+      }
+    } catch (caughtError) {
+      if (activeThreadId.value !== threadId) {
+        return
+      }
+
+      const messageText = caughtError instanceof Error ? caughtError.message : String(caughtError)
+      error.value = `Could not resume the live thread after ${reason}: ${messageText}`
+      status.value = 'error'
+    }
+  })()
+
+  pendingThreadReactivationSync = syncPromise
+  syncPromise.finally(() => {
+    if (pendingThreadReactivationSync === syncPromise) {
+      pendingThreadReactivationSync = null
+    }
+  })
+
+  return syncPromise
 }
 
 const resetDraftThread = () => {
@@ -3736,6 +3860,47 @@ onMounted(() => {
       window.removeEventListener('keydown', handleWorkspaceInteraction)
     }
 
+    const markThreadWorkspaceDeactivated = () => {
+      lastWorkspaceDeactivatedAt = Date.now()
+    }
+    const handleThreadWorkspaceVisible = () => {
+      if (document.visibilityState === 'visible') {
+        void syncActiveThreadAfterReactivation('window/visible')
+      } else {
+        markThreadWorkspaceDeactivated()
+      }
+    }
+    const handleThreadWorkspaceFocus = () => {
+      void syncActiveThreadAfterReactivation('window/focus')
+    }
+    const handleThreadWorkspaceInteraction = () => {
+      void syncActiveThreadAfterReactivation('window/interaction')
+    }
+    const handleThreadWorkspaceOnline = () => {
+      void syncActiveThreadAfterReactivation('window/online')
+    }
+
+    document.addEventListener('visibilitychange', handleThreadWorkspaceVisible)
+    document.addEventListener('freeze', markThreadWorkspaceDeactivated)
+    document.addEventListener('resume', handleThreadWorkspaceFocus)
+    window.addEventListener('pagehide', markThreadWorkspaceDeactivated)
+    window.addEventListener('pageshow', handleThreadWorkspaceFocus)
+    window.addEventListener('focus', handleThreadWorkspaceFocus)
+    window.addEventListener('online', handleThreadWorkspaceOnline)
+    window.addEventListener('pointermove', handleThreadWorkspaceInteraction, { passive: true })
+    window.addEventListener('keydown', handleThreadWorkspaceInteraction)
+    releaseThreadReactivationListeners = () => {
+      document.removeEventListener('visibilitychange', handleThreadWorkspaceVisible)
+      document.removeEventListener('freeze', markThreadWorkspaceDeactivated)
+      document.removeEventListener('resume', handleThreadWorkspaceFocus)
+      window.removeEventListener('pagehide', markThreadWorkspaceDeactivated)
+      window.removeEventListener('pageshow', handleThreadWorkspaceFocus)
+      window.removeEventListener('focus', handleThreadWorkspaceFocus)
+      window.removeEventListener('online', handleThreadWorkspaceOnline)
+      window.removeEventListener('pointermove', handleThreadWorkspaceInteraction)
+      window.removeEventListener('keydown', handleThreadWorkspaceInteraction)
+    }
+
     footerResizeObserver = new ResizeObserver((entries) => {
       const entry = entries[0]
       const borderBoxSize = entry?.borderBoxSize[0]?.blockSize
@@ -3760,6 +3925,8 @@ onBeforeUnmount(() => {
   runtimeSubscriptionKey = null
   releaseWorkspaceGitBranchEnvironmentListeners?.()
   releaseWorkspaceGitBranchEnvironmentListeners = null
+  releaseThreadReactivationListeners?.()
+  releaseThreadReactivationListeners = null
   footerResizeObserver?.disconnect()
   footerResizeObserver = null
 })
