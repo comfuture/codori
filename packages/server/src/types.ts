@@ -24,14 +24,9 @@ export type ConfigOverrides = {
   idleShutdownSweepIntervalMs?: number
 }
 
-export type WorkspaceKind = 'project' | 'projectless'
-
 export type ProjectRecord = {
   id: string
   path: string
-  title?: string | null
-  workspaceKind?: WorkspaceKind
-  createdAt?: number | null
 }
 
 export type RuntimeRecord = {
@@ -48,9 +43,6 @@ export type ProjectRuntimeStatus = 'running' | 'stopped' | 'error'
 export type ProjectStatusRecord = {
   projectId: string
   projectPath: string
-  title: string | null
-  workspaceKind: WorkspaceKind
-  createdAt: number | null
   status: ProjectRuntimeStatus
   pid: number | null
   port: number | null
@@ -66,8 +58,35 @@ export type StartProjectResult = ProjectStatusRecord & {
   reusedExisting: boolean
 }
 
-export type DeleteProjectlessChatResult = {
-  projectId: string
+export type ChatSessionRecord = {
+  chatId: string
+  chatPath: string
+  threadId: string | null
+  title: string | null
+  createdAt: number
+  updatedAt: number | null
 }
 
-export type UpdateProjectlessChatTitleResult = ProjectStatusRecord
+export type ChatSessionStatusRecord = ChatSessionRecord & {
+  status: ProjectRuntimeStatus
+  pid: number | null
+  port: number | null
+  startedAt: number | null
+  lastActivityAt: number | null
+  activeSessionCount: number
+  idleTimeoutMs: number | null
+  idleDeadlineAt: number | null
+  error: string | null
+}
+
+export type StartChatSessionResult = ChatSessionStatusRecord & {
+  reusedExisting: boolean
+}
+
+export type DeleteChatSessionResult = {
+  chatId: string
+}
+
+export type UpdateChatSessionTitleResult = ChatSessionStatusRecord
+
+export type UpdateChatSessionThreadResult = ChatSessionStatusRecord

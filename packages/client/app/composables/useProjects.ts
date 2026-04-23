@@ -4,15 +4,12 @@ import { encodeProjectIdSegment } from '~~/shared/codori'
 import { resolveApiUrl, shouldUseServerProxy } from '~~/shared/network'
 import type {
   CloneProjectRequest,
-  DeleteProjectlessChatResponse,
-  ProjectlessChatsResponse,
   ProjectRecord,
   ProjectResponse,
   ProjectsResponse,
   ServiceUpdateResponse,
   ServiceUpdateStatus,
-  StartProjectResult,
-  UpdateProjectlessChatTitleRequest
+  StartProjectResult
 } from '~~/shared/codori'
 
 const mergeProject = (projects: ProjectRecord[], nextProject: ProjectRecord) => {
@@ -20,16 +17,8 @@ const mergeProject = (projects: ProjectRecord[], nextProject: ProjectRecord) => 
   return [...filtered, nextProject].sort((left, right) => left.projectId.localeCompare(right.projectId))
 }
 
-const mergeProjectlessChat = (projects: ProjectRecord[], nextProject: ProjectRecord) => {
-  const filtered = projects.filter(project => project.projectId !== nextProject.projectId)
-  return [nextProject, ...filtered]
-    .sort((left, right) => (right.createdAt ?? 0) - (left.createdAt ?? 0))
-    .slice(0, 5)
-}
-
 export const useProjects = () => {
   const projects = useState<ProjectRecord[]>('codori-projects', () => [])
-  const projectlessChats = useState<ProjectRecord[]>('codori-projectless-chats', () => [])
   const serviceUpdate = useState<ServiceUpdateStatus>('codori-service-update', () => ({
     enabled: false,
     updateAvailable: false,
@@ -38,12 +27,8 @@ export const useProjects = () => {
     latestVersion: null
   }))
   const loaded = useState<boolean>('codori-projects-loaded', () => false)
-  const projectlessLoaded = useState<boolean>('codori-projectless-chats-loaded', () => false)
   const loading = useState<boolean>('codori-projects-loading', () => false)
-  const projectlessLoading = useState<boolean>('codori-projectless-chats-loading', () => false)
   const clonePending = useState<boolean>('codori-projects-clone-pending', () => false)
-  const projectlessCreatePending = useState<boolean>('codori-projectless-chats-create-pending', () => false)
-  const projectlessDeletePendingId = useState<string | null>('codori-projectless-chats-delete-pending-id', () => null)
   const serviceUpdatePending = useState<boolean>('codori-service-update-pending', () => false)
   const pendingProjectId = useState<string | null>('codori-projects-pending-id', () => null)
   const error = useState<string | null>('codori-projects-error', () => null)
@@ -83,91 +68,8 @@ export const useProjects = () => {
 
   const applyProjectResponse = (response: ProjectResponse) => {
     const nextProject = response.project as ProjectRecord
-    if (nextProject.workspaceKind === 'projectless') {
-      projectlessChats.value = mergeProjectlessChat(projectlessChats.value, nextProject)
-    } else {
-      projects.value = mergeProject(projects.value, nextProject)
-    }
+    projects.value = mergeProject(projects.value, nextProject)
     return nextProject
-  }
-
-  const refreshProjectlessChats = async () => {
-    if (projectlessLoading.value) {
-      return
-    }
-
-    projectlessLoading.value = true
-    error.value = null
-    try {
-      const response = await $fetch<ProjectlessChatsResponse>(toApiUrl('/projectless-chats'))
-      projectlessChats.value = response.projects.slice(0, 5)
-      projectlessLoaded.value = true
-    } catch (caughtError) {
-      error.value = caughtError instanceof Error ? caughtError.message : String(caughtError)
-    } finally {
-      projectlessLoading.value = false
-    }
-  }
-
-  const createProjectlessChat = async () => {
-    if (projectlessCreatePending.value) {
-      throw new Error('A new chat is already being created.')
-    }
-
-    projectlessCreatePending.value = true
-    error.value = null
-    try {
-      const response = await $fetch<ProjectResponse>(toApiUrl('/projectless-chats'), {
-        method: 'POST'
-      })
-      projectlessLoaded.value = true
-      return applyProjectResponse(response)
-    } finally {
-      projectlessCreatePending.value = false
-    }
-  }
-
-  const deleteProjectlessChat = async (projectId: string) => {
-    if (projectlessDeletePendingId.value) {
-      throw new Error('A chat deletion is already in progress.')
-    }
-
-    projectlessDeletePendingId.value = projectId
-    error.value = null
-    try {
-      const response = await $fetch<DeleteProjectlessChatResponse>(toApiUrl(
-        `/projectless-chats/${encodeProjectIdSegment(projectId)}`
-      ), {
-        method: 'DELETE'
-      })
-      projectlessChats.value = projectlessChats.value.filter(project => project.projectId !== response.projectId)
-      return response
-    } finally {
-      projectlessDeletePendingId.value = null
-    }
-  }
-
-  const renameProjectlessChat = async (projectId: string, title: string) => {
-    const nextTitle = title.trim()
-    if (!nextTitle) {
-      return null
-    }
-
-    projectlessChats.value = projectlessChats.value.map(project =>
-      project.projectId === projectId
-        ? { ...project, title: nextTitle }
-        : project
-    )
-
-    const response = await $fetch<ProjectResponse>(toApiUrl(
-      `/projectless-chats/${encodeProjectIdSegment(projectId)}/title`
-    ), {
-      method: 'POST',
-      body: {
-        title: nextTitle
-      } satisfies UpdateProjectlessChatTitleRequest
-    })
-    return applyProjectResponse(response)
   }
 
   const startProject = async (projectId: string) => {
@@ -221,7 +123,6 @@ export const useProjects = () => {
       return null
     }
     return projects.value.find((project: ProjectRecord) => project.projectId === projectId)
-      ?? projectlessChats.value.find((project: ProjectRecord) => project.projectId === projectId)
       ?? null
   }
 
@@ -248,25 +149,16 @@ export const useProjects = () => {
 
   return {
     projects,
-    projectlessChats,
     serviceUpdate,
     loaded,
-    projectlessLoaded,
     loading,
-    projectlessLoading,
     clonePending,
-    projectlessCreatePending,
-    projectlessDeletePendingId,
     serviceUpdatePending,
     error,
     pendingProjectId,
     refreshProjects,
-    refreshProjectlessChats,
     triggerServiceUpdate,
     cloneProject,
-    createProjectlessChat,
-    deleteProjectlessChat,
-    renameProjectlessChat,
     startProject,
     stopProject,
     getProject

@@ -1,6 +1,6 @@
 import type { SubagentAgentStatus } from './codex-chat'
 import type { UserInput } from './generated/codex-app-server/v2/UserInput'
-import { encodeProjectIdSegment } from './codori'
+import { encodeChatIdSegment, encodeProjectIdSegment } from './codori'
 import { resolveApiUrl, shouldUseServerProxy } from './network'
 
 export type ActiveMentionAutocompleteMatch = {
@@ -409,7 +409,8 @@ export const buildMentionAutocompleteSubmission = (
 }
 
 export const resolvePluginMentionIconUrl = (input: {
-  projectId: string
+  projectId?: string
+  workspace?: { kind: 'project', id: string } | { kind: 'chat', id: string }
   path: string | null | undefined
   configuredBase?: string | null
 }) => {
@@ -433,7 +434,10 @@ export const resolvePluginMentionIconUrl = (input: {
   const query = new URLSearchParams({
     path
   })
-  const requestPath = `/projects/${encodeProjectIdSegment(input.projectId)}/mentions/icon?${query.toString()}`
+  const workspace = input.workspace ?? { kind: 'project' as const, id: input.projectId ?? '' }
+  const requestPath = workspace.kind === 'chat'
+    ? `/chats/${encodeChatIdSegment(workspace.id)}/mentions/icon?${query.toString()}`
+    : `/projects/${encodeProjectIdSegment(workspace.id)}/mentions/icon?${query.toString()}`
   if (shouldUseServerProxy(input.configuredBase)) {
     return `/api/codori${requestPath}`
   }

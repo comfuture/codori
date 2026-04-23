@@ -53,7 +53,7 @@ describe('useWorkspaceGitBranch', () => {
 
   it('does not fetch branches when git is unsupported', async () => {
     const manager = useWorkspaceGitBranch({
-      projectId: `projectless/chat-${Date.now()}`,
+      projectId: `chat-${Date.now()}`,
       serverBase: '',
       supportsGit: () => false
     })
@@ -70,7 +70,7 @@ describe('useWorkspaceGitBranch', () => {
 
   it('does not mutate branches when git is unsupported', async () => {
     const manager = useWorkspaceGitBranch({
-      projectId: `projectless/chat-${Date.now()}`,
+      projectId: `chat-${Date.now()}`,
       serverBase: '',
       supportsGit: () => false
     })
@@ -78,7 +78,7 @@ describe('useWorkspaceGitBranch', () => {
     await expect(manager.switchBranch('main')).resolves.toBeNull()
 
     expect(fetchMock).not.toHaveBeenCalled()
-    expect(manager.error.value).toBe('Git branch operations are not available for projectless chats.')
+    expect(manager.error.value).toBe('Git branch operations are not available for chat sessions.')
   })
 
   it('refreshes the current branch on activity boundaries after an external change', async () => {

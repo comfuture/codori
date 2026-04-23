@@ -6,7 +6,7 @@ import { useProjects } from '../../../../composables/useProjects'
 import { useThreadSummaries } from '../../../../composables/useThreadSummaries'
 import { useThreadPanel } from '../../../../composables/useThreadPanel'
 import { useVisualSubagentPanels } from '../../../../composables/useVisualSubagentPanels'
-import { isProjectlessProjectId, normalizeProjectIdParam, toProjectRoute } from '~~/shared/codori'
+import { normalizeProjectIdParam, toProjectRoute } from '~~/shared/codori'
 import {
   pruneExpandedSubagentThreadId,
   resolveExpandedSubagentPanel,
@@ -20,9 +20,7 @@ const router = useRouter()
 const { togglePanel } = useThreadPanel()
 const {
   loaded,
-  projectlessLoaded,
   refreshProjects,
-  refreshProjectlessChats,
   getProject
 } = useProjects()
 
@@ -45,17 +43,7 @@ const subagentPanels = computed(() =>
   session.value?.subagentPanels.value ?? []
 )
 const { availablePanels, activePanels } = useVisualSubagentPanels(() => subagentPanels.value)
-const isProjectlessProject = computed(() =>
-  selectedProject.value?.workspaceKind === 'projectless'
-  || isProjectlessProjectId(projectId.value)
-)
-const projectName = computed(() => {
-  if (isProjectlessProject.value) {
-    return selectedProject.value?.title?.trim() || 'New Chat'
-  }
-
-  return selectedProject.value?.projectId ?? projectId.value ?? 'Project'
-})
+const projectName = computed(() => selectedProject.value?.projectId ?? projectId.value ?? 'Project')
 const threadTitle = computed(() => {
   if (!projectId.value) {
     return threadId.value ?? 'Thread'
@@ -174,9 +162,6 @@ onMounted(() => {
   if (!loaded.value) {
     void refreshProjects()
   }
-  if (projectId.value?.startsWith('projectless/') && !projectlessLoaded.value) {
-    void refreshProjectlessChats()
-  }
 
   if (!import.meta.client) {
     return
@@ -282,10 +267,7 @@ watch(
           </template>
           <template #right>
             <div class="flex items-center gap-1.5 lg:gap-2">
-              <UTooltip
-                v-if="!isProjectlessProject"
-                text="New thread"
-              >
+              <UTooltip text="New thread">
                 <UButton
                   icon="i-lucide-plus"
                   color="primary"
@@ -294,10 +276,7 @@ watch(
                   @click="onNewThread"
                 />
               </UTooltip>
-              <UTooltip
-                v-if="!isProjectlessProject"
-                text="Previous threads"
-              >
+              <UTooltip text="Previous threads">
                 <UButton
                   icon="i-lucide-history"
                   color="neutral"

@@ -3,37 +3,20 @@ import { useRoute, useRouter } from '#imports'
 import { computed, onMounted } from 'vue'
 import { useProjects } from '../../../composables/useProjects'
 import { useThreadPanel } from '../../../composables/useThreadPanel'
-import { isProjectlessProjectId, normalizeProjectIdParam, toProjectRoute } from '~~/shared/codori'
+import { normalizeProjectIdParam, toProjectRoute } from '~~/shared/codori'
 
 const route = useRoute()
 const router = useRouter()
 const { togglePanel } = useThreadPanel()
 const {
   loaded,
-  projectlessLoaded,
   refreshProjects,
-  refreshProjectlessChats,
   getProject
 } = useProjects()
 
 const projectId = computed(() => normalizeProjectIdParam(route.params.projectId as string | string[] | undefined))
 const selectedProject = computed(() => getProject(projectId.value))
-const isProjectlessProject = computed(() =>
-  selectedProject.value?.workspaceKind === 'projectless'
-  || isProjectlessProjectId(projectId.value)
-)
-const projectName = computed(() => {
-  if (isProjectlessProject.value) {
-    return selectedProject.value?.title?.trim() || 'New Chat'
-  }
-
-  return selectedProject.value?.projectId ?? projectId.value ?? 'Project'
-})
-const projectIcon = computed(() =>
-  isProjectlessProject.value
-    ? 'i-lucide-message-square'
-    : 'i-lucide-folder-git-2'
-)
+const projectName = computed(() => selectedProject.value?.projectId ?? projectId.value ?? 'Project')
 
 const onNewThread = async () => {
   if (!projectId.value) {
@@ -45,9 +28,6 @@ const onNewThread = async () => {
 onMounted(() => {
   if (!loaded.value) {
     void refreshProjects()
-  }
-  if (projectId.value?.startsWith('projectless/') && !projectlessLoaded.value) {
-    void refreshProjectlessChats()
   }
 })
 </script>
@@ -62,12 +42,9 @@ onMounted(() => {
       <template #header>
         <UDashboardNavbar
           :title="projectName"
-          :icon="projectIcon"
+          icon="i-lucide-folder-git-2"
         >
-          <template
-            v-if="!isProjectlessProject"
-            #right
-          >
+          <template #right>
             <div class="flex items-center gap-2">
               <UTooltip text="New thread">
                 <UButton
@@ -100,6 +77,6 @@ onMounted(() => {
       </template>
     </UDashboardPanel>
 
-    <ThreadPanel :project-id="projectId" />
+        <ThreadPanel :project-id="projectId" />
   </div>
 </template>

@@ -31,27 +31,39 @@ import {
   type ServiceUpdateStatus
 } from './service-update.js'
 import type {
-  DeleteProjectlessChatResult,
+  ChatSessionStatusRecord,
+  DeleteChatSessionResult,
   ProjectStatusRecord,
+  StartChatSessionResult,
   StartProjectResult,
-  UpdateProjectlessChatTitleResult
+  UpdateChatSessionThreadResult,
+  UpdateChatSessionTitleResult
 } from './types.js'
 
 type MaybePromise<T> = T | Promise<T>
 
 export type RuntimeManagerLike = {
   listProjectStatuses: () => MaybePromise<ProjectStatusRecord[]>
-  listProjectlessStatuses?: () => MaybePromise<ProjectStatusRecord[]>
+  listChatStatuses?: () => MaybePromise<ChatSessionStatusRecord[]>
   getProjectStatus: (projectId: string) => MaybePromise<ProjectStatusRecord>
+  getChatStatus?: (chatId: string) => MaybePromise<ChatSessionStatusRecord>
   cloneProject?: (input: { repositoryUrl: string, destination?: string | null }) => MaybePromise<ProjectStatusRecord>
-  createProjectlessChat?: () => MaybePromise<StartProjectResult>
-  deleteProjectlessChat?: (projectId: string) => MaybePromise<DeleteProjectlessChatResult>
-  updateProjectlessChatTitle?: (projectId: string, title: string) => MaybePromise<UpdateProjectlessChatTitleResult>
+  createChatSession?: () => MaybePromise<StartChatSessionResult>
+  deleteChatSession?: (chatId: string) => MaybePromise<DeleteChatSessionResult>
+  updateChatSessionTitle?: (chatId: string, title: string) => MaybePromise<UpdateChatSessionTitleResult>
+  updateChatSessionThread?: (chatId: string, threadId: string) => MaybePromise<UpdateChatSessionThreadResult>
   startProject: (projectId: string) => MaybePromise<StartProjectResult>
+  startChatSession?: (chatId: string) => MaybePromise<StartChatSessionResult>
   stopProject: (projectId: string) => MaybePromise<ProjectStatusRecord>
+  stopChatSession?: (chatId: string) => MaybePromise<ChatSessionStatusRecord>
   noteProjectActivity?: (projectId: string) => MaybePromise<ProjectStatusRecord | void>
+  noteChatActivity?: (chatId: string) => MaybePromise<ChatSessionStatusRecord | void>
   acquireProjectSession?: (projectId: string) => {
     touchActivity?: (at?: number) => MaybePromise<ProjectStatusRecord | void>
+    release: () => void
+  }
+  acquireChatSession?: (chatId: string) => {
+    touchActivity?: (at?: number) => MaybePromise<ChatSessionStatusRecord | void>
     release: () => void
   }
   dispose?: () => MaybePromise<void>
@@ -67,18 +79,26 @@ type ProjectResponse = {
   project: ProjectStatusRecord | StartProjectResult
 }
 
+type ChatResponse = {
+  chat: ChatSessionStatusRecord | StartChatSessionResult
+}
+
 type ProjectsResponse = {
   projects: ProjectStatusRecord[]
 }
 
-type ProjectlessChatsResponse = {
-  projects: ProjectStatusRecord[]
+type ChatsResponse = {
+  chats: ChatSessionStatusRecord[]
 }
 
-type DeleteProjectlessChatResponse = DeleteProjectlessChatResult
+type DeleteChatResponse = DeleteChatSessionResult
 
-type ProjectlessChatTitleRequest = {
+type ChatTitleRequest = {
   title?: string
+}
+
+type ChatThreadRequest = {
+  threadId?: string
 }
 
 type ServiceUpdateResponse = {
@@ -140,19 +160,19 @@ const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
 const toStatusCode = (error: CodoriError) => {
   switch (error.code) {
     case 'PROJECT_NOT_FOUND':
+    case 'CHAT_NOT_FOUND':
       return 404
     case 'INVALID_CONFIG':
     case 'INVALID_GIT_URL':
     case 'INVALID_GIT_BRANCH':
     case 'INVALID_PROJECT_DESTINATION':
     case 'MISSING_PROJECT_ID':
+    case 'MISSING_CHAT_ID':
     case 'MISSING_THREAD_ID':
     case 'INVALID_ATTACHMENT':
     case 'MISSING_ROOT':
     case 'PROJECT_NOT_GIT_REPOSITORY':
-    case 'PROJECT_DELETE_UNAVAILABLE':
-    case 'PROJECT_TITLE_UPDATE_UNAVAILABLE':
-    case 'INVALID_PROJECT_TITLE':
+    case 'INVALID_CHAT_TITLE':
       return 400
     case 'DESTINATION_EXISTS':
     case 'GIT_OPERATION_FAILED':
@@ -173,11 +193,18 @@ const getProjectIdFromRequest = (value: string | undefined) => {
   return value
 }
 
+const getChatIdFromRequest = (value: string | undefined) => {
+  if (!value) {
+    throw new CodoriError('MISSING_CHAT_ID', 'Missing chat id.')
+  }
+  return value
+}
+
 const ensureGitWorkspace = (project: ProjectStatusRecord) => {
-  if (project.workspaceKind === 'projectless') {
+  if (!project.projectPath) {
     throw new CodoriError(
       'PROJECT_NOT_GIT_REPOSITORY',
-      'Git branch operations are not available for projectless chats.'
+      'Git branch operations are not available for this workspace.'
     )
   }
 }
@@ -230,6 +257,14 @@ const touchProjectActivity = async (manager: RuntimeManagerLike, projectId: stri
   await resolveValue(manager.noteProjectActivity(projectId))
 }
 
+const touchChatActivity = async (manager: RuntimeManagerLike, chatId: string) => {
+  if (!manager.noteChatActivity) {
+    return
+  }
+
+  await resolveValue(manager.noteChatActivity(chatId))
+}
+
 const touchProjectActivityInBackground = (
   manager: RuntimeManagerLike,
   projectId: string,
@@ -238,6 +273,18 @@ const touchProjectActivityInBackground = (
   const task = session?.touchActivity
     ? resolveValue(session.touchActivity())
     : touchProjectActivity(manager, projectId)
+
+  void task.catch(() => {})
+}
+
+const touchChatActivityInBackground = (
+  manager: RuntimeManagerLike,
+  chatId: string,
+  session?: { touchActivity?: (at?: number) => MaybePromise<ChatSessionStatusRecord | void> } | null
+) => {
+  const task = session?.touchActivity
+    ? resolveValue(session.touchActivity())
+    : touchChatActivity(manager, chatId)
 
   void task.catch(() => {})
 }
@@ -347,54 +394,89 @@ export const createHttpServer = async (
     projects: await resolveValue(manager.listProjectStatuses())
   }))
 
-  app.get('/api/projectless-chats', async (): Promise<ProjectlessChatsResponse> => ({
-    projects: manager.listProjectlessStatuses
-      ? await resolveValue(manager.listProjectlessStatuses())
+  app.get('/api/chats', async (): Promise<ChatsResponse> => ({
+    chats: manager.listChatStatuses
+      ? await resolveValue(manager.listChatStatuses())
       : []
   }))
 
-  app.post('/api/projectless-chats', async (_request, reply): Promise<ProjectResponse> => {
-    if (!manager.createProjectlessChat) {
+  app.post('/api/chats', async (_request, reply): Promise<ChatResponse> => {
+    if (!manager.createChatSession) {
       throw new CodoriError(
         'INVALID_CONFIG',
-        'Projectless chat creation is not available because the runtime manager does not support it.'
+        'Chat creation is not available because the runtime manager does not support it.'
       )
     }
 
     reply.status(201)
     return {
-      project: await resolveValue(manager.createProjectlessChat())
+      chat: await resolveValue(manager.createChatSession())
     }
   })
 
-  app.delete<{ Params: { projectId: string } }>(
-    '/api/projectless-chats/:projectId',
-    async (request: FastifyRequest<{ Params: { projectId: string } }>): Promise<DeleteProjectlessChatResponse> => {
-      if (!manager.deleteProjectlessChat) {
+  app.get<{ Params: { chatId: string } }>(
+    '/api/chats/:chatId',
+    async (request: FastifyRequest<{ Params: { chatId: string } }>): Promise<ChatResponse> => {
+      if (!manager.getChatStatus) {
         throw new CodoriError(
           'INVALID_CONFIG',
-          'Projectless chat deletion is not available because the runtime manager does not support it.'
-        )
-      }
-
-      return await resolveValue(manager.deleteProjectlessChat(getProjectIdFromRequest(request.params.projectId)))
-    }
-  )
-
-  app.post<{ Params: { projectId: string }, Body: ProjectlessChatTitleRequest }>(
-    '/api/projectless-chats/:projectId/title',
-    async (request: FastifyRequest<{ Params: { projectId: string }, Body: ProjectlessChatTitleRequest }>): Promise<ProjectResponse> => {
-      if (!manager.updateProjectlessChatTitle) {
-        throw new CodoriError(
-          'INVALID_CONFIG',
-          'Projectless chat title updates are not available because the runtime manager does not support them.'
+          'Chat lookup is not available because the runtime manager does not support it.'
         )
       }
 
       return {
-        project: await resolveValue(manager.updateProjectlessChatTitle(
-          getProjectIdFromRequest(request.params.projectId),
+        chat: await resolveValue(manager.getChatStatus(getChatIdFromRequest(request.params.chatId)))
+      }
+    }
+  )
+
+  app.delete<{ Params: { chatId: string } }>(
+    '/api/chats/:chatId',
+    async (request: FastifyRequest<{ Params: { chatId: string } }>): Promise<DeleteChatResponse> => {
+      if (!manager.deleteChatSession) {
+        throw new CodoriError(
+          'INVALID_CONFIG',
+          'Chat deletion is not available because the runtime manager does not support it.'
+        )
+      }
+
+      return await resolveValue(manager.deleteChatSession(getChatIdFromRequest(request.params.chatId)))
+    }
+  )
+
+  app.post<{ Params: { chatId: string }, Body: ChatTitleRequest }>(
+    '/api/chats/:chatId/title',
+    async (request: FastifyRequest<{ Params: { chatId: string }, Body: ChatTitleRequest }>): Promise<ChatResponse> => {
+      if (!manager.updateChatSessionTitle) {
+        throw new CodoriError(
+          'INVALID_CONFIG',
+          'Chat title updates are not available because the runtime manager does not support them.'
+        )
+      }
+
+      return {
+        chat: await resolveValue(manager.updateChatSessionTitle(
+          getChatIdFromRequest(request.params.chatId),
           request.body?.title ?? ''
+        ))
+      }
+    }
+  )
+
+  app.post<{ Params: { chatId: string }, Body: ChatThreadRequest }>(
+    '/api/chats/:chatId/thread',
+    async (request: FastifyRequest<{ Params: { chatId: string }, Body: ChatThreadRequest }>): Promise<ChatResponse> => {
+      if (!manager.updateChatSessionThread) {
+        throw new CodoriError(
+          'INVALID_CONFIG',
+          'Chat thread updates are not available because the runtime manager does not support them.'
+        )
+      }
+
+      return {
+        chat: await resolveValue(manager.updateChatSessionThread(
+          getChatIdFromRequest(request.params.chatId),
+          request.body?.threadId ?? ''
         ))
       }
     }
@@ -470,12 +552,6 @@ export const createHttpServer = async (
     async (request: FastifyRequest<{ Params: { projectId: string } }>): Promise<ProjectGitBranchesResponse> => {
       const projectId = getProjectIdFromRequest(request.params.projectId)
       const project = await resolveValue(manager.getProjectStatus(projectId))
-      if (project.workspaceKind === 'projectless') {
-        return {
-          currentBranch: null,
-          branches: []
-        }
-      }
       await touchProjectActivity(manager, projectId)
       return await listGitBranches(project.projectPath)
     }
@@ -515,6 +591,412 @@ export const createHttpServer = async (
     async (request: FastifyRequest<{ Params: { projectId: string } }>): Promise<ProjectResponse> => ({
       project: await resolveValue(manager.stopProject(getProjectIdFromRequest(request.params.projectId)))
     })
+  )
+
+  app.post<{ Params: { chatId: string } }>(
+    '/api/chats/:chatId/start',
+    async (request: FastifyRequest<{ Params: { chatId: string } }>): Promise<ChatResponse> => {
+      if (!manager.startChatSession) {
+        throw new CodoriError(
+          'INVALID_CONFIG',
+          'Chat runtime start is not available because the runtime manager does not support it.'
+        )
+      }
+
+      return {
+        chat: await resolveValue(manager.startChatSession(getChatIdFromRequest(request.params.chatId)))
+      }
+    }
+  )
+
+  app.post<{ Params: { chatId: string } }>(
+    '/api/chats/:chatId/stop',
+    async (request: FastifyRequest<{ Params: { chatId: string } }>): Promise<ChatResponse> => {
+      if (!manager.stopChatSession) {
+        throw new CodoriError(
+          'INVALID_CONFIG',
+          'Chat runtime stop is not available because the runtime manager does not support it.'
+        )
+      }
+
+      return {
+        chat: await resolveValue(manager.stopChatSession(getChatIdFromRequest(request.params.chatId)))
+      }
+    }
+  )
+
+  app.post<{ Params: { chatId: string } }>(
+    '/api/chats/:chatId/attachments',
+    async (request, reply) => {
+      if (!manager.getChatStatus) {
+        throw new CodoriError('INVALID_CONFIG', 'Chat lookup is not available.')
+      }
+
+      const chatId = getChatIdFromRequest(request.params.chatId)
+      const chat = await resolveValue(manager.getChatStatus(chatId))
+      await touchChatActivity(manager, chatId)
+      const files: PersistedAttachment[] = []
+      let threadId: string | null = null
+
+      for await (const part of request.parts()) {
+        if (part.type === 'file') {
+          if (!threadId) {
+            throw new CodoriError('MISSING_THREAD_ID', 'Thread id must be provided before file parts.')
+          }
+
+          const mediaType = normalizeImageMediaType({
+            filename: part.filename ?? 'attachment',
+            declaredMediaType: part.mimetype || null
+          })
+
+          if (!mediaType) {
+            throw new CodoriError('INVALID_ATTACHMENT', 'Only image attachments are supported.')
+          }
+
+          const attachment = await persistThreadAttachmentStream({
+            projectPath: chat.chatPath,
+            threadId,
+            filename: part.filename ?? 'attachment',
+            mediaType,
+            stream: part.file,
+            rootDir: options.attachmentsRootDir
+          })
+
+          files.push(attachment)
+          continue
+        }
+
+        if (part.fieldname === 'threadId' && typeof part.value === 'string') {
+          threadId = part.value.trim() || null
+        }
+      }
+
+      if (!threadId) {
+        throw new CodoriError('MISSING_THREAD_ID', 'Missing thread id.')
+      }
+
+      if (!files.length) {
+        throw new CodoriError('INVALID_ATTACHMENT', 'No files provided.')
+      }
+
+      reply.header('cache-control', 'no-store')
+      return {
+        threadId,
+        files
+      }
+    }
+  )
+
+  app.get<{ Params: { chatId: string }, Querystring: { path?: string, mediaType?: string } }>(
+    '/api/chats/:chatId/attachments/file',
+    async (request, reply) => {
+      if (!manager.getChatStatus) {
+        throw new CodoriError('INVALID_CONFIG', 'Chat lookup is not available.')
+      }
+
+      const chatId = getChatIdFromRequest(request.params.chatId)
+      const requestedPath = typeof request.query.path === 'string'
+        ? request.query.path.trim()
+        : ''
+
+      if (!requestedPath) {
+        throw new CodoriError('INVALID_ATTACHMENT', 'Missing attachment path.')
+      }
+
+      const chat = await resolveValue(manager.getChatStatus(chatId))
+      await touchChatActivity(manager, chatId)
+      const allowedRoot = resolveProjectAttachmentsDir(chat.chatPath, options.attachmentsRootDir)
+      const resolvedPath = resolve(requestedPath)
+
+      if (!isPathInsideDirectory(resolvedPath, allowedRoot)) {
+        reply.status(403)
+        return {
+          error: {
+            code: 'FORBIDDEN',
+            message: 'Invalid attachment path.'
+          }
+        }
+      }
+
+      let fileStat
+      try {
+        fileStat = await stat(resolvedPath)
+      } catch {
+        reply.status(404)
+        return {
+          error: {
+            code: 'NOT_FOUND',
+            message: 'Attachment not found.'
+          }
+        }
+      }
+
+      if (!fileStat.isFile()) {
+        reply.status(404)
+        return {
+          error: {
+            code: 'NOT_FOUND',
+            message: 'Attachment not found.'
+          }
+        }
+      }
+
+      const attachmentMetadata = await readAttachmentMetadata(resolvedPath)
+      const inferredMediaType = typeof lookupMimeType(resolvedPath) === 'string'
+        ? String(lookupMimeType(resolvedPath)).toLowerCase()
+        : null
+      const mediaType = attachmentMetadata?.mediaType?.toLowerCase()
+        ?? inferredMediaType
+        ?? null
+
+      if (!mediaType?.startsWith('image/')) {
+        reply.status(415)
+        return {
+          error: {
+            code: 'UNSUPPORTED_MEDIA_TYPE',
+            message: 'Attachment preview is only available for image files.'
+          }
+        }
+      }
+
+      reply.header('cache-control', 'private, max-age=3600')
+      reply.header('cross-origin-resource-policy', 'cross-origin')
+      reply.header('content-type', mediaType)
+      reply.header('content-disposition', `inline; filename="${basename(resolvedPath).replace(/"/g, '')}"`)
+
+      return await readFile(resolvedPath)
+    }
+  )
+
+  app.get<{ Params: { chatId: string }, Querystring: { path?: string } }>(
+    '/api/chats/:chatId/mentions/icon',
+    async (request, reply) => {
+      if (!manager.getChatStatus) {
+        throw new CodoriError('INVALID_CONFIG', 'Chat lookup is not available.')
+      }
+
+      const chatId = getChatIdFromRequest(request.params.chatId)
+      const requestedPath = typeof request.query.path === 'string'
+        ? request.query.path.trim()
+        : ''
+
+      if (!requestedPath) {
+        throw new CodoriError('INVALID_ATTACHMENT', 'Missing mention asset path.')
+      }
+
+      if (!isAbsoluteFilesystemPath(requestedPath)) {
+        reply.status(400)
+        return {
+          error: {
+            code: 'INVALID_ATTACHMENT',
+            message: 'Mention asset path must be absolute.'
+          }
+        }
+      }
+
+      const chat = await resolveValue(manager.getChatStatus(chatId))
+      await touchChatActivity(manager, chatId)
+      const resolvedPath = resolve(requestedPath)
+
+      if (!resolveMentionAssetRoots(chat.chatPath).some(root => isPathInsideDirectory(resolvedPath, root))) {
+        reply.status(403)
+        return {
+          error: {
+            code: 'FORBIDDEN',
+            message: 'Invalid mention asset path.'
+          }
+        }
+      }
+
+      let fileStat
+      try {
+        fileStat = await stat(resolvedPath)
+      } catch {
+        reply.status(404)
+        return {
+          error: {
+            code: 'NOT_FOUND',
+            message: 'Mention asset not found.'
+          }
+        }
+      }
+
+      if (!fileStat.isFile()) {
+        reply.status(404)
+        return {
+          error: {
+            code: 'NOT_FOUND',
+            message: 'Mention asset not found.'
+          }
+        }
+      }
+
+      const mediaType = typeof lookupMimeType(resolvedPath) === 'string'
+        ? String(lookupMimeType(resolvedPath)).toLowerCase()
+        : null
+
+      if (!mediaType?.startsWith('image/')) {
+        reply.status(415)
+        return {
+          error: {
+            code: 'UNSUPPORTED_MEDIA_TYPE',
+            message: 'Mention assets must be image files.'
+          }
+        }
+      }
+
+      reply.header('cache-control', 'public, max-age=300')
+      reply.header('cross-origin-resource-policy', 'cross-origin')
+      reply.header('content-type', mediaType)
+      reply.header('content-disposition', `inline; filename="${basename(resolvedPath).replace(/"/g, '')}"`)
+
+      return await readFile(resolvedPath)
+    }
+  )
+
+  app.get<{ Params: { chatId: string }, Querystring: { path?: string } }>(
+    '/api/chats/:chatId/local-file',
+    async (request, reply): Promise<ProjectLocalFileResponse | { error: { code: string, message: string } }> => {
+      if (!manager.getChatStatus) {
+        throw new CodoriError('INVALID_CONFIG', 'Chat lookup is not available.')
+      }
+
+      const chatId = getChatIdFromRequest(request.params.chatId)
+      const requestedPath = typeof request.query.path === 'string'
+        ? request.query.path.trim()
+        : ''
+
+      if (!requestedPath) {
+        reply.status(400)
+        return {
+          error: {
+            code: 'INVALID_LOCAL_FILE',
+            message: 'Missing local file path.'
+          }
+        }
+      }
+
+      const chat = await resolveValue(manager.getChatStatus(chatId))
+      await touchChatActivity(manager, chatId)
+
+      try {
+        const file = await readProjectLocalFile(chat.chatPath, requestedPath)
+        reply.header('cache-control', 'no-store')
+        return { file }
+      } catch (error) {
+        if (error instanceof LocalFileViewError) {
+          const statusCode = error.code === 'FORBIDDEN'
+            ? 403
+            : error.code === 'NOT_FOUND' || error.code === 'NOT_A_FILE'
+              ? 404
+              : 415
+          reply.status(statusCode)
+          return {
+            error: {
+              code: error.code,
+              message: error.message
+            }
+          }
+        }
+
+        throw error
+      }
+    }
+  )
+
+  app.get<{ Params: { chatId: string } }>(
+    '/api/chats/:chatId/rpc',
+    { websocket: true },
+    async (clientSocket: WebSocket, request: FastifyRequest<{ Params: { chatId: string } }>) => {
+      if (!manager.startChatSession) {
+        clientSocket.close(1011, 'chat runtime unavailable')
+        return
+      }
+
+      const chatId = getChatIdFromRequest(request.params.chatId)
+      const pendingClientMessages: Array<{ message: WebSocket.RawData, isBinary: boolean }> = []
+      const session = manager.acquireChatSession?.(chatId) ?? null
+      let upstream: WebSocket | null = null
+      let sessionReleased = false
+
+      const releaseSession = () => {
+        if (sessionReleased) {
+          return
+        }
+
+        sessionReleased = true
+        session?.release()
+      }
+
+      const closeBoth = (code = 1011, reason = 'proxy error') => {
+        if (clientSocket.readyState === clientSocket.OPEN || clientSocket.readyState === clientSocket.CONNECTING) {
+          clientSocket.close(code, reason)
+        }
+        if (upstream && (upstream.readyState === WebSocket.OPEN || upstream.readyState === WebSocket.CONNECTING)) {
+          upstream.close(code, reason)
+        }
+      }
+
+      clientSocket.on('message', (message: WebSocket.RawData, isBinary: boolean) => {
+        touchChatActivityInBackground(manager, chatId, session)
+        if (upstream?.readyState === WebSocket.OPEN) {
+          upstream.send(message, { binary: isBinary })
+          return
+        }
+
+        pendingClientMessages.push({ message, isBinary })
+      })
+
+      clientSocket.on('error', () => {
+        closeBoth(1011, 'client websocket failed')
+      })
+
+      clientSocket.on('close', () => {
+        releaseSession()
+        if (upstream && (upstream.readyState === WebSocket.OPEN || upstream.readyState === WebSocket.CONNECTING)) {
+          upstream.close()
+        }
+      })
+
+      void (async () => {
+        const started = await resolveValue(manager.startChatSession!(chatId))
+        if (typeof started.port !== 'number') {
+          closeBoth(1011, 'runtime port unavailable')
+          return
+        }
+
+        const ready = await waitForPortReady(started.port)
+        if (!ready) {
+          closeBoth(1011, 'runtime did not become ready')
+          return
+        }
+
+        upstream = new WebSocket(`ws://127.0.0.1:${started.port}`)
+
+        upstream.once('open', () => {
+          for (const entry of pendingClientMessages.splice(0, pendingClientMessages.length)) {
+            upstream?.send(entry.message, { binary: entry.isBinary })
+          }
+        })
+
+        upstream.on('message', (message: WebSocket.RawData, isBinary: boolean) => {
+          touchChatActivityInBackground(manager, chatId, session)
+          clientSocket.send(message, { binary: isBinary })
+        })
+
+        upstream.on('error', () => {
+          closeBoth(1011, 'upstream websocket failed')
+        })
+
+        upstream.on('close', () => {
+          if (clientSocket.readyState === clientSocket.OPEN || clientSocket.readyState === clientSocket.CONNECTING) {
+            clientSocket.close()
+          }
+        })
+      })().catch(() => {
+        closeBoth(1011, 'upstream bootstrap failed')
+      })
+    }
   )
 
   app.post<{ Params: { projectId: string } }>(

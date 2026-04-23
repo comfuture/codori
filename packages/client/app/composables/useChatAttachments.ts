@@ -3,6 +3,7 @@ import { useRuntimeConfig } from '#imports'
 import { $fetch } from 'ofetch'
 import {
   resolveAttachmentUploadUrl,
+  type WorkspaceAttachmentScope,
   type ProjectAttachmentUploadResponse,
   validateAttachmentSelection
 } from '~~/shared/chat-attachments'
@@ -21,7 +22,7 @@ const createAttachmentId = () =>
     ? crypto.randomUUID()
     : `${Date.now()}-${Math.random().toString(16).slice(2)}`
 
-export const useChatAttachments = (projectId: string) => {
+export const useChatAttachments = (workspace: string | WorkspaceAttachmentScope) => {
   const runtimeConfig = useRuntimeConfig()
   const attachments = ref<DraftAttachment[]>([])
   const isDragging = ref(false)
@@ -170,7 +171,9 @@ export const useChatAttachments = (projectId: string) => {
     try {
       const response = await $fetch<ProjectAttachmentUploadResponse>(
         resolveAttachmentUploadUrl({
-          projectId,
+          workspace: typeof workspace === 'string'
+            ? { kind: 'project', id: workspace }
+            : workspace,
           configuredBase: String(runtimeConfig.public.serverBase ?? '')
         }),
         {

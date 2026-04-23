@@ -2,9 +2,10 @@
 import type { NavigationMenuItem } from '@nuxt/ui'
 import { useRoute, useRouter } from '#imports'
 import { computed, onMounted, ref } from 'vue'
+import { useChats } from '../composables/useChats'
 import { useProjects } from '../composables/useProjects'
 import { sortSidebarProjects } from '../utils/project-sidebar-order'
-import { toProjectRoute } from '~~/shared/codori'
+import { toChatRoute, toProjectRoute } from '~~/shared/codori'
 
 const props = defineProps<{
   collapsed?: boolean
@@ -12,10 +13,15 @@ const props = defineProps<{
 type ProjectNavigationItem = NavigationMenuItem & {
   projectId: string
   projectPath: string
-  title: string | null
-  createdAt: number | null
   status: 'running' | 'stopped' | 'error'
   error: string | null
+}
+
+type ChatNavigationItem = NavigationMenuItem & {
+  chatId: string
+  title: string | null
+  createdAt: number
+  updatedAt: number | null
 }
 
 const route = useRoute()
@@ -23,18 +29,20 @@ const router = useRouter()
 const addProjectOpen = ref(false)
 const {
   projects,
-  projectlessChats,
   loaded,
-  projectlessLoaded,
   loading,
-  projectlessLoading,
-  projectlessCreatePending,
-  projectlessDeletePendingId,
   refreshProjects,
-  refreshProjectlessChats,
-  createProjectlessChat,
-  deleteProjectlessChat
 } = useProjects()
+const {
+  chats,
+  loaded: chatsLoaded,
+  loading: chatsLoading,
+  createPending: chatCreatePending,
+  deletePendingId: chatDeletePendingId,
+  refreshChats,
+  createChat,
+  deleteChat
+} = useChats()
 
 const activeProjectId = computed(() => {
   const param = route.params.projectId
@@ -43,21 +51,25 @@ const activeProjectId = computed(() => {
   }
   return typeof param === 'string' ? param : null
 })
+const activeChatId = computed(() => {
+  const param = route.params.chatId
+  return typeof param === 'string' ? param : null
+})
 
 onMounted(() => {
   if (!loaded.value) {
     void refreshProjects()
   }
-  if (!projectlessLoaded.value) {
-    void refreshProjectlessChats()
+  if (!chatsLoaded.value) {
+    void refreshChats()
   }
 })
 
-const formatProjectlessTitle = (project: { projectId: string, title: string | null }) =>
-  project.title?.trim() || project.projectId.replace(/^projectless\//, '') || 'New Chat'
+const formatChatTitle = (chat: { chatId: string, title: string | null }) =>
+  chat.title?.trim() || chat.chatId || 'New Chat'
 
-const formatProjectlessDate = (project: { createdAt: number | null }) => {
-  if (!project.createdAt) {
+const formatChatDate = (chat: { createdAt: number | null }) => {
+  if (!chat.createdAt) {
     return 'Date unavailable'
   }
 
@@ -66,36 +78,34 @@ const formatProjectlessDate = (project: { createdAt: number | null }) => {
     day: 'numeric',
     hour: '2-digit',
     minute: '2-digit'
-  }).format(new Date(project.createdAt))
+  }).format(new Date(chat.createdAt))
 }
 
-const startProjectlessChat = async () => {
-  const project = await createProjectlessChat()
-  await router.push(toProjectRoute(project.projectId))
+const startChat = async () => {
+  const chat = await createChat()
+  await router.push(toChatRoute(chat.chatId))
 }
 
-const removeProjectlessChat = async (projectId: string) => {
-  await deleteProjectlessChat(projectId)
-  if (activeProjectId.value === projectId) {
+const removeChat = async (chatId: string) => {
+  await deleteChat(chatId)
+  if (activeChatId.value === chatId) {
     await router.push('/')
   }
 }
 
-const projectlessItems = computed<ProjectNavigationItem[][]>(() => [
-  projectlessChats.value.map(project => ({
-    label: formatProjectlessTitle(project),
+const chatItems = computed<ChatNavigationItem[][]>(() => [
+  chats.value.map(chat => ({
+    label: formatChatTitle(chat),
     icon: 'i-lucide-message-square',
-    to: toProjectRoute(project.projectId),
-    active: activeProjectId.value === project.projectId,
+    to: toChatRoute(chat.chatId),
+    active: activeChatId.value === chat.chatId,
     tooltip: {
-      text: project.projectId
+      text: chat.chatId
     },
-    projectId: project.projectId,
-    projectPath: project.projectPath,
-    title: project.title,
-    createdAt: project.createdAt,
-    status: project.status,
-    error: project.error
+    chatId: chat.chatId,
+    title: chat.title,
+    createdAt: chat.createdAt,
+    updatedAt: chat.updatedAt
   }))
 ])
 
@@ -110,14 +120,13 @@ const projectItems = computed<ProjectNavigationItem[][]>(() => [
     },
     projectId: project.projectId,
     projectPath: project.projectPath,
-    title: project.title,
-    createdAt: project.createdAt,
     status: project.status,
     error: project.error
   }))
 ])
 
 const asProjectItem = (item: NavigationMenuItem) => item as ProjectNavigationItem
+const asChatItem = (item: NavigationMenuItem) => item as ChatNavigationItem
 
 const isActiveProject = (item: ProjectNavigationItem) => activeProjectId.value === item.projectId
 </script>
@@ -134,15 +143,15 @@ const isActiveProject = (item: ProjectNavigationItem) => activeProjectId.value =
           :block="!props.collapsed"
           :square="props.collapsed"
           :label="props.collapsed ? undefined : 'New Chat'"
-          :loading="projectlessCreatePending"
+          :loading="chatCreatePending"
           aria-label="New Chat"
-          @click="startProjectlessChat"
+          @click="startChat"
         />
       </UTooltip>
 
       <UNavigationMenu
-        v-if="projectlessChats.length"
-        :items="projectlessItems"
+        v-if="chats.length"
+        :items="chatItems"
         orientation="vertical"
         :collapsed="props.collapsed"
         highlight
@@ -169,10 +178,10 @@ const isActiveProject = (item: ProjectNavigationItem) => activeProjectId.value =
             class="min-w-0"
           >
             <div class="truncate font-medium text-highlighted">
-              {{ asProjectItem(item).title || asProjectItem(item).label }}
+              {{ asChatItem(item).title || asChatItem(item).label }}
             </div>
             <div class="truncate text-[11px] text-muted">
-              {{ formatProjectlessDate(asProjectItem(item)) }}
+              {{ formatChatDate(asChatItem(item)) }}
             </div>
           </div>
         </template>
@@ -189,9 +198,9 @@ const isActiveProject = (item: ProjectNavigationItem) => activeProjectId.value =
                 variant="ghost"
                 size="xs"
                 square
-                :loading="projectlessDeletePendingId === asProjectItem(item).projectId"
+                :loading="chatDeletePendingId === asChatItem(item).chatId"
                 aria-label="Delete chat"
-                @click.prevent.stop="removeProjectlessChat(asProjectItem(item).projectId)"
+                @click.prevent.stop="removeChat(asChatItem(item).chatId)"
               />
             </UTooltip>
           </div>
@@ -199,7 +208,7 @@ const isActiveProject = (item: ProjectNavigationItem) => activeProjectId.value =
       </UNavigationMenu>
 
       <div
-        v-else-if="projectlessLoading && !props.collapsed"
+        v-else-if="chatsLoading && !props.collapsed"
         class="px-3 py-1 text-xs text-muted"
       >
         Loading recent chats...

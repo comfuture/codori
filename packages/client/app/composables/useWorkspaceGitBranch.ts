@@ -194,7 +194,7 @@ export const useWorkspaceGitBranch = (options: UseWorkspaceGitBranchOptions) => 
     fallbackMessage: string
   ) => {
     if (!supportsGit()) {
-      error.value = 'Git branch operations are not available for projectless chats.'
+      error.value = 'Git branch operations are not available for chat sessions.'
       return null
     }
 

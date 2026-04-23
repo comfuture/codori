@@ -1,4 +1,4 @@
-import { encodeProjectIdSegment } from './codori'
+import { encodeChatIdSegment, encodeProjectIdSegment } from './codori'
 import { resolveApiUrl, shouldUseServerProxy } from './network'
 
 export type LocalFileLinkTarget = {
@@ -95,12 +95,16 @@ export const isLocalFileWithinProject = (
 }
 
 export const resolveProjectLocalFileUrl = (input: {
-  projectId: string
+  projectId?: string
+  workspace?: { kind: 'project', id: string } | { kind: 'chat', id: string }
   path: string
   configuredBase?: string | null
 }) => {
   const query = new URLSearchParams({ path: input.path })
-  const requestPath = `/projects/${encodeProjectIdSegment(input.projectId)}/local-file?${query.toString()}`
+  const workspace = input.workspace ?? { kind: 'project' as const, id: input.projectId ?? '' }
+  const requestPath = workspace.kind === 'chat'
+    ? `/chats/${encodeChatIdSegment(workspace.id)}/local-file?${query.toString()}`
+    : `/projects/${encodeProjectIdSegment(workspace.id)}/local-file?${query.toString()}`
 
   if (shouldUseServerProxy(input.configuredBase)) {
     return `/api/codori${requestPath}`
