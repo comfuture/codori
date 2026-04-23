@@ -4265,18 +4265,6 @@ watch(
 
               <div class="flex w-full flex-wrap items-center gap-2 pt-1">
                 <div class="flex min-w-0 flex-1 flex-wrap items-center gap-2">
-                  <WorkspaceBranchControl
-                    v-if="showWorkspaceBranchControl"
-                    :current-branch="workspaceCurrentBranch"
-                    :branches="workspaceAvailableBranches"
-                    :loading="workspaceGitBranchLoading"
-                    :submitting="workspaceGitBranchSubmitting"
-                    :disabled="isWorkspaceBranchControlDisabled"
-                    :error="workspaceGitBranchError"
-                    @switch-branch="(branch) => void switchWorkspaceGitBranch(branch)"
-                    @create-branch="(branch) => void createWorkspaceGitBranch(branch)"
-                  />
-
                   <UButton
                     type="button"
                     color="neutral"
@@ -4311,6 +4299,18 @@ watch(
                     :disabled="isComposerDisabled"
                     class="min-w-0 flex-1 sm:max-w-36 sm:flex-none"
                     :ui="{ base: 'rounded-full border border-default/70 bg-default/70', value: 'truncate' }"
+                  />
+
+                  <WorkspaceBranchControl
+                    v-if="showWorkspaceBranchControl"
+                    :current-branch="workspaceCurrentBranch"
+                    :branches="workspaceAvailableBranches"
+                    :loading="workspaceGitBranchLoading"
+                    :submitting="workspaceGitBranchSubmitting"
+                    :disabled="isWorkspaceBranchControlDisabled"
+                    :error="workspaceGitBranchError"
+                    @switch-branch="(branch) => void switchWorkspaceGitBranch(branch)"
+                    @create-branch="(branch) => void createWorkspaceGitBranch(branch)"
                   />
                 </div>
 
