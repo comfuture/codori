@@ -120,21 +120,22 @@ const requestBranchCreate = () => {
           </div>
         </div>
 
-        <div class="flex items-center gap-2 border-t border-default pt-2">
+        <div class="flex w-full items-center gap-2 border-t border-default pt-2">
           <UInput
             v-model="newBranchName"
             size="sm"
             color="neutral"
             variant="ghost"
             placeholder="create a branch"
+            class="min-w-0 flex-1"
             :disabled="loading || submitting || disabled"
             @keydown.enter.prevent="requestBranchCreate"
           />
           <UButton
             type="button"
             color="primary"
-            variant="ghost"
             size="sm"
+            class="shrink-0"
             :loading="submitting"
             :disabled="createDisabled"
             data-create-branch=""
