@@ -9,6 +9,11 @@ export const FALLBACK_REASONING_EFFORTS = [
   'xhigh'
 ] as const satisfies readonly ReasoningEffort[]
 
+const HIDDEN_REASONING_EFFORTS = new Set<ReasoningEffort>([
+  'minimal',
+  'low'
+])
+
 export type ModelOption = {
   id: string
   model: string
@@ -206,9 +211,11 @@ export const resolveEffortOptions = (
   model: string | null | undefined
 ) => {
   const selectedModel = models.find(entry => entry.model === model)
-  return selectedModel?.supportedReasoningEfforts.length
+  const supportedEfforts = selectedModel?.supportedReasoningEfforts.length
     ? selectedModel.supportedReasoningEfforts
     : [...FALLBACK_REASONING_EFFORTS]
+  const selectableEfforts = supportedEfforts.filter(effort => !HIDDEN_REASONING_EFFORTS.has(effort))
+  return selectableEfforts.length > 0 ? selectableEfforts : supportedEfforts
 }
 
 export const resolveSelectedEffort = (
@@ -245,10 +252,23 @@ export const normalizeConfigDefaults = (value: unknown) => {
   const config = isObjectRecord(value) && isObjectRecord(value.config)
     ? value.config
     : null
+  const activeProfileName = typeof config?.profile === 'string' ? config.profile : null
+  const profiles = isObjectRecord(config?.profiles) ? config.profiles : null
+  const activeProfile = activeProfileName && isObjectRecord(profiles?.[activeProfileName])
+    ? profiles[activeProfileName]
+    : null
 
   return {
-    model: typeof config?.model === 'string' ? config.model : null,
-    effort: isReasoningEffort(config?.model_reasoning_effort) ? config.model_reasoning_effort : null,
+    model: typeof activeProfile?.model === 'string'
+      ? activeProfile.model
+      : typeof config?.model === 'string'
+        ? config.model
+        : null,
+    effort: isReasoningEffort(activeProfile?.model_reasoning_effort)
+      ? activeProfile.model_reasoning_effort
+      : isReasoningEffort(config?.model_reasoning_effort)
+        ? config.model_reasoning_effort
+        : null,
     contextWindow: toFiniteNumber(config?.model_context_window)
   }
 }

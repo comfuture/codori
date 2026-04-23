@@ -67,6 +67,7 @@ import { buildTurnStartInput, type PersistedProjectAttachment } from '~~/shared/
 import {
   type CollaborationMode
 } from '~~/shared/collaboration-mode'
+import type { ConfigReadParams } from '~~/shared/generated/codex-app-server/v2/ConfigReadParams'
 import type { ConfigReadResponse } from '~~/shared/generated/codex-app-server/v2/ConfigReadResponse'
 import type { ModelListResponse } from '~~/shared/generated/codex-app-server/v2/ModelListResponse'
 import type { ThreadReadResponse } from '~~/shared/generated/codex-app-server/v2/ThreadReadResponse'
@@ -824,7 +825,10 @@ const loadPromptControls = async () => {
 
       const [modelsResponse, configResponse] = await Promise.allSettled([
         client.request<ModelListResponse>('model/list'),
-        client.request<ConfigReadResponse>('config/read')
+        client.request<ConfigReadResponse>('config/read', {
+          includeLayers: false,
+          cwd: selectedProject.value?.projectPath ?? null
+        } satisfies ConfigReadParams)
       ])
 
       if (modelsResponse.status === 'fulfilled') {

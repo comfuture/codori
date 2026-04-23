@@ -786,7 +786,7 @@ describe('client package', () => {
     }])
   })
 
-  it('derives initial selector defaults from config and coerces invalid effort values', () => {
+  it('derives initial selector defaults from config and keeps selectable high effort values', () => {
     const defaults = normalizeConfigDefaults({
       config: {
         model: 'gpt-5.4-mini',
@@ -804,7 +804,8 @@ describe('client package', () => {
         defaultReasoningEffort: 'medium',
         supportedReasoningEfforts: [
           { reasoningEffort: 'minimal' },
-          { reasoningEffort: 'medium' }
+          { reasoningEffort: 'medium' },
+          { reasoningEffort: 'high' }
         ]
       }]
     })
@@ -816,7 +817,28 @@ describe('client package', () => {
     })
     expect(coercePromptSelection(models, defaults.model, defaults.effort)).toEqual({
       model: 'gpt-5.4-mini',
-      effort: 'medium'
+      effort: 'high'
+    })
+  })
+
+  it('derives selector defaults from the active config profile', () => {
+    expect(normalizeConfigDefaults({
+      config: {
+        model: 'gpt-5.4',
+        model_reasoning_effort: 'medium',
+        model_context_window: 128000,
+        profile: 'work',
+        profiles: {
+          work: {
+            model: null,
+            model_reasoning_effort: 'high'
+          }
+        }
+      }
+    })).toEqual({
+      model: 'gpt-5.4',
+      effort: 'high',
+      contextWindow: 128000
     })
   })
 
@@ -846,10 +868,11 @@ describe('client package', () => {
       }]
     })
 
-    expect(resolveEffortOptions(models, 'gpt-5.4-mini')).toEqual(['none', 'minimal'])
+    expect(resolveEffortOptions(models, 'gpt-5.4')).toEqual(['medium', 'high'])
+    expect(resolveEffortOptions(models, 'gpt-5.4-mini')).toEqual(['none'])
     expect(coercePromptSelection(models, 'gpt-5.4-mini', 'high')).toEqual({
       model: 'gpt-5.4-mini',
-      effort: 'minimal'
+      effort: 'none'
     })
   })
 
