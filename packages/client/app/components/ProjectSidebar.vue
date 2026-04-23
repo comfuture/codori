@@ -12,6 +12,8 @@ const props = defineProps<{
 type ProjectNavigationItem = NavigationMenuItem & {
   projectId: string
   projectPath: string
+  title: string | null
+  createdAt: number | null
   status: 'running' | 'stopped' | 'error'
   error: string | null
 }
@@ -27,9 +29,11 @@ const {
   loading,
   projectlessLoading,
   projectlessCreatePending,
+  projectlessDeletePendingId,
   refreshProjects,
   refreshProjectlessChats,
-  createProjectlessChat
+  createProjectlessChat,
+  deleteProjectlessChat
 } = useProjects()
 
 const activeProjectId = computed(() => {
@@ -49,9 +53,12 @@ onMounted(() => {
   }
 })
 
-const formatProjectlessLabel = (project: { projectId: string, createdAt: number | null }) => {
+const formatProjectlessTitle = (project: { projectId: string, title: string | null }) =>
+  project.title?.trim() || project.projectId.replace(/^projectless\//, '') || 'New Chat'
+
+const formatProjectlessDate = (project: { createdAt: number | null }) => {
   if (!project.createdAt) {
-    return project.projectId.replace(/^projectless\//, '')
+    return 'Date unavailable'
   }
 
   return new Intl.DateTimeFormat(undefined, {
@@ -67,9 +74,16 @@ const startProjectlessChat = async () => {
   await router.push(toProjectRoute(project.projectId))
 }
 
+const removeProjectlessChat = async (projectId: string) => {
+  await deleteProjectlessChat(projectId)
+  if (activeProjectId.value === projectId) {
+    await router.push('/')
+  }
+}
+
 const projectlessItems = computed<ProjectNavigationItem[][]>(() => [
   projectlessChats.value.map(project => ({
-    label: formatProjectlessLabel(project),
+    label: formatProjectlessTitle(project),
     icon: 'i-lucide-message-square',
     to: toProjectRoute(project.projectId),
     active: activeProjectId.value === project.projectId,
@@ -78,6 +92,8 @@ const projectlessItems = computed<ProjectNavigationItem[][]>(() => [
     },
     projectId: project.projectId,
     projectPath: project.projectPath,
+    title: project.title,
+    createdAt: project.createdAt,
     status: project.status,
     error: project.error
   }))
@@ -94,6 +110,8 @@ const projectItems = computed<ProjectNavigationItem[][]>(() => [
     },
     projectId: project.projectId,
     projectPath: project.projectPath,
+    title: project.title,
+    createdAt: project.createdAt,
     status: project.status,
     error: project.error
   }))
@@ -151,10 +169,10 @@ const isActiveProject = (item: ProjectNavigationItem) => activeProjectId.value =
             class="min-w-0"
           >
             <div class="truncate font-medium text-highlighted">
-              {{ asProjectItem(item).label }}
+              {{ asProjectItem(item).title || asProjectItem(item).label }}
             </div>
             <div class="truncate text-[11px] text-muted">
-              {{ asProjectItem(item).projectPath }}
+              {{ formatProjectlessDate(asProjectItem(item)) }}
             </div>
           </div>
         </template>
@@ -164,10 +182,18 @@ const isActiveProject = (item: ProjectNavigationItem) => activeProjectId.value =
             v-if="!props.collapsed"
             class="flex items-center"
           >
-            <ProjectStatusDot
-              :status="asProjectItem(item).status"
-              :pulse="isActiveProject(asProjectItem(item))"
-            />
+            <UTooltip text="Delete chat">
+              <UButton
+                icon="i-lucide-trash-2"
+                color="neutral"
+                variant="ghost"
+                size="xs"
+                square
+                :loading="projectlessDeletePendingId === asProjectItem(item).projectId"
+                aria-label="Delete chat"
+                @click.prevent.stop="removeProjectlessChat(asProjectItem(item).projectId)"
+              />
+            </UTooltip>
           </div>
         </template>
       </UNavigationMenu>

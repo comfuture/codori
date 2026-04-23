@@ -29,6 +29,7 @@ export type WorkspaceKind = 'project' | 'projectless'
 export type ProjectRecord = {
   id: string
   path: string
+  title?: string | null
   workspaceKind?: WorkspaceKind
   createdAt?: number | null
 }
@@ -47,6 +48,7 @@ export type ProjectRuntimeStatus = 'running' | 'stopped' | 'error'
 export type ProjectStatusRecord = {
   projectId: string
   projectPath: string
+  title: string | null
   workspaceKind: WorkspaceKind
   createdAt: number | null
   status: ProjectRuntimeStatus
@@ -62,4 +64,8 @@ export type ProjectStatusRecord = {
 
 export type StartProjectResult = ProjectStatusRecord & {
   reusedExisting: boolean
+}
+
+export type DeleteProjectlessChatResult = {
+  projectId: string
 }

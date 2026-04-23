@@ -30,7 +30,7 @@ import {
   type ServiceUpdateController,
   type ServiceUpdateStatus
 } from './service-update.js'
-import type { ProjectStatusRecord, StartProjectResult } from './types.js'
+import type { DeleteProjectlessChatResult, ProjectStatusRecord, StartProjectResult } from './types.js'
 
 type MaybePromise<T> = T | Promise<T>
 
@@ -40,6 +40,7 @@ export type RuntimeManagerLike = {
   getProjectStatus: (projectId: string) => MaybePromise<ProjectStatusRecord>
   cloneProject?: (input: { repositoryUrl: string, destination?: string | null }) => MaybePromise<ProjectStatusRecord>
   createProjectlessChat?: () => MaybePromise<StartProjectResult>
+  deleteProjectlessChat?: (projectId: string) => MaybePromise<DeleteProjectlessChatResult>
   startProject: (projectId: string) => MaybePromise<StartProjectResult>
   stopProject: (projectId: string) => MaybePromise<ProjectStatusRecord>
   noteProjectActivity?: (projectId: string) => MaybePromise<ProjectStatusRecord | void>
@@ -67,6 +68,8 @@ type ProjectsResponse = {
 type ProjectlessChatsResponse = {
   projects: ProjectStatusRecord[]
 }
+
+type DeleteProjectlessChatResponse = DeleteProjectlessChatResult
 
 type ServiceUpdateResponse = {
   serviceUpdate: ServiceUpdateStatus
@@ -137,6 +140,7 @@ const toStatusCode = (error: CodoriError) => {
     case 'INVALID_ATTACHMENT':
     case 'MISSING_ROOT':
     case 'PROJECT_NOT_GIT_REPOSITORY':
+    case 'PROJECT_DELETE_UNAVAILABLE':
       return 400
     case 'DESTINATION_EXISTS':
     case 'GIT_OPERATION_FAILED':
@@ -350,6 +354,20 @@ export const createHttpServer = async (
       project: await resolveValue(manager.createProjectlessChat())
     }
   })
+
+  app.delete<{ Params: { projectId: string } }>(
+    '/api/projectless-chats/:projectId',
+    async (request: FastifyRequest<{ Params: { projectId: string } }>): Promise<DeleteProjectlessChatResponse> => {
+      if (!manager.deleteProjectlessChat) {
+        throw new CodoriError(
+          'INVALID_CONFIG',
+          'Projectless chat deletion is not available because the runtime manager does not support it.'
+        )
+      }
+
+      return await resolveValue(manager.deleteProjectlessChat(getProjectIdFromRequest(request.params.projectId)))
+    }
+  )
 
   app.post<{ Body: { repositoryUrl?: string, destination?: string | null } }>(
     '/api/projects/clone',

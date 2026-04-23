@@ -6,6 +6,7 @@ export type WorkspaceKind = 'project' | 'projectless'
 export type ProjectRecord = {
   projectId: string
   projectPath: string
+  title: string | null
   workspaceKind: WorkspaceKind
   createdAt: number | null
   status: ProjectRuntimeStatus
@@ -37,6 +38,10 @@ export type ProjectsResponse = {
 
 export type ProjectlessChatsResponse = {
   projects: ProjectRecord[]
+}
+
+export type DeleteProjectlessChatResponse = {
+  projectId: string
 }
 
 export type ProjectResponse = {

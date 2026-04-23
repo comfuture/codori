@@ -278,6 +278,7 @@ describe('RuntimeManager', () => {
 
     expect(created.status).toBe('running')
     expect(created.reusedExisting).toBe(false)
+    expect(created.title).toBe('New Chat')
     expect(created.workspaceKind).toBe('projectless')
     expect(created.projectId).toMatch(/^projectless\/chat-/)
     expect(created.projectPath.startsWith(join(fixture.documentsDir, 'Codex'))).toBe(true)
@@ -286,6 +287,29 @@ describe('RuntimeManager', () => {
     const recent = manager.listProjectlessStatuses()
     expect(recent).toHaveLength(1)
     expect(recent[0]?.projectId).toBe(created.projectId)
+    expect(recent[0]?.title).toBe('New Chat')
     expect(recent[0]?.workspaceKind).toBe('projectless')
+  })
+
+  it('deletes a projectless chat and removes its scratch directory', async () => {
+    const fixture = createFixture()
+    const manager = createRuntimeManager({
+      homeDir: fixture.homeDir,
+      documentsDir: fixture.documentsDir,
+      config: fixture.config,
+      commandFactory: () => ({
+        command: process.execPath,
+        args: ['-e', 'setInterval(() => {}, 1000)']
+      })
+    })
+    runningManagers.push(manager)
+
+    const created = await manager.createProjectlessChat()
+    const deleted = await manager.deleteProjectlessChat(created.projectId)
+
+    expect(deleted).toEqual({
+      projectId: created.projectId
+    })
+    expect(manager.listProjectlessStatuses()).toEqual([])
   })
 })
