@@ -2,7 +2,9 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  shouldRefreshWorkspaceGitBranchOnEnvironmentSignal,
   shouldRefreshWorkspaceGitBranchOnActivity,
+  WORKSPACE_GIT_BRANCH_ENVIRONMENT_REFRESH_INTERVAL_MS,
   useWorkspaceGitBranch
 } from '../app/composables/useWorkspaceGitBranch'
 
@@ -119,6 +121,40 @@ describe('useWorkspaceGitBranch', () => {
       currentBranch: 'main',
       branches: ['feature/demo', 'main']
     })
+  })
+
+  it('refreshes on environment signals with a longer throttle window', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-23T00:00:00Z'))
+
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      currentBranch: 'main',
+      branches: ['feature/demo', 'main']
+    }))
+    fetchMock.mockResolvedValueOnce(jsonResponse({
+      currentBranch: 'feature/demo',
+      branches: ['feature/demo', 'main']
+    }))
+
+    const manager = useWorkspaceGitBranch({
+      projectId: `project-${Date.now()}`,
+      serverBase: ''
+    })
+
+    await manager.refreshBranches({ force: true })
+    await expect(manager.refreshBranchesForEnvironmentSignal('window/interaction')).resolves.toBeNull()
+
+    vi.advanceTimersByTime(WORKSPACE_GIT_BRANCH_ENVIRONMENT_REFRESH_INTERVAL_MS)
+    await manager.refreshBranchesForEnvironmentSignal('window/interaction')
+
+    expect(manager.currentBranch.value).toBe('feature/demo')
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('tracks only the defined environment refresh boundaries', () => {
+    expect(shouldRefreshWorkspaceGitBranchOnEnvironmentSignal('window/visible')).toBe(true)
+    expect(shouldRefreshWorkspaceGitBranchOnEnvironmentSignal('window/interaction')).toBe(true)
+    expect(shouldRefreshWorkspaceGitBranchOnEnvironmentSignal('turn/completed')).toBe(false)
   })
 
   it('tracks only the defined branch refresh activity boundaries', () => {
