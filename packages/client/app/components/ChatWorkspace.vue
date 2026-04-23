@@ -27,7 +27,8 @@ import {
   shouldSubmitViaTurnSteer,
   shouldAwaitThreadHydration,
   shouldRetrySteerWithTurnStart,
-  shouldIgnoreNotificationAfterInterrupt
+  shouldIgnoreNotificationAfterInterrupt,
+  shouldApplyNotificationWithoutTurnId
 } from '../utils/chat-turn-engagement'
 import { isFocusWithinContainer } from '../utils/slash-prompt-focus'
 import { useChatAttachments, type DraftAttachment } from '../composables/useChatAttachments'
@@ -928,7 +929,7 @@ const currentLiveStream = () =>
     : null
 
 const hasActiveTurnEngagement = () =>
-  Boolean(currentLiveStream() || session.pendingLiveStream)
+  Boolean(currentLiveStream()?.turnId || session.pendingLiveStream)
 
 const shouldSubmitWithTurnSteer = () =>
   !currentThreadCollaborationModeMask.value
@@ -974,6 +975,11 @@ const subscribeThreadNotifications = (threadId: string, liveStream: LiveStream) 
       if (liveStream.observedSubagentThreadIds.has(targetThreadId)) {
         applySubagentNotification(targetThreadId, notification)
       }
+      return
+    }
+
+    if (shouldApplyNotificationWithoutTurnId(notification.method)) {
+      applyNotification(notification)
       return
     }
 
@@ -1070,6 +1076,15 @@ const clearLiveStream = (reason?: Error) => {
   rejectLiveStreamTurnWaiters(liveStream, reason ?? new Error('The active turn is no longer available.'))
   setSessionLiveStream(null)
   return liveStream
+}
+
+const completeLiveStreamTurn = (liveStream: LiveStream | null) => {
+  if (!liveStream) {
+    return
+  }
+
+  liveStream.lockedTurnId = null
+  setLiveStreamTurnId(liveStream, null)
 }
 
 const ensurePendingLiveStream = async () => {
@@ -2306,37 +2321,7 @@ const hydrateThread = async (threadId: string) => {
       if (!session.liveStream) {
         const nextLiveStream = createLiveStreamState(threadId)
 
-        nextLiveStream.unsubscribe = client.subscribe((notification) => {
-          const targetThreadId = notificationThreadId(notification)
-          if (!targetThreadId) {
-            return
-          }
-
-          if (targetThreadId && targetThreadId !== threadId) {
-            if (nextLiveStream.observedSubagentThreadIds.has(targetThreadId)) {
-              applySubagentNotification(targetThreadId, notification)
-            }
-            return
-          }
-
-          if (!nextLiveStream.turnId) {
-            nextLiveStream.bufferedNotifications.push(notification)
-            return
-          }
-
-          const turnId = notificationTurnId(notification)
-          if (!shouldApplyNotificationToCurrentTurn({
-            liveStreamTurnId: nextLiveStream.turnId,
-            lockedTurnId: nextLiveStream.lockedTurnId,
-            notificationMethod: notification.method,
-            notificationTurnId: turnId
-          })) {
-            return
-          }
-
-          applyNotification(notification)
-        })
-
+        subscribeThreadNotifications(threadId, nextLiveStream)
         setSessionLiveStream(nextLiveStream)
       }
 
@@ -2827,7 +2812,7 @@ const applyTurnCompletedNotification = (
   }
   error.value = null
   status.value = 'ready'
-  clearLiveStream()
+  completeLiveStreamTurn(liveStream)
 }
 const applyNotification = (notification: CodexRpcNotification) => {
   const liveStream = currentLiveStream()
