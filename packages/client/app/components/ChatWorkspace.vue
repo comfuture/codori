@@ -477,7 +477,10 @@ const selectStarterProject = async (projectId: unknown) => {
 
 const slashCommands = computed(() =>
   SLASH_COMMANDS
-    .filter(() => !hasPendingRequest.value)
+    .filter(command =>
+      !hasPendingRequest.value
+      && (supportsWorkspaceGit.value || (command.name !== 'usage' && command.name !== 'status'))
+    )
     .map((command) => {
       if (command.name !== 'plan' || !collaborationModesLoaded.value || planCollaborationModeMask.value) {
         return command
@@ -2432,7 +2435,7 @@ async function ensureProjectRuntime() {
 }
 
 const findActiveTurn = (thread: Thread) =>
-  [...thread.turns].reverse().find(turn => isActiveTurnStatus(turn.status))
+  thread.turns.findLast(turn => isActiveTurnStatus(turn.status))
 
 const syncThreadSnapshot = (thread: Thread) => {
   activeThreadId.value = thread.id
@@ -3887,7 +3890,7 @@ onMounted(() => {
     window.addEventListener('pageshow', handleThreadWorkspaceFocus)
     window.addEventListener('focus', handleThreadWorkspaceFocus)
     window.addEventListener('online', handleThreadWorkspaceOnline)
-    window.addEventListener('pointermove', handleThreadWorkspaceInteraction, { passive: true })
+    window.addEventListener('pointerdown', handleThreadWorkspaceInteraction, { passive: true })
     window.addEventListener('keydown', handleThreadWorkspaceInteraction)
     releaseThreadReactivationListeners = () => {
       document.removeEventListener('visibilitychange', handleThreadWorkspaceVisible)
@@ -3897,7 +3900,7 @@ onMounted(() => {
       window.removeEventListener('pageshow', handleThreadWorkspaceFocus)
       window.removeEventListener('focus', handleThreadWorkspaceFocus)
       window.removeEventListener('online', handleThreadWorkspaceOnline)
-      window.removeEventListener('pointermove', handleThreadWorkspaceInteraction)
+      window.removeEventListener('pointerdown', handleThreadWorkspaceInteraction)
       window.removeEventListener('keydown', handleThreadWorkspaceInteraction)
     }
 
@@ -4382,6 +4385,8 @@ watch(
           <MessageContent
             :message="message as ChatMessage"
             :project-id="workspaceKind === 'project' ? workspaceId : undefined"
+            :workspace="{ kind: workspaceKind, id: workspaceId }"
+            :workspace-root-path="selectedProject?.projectPath ?? null"
           />
         </template>
         <template #indicator>

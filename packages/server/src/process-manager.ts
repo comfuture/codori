@@ -1,13 +1,11 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import {
   existsSync,
-  mkdirSync,
   readdirSync,
   readFileSync,
-  rmSync,
-  statSync,
-  writeFileSync
+  statSync
 } from 'node:fs'
+import { mkdir, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -208,7 +206,7 @@ export class RuntimeManager {
       .slice(0, limit)
   }
 
-  private createChatSessionRecord() {
+  private async createChatSessionRecord() {
     const now = Date.now()
     const stamp = new Date(now).toISOString()
       .replace(/[-:]/g, '')
@@ -217,7 +215,7 @@ export class RuntimeManager {
     const chatId = `chat-${stamp}-${randomUUID().slice(0, 8)}`
     const chatPath = join(this.getChatsRoot(), chatId)
 
-    mkdirSync(chatPath, { recursive: true })
+    await mkdir(chatPath, { recursive: true })
     const chat: ChatSessionRecord = {
       chatId,
       chatPath,
@@ -226,13 +224,13 @@ export class RuntimeManager {
       createdAt: now,
       updatedAt: now
     }
-    this.writeChatSessionMarker(chat)
+    await this.writeChatSessionMarker(chat)
 
     return chat
   }
 
-  private writeChatSessionMarker(chat: ChatSessionRecord) {
-    writeFileSync(join(chat.chatPath, CHAT_MARKER_FILE), `${JSON.stringify({
+  private async writeChatSessionMarker(chat: ChatSessionRecord) {
+    await writeFile(join(chat.chatPath, CHAT_MARKER_FILE), `${JSON.stringify({
       chatId: chat.chatId,
       threadId: chat.threadId,
       title: chat.title ?? DEFAULT_CHAT_TITLE,
@@ -542,7 +540,7 @@ export class RuntimeManager {
   }
 
   async createChatSession(): Promise<StartChatSessionResult> {
-    return await this.startChatSession(this.createChatSessionRecord().chatId)
+    return await this.startChatSession((await this.createChatSessionRecord()).chatId)
   }
 
   async startChatSession(chatId: string): Promise<StartChatSessionResult> {
@@ -558,12 +556,12 @@ export class RuntimeManager {
     const chat = this.resolveChatSession(chatId)
     await this.stopChatSession(chatId)
     this.activeSessions.delete(this.chatRuntimeId(chatId))
-    rmSync(chat.chatPath, { recursive: true, force: true })
+    await rm(chat.chatPath, { recursive: true, force: true })
 
     return { chatId }
   }
 
-  updateChatSessionTitle(chatId: string, title: string): UpdateChatSessionTitleResult {
+  async updateChatSessionTitle(chatId: string, title: string): Promise<UpdateChatSessionTitleResult> {
     const chat = this.resolveChatSession(chatId)
 
     const nextTitle = title.trim()
@@ -576,11 +574,11 @@ export class RuntimeManager {
       title: nextTitle,
       updatedAt: Date.now()
     }
-    this.writeChatSessionMarker(updatedChat)
+    await this.writeChatSessionMarker(updatedChat)
     return this.getChatStatus(chatId)
   }
 
-  updateChatSessionThread(chatId: string, threadId: string | null): UpdateChatSessionThreadResult {
+  async updateChatSessionThread(chatId: string, threadId: string | null): Promise<UpdateChatSessionThreadResult> {
     const chat = this.resolveChatSession(chatId)
     const nextThreadId = typeof threadId === 'string' && threadId.trim()
       ? threadId.trim()
@@ -591,7 +589,7 @@ export class RuntimeManager {
       threadId: nextThreadId,
       updatedAt: Date.now()
     }
-    this.writeChatSessionMarker(updatedChat)
+    await this.writeChatSessionMarker(updatedChat)
     return this.getChatStatus(chatId)
   }
 

@@ -10,6 +10,7 @@ import {
   inferLocalFileLanguage,
   resolveLocalFileLanguageLabel
 } from '../../shared/file-highlighting'
+import type { WorkspaceLocalFileScope } from '../../shared/local-files'
 
 const runtimeConfig = useRuntimeConfig()
 const { state, closeViewer } = useLocalFileViewer()
@@ -80,6 +81,9 @@ const updatedAtLabel = computed(() => {
   }).format(new Date(file.value.updatedAt))
 })
 
+const isSameWorkspace = (left: WorkspaceLocalFileScope | null, right: WorkspaceLocalFileScope | null) =>
+  left?.kind === right?.kind && left?.id === right?.id
+
 const syncRenderedCodeLines = async () => {
   if (!lineContainer.value) {
     return
@@ -107,9 +111,10 @@ const syncRenderedCodeLines = async () => {
 }
 
 watch(
-  () => [state.value.open, state.value.projectId, state.value.path] as const,
-  async ([open, projectId, path]) => {
-    if (!open || !projectId || !path) {
+  () => [state.value.open, state.value.workspace?.kind, state.value.workspace?.id, state.value.path] as const,
+  async ([open, _workspaceKind, _workspaceId, path]) => {
+    const workspace = state.value.workspace ? { ...state.value.workspace } : null
+    if (!open || !workspace || !path) {
       loading.value = false
       error.value = null
       file.value = null
@@ -122,24 +127,24 @@ watch(
 
     try {
       const response = await $fetch<ProjectLocalFileResponse>(resolveProjectLocalFileUrl({
-        projectId,
+        workspace,
         path,
         configuredBase: String(runtimeConfig.public.serverBase ?? '')
       }))
-      if (!state.value.open || state.value.projectId !== projectId || state.value.path !== path) {
+      if (!state.value.open || !isSameWorkspace(state.value.workspace, workspace) || state.value.path !== path) {
         return
       }
 
       file.value = response.file
       await syncRenderedCodeLines()
     } catch (caughtError) {
-      if (!state.value.open || state.value.projectId !== projectId || state.value.path !== path) {
+      if (!state.value.open || !isSameWorkspace(state.value.workspace, workspace) || state.value.path !== path) {
         return
       }
 
       error.value = caughtError instanceof Error ? caughtError.message : String(caughtError)
     } finally {
-      if (state.value.open && state.value.projectId === projectId && state.value.path === path) {
+      if (state.value.open && isSameWorkspace(state.value.workspace, workspace) && state.value.path === path) {
         loading.value = false
       }
     }

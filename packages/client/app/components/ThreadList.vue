@@ -26,7 +26,9 @@ const route = useRoute()
 const { loaded, refreshProjects, startProject, getProject } = useProjects()
 const { getClient } = useRpc()
 const { closePanel } = useThreadPanel()
-const currentThreadSummaries = () => useThreadSummaries(props.projectId ?? '__missing-project__')
+const resolveThreadSummaryKey = (projectId: string | null) =>
+  projectId ? `project:${projectId}` : '__missing-project__'
+const currentThreadSummaries = () => useThreadSummaries(resolveThreadSummaryKey(props.projectId))
 const threads = computed(() => currentThreadSummaries().threads.value)
 const loading = computed(() => currentThreadSummaries().loading.value)
 const error = computed(() => currentThreadSummaries().error.value)

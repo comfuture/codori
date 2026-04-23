@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import MessagePartRenderer from './MessagePartRenderer'
 import type { ChatMessage, ChatPart } from '~~/shared/codex-chat'
+import type { WorkspaceAttachmentScope } from '~~/shared/chat-attachments'
 
 defineProps<{
   message?: ChatMessage | null
   projectId?: string
+  workspace?: WorkspaceAttachmentScope
+  workspaceRootPath?: string | null
 }>()
 
 const partKey = (messageId: string | undefined, part: ChatPart, index: number) => {
@@ -23,6 +26,8 @@ const partKey = (messageId: string | undefined, part: ChatPart, index: number) =
       :key="partKey(message?.id, part, index)"
       :message="message"
       :project-id="projectId"
+      :workspace="workspace"
+      :workspace-root-path="workspaceRootPath"
       :part="part"
     />
   </div>

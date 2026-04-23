@@ -18,6 +18,10 @@ export type ProjectLocalFileResponse = {
   }
 }
 
+export type WorkspaceLocalFileScope =
+  | { kind: 'project', id: string }
+  | { kind: 'chat', id: string }
+
 const WINDOWS_ABSOLUTE_PATH_RE = /^[A-Za-z]:[\\/]/u
 
 const normalizeComparablePath = (value: string) => {
@@ -96,7 +100,7 @@ export const isLocalFileWithinProject = (
 
 export const resolveProjectLocalFileUrl = (input: {
   projectId?: string
-  workspace?: { kind: 'project', id: string } | { kind: 'chat', id: string }
+  workspace?: WorkspaceLocalFileScope
   path: string
   configuredBase?: string | null
 }) => {

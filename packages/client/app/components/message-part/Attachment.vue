@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRuntimeConfig } from '#imports'
-import { resolveAttachmentPreviewUrl } from '~~/shared/chat-attachments'
+import { resolveAttachmentPreviewUrl, type WorkspaceAttachmentScope } from '~~/shared/chat-attachments'
 
 const props = defineProps<{
   projectId?: string
+  workspace?: WorkspaceAttachmentScope
   part?: {
     type: 'attachment'
     attachment: {
@@ -18,9 +19,13 @@ const props = defineProps<{
 }>()
 
 const runtimeConfig = useRuntimeConfig()
+const workspaceScope = computed<WorkspaceAttachmentScope | null>(() =>
+  props.workspace ?? (props.projectId ? { kind: 'project', id: props.projectId } : null)
+)
 
 const previewUrl = computed(() => {
   const attachment = props.part?.attachment
+  const workspace = workspaceScope.value
   if (!attachment) {
     return null
   }
@@ -29,12 +34,12 @@ const previewUrl = computed(() => {
     return attachment.url
   }
 
-  if (!attachment.localPath || !props.projectId) {
+  if (!attachment.localPath || !workspace) {
     return null
   }
 
   return resolveAttachmentPreviewUrl({
-    projectId: props.projectId,
+    workspace,
     path: attachment.localPath,
     configuredBase: String(runtimeConfig.public.serverBase ?? '')
   })

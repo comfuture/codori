@@ -329,12 +329,12 @@ describe('RuntimeManager', () => {
     runningManagers.push(manager)
 
     const created = await manager.createChatSession()
-    const titled = manager.updateChatSessionTitle(
+    const titled = await manager.updateChatSessionTitle(
       created.chatId,
       'Investigate chat titles'
     )
-    const threaded = manager.updateChatSessionThread(created.chatId, 'thread-1')
-    const cleared = manager.updateChatSessionThread(created.chatId, null)
+    const threaded = await manager.updateChatSessionThread(created.chatId, 'thread-1')
+    const cleared = await manager.updateChatSessionThread(created.chatId, null)
 
     expect(titled.title).toBe('Investigate chat titles')
     expect(threaded.threadId).toBe('thread-1')
