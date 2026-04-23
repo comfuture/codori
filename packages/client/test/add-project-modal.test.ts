@@ -199,4 +199,11 @@ describe('add project modal', () => {
     expect(mockRefreshProjects).not.toHaveBeenCalled()
     expect(mockRouterPush).not.toHaveBeenCalled()
   })
+
+  it('uses a single-directory placeholder for the optional destination field', () => {
+    const wrapper = mountModal()
+    const inputs = wrapper.findAll('input')
+
+    expect(inputs[1]?.attributes('placeholder')).toBe('reponame')
+  })
 })

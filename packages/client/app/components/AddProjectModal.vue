@@ -101,14 +101,19 @@ const submit = async () => {
   >
     <template #body>
       <form
-        class="space-y-4"
+        class="w-full space-y-4"
         @submit.prevent="submit"
       >
-        <div class="space-y-3">
+        <div class="w-full space-y-3">
           <UFormField
             label="Git repository URL"
             required
             size="sm"
+            class="w-full"
+            :ui="{
+              root: 'w-full',
+              container: 'w-full'
+            }"
           >
             <UInput
               v-model="repositoryUrl"
@@ -117,9 +122,11 @@ const submit = async () => {
               size="sm"
               color="neutral"
               variant="subtle"
+              class="w-full"
               :disabled="clonePending"
               :ui="{
-                base: 'min-h-10 rounded-lg px-3 text-sm'
+                root: 'w-full',
+                base: 'min-h-10 w-full rounded-lg px-3 text-sm'
               }"
             />
           </UFormField>
@@ -128,16 +135,23 @@ const submit = async () => {
             label="Directory name"
             description="Optional relative path under the configured Codori root."
             size="sm"
+            class="w-full"
+            :ui="{
+              root: 'w-full',
+              container: 'w-full'
+            }"
           >
             <UInput
               v-model="destination"
-              placeholder="team/repo"
+              placeholder="reponame"
               size="sm"
               color="neutral"
               variant="subtle"
+              class="w-full"
               :disabled="clonePending"
               :ui="{
-                base: 'min-h-10 rounded-lg px-3 text-sm'
+                root: 'w-full',
+                base: 'min-h-10 w-full rounded-lg px-3 text-sm'
               }"
             />
           </UFormField>
