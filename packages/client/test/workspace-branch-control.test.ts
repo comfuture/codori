@@ -41,6 +41,7 @@ const ButtonStub = defineComponent({
 
 const InputStub = defineComponent({
   name: 'InputStub',
+  inheritAttrs: false,
   props: {
     modelValue: {
       type: String,
@@ -57,14 +58,19 @@ const InputStub = defineComponent({
   },
   emits: ['update:modelValue', 'keydown'],
   setup(props, { emit, attrs }) {
-    return () => h('input', {
-      ...attrs,
-      value: props.modelValue,
-      placeholder: props.placeholder,
-      disabled: props.disabled,
-      onInput: (event: Event) => emit('update:modelValue', (event.target as HTMLInputElement).value),
-      onKeydown: (event: KeyboardEvent) => emit('keydown', event)
-    })
+    return () => {
+      const inputAttrs = { ...attrs }
+      delete inputAttrs.size
+
+      return h('input', {
+        ...inputAttrs,
+        value: props.modelValue,
+        placeholder: props.placeholder,
+        disabled: props.disabled,
+        onInput: (event: Event) => emit('update:modelValue', (event.target as HTMLInputElement).value),
+        onKeydown: (event: KeyboardEvent) => emit('keydown', event)
+      })
+    }
   }
 })
 
@@ -99,26 +105,23 @@ const mountControl = (props: Record<string, unknown>) =>
   })
 
 describe('workspace branch control', () => {
-  it('renders the current branch, filters local branches, and emits switch/create actions', async () => {
+  it('renders a simple branch list and emits switch/create actions', async () => {
     const wrapper = mountControl({
       currentBranch: 'main',
       branches: ['feature/demo', 'main', 'release']
     })
 
+    expect(wrapper.find('[data-current-branch]').text()).toContain('main')
+    expect(wrapper.text()).not.toContain('Workspace branch')
+    expect(wrapper.find('input[placeholder="Search local branches"]').exists()).toBe(false)
     expect(wrapper.text()).toContain('main')
     expect(wrapper.text()).toContain('feature/demo')
-    expect(wrapper.text()).toContain('release')
-
-    const searchInput = wrapper.find('input[placeholder="Search local branches"]')
-    await searchInput.setValue('rel')
-
-    expect(wrapper.text()).not.toContain('feature/demo')
     expect(wrapper.text()).toContain('release')
 
     await wrapper.get('[data-branch-option="release"]').trigger('click')
     expect(wrapper.emitted('switchBranch')?.[0]?.[0]).toBe('release')
 
-    const createInput = wrapper.find('input[placeholder="feature/new-branch"]')
+    const createInput = wrapper.find('input[placeholder="create a branch"]')
     await createInput.setValue('feature/new-work')
     await wrapper.get('[data-create-branch]').trigger('click')
 
