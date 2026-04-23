@@ -286,6 +286,84 @@ describe('createHttpServer', () => {
     })
   })
 
+  it('switches to another local git branch for a project', async () => {
+    const projectPath = createGitRepo()
+    const app = await createHttpServer(createManager({
+      getProjectStatus: () => ({
+        ...createProjectRecord(),
+        projectPath
+      })
+    }))
+    startedApps.push(app)
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/projects/demo/git/branches/switch',
+      payload: {
+        branch: 'feature/review'
+      }
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toEqual({
+      currentBranch: 'feature/review',
+      branches: ['feature/review', 'main']
+    })
+  })
+
+  it('creates and switches to a new local git branch for a project', async () => {
+    const projectPath = createGitRepo()
+    const app = await createHttpServer(createManager({
+      getProjectStatus: () => ({
+        ...createProjectRecord(),
+        projectPath
+      })
+    }))
+    startedApps.push(app)
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/projects/demo/git/branches/create',
+      payload: {
+        branch: 'feature/new-work'
+      }
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toEqual({
+      currentBranch: 'feature/new-work',
+      branches: ['feature/new-work', 'feature/review', 'main']
+    })
+  })
+
+  it('rejects invalid local git branch names', async () => {
+    const projectPath = createGitRepo()
+    const app = await createHttpServer(createManager({
+      getProjectStatus: () => ({
+        ...createProjectRecord(),
+        projectPath
+      })
+    }))
+    startedApps.push(app)
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/projects/demo/git/branches/create',
+      payload: {
+        branch: 'feature with spaces'
+      }
+    })
+
+    expect(response.statusCode).toBe(400)
+    expect(response.json()).toEqual({
+      error: {
+        code: 'INVALID_GIT_BRANCH',
+        message: 'Branch name "feature with spaces" is not a valid local branch name.',
+        details: null
+      }
+    })
+  })
+
   it('returns an empty branch list when the project is not a git repository', async () => {
     const projectPath = mkdtempSync(join(os.tmpdir(), 'codori-non-git-'))
     tempDirs.push(projectPath)
