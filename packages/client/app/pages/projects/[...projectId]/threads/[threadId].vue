@@ -30,11 +30,14 @@ const threadId = computed(() => {
   return typeof value === 'string' ? value : null
 })
 const selectedProject = computed(() => getProject(projectId.value))
+const workspaceSessionKey = computed(() =>
+  projectId.value ? `project:${projectId.value}` : null
+)
 const session = computed(() =>
-  projectId.value ? useChatSession(projectId.value) : null
+  workspaceSessionKey.value ? useChatSession(workspaceSessionKey.value) : null
 )
 const threadSummaries = computed(() =>
-  projectId.value ? useThreadSummaries(projectId.value).threads.value : []
+  workspaceSessionKey.value ? useThreadSummaries(workspaceSessionKey.value).threads.value : []
 )
 const routeThreadSummaryTitle = computed(() =>
   threadSummaries.value.find(thread => thread.id === threadId.value)?.title ?? null
