@@ -57,6 +57,27 @@ const getSession = (projectId: string, threadId: string | null): PendingUserRequ
   return session
 }
 
+export const promotePendingUserRequestSessions = (sourceProjectId: string, targetProjectId: string) => {
+  if (sourceProjectId === targetProjectId) {
+    return
+  }
+
+  const sourcePrefix = `${sourceProjectId}::`
+  const targetPrefix = `${targetProjectId}::`
+
+  for (const [key, session] of [...sessions.entries()]) {
+    if (!key.startsWith(sourcePrefix)) {
+      continue
+    }
+
+    const targetKey = `${targetPrefix}${key.slice(sourcePrefix.length)}`
+    if (!sessions.has(targetKey)) {
+      sessions.set(targetKey, session)
+    }
+    sessions.delete(key)
+  }
+}
+
 const promoteNextRequest = (session: PendingUserRequestSession) => {
   const entry = session.queue[0]
   session.current.value = entry

@@ -5,7 +5,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useChats } from '../composables/useChats'
 import { useProjects } from '../composables/useProjects'
 import { sortSidebarProjects } from '../utils/project-sidebar-order'
-import { toChatRoute, toProjectRoute } from '~~/shared/codori'
+import { toChatRoute, toChatsRoute, toProjectRoute } from '~~/shared/codori'
 
 const props = defineProps<{
   collapsed?: boolean
@@ -40,7 +40,6 @@ const {
   createPending: chatCreatePending,
   deletePendingId: chatDeletePendingId,
   refreshChats,
-  createChat,
   deleteChat
 } = useChats()
 
@@ -82,8 +81,7 @@ const formatChatDate = (chat: { createdAt: number | null }) => {
 }
 
 const startChat = async () => {
-  const chat = await createChat()
-  await router.push(toChatRoute(chat.chatId))
+  await router.push(toChatsRoute())
 }
 
 const removeChat = async (chatId: string) => {

@@ -119,3 +119,17 @@ export const useChatSession = (projectId: string) => {
   sessions.set(projectId, session)
   return session
 }
+
+export const promoteChatSession = (sourceProjectId: string, targetProjectId: string) => {
+  if (sourceProjectId === targetProjectId || sessions.has(targetProjectId)) {
+    return
+  }
+
+  const session = sessions.get(sourceProjectId)
+  if (!session) {
+    return
+  }
+
+  sessions.set(targetProjectId, session)
+  sessions.delete(sourceProjectId)
+}

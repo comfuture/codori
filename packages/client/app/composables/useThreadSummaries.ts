@@ -123,3 +123,17 @@ export const useThreadSummaries = (projectId: string): UseThreadSummariesResult 
   states.set(projectId, state)
   return createApi(state)
 }
+
+export const promoteThreadSummaries = (sourceProjectId: string, targetProjectId: string) => {
+  if (sourceProjectId === targetProjectId || states.has(targetProjectId)) {
+    return
+  }
+
+  const state = states.get(sourceProjectId)
+  if (!state) {
+    return
+  }
+
+  states.set(targetProjectId, state)
+  states.delete(sourceProjectId)
+}
