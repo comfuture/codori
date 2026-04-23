@@ -7,6 +7,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import WebSocket, { WebSocketServer } from 'ws'
 import { resolveProjectAttachmentsDir } from '../src/attachment-store.js'
+import { CodoriError } from '../src/errors.js'
 import { createHttpServer, type RuntimeManagerLike } from '../src/http-server.js'
 import type { ServiceUpdateController } from '../src/service-update.js'
 import type { ProjectStatusRecord, StartProjectResult } from '../src/types.js'
@@ -72,6 +73,7 @@ const createProjectRecord = (): ProjectStatusRecord => ({
 const createManager = (overrides: Partial<RuntimeManagerLike> = {}): RuntimeManagerLike => ({
   listProjectStatuses: () => [createProjectRecord()],
   getProjectStatus: () => createProjectRecord(),
+  cloneProject: () => createProjectRecord(),
   startProject: () => ({
     ...createProjectRecord(),
     reusedExisting: true
@@ -145,6 +147,66 @@ describe('createHttpServer', () => {
       project: {
         ...createProjectRecord(),
         reusedExisting: true
+      }
+    })
+  })
+
+  it('clones a project through the management API', async () => {
+    const app = await createHttpServer(createManager({
+      cloneProject: ({ repositoryUrl, destination }) => ({
+        ...createProjectRecord(),
+        projectId: destination ?? 'demo',
+        projectPath: `/tmp/${destination ?? 'demo'}`,
+        error: repositoryUrl ? null : 'missing'
+      })
+    }))
+    startedApps.push(app)
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/projects/clone',
+      payload: {
+        repositoryUrl: 'https://github.com/comfuture/codori',
+        destination: 'team/codori'
+      }
+    })
+
+    expect(response.statusCode).toBe(201)
+    expect(response.json()).toEqual({
+      project: {
+        ...createProjectRecord(),
+        projectId: 'team/codori',
+        projectPath: '/tmp/team/codori'
+      }
+    })
+  })
+
+  it('maps clone validation errors to structured API responses', async () => {
+    const app = await createHttpServer(createManager({
+      cloneProject: () => {
+        throw new CodoriError(
+          'DESTINATION_EXISTS',
+          'Destination "team/codori" already exists under the configured Codori root.'
+        )
+      }
+    }))
+    startedApps.push(app)
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/projects/clone',
+      payload: {
+        repositoryUrl: 'https://github.com/comfuture/codori',
+        destination: 'team/codori'
+      }
+    })
+
+    expect(response.statusCode).toBe(409)
+    expect(response.json()).toEqual({
+      error: {
+        code: 'DESTINATION_EXISTS',
+        message: 'Destination "team/codori" already exists under the configured Codori root.',
+        details: null
       }
     })
   })

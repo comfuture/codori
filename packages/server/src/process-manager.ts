@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import os from 'node:os'
 import { resolveConfig } from './config.js'
 import { CodoriError } from './errors.js'
+import { cloneProjectIntoRoot } from './git.js'
 import { findAvailablePort } from './ports.js'
 import { scanProjects } from './project-scanner.js'
 import { RuntimeStore } from './runtime-store.js'
@@ -249,6 +250,16 @@ export class RuntimeManager {
 
   getProjectStatus(projectId: string) {
     return this.readRunningRuntime(this.resolveProject(projectId))
+  }
+
+  async cloneProject(input: { repositoryUrl: string, destination?: string | null }) {
+    const clonedProject = await cloneProjectIntoRoot({
+      rootDirectory: this.config.root,
+      repositoryUrl: input.repositoryUrl,
+      destination: input.destination
+    })
+
+    return this.getProjectStatus(clonedProject.projectId)
   }
 
   async startProject(projectId: string): Promise<StartProjectResult> {
