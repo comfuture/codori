@@ -127,7 +127,7 @@ export const switchGitBranch = async (
   projectPath: string,
   branchName: string
 ): Promise<GitBranchesResult> =>
-  await runGitBranchMutation(projectPath, branchName, validatedBranchName => ['checkout', '--', validatedBranchName])
+  await runGitBranchMutation(projectPath, branchName, validatedBranchName => ['checkout', validatedBranchName])
 
 export const createGitBranch = async (
   projectPath: string,
