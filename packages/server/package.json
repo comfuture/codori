@@ -1,6 +1,6 @@
 {
   "name": "@codori/server",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": false,
   "description": "Codori server for Git project discovery, Codex runtime management, and bundled dashboard serving.",
   "type": "module",
