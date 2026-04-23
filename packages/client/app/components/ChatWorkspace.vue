@@ -400,7 +400,9 @@ const composerPlaceholder = computed(() =>
     ? 'Respond to the pending request below to let Codex continue'
     : isPlanModeActive.value
       ? 'Describe what you want Codex to plan'
-      : 'Describe the change you want Codex to make'
+      : isChatSessionWorkspace.value
+        ? 'Ask Codex anything. @ to use plugins or use files'
+        : 'Describe the change you want Codex to make'
 )
 const chatMessagesStatus = computed(() =>
   resolveChatMessagesStatus(status.value, awaitingAssistantOutput.value)
@@ -409,10 +411,15 @@ const chatSpacingOffset = computed(() =>
   Math.max(140, stickyFooterHeight.value + 24)
 )
 const showWelcomeState = computed(() =>
-  !routeThreadId.value
-  && !activeThreadId.value
-  && messages.value.length === 0
+  messages.value.length === 0
   && !isBusy.value
+  && (
+    isChatSessionWorkspace.value
+    || (!routeThreadId.value && !activeThreadId.value)
+  )
+)
+const showChatWelcomeState = computed(() =>
+  showWelcomeState.value && isChatSessionWorkspace.value
 )
 
 const slashCommands = computed(() =>
@@ -3958,7 +3965,19 @@ watch(
         v-if="showWelcomeState"
         class="flex min-h-full items-center justify-center px-6 py-10"
       >
-        <div class="flex w-full max-w-4xl flex-col items-center gap-10 text-center">
+        <div
+          v-if="showChatWelcomeState"
+          class="w-full max-w-5xl text-center"
+        >
+          <h1 class="text-balance text-3xl font-semibold tracking-tight text-highlighted md:text-4xl">
+            What should we work on?
+          </h1>
+        </div>
+
+        <div
+          v-else
+          class="flex w-full max-w-4xl flex-col items-center gap-10 text-center"
+        >
           <div class="space-y-4">
             <div class="text-xs font-medium text-primary">
               Ready to code
