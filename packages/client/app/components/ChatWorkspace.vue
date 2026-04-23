@@ -288,6 +288,7 @@ const {
   error: workspaceGitBranchError,
   showBranchControl: showWorkspaceBranchControl,
   refreshBranchesForActivity: refreshWorkspaceGitBranchesForActivity,
+  refreshBranchesForEnvironmentSignal: refreshWorkspaceGitBranchesForEnvironmentSignal,
   switchBranch: switchWorkspaceGitBranch,
   createBranch: createWorkspaceGitBranch
 } = workspaceGitBranch
@@ -866,6 +867,7 @@ let promptControlsPromise: Promise<void> | null = null
 let pendingThreadHydration: Promise<void> | null = null
 let releaseServerRequestHandler: (() => void) | null = null
 let releaseSkillNotificationSubscription: (() => void) | null = null
+let releaseWorkspaceGitBranchEnvironmentListeners: (() => void) | null = null
 let footerResizeObserver: ResizeObserver | null = null
 let skipNextSkillMentionSync = false
 let skipNextMentionSelectionSync = false
@@ -2007,6 +2009,14 @@ const isWorkspaceBranchControlDisabled = computed(() =>
 
 const refreshWorkspaceGitBranchesInBackground = (activity: string) => {
   void refreshWorkspaceGitBranchesForActivity(activity)
+}
+
+const refreshWorkspaceGitBranchesFromEnvironment = (signal: string) => {
+  if (!import.meta.client || document.visibilityState !== 'visible') {
+    return
+  }
+
+  void refreshWorkspaceGitBranchesForEnvironmentSignal(signal)
 }
 
 const untrackPendingUserMessage = (messageId: string) => {
@@ -3474,6 +3484,29 @@ onMounted(() => {
   void scheduleScrollToBottom('auto')
 
   if (import.meta.client) {
+    const handleWorkspaceVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        refreshWorkspaceGitBranchesFromEnvironment('window/visible')
+      }
+    }
+    const handleWorkspaceFocus = () => {
+      refreshWorkspaceGitBranchesFromEnvironment('window/focus')
+    }
+    const handleWorkspaceInteraction = () => {
+      refreshWorkspaceGitBranchesFromEnvironment('window/interaction')
+    }
+
+    document.addEventListener('visibilitychange', handleWorkspaceVisibilityChange)
+    window.addEventListener('focus', handleWorkspaceFocus)
+    window.addEventListener('pointermove', handleWorkspaceInteraction, { passive: true })
+    window.addEventListener('keydown', handleWorkspaceInteraction)
+    releaseWorkspaceGitBranchEnvironmentListeners = () => {
+      document.removeEventListener('visibilitychange', handleWorkspaceVisibilityChange)
+      window.removeEventListener('focus', handleWorkspaceFocus)
+      window.removeEventListener('pointermove', handleWorkspaceInteraction)
+      window.removeEventListener('keydown', handleWorkspaceInteraction)
+    }
+
     footerResizeObserver = new ResizeObserver((entries) => {
       const entry = entries[0]
       const borderBoxSize = entry?.borderBoxSize[0]?.blockSize
@@ -3495,6 +3528,8 @@ onBeforeUnmount(() => {
   releaseServerRequestHandler = null
   releaseSkillNotificationSubscription?.()
   releaseSkillNotificationSubscription = null
+  releaseWorkspaceGitBranchEnvironmentListeners?.()
+  releaseWorkspaceGitBranchEnvironmentListeners = null
   footerResizeObserver?.disconnect()
   footerResizeObserver = null
 })

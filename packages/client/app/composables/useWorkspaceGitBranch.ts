@@ -22,6 +22,15 @@ export const WORKSPACE_GIT_BRANCH_REFRESH_BOUNDARIES = new Set([
 export const shouldRefreshWorkspaceGitBranchOnActivity = (activity: string) =>
   WORKSPACE_GIT_BRANCH_REFRESH_BOUNDARIES.has(activity)
 
+export const WORKSPACE_GIT_BRANCH_ENVIRONMENT_REFRESH_BOUNDARIES = new Set([
+  'window/visible',
+  'window/focus',
+  'window/interaction'
+])
+
+export const shouldRefreshWorkspaceGitBranchOnEnvironmentSignal = (signal: string) =>
+  WORKSPACE_GIT_BRANCH_ENVIRONMENT_REFRESH_BOUNDARIES.has(signal)
+
 type UseWorkspaceGitBranchOptions = {
   projectId: string
   serverBase: string
@@ -33,6 +42,7 @@ type RefreshWorkspaceGitBranchOptions = {
 }
 
 const MIN_REFRESH_INTERVAL_MS = 750
+export const WORKSPACE_GIT_BRANCH_ENVIRONMENT_REFRESH_INTERVAL_MS = 10_000
 
 const readJsonResponse = async <T>(response: Response, fallbackMessage: string): Promise<T> => {
   let body: T | { error?: { message?: string } } | null = null
@@ -61,6 +71,7 @@ export const useWorkspaceGitBranch = (options: UseWorkspaceGitBranchOptions) => 
   const error = ref<string | null>(null)
 
   let lastRefreshAt = 0
+  let lastEnvironmentRefreshAttemptAt = 0
   let inflightRefresh: Promise<ProjectGitBranchesResponse> | null = null
 
   const applyBranchState = (result: ProjectGitBranchesResponse) => {
@@ -126,6 +137,32 @@ export const useWorkspaceGitBranch = (options: UseWorkspaceGitBranchOptions) => 
     if (!shouldRefreshWorkspaceGitBranchOnActivity(activity)) {
       return null
     }
+
+    try {
+      return await refreshBranches({
+        silent: loaded.value
+      })
+    } catch {
+      return null
+    }
+  }
+
+  const refreshBranchesForEnvironmentSignal = async (
+    signal: string,
+    now = Date.now()
+  ) => {
+    if (!shouldRefreshWorkspaceGitBranchOnEnvironmentSignal(signal)) {
+      return null
+    }
+
+    if (
+      loaded.value
+      && now - Math.max(lastRefreshAt, lastEnvironmentRefreshAttemptAt) < WORKSPACE_GIT_BRANCH_ENVIRONMENT_REFRESH_INTERVAL_MS
+    ) {
+      return null
+    }
+
+    lastEnvironmentRefreshAttemptAt = now
 
     try {
       return await refreshBranches({
@@ -210,6 +247,7 @@ export const useWorkspaceGitBranch = (options: UseWorkspaceGitBranchOptions) => 
     showBranchControl,
     refreshBranches,
     refreshBranchesForActivity,
+    refreshBranchesForEnvironmentSignal,
     switchBranch,
     createBranch
   }
