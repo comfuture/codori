@@ -24,9 +24,13 @@ export type ConfigOverrides = {
   idleShutdownSweepIntervalMs?: number
 }
 
+export type WorkspaceKind = 'project' | 'projectless'
+
 export type ProjectRecord = {
   id: string
   path: string
+  workspaceKind?: WorkspaceKind
+  createdAt?: number | null
 }
 
 export type RuntimeRecord = {
@@ -43,6 +47,8 @@ export type ProjectRuntimeStatus = 'running' | 'stopped' | 'error'
 export type ProjectStatusRecord = {
   projectId: string
   projectPath: string
+  workspaceKind: WorkspaceKind
+  createdAt: number | null
   status: ProjectRuntimeStatus
   pid: number | null
   port: number | null
