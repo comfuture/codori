@@ -51,6 +51,36 @@ describe('useWorkspaceGitBranch', () => {
     expect(manager.branches.value).toEqual([])
   })
 
+  it('does not fetch branches when git is unsupported', async () => {
+    const manager = useWorkspaceGitBranch({
+      projectId: `projectless/chat-${Date.now()}`,
+      serverBase: '',
+      supportsGit: () => false
+    })
+
+    await expect(manager.refreshBranches({ force: true })).resolves.toEqual({
+      currentBranch: null,
+      branches: []
+    })
+
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(manager.loaded.value).toBe(true)
+    expect(manager.showBranchControl.value).toBe(false)
+  })
+
+  it('does not mutate branches when git is unsupported', async () => {
+    const manager = useWorkspaceGitBranch({
+      projectId: `projectless/chat-${Date.now()}`,
+      serverBase: '',
+      supportsGit: () => false
+    })
+
+    await expect(manager.switchBranch('main')).resolves.toBeNull()
+
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(manager.error.value).toBe('Git branch operations are not available for projectless chats.')
+  })
+
   it('refreshes the current branch on activity boundaries after an external change', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-23T00:00:00Z'))

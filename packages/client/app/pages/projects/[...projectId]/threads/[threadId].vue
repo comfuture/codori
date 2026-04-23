@@ -18,7 +18,14 @@ import {
 const route = useRoute()
 const router = useRouter()
 const { togglePanel } = useThreadPanel()
-const { loaded, refreshProjects, getProject, pendingProjectId } = useProjects()
+const {
+  loaded,
+  projectlessLoaded,
+  refreshProjects,
+  refreshProjectlessChats,
+  getProject,
+  pendingProjectId
+} = useProjects()
 
 const projectId = computed(() => normalizeProjectIdParam(route.params.projectId as string | string[] | undefined))
 const threadId = computed(() => {
@@ -177,6 +184,9 @@ const onNewThread = async () => {
 onMounted(() => {
   if (!loaded.value) {
     void refreshProjects()
+  }
+  if (projectId.value?.startsWith('projectless/') && !projectlessLoaded.value) {
+    void refreshProjectlessChats()
   }
 
   if (!import.meta.client) {

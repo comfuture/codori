@@ -100,7 +100,7 @@ import {
   shouldShowContextWindowIndicator,
   visibleModelOptions
 } from '~~/shared/chat-prompt-controls'
-import { toProjectThreadRoute } from '~~/shared/codori'
+import { isProjectlessProjectId, toProjectThreadRoute } from '~~/shared/codori'
 import {
   filterSlashCommands,
   findActiveSlashCommand,
@@ -162,7 +162,9 @@ const runtimeConfig = useRuntimeConfig()
 const { getClient } = useRpc()
 const {
   loaded,
+  projectlessLoaded,
   refreshProjects,
+  refreshProjectlessChats,
   getProject,
   startProject
 } = useProjects()
@@ -277,9 +279,14 @@ type MentionAutocompletePaletteSection = {
 }
 
 const selectedProject = computed(() => getProject(props.projectId))
+const supportsWorkspaceGit = computed(() =>
+  selectedProject.value?.workspaceKind !== 'projectless'
+  && !isProjectlessProjectId(props.projectId)
+)
 const workspaceGitBranch = useWorkspaceGitBranch({
   projectId: props.projectId,
-  serverBase: String(runtimeConfig.public.serverBase ?? '')
+  serverBase: String(runtimeConfig.public.serverBase ?? ''),
+  supportsGit: () => supportsWorkspaceGit.value
 })
 const {
   currentBranch: workspaceCurrentBranch,
@@ -1903,6 +1910,7 @@ const reviewWorkflow = useChatReviewWorkflow({
   attachments,
   hasPendingRequest,
   isWorkflowBusy,
+  supportsGit: supportsWorkspaceGit,
   error,
   status,
   tokenUsage,
@@ -2212,6 +2220,9 @@ const scheduleScrollToBottom = async (behavior: ScrollBehavior = 'auto') => {
 async function ensureProjectRuntime() {
   if (!loaded.value) {
     await refreshProjects()
+  }
+  if (isProjectlessProjectId(props.projectId) && !projectlessLoaded.value) {
+    await refreshProjectlessChats()
   }
 
   if (selectedProject.value?.status === 'running') {
@@ -3480,6 +3491,9 @@ onMounted(() => {
   })
   if (!loaded.value) {
     void refreshProjects()
+  }
+  if (isProjectlessProjectId(props.projectId) && !projectlessLoaded.value) {
+    void refreshProjectlessChats()
   }
 
   void getClient(props.projectId).connect().catch(() => {})

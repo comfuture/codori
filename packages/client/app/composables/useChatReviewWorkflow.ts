@@ -26,6 +26,7 @@ type UseChatReviewWorkflowOptions = {
   attachments: Ref<DraftAttachment[]>
   hasPendingRequest: Ref<boolean>
   isWorkflowBusy: ComputedRef<boolean>
+  supportsGit: ComputedRef<boolean>
   error: Ref<string | null>
   status: Ref<ChatStatus>
   tokenUsage: Ref<TokenUsageSnapshot | null>
@@ -68,6 +69,11 @@ export const useChatReviewWorkflow = (options: UseChatReviewWorkflowOptions) => 
   }
 
   const openReviewDrawer = (commandText = '/review') => {
+    if (!options.supportsGit.value) {
+      options.setComposerError('Review is only available in Git project workspaces.')
+      return
+    }
+
     options.clearDismissedSlashMatch()
     reviewDrawerCommandText.value = commandText
     reviewDrawerMode.value = 'target'
@@ -101,6 +107,11 @@ export const useChatReviewWorkflow = (options: UseChatReviewWorkflowOptions) => 
   }
 
   const openBaseBranchPicker = async () => {
+    if (!options.supportsGit.value) {
+      reviewBranchesError.value = 'Git branches are not available for projectless chats.'
+      return
+    }
+
     reviewDrawerMode.value = 'branch'
 
     try {
@@ -120,6 +131,11 @@ export const useChatReviewWorkflow = (options: UseChatReviewWorkflowOptions) => 
 
     if (options.hasPendingRequest.value || options.isWorkflowBusy.value) {
       options.setComposerError('Review can only start when the current thread is idle.')
+      return
+    }
+
+    if (!options.supportsGit.value) {
+      options.setComposerError('Review is only available in Git project workspaces.')
       return
     }
 
