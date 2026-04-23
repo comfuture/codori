@@ -36,8 +36,10 @@ type MaybePromise<T> = T | Promise<T>
 
 export type RuntimeManagerLike = {
   listProjectStatuses: () => MaybePromise<ProjectStatusRecord[]>
+  listProjectlessStatuses?: () => MaybePromise<ProjectStatusRecord[]>
   getProjectStatus: (projectId: string) => MaybePromise<ProjectStatusRecord>
   cloneProject?: (input: { repositoryUrl: string, destination?: string | null }) => MaybePromise<ProjectStatusRecord>
+  createProjectlessChat?: () => MaybePromise<StartProjectResult>
   startProject: (projectId: string) => MaybePromise<StartProjectResult>
   stopProject: (projectId: string) => MaybePromise<ProjectStatusRecord>
   noteProjectActivity?: (projectId: string) => MaybePromise<ProjectStatusRecord | void>
@@ -59,6 +61,10 @@ type ProjectResponse = {
 }
 
 type ProjectsResponse = {
+  projects: ProjectStatusRecord[]
+}
+
+type ProjectlessChatsResponse = {
   projects: ProjectStatusRecord[]
 }
 
@@ -130,6 +136,7 @@ const toStatusCode = (error: CodoriError) => {
     case 'MISSING_THREAD_ID':
     case 'INVALID_ATTACHMENT':
     case 'MISSING_ROOT':
+    case 'PROJECT_NOT_GIT_REPOSITORY':
       return 400
     case 'DESTINATION_EXISTS':
     case 'GIT_OPERATION_FAILED':
@@ -148,6 +155,15 @@ const getProjectIdFromRequest = (value: string | undefined) => {
     throw new CodoriError('MISSING_PROJECT_ID', 'Missing project id.')
   }
   return value
+}
+
+const ensureGitWorkspace = (project: ProjectStatusRecord) => {
+  if (project.workspaceKind === 'projectless') {
+    throw new CodoriError(
+      'PROJECT_NOT_GIT_REPOSITORY',
+      'Git branch operations are not available for projectless chats.'
+    )
+  }
 }
 
 const resolveMentionAssetRoots = (projectPath: string) => [
@@ -315,6 +331,26 @@ export const createHttpServer = async (
     projects: await resolveValue(manager.listProjectStatuses())
   }))
 
+  app.get('/api/projectless-chats', async (): Promise<ProjectlessChatsResponse> => ({
+    projects: manager.listProjectlessStatuses
+      ? await resolveValue(manager.listProjectlessStatuses())
+      : []
+  }))
+
+  app.post('/api/projectless-chats', async (_request, reply): Promise<ProjectResponse> => {
+    if (!manager.createProjectlessChat) {
+      throw new CodoriError(
+        'INVALID_CONFIG',
+        'Projectless chat creation is not available because the runtime manager does not support it.'
+      )
+    }
+
+    reply.status(201)
+    return {
+      project: await resolveValue(manager.createProjectlessChat())
+    }
+  })
+
   app.post<{ Body: { repositoryUrl?: string, destination?: string | null } }>(
     '/api/projects/clone',
     async (request, reply): Promise<ProjectResponse> => {
@@ -385,6 +421,12 @@ export const createHttpServer = async (
     async (request: FastifyRequest<{ Params: { projectId: string } }>): Promise<ProjectGitBranchesResponse> => {
       const projectId = getProjectIdFromRequest(request.params.projectId)
       const project = await resolveValue(manager.getProjectStatus(projectId))
+      if (project.workspaceKind === 'projectless') {
+        return {
+          currentBranch: null,
+          branches: []
+        }
+      }
       await touchProjectActivity(manager, projectId)
       return await listGitBranches(project.projectPath)
     }
@@ -395,6 +437,7 @@ export const createHttpServer = async (
     async (request: FastifyRequest<{ Params: { projectId: string }, Body: ProjectGitBranchMutationRequest }>): Promise<ProjectGitBranchesResponse> => {
       const projectId = getProjectIdFromRequest(request.params.projectId)
       const project = await resolveValue(manager.getProjectStatus(projectId))
+      ensureGitWorkspace(project)
       await touchProjectActivity(manager, projectId)
       return await switchGitBranch(project.projectPath, request.body?.branch ?? '')
     }
@@ -405,6 +448,7 @@ export const createHttpServer = async (
     async (request: FastifyRequest<{ Params: { projectId: string }, Body: ProjectGitBranchMutationRequest }>): Promise<ProjectGitBranchesResponse> => {
       const projectId = getProjectIdFromRequest(request.params.projectId)
       const project = await resolveValue(manager.getProjectStatus(projectId))
+      ensureGitWorkspace(project)
       await touchProjectActivity(manager, projectId)
       return await createGitBranch(project.projectPath, request.body?.branch ?? '')
     }

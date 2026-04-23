@@ -1,5 +1,15 @@
 import { spawn, type ChildProcess } from 'node:child_process'
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync
+} from 'node:fs'
 import os from 'node:os'
+import { join } from 'node:path'
+import { randomUUID } from 'node:crypto'
 import { resolveConfig } from './config.js'
 import { CodoriError } from './errors.js'
 import { cloneProjectIntoRoot } from './git.js'
@@ -27,6 +37,7 @@ type ProjectSessionLease = {
 
 type RuntimeManagerOptions = {
   homeDir?: string
+  documentsDir?: string
   configOverrides?: ConfigOverrides
   config?: CodoriConfig
   commandFactory?: CommandFactory
@@ -34,6 +45,10 @@ type RuntimeManagerOptions = {
 
 const CODORI_STOP_TIMEOUT_MS = 3_000
 const CODORI_STOP_POLL_MS = 50
+const PROJECTLESS_PARENT_DIR_NAME = 'Codex'
+const PROJECTLESS_PROJECT_ID_PREFIX = 'projectless/'
+const PROJECTLESS_MARKER_FILE = '.codori-projectless.json'
+const PROJECTLESS_RECENT_LIMIT = 5
 
 const defaultCommandFactory: CommandFactory = (port) => ({
   command: process.env.CODORI_CODEX_BIN ?? 'codex',
@@ -86,6 +101,8 @@ export class RuntimeManager {
 
   readonly store: RuntimeStore
 
+  private readonly documentsDir: string
+
   private readonly commandFactory: CommandFactory
 
   private readonly activeSessions = new Map<string, number>()
@@ -97,6 +114,7 @@ export class RuntimeManager {
   constructor(options: RuntimeManagerOptions = {}) {
     this.config = options.config ?? resolveConfig(options.configOverrides, options.homeDir)
     this.store = new RuntimeStore(options.homeDir)
+    this.documentsDir = options.documentsDir ?? join(options.homeDir ?? os.homedir(), 'Documents')
     this.commandFactory = options.commandFactory ?? defaultCommandFactory
 
     if (this.config.idleShutdown.enabled) {
@@ -111,12 +129,105 @@ export class RuntimeManager {
     return scanProjects(this.config.root)
   }
 
+  private getProjectlessRoot() {
+    return join(this.documentsDir, PROJECTLESS_PARENT_DIR_NAME)
+  }
+
+  private readProjectlessProject(projectPath: string): ProjectRecord | null {
+    const markerPath = join(projectPath, PROJECTLESS_MARKER_FILE)
+    if (!existsSync(markerPath)) {
+      return null
+    }
+
+    try {
+      const marker = JSON.parse(readFileSync(markerPath, 'utf8')) as {
+        projectId?: unknown
+        createdAt?: unknown
+      }
+      if (typeof marker.projectId !== 'string' || !marker.projectId.startsWith(PROJECTLESS_PROJECT_ID_PREFIX)) {
+        return null
+      }
+
+      return {
+        id: marker.projectId,
+        path: projectPath,
+        workspaceKind: 'projectless',
+        createdAt: typeof marker.createdAt === 'number' ? marker.createdAt : null
+      }
+    } catch {
+      return null
+    }
+  }
+
+  private listProjectlessProjects(limit = PROJECTLESS_RECENT_LIMIT) {
+    const root = this.getProjectlessRoot()
+    if (!existsSync(root)) {
+      return []
+    }
+
+    const projects: ProjectRecord[] = []
+    for (const entry of readdirSync(root, { withFileTypes: true })) {
+      if (!entry.isDirectory()) {
+        continue
+      }
+
+      const projectPath = join(root, entry.name)
+      try {
+        if (!statSync(projectPath).isDirectory()) {
+          continue
+        }
+      } catch {
+        continue
+      }
+
+      const project = this.readProjectlessProject(projectPath)
+      if (project) {
+        projects.push(project)
+      }
+    }
+
+    return projects
+      .sort((left, right) => (right.createdAt ?? 0) - (left.createdAt ?? 0))
+      .slice(0, limit)
+  }
+
+  private createProjectlessProjectRecord() {
+    const now = Date.now()
+    const stamp = new Date(now).toISOString()
+      .replace(/[-:]/g, '')
+      .replace(/\.\d{3}Z$/, '')
+      .replace('T', '-')
+    const slug = `chat-${stamp}-${randomUUID().slice(0, 8)}`
+    const projectPath = join(this.getProjectlessRoot(), slug)
+    const projectId = `${PROJECTLESS_PROJECT_ID_PREFIX}${slug}`
+
+    mkdirSync(projectPath, { recursive: true })
+    writeFileSync(join(projectPath, PROJECTLESS_MARKER_FILE), `${JSON.stringify({
+      projectId,
+      createdAt: now
+    }, null, 2)}\n`)
+
+    return {
+      id: projectId,
+      path: projectPath,
+      workspaceKind: 'projectless' as const,
+      createdAt: now
+    }
+  }
+
   private resolveProject(projectId: string) {
     const project = this.listProjects().find(entry => entry.id === projectId)
-    if (!project) {
-      throw new CodoriError('PROJECT_NOT_FOUND', `Project "${projectId}" was not found under ${this.config.root}.`)
+    if (project) {
+      return project
     }
-    return project
+
+    const projectlessProject = this.listProjectlessProjects(Number.POSITIVE_INFINITY)
+      .find(entry => entry.id === projectId)
+    if (projectlessProject) {
+      return projectlessProject
+    }
+
+    throw new CodoriError('PROJECT_NOT_FOUND', `Project "${projectId}" was not found under ${this.config.root} or ${this.getProjectlessRoot()}.`)
   }
 
   private normalizeStatus(project: ProjectRecord, runtime: RuntimeRecord | null, error: string | null): ProjectStatusRecord {
@@ -124,6 +235,8 @@ export class RuntimeManager {
     return {
       projectId: project.id,
       projectPath: project.path,
+      workspaceKind: project.workspaceKind ?? 'project',
+      createdAt: project.createdAt ?? null,
       status: error ? 'error' : runtime ? 'running' : 'stopped',
       pid: runtime?.pid ?? null,
       port: runtime?.port ?? null,
@@ -248,6 +361,11 @@ export class RuntimeManager {
     return this.listProjects().map(project => this.readRunningRuntime(project))
   }
 
+  listProjectlessStatuses() {
+    return this.listProjectlessProjects(PROJECTLESS_RECENT_LIMIT)
+      .map(project => this.readRunningRuntime(project))
+  }
+
   getProjectStatus(projectId: string) {
     return this.readRunningRuntime(this.resolveProject(projectId))
   }
@@ -264,6 +382,10 @@ export class RuntimeManager {
 
   async startProject(projectId: string): Promise<StartProjectResult> {
     const project = this.resolveProject(projectId)
+    return await this.startResolvedProject(project)
+  }
+
+  private async startResolvedProject(project: ProjectRecord): Promise<StartProjectResult> {
     const loaded = this.store.load(project.path)
 
     if (loaded.kind === 'valid' && isProcessAlive(loaded.record.pid)) {
@@ -283,7 +405,7 @@ export class RuntimeManager {
     const child = await spawnDetached(command.command, command.args, project.path)
 
     if (typeof child.pid !== 'number') {
-      throw new CodoriError('PROCESS_START_FAILED', `Failed to determine PID for project "${projectId}".`)
+      throw new CodoriError('PROCESS_START_FAILED', `Failed to determine PID for project "${project.id}".`)
     }
 
     const now = Date.now()
@@ -301,6 +423,10 @@ export class RuntimeManager {
       ...this.normalizeStatus(project, runtime, null),
       reusedExisting: false
     }
+  }
+
+  async createProjectlessChat(): Promise<StartProjectResult> {
+    return await this.startResolvedProject(this.createProjectlessProjectRecord())
   }
 
   async stopProject(projectId: string) {
@@ -339,7 +465,10 @@ export class RuntimeManager {
 
     try {
       const now = Date.now()
-      for (const project of this.listProjects()) {
+      for (const project of [
+        ...this.listProjects(),
+        ...this.listProjectlessProjects(Number.POSITIVE_INFINITY)
+      ]) {
         const runtime = this.loadActiveRuntime(project)
         if (!runtime) {
           continue
@@ -376,6 +505,7 @@ export class RuntimeManager {
 export const createRuntimeManager = (options: RuntimeManagerOptions = {}) =>
   new RuntimeManager({
     homeDir: options.homeDir ?? os.homedir(),
+    documentsDir: options.documentsDir,
     configOverrides: options.configOverrides,
     config: options.config,
     commandFactory: options.commandFactory

@@ -59,6 +59,8 @@ afterEach(async () => {
 const createProjectRecord = (): ProjectStatusRecord => ({
   projectId: 'demo',
   projectPath: '/tmp/demo',
+  workspaceKind: 'project',
+  createdAt: null,
   status: 'running',
   pid: 123,
   port: 46000,
@@ -72,8 +74,17 @@ const createProjectRecord = (): ProjectStatusRecord => ({
 
 const createManager = (overrides: Partial<RuntimeManagerLike> = {}): RuntimeManagerLike => ({
   listProjectStatuses: () => [createProjectRecord()],
+  listProjectlessStatuses: () => [],
   getProjectStatus: () => createProjectRecord(),
   cloneProject: () => createProjectRecord(),
+  createProjectlessChat: () => ({
+    ...createProjectRecord(),
+    projectId: 'projectless/chat-test',
+    projectPath: '/tmp/projectless/chat-test',
+    workspaceKind: 'projectless',
+    createdAt: 1,
+    reusedExisting: false
+  }),
   startProject: () => ({
     ...createProjectRecord(),
     reusedExisting: true
@@ -177,6 +188,90 @@ describe('createHttpServer', () => {
         ...createProjectRecord(),
         projectId: 'team/codori',
         projectPath: '/tmp/team/codori'
+      }
+    })
+  })
+
+  it('creates and lists recent projectless chats through the management API', async () => {
+    const projectlessRecord: ProjectStatusRecord = {
+      ...createProjectRecord(),
+      projectId: 'projectless/chat-recent',
+      projectPath: '/tmp/projectless/chat-recent',
+      workspaceKind: 'projectless',
+      createdAt: 10
+    }
+    const app = await createHttpServer(createManager({
+      listProjectlessStatuses: () => [projectlessRecord],
+      createProjectlessChat: () => ({
+        ...projectlessRecord,
+        projectId: 'projectless/chat-new',
+        projectPath: '/tmp/projectless/chat-new',
+        createdAt: 11,
+        reusedExisting: false
+      })
+    }))
+    startedApps.push(app)
+
+    const listResponse = await app.inject({
+      method: 'GET',
+      url: '/api/projectless-chats'
+    })
+    expect(listResponse.statusCode).toBe(200)
+    expect(listResponse.json()).toEqual({
+      projects: [projectlessRecord]
+    })
+
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/projectless-chats'
+    })
+    expect(createResponse.statusCode).toBe(201)
+    expect(createResponse.json()).toEqual({
+      project: {
+        ...projectlessRecord,
+        projectId: 'projectless/chat-new',
+        projectPath: '/tmp/projectless/chat-new',
+        createdAt: 11,
+        reusedExisting: false
+      }
+    })
+  })
+
+  it('does not expose git branch operations for projectless chats', async () => {
+    const projectlessRecord: ProjectStatusRecord = {
+      ...createProjectRecord(),
+      projectId: 'projectless/chat-recent',
+      projectPath: '/tmp/projectless/chat-recent',
+      workspaceKind: 'projectless'
+    }
+    const app = await createHttpServer(createManager({
+      getProjectStatus: () => projectlessRecord
+    }))
+    startedApps.push(app)
+
+    const listResponse = await app.inject({
+      method: 'GET',
+      url: '/api/projects/projectless%2Fchat-recent/git/branches'
+    })
+    expect(listResponse.statusCode).toBe(200)
+    expect(listResponse.json()).toEqual({
+      currentBranch: null,
+      branches: []
+    })
+
+    const switchResponse = await app.inject({
+      method: 'POST',
+      url: '/api/projects/projectless%2Fchat-recent/git/branches/switch',
+      payload: {
+        branch: 'main'
+      }
+    })
+    expect(switchResponse.statusCode).toBe(400)
+    expect(switchResponse.json()).toEqual({
+      error: {
+        code: 'PROJECT_NOT_GIT_REPOSITORY',
+        message: 'Git branch operations are not available for projectless chats.',
+        details: null
       }
     })
   })

@@ -12,8 +12,12 @@ const occupiedServers: Array<ReturnType<typeof createServer>> = []
 
 afterEach(async () => {
   for (const manager of runningManagers.splice(0, runningManagers.length)) {
-    for (const project of manager.listProjects()) {
-      await manager.stopProject(project.id)
+    const projects = [
+      ...manager.listProjects().map(project => project.id),
+      ...manager.listProjectlessStatuses().map(project => project.projectId)
+    ]
+    for (const projectId of projects) {
+      await manager.stopProject(projectId)
     }
     manager.dispose()
   }
@@ -35,6 +39,7 @@ const createFixture = () => {
   const homeDir = mkdtempSync(join(os.tmpdir(), 'codori-home-'))
   const root = mkdtempSync(join(os.tmpdir(), 'codori-root-'))
   mkdirSync(join(root, 'demo', '.git'), { recursive: true })
+  const documentsDir = join(homeDir, 'Documents')
 
   const config = resolveConfig({
     root
@@ -42,6 +47,7 @@ const createFixture = () => {
 
   return {
     homeDir,
+    documentsDir,
     root,
     config
   }
@@ -249,5 +255,37 @@ describe('RuntimeManager', () => {
         ? null
         : touched.lastActivityAt + fixture.config.idleShutdown.timeoutMs
     )
+  })
+
+  it('creates and starts a projectless chat under the current user documents directory', async () => {
+    const fixture = createFixture()
+    const spawnedCwds: string[] = []
+    const manager = createRuntimeManager({
+      homeDir: fixture.homeDir,
+      documentsDir: fixture.documentsDir,
+      config: fixture.config,
+      commandFactory: (_port, project) => {
+        spawnedCwds.push(project.path)
+        return {
+          command: process.execPath,
+          args: ['-e', 'setInterval(() => {}, 1000)']
+        }
+      }
+    })
+    runningManagers.push(manager)
+
+    const created = await manager.createProjectlessChat()
+
+    expect(created.status).toBe('running')
+    expect(created.reusedExisting).toBe(false)
+    expect(created.workspaceKind).toBe('projectless')
+    expect(created.projectId).toMatch(/^projectless\/chat-/)
+    expect(created.projectPath.startsWith(join(fixture.documentsDir, 'Codex'))).toBe(true)
+    expect(spawnedCwds).toEqual([created.projectPath])
+
+    const recent = manager.listProjectlessStatuses()
+    expect(recent).toHaveLength(1)
+    expect(recent[0]?.projectId).toBe(created.projectId)
+    expect(recent[0]?.workspaceKind).toBe('projectless')
   })
 })
