@@ -90,6 +90,14 @@ const createManager = (overrides: Partial<RuntimeManagerLike> = {}): RuntimeMana
   deleteProjectlessChat: projectId => ({
     projectId
   }),
+  updateProjectlessChatTitle: (projectId, title) => ({
+    ...createProjectRecord(),
+    projectId,
+    projectPath: `/tmp/${projectId}`,
+    title,
+    workspaceKind: 'projectless',
+    createdAt: 1
+  }),
   startProject: () => ({
     ...createProjectRecord(),
     reusedExisting: true
@@ -259,6 +267,40 @@ describe('createHttpServer', () => {
     expect(response.statusCode).toBe(200)
     expect(response.json()).toEqual({
       projectId: 'projectless/chat-recent'
+    })
+  })
+
+  it('updates a projectless chat title through the management API', async () => {
+    const app = await createHttpServer(createManager({
+      updateProjectlessChatTitle: (projectId, title) => ({
+        ...createProjectRecord(),
+        projectId,
+        projectPath: '/tmp/projectless/chat-recent',
+        title,
+        workspaceKind: 'projectless',
+        createdAt: 10
+      })
+    }))
+    startedApps.push(app)
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/projectless-chats/projectless%2Fchat-recent/title',
+      payload: {
+        title: 'Investigate projectless chat titles'
+      }
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toEqual({
+      project: {
+        ...createProjectRecord(),
+        projectId: 'projectless/chat-recent',
+        projectPath: '/tmp/projectless/chat-recent',
+        title: 'Investigate projectless chat titles',
+        workspaceKind: 'projectless',
+        createdAt: 10
+      }
     })
   })
 

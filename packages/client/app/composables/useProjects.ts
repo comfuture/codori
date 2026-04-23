@@ -11,7 +11,8 @@ import type {
   ProjectsResponse,
   ServiceUpdateResponse,
   ServiceUpdateStatus,
-  StartProjectResult
+  StartProjectResult,
+  UpdateProjectlessChatTitleRequest
 } from '~~/shared/codori'
 
 const mergeProject = (projects: ProjectRecord[], nextProject: ProjectRecord) => {
@@ -146,6 +147,29 @@ export const useProjects = () => {
     }
   }
 
+  const renameProjectlessChat = async (projectId: string, title: string) => {
+    const nextTitle = title.trim()
+    if (!nextTitle) {
+      return null
+    }
+
+    projectlessChats.value = projectlessChats.value.map(project =>
+      project.projectId === projectId
+        ? { ...project, title: nextTitle }
+        : project
+    )
+
+    const response = await $fetch<ProjectResponse>(toApiUrl(
+      `/projectless-chats/${encodeProjectIdSegment(projectId)}/title`
+    ), {
+      method: 'POST',
+      body: {
+        title: nextTitle
+      } satisfies UpdateProjectlessChatTitleRequest
+    })
+    return applyProjectResponse(response)
+  }
+
   const startProject = async (projectId: string) => {
     pendingProjectId.value = projectId
     try {
@@ -242,6 +266,7 @@ export const useProjects = () => {
     cloneProject,
     createProjectlessChat,
     deleteProjectlessChat,
+    renameProjectlessChat,
     startProject,
     stopProject,
     getProject

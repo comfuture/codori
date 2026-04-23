@@ -69,3 +69,5 @@ export type StartProjectResult = ProjectStatusRecord & {
 export type DeleteProjectlessChatResult = {
   projectId: string
 }
+
+export type UpdateProjectlessChatTitleResult = ProjectStatusRecord

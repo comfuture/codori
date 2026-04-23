@@ -312,4 +312,27 @@ describe('RuntimeManager', () => {
     })
     expect(manager.listProjectlessStatuses()).toEqual([])
   })
+
+  it('persists projectless chat title updates in the scratch marker', async () => {
+    const fixture = createFixture()
+    const manager = createRuntimeManager({
+      homeDir: fixture.homeDir,
+      documentsDir: fixture.documentsDir,
+      config: fixture.config,
+      commandFactory: () => ({
+        command: process.execPath,
+        args: ['-e', 'setInterval(() => {}, 1000)']
+      })
+    })
+    runningManagers.push(manager)
+
+    const created = await manager.createProjectlessChat()
+    const updated = manager.updateProjectlessChatTitle(
+      created.projectId,
+      'Investigate projectless chat titles'
+    )
+
+    expect(updated.title).toBe('Investigate projectless chat titles')
+    expect(manager.listProjectlessStatuses()[0]?.title).toBe('Investigate projectless chat titles')
+  })
 })

@@ -225,7 +225,7 @@ export const notificationTurnId = (notification: CodexRpcNotification) => {
 export const notificationThreadName = (notification: CodexRpcNotification) => {
   const params = notificationParams(notification)
   const thread = isObjectRecord(params?.thread) ? params.thread : null
-  const directName = thread?.name ?? params?.name ?? params?.title
+  const directName = thread?.name ?? params?.threadName ?? params?.name ?? params?.title
 
   return typeof directName === 'string' ? directName : null
 }

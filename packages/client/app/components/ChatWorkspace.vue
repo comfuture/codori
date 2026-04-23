@@ -166,6 +166,7 @@ const {
   refreshProjects,
   refreshProjectlessChats,
   getProject,
+  renameProjectlessChat,
   startProject
 } = useProjects()
 const {
@@ -282,6 +283,10 @@ const selectedProject = computed(() => getProject(props.projectId))
 const supportsWorkspaceGit = computed(() =>
   selectedProject.value?.workspaceKind !== 'projectless'
   && !isProjectlessProjectId(props.projectId)
+)
+const isProjectlessWorkspace = computed(() =>
+  selectedProject.value?.workspaceKind === 'projectless'
+  || isProjectlessProjectId(props.projectId)
 )
 const workspaceGitBranch = useWorkspaceGitBranch({
   projectId: props.projectId,
@@ -1148,6 +1153,23 @@ const updateThreadTitleFromUserInput = (threadId: string, text: string) => {
   }
 
   updateThreadSummaryTitle(threadId, nextTitle)
+}
+
+const syncProjectlessChatTitle = (title: string) => {
+  if (!isProjectlessWorkspace.value) {
+    return
+  }
+
+  void renameProjectlessChat(props.projectId, title).catch(() => {
+    // Keep the live UI responsive even if marker persistence fails.
+  })
+}
+
+const syncProjectlessChatTitleFromThreadName = (thread: { name: string | null }) => {
+  const nextTitle = normalizeThreadTitleCandidate(thread.name)
+  if (nextTitle) {
+    syncProjectlessChatTitle(nextTitle)
+  }
 }
 
 const formatAttachmentSize = (size: number) => {
@@ -2311,6 +2333,7 @@ const hydrateThread = async (threadId: string) => {
       activeThreadId.value = response.thread.id
       threadTitle.value = resolveThreadSummaryTitle(response.thread)
       syncThreadSummary(response.thread)
+      syncProjectlessChatTitleFromThreadName(response.thread)
       messages.value = threadToMessages(response.thread)
       latestPlanTurnId.value = findLatestPlanTurnId(response.thread.turns)
       maybeQueuePlanImplementationPrompt({
@@ -2418,6 +2441,7 @@ const ensureThread = async () => {
   moveDraftCollaborationModeToThread(response.thread.id)
   threadTitle.value = resolveThreadSummaryTitle(response.thread)
   syncThreadSummary(response.thread)
+  syncProjectlessChatTitleFromThreadName(response.thread)
   return {
     threadId: response.thread.id,
     created: true
@@ -2799,6 +2823,7 @@ const applyNotification = (notification: CodexRpcNotification) => {
 
       if (activeThreadId.value === nextThreadId) {
         threadTitle.value = nextTitle
+        syncProjectlessChatTitle(nextTitle)
       }
 
       updateThreadSummaryTitle(nextThreadId, nextTitle, notificationThreadUpdatedAt(notification))

@@ -44,6 +44,10 @@ export type DeleteProjectlessChatResponse = {
   projectId: string
 }
 
+export type UpdateProjectlessChatTitleRequest = {
+  title: string
+}
+
 export type ProjectResponse = {
   project: ProjectRecord | StartProjectResult
 }
