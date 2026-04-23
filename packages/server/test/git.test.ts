@@ -1,7 +1,7 @@
-import { mkdirSync, mkdtempSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, symlinkSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
 import os from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const { execFileMock } = vi.hoisted(() => ({
@@ -56,6 +56,10 @@ describe('cloneProjectIntoRoot', () => {
       }
 
       const destination = args[3]
+      if (!existsSync(dirname(destination!))) {
+        callback(new Error('Missing parent directory.'), '', 'Missing parent directory.')
+        return
+      }
       mkdirSync(join(destination!, '.git'), { recursive: true })
       callback(null, '', '')
     })
@@ -110,5 +114,23 @@ describe('cloneProjectIntoRoot', () => {
       code: 'PROJECT_CLONE_FAILED',
       message: 'Failed to clone https://github.com/comfuture/private-repo.git: Authentication failed.'
     })
+  })
+
+  it('rejects clone destinations that escape the configured root through symlinked parents', async () => {
+    const root = createRoot()
+    const external = mkdtempSync(join(os.tmpdir(), 'codori-clone-external-'))
+    tempDirs.push(external)
+    symlinkSync(external, join(root, 'team'))
+
+    await expect(cloneProjectIntoRoot({
+      rootDirectory: root,
+      repositoryUrl: 'git@github.com:comfuture/codori.git',
+      destination: 'team/codori'
+    })).rejects.toMatchObject({
+      code: 'INVALID_PROJECT_DESTINATION',
+      message: 'Destination must stay inside the configured Codori root after resolving symlinks.'
+    })
+
+    expect(execFileMock).not.toHaveBeenCalled()
   })
 })
