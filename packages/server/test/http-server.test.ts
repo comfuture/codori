@@ -10,7 +10,7 @@ import { resolveProjectAttachmentsDir } from '../src/attachment-store.js'
 import { CodoriError } from '../src/errors.js'
 import { createHttpServer, type RuntimeManagerLike } from '../src/http-server.js'
 import type { ServiceUpdateController } from '../src/service-update.js'
-import type { ChatSessionStatusRecord, ProjectStatusRecord, StartChatSessionResult, StartProjectResult } from '../src/types.js'
+import type { ChatSessionStatusRecord, ProjectStatusRecord, StartProjectResult } from '../src/types.js'
 
 const startedApps: Array<Awaited<ReturnType<typeof createHttpServer>>> = []
 const startedSocketServers: WebSocketServer[] = []

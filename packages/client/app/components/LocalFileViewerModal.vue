@@ -112,7 +112,7 @@ const syncRenderedCodeLines = async () => {
 
 watch(
   () => [state.value.open, state.value.workspace?.kind, state.value.workspace?.id, state.value.path] as const,
-  async ([open, _workspaceKind, _workspaceId, path]) => {
+  async ([open, , , path]) => {
     const workspace = state.value.workspace ? { ...state.value.workspace } : null
     if (!open || !workspace || !path) {
       loading.value = false
