@@ -3,7 +3,7 @@
 
 import { mount } from '@vue/test-utils'
 import { defineComponent, h, ref } from 'vue'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import ProjectSidebar from '../app/components/ProjectSidebar.vue'
 
 const mockRoute = {
@@ -125,12 +125,19 @@ const mountSidebar = (props: Record<string, unknown> = {}) =>
   })
 
 describe('project sidebar command palette trigger', () => {
+  let platformSpy: ReturnType<typeof vi.spyOn>
+
   beforeEach(() => {
     mockRouterPush.mockReset()
     mockRefreshProjects.mockReset()
     mockRefreshChats.mockReset()
     mockProjects.value = []
     mockChats.value = []
+    platformSpy = vi.spyOn(window.navigator, 'platform', 'get').mockReturnValue('MacIntel')
+  })
+
+  afterEach(() => {
+    platformSpy.mockRestore()
   })
 
   it('renders an input-like expanded search trigger before project action buttons', async () => {
@@ -149,6 +156,16 @@ describe('project sidebar command palette trigger', () => {
     await wrapper.get('button[aria-label="Search Codori"]').trigger('click')
 
     expect(wrapper.emitted('openCommandPalette')).toHaveLength(1)
+  })
+
+  it('renders the non-macOS shortcut modifier in the expanded search trigger', async () => {
+    platformSpy.mockReturnValue('Linux x86_64')
+    const wrapper = mountSidebar({
+      collapsed: false
+    })
+
+    expect(wrapper.text()).toContain('ctrl')
+    expect(wrapper.text()).toContain('K')
   })
 
   it('renders a compact search trigger when collapsed', async () => {

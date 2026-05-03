@@ -380,6 +380,20 @@ describe('global command palette', () => {
     vi.useFakeTimers()
     mockProjectsLoaded.value = true
     mockChatsLoaded.value = true
+    mockProjects.value = [
+      {
+        projectId: 'team/api',
+        projectPath: '/Users/comfuture/Project/team-api',
+        status: 'running',
+        error: null
+      },
+      {
+        projectId: 'codori',
+        projectPath: '/Users/comfuture/Project/codori',
+        status: 'stopped',
+        error: null
+      }
+    ]
     mockRouterPush.mockResolvedValue(undefined)
     mockThreadResponses.set('team/api', [{
       id: 'thread-1',
@@ -397,9 +411,9 @@ describe('global command palette', () => {
     await vi.advanceTimersByTimeAsync(250)
     await flushPromises()
 
-    expect(mockStartProject).toHaveBeenCalledWith('team/api')
-    expect(mockStartProject).toHaveBeenCalledWith('codori')
+    expect(mockStartProject).not.toHaveBeenCalled()
     expect(mockGetClient).toHaveBeenCalledWith('team/api')
+    expect(mockGetClient).not.toHaveBeenCalledWith('codori')
     const teamClient = mockGetClient.mock.results.find(result => result.type === 'return')?.value
     expect(teamClient.request).toHaveBeenCalledWith('thread/list', {
       limit: 3,
@@ -452,7 +466,7 @@ describe('global command palette', () => {
     await nextTick()
     await flushPromises()
 
-    expect(mockStartProject).toHaveBeenCalledWith('codori')
+    expect(mockStartProject).not.toHaveBeenCalled()
     expect(wrapper.text()).toContain('Matching Threads')
     expect(wrapper.text()).toContain('Codori command palette work')
   })
