@@ -127,6 +127,8 @@ const sidebarUi = computed(() =>
       </template>
     </UDashboardSidebar>
 
+    <GlobalCommandPalette />
+
     <NuxtPage />
   </UDashboardGroup>
 </template>
