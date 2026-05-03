@@ -1,14 +1,18 @@
 <script setup lang="ts">
 import type { NavigationMenuItem } from '@nuxt/ui'
-import { useRoute, useRouter } from '#imports'
 import { computed, onMounted, ref } from 'vue'
 import { useChats } from '../composables/useChats'
+import { useCodoriRoute } from '../composables/useCodoriRoute'
+import { useCodoriRouter } from '../composables/useCodoriRouter'
 import { useProjects } from '../composables/useProjects'
 import { sortSidebarProjects } from '../utils/project-sidebar-order'
 import { toChatRoute, toChatsRoute, toProjectRoute } from '~~/shared/codori'
 
 const props = defineProps<{
   collapsed?: boolean
+}>()
+const emit = defineEmits<{
+  openCommandPalette: []
 }>()
 type ProjectNavigationItem = NavigationMenuItem & {
   projectId: string
@@ -24,8 +28,8 @@ type ChatNavigationItem = NavigationMenuItem & {
   updatedAt: number | null
 }
 
-const route = useRoute()
-const router = useRouter()
+const route = useCodoriRoute()
+const router = useCodoriRouter()
 const addProjectOpen = ref(false)
 const {
   projects,
@@ -221,6 +225,44 @@ const isActiveProject = (item: ProjectNavigationItem) => activeProjectId.value =
         Projects
       </div>
       <div class="flex items-center gap-1">
+        <UTooltip text="Search Codori">
+          <UButton
+            v-if="props.collapsed"
+            icon="i-lucide-search"
+            color="neutral"
+            variant="ghost"
+            size="xs"
+            square
+            aria-label="Search Codori"
+            @click="emit('openCommandPalette')"
+          />
+          <UButton
+            v-else
+            icon="i-lucide-search"
+            color="neutral"
+            variant="outline"
+            size="xs"
+            class="min-w-32 justify-start"
+            aria-label="Search Codori"
+            @click="emit('openCommandPalette')"
+          >
+            <span class="min-w-0 flex-1 truncate text-left">
+              Search
+            </span>
+            <template #trailing>
+              <span class="flex items-center gap-1">
+                <UKbd
+                  value="meta"
+                  size="sm"
+                />
+                <UKbd
+                  value="K"
+                  size="sm"
+                />
+              </span>
+            </template>
+          </UButton>
+        </UTooltip>
         <UTooltip text="Add project">
           <UButton
             icon="i-lucide-plus"
