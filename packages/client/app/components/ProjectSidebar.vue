@@ -5,6 +5,7 @@ import { useChats } from '../composables/useChats'
 import { useCodoriRoute } from '../composables/useCodoriRoute'
 import { useCodoriRouter } from '../composables/useCodoriRouter'
 import { useProjects } from '../composables/useProjects'
+import { isMacLikePlatform } from '../utils/global-command-palette-shortcut'
 import { sortSidebarProjects } from '../utils/project-sidebar-order'
 import { toChatRoute, toChatsRoute, toProjectRoute } from '~~/shared/codori'
 
@@ -31,6 +32,8 @@ type ChatNavigationItem = NavigationMenuItem & {
 const route = useCodoriRoute()
 const router = useCodoriRouter()
 const addProjectOpen = ref(false)
+const platform = ref(typeof navigator === 'undefined' ? '' : navigator.platform)
+const isMac = computed(() => isMacLikePlatform(platform.value))
 const {
   projects,
   loaded,
@@ -60,6 +63,9 @@ const activeChatId = computed(() => {
 })
 
 onMounted(() => {
+  if (typeof navigator !== 'undefined') {
+    platform.value = navigator.platform
+  }
   if (!loaded.value) {
     void refreshProjects()
   }
@@ -252,7 +258,7 @@ const isActiveProject = (item: ProjectNavigationItem) => activeProjectId.value =
             <template #trailing>
               <span class="flex items-center gap-1">
                 <UKbd
-                  value="meta"
+                  :value="isMac ? 'meta' : 'ctrl'"
                   size="sm"
                 />
                 <UKbd

@@ -49,7 +49,6 @@ const {
   loaded: projectsLoaded,
   loading: projectsLoading,
   refreshProjects,
-  startProject
 } = useProjects()
 
 const isMac = computed(() => isMacLikePlatform(platform.value))
@@ -266,7 +265,6 @@ const searchProjectThreads = async (
   query: string
 ) => {
   try {
-    await startProject(project.projectId)
     const client = getClient(project.projectId)
     const response = await client.request<ThreadListResponse>('thread/list', {
       limit: THREAD_SEARCH_LIMIT_PER_PROJECT,
@@ -317,8 +315,9 @@ const searchThreads = async (query: string) => {
       return
     }
 
+    const runningProjects = projects.value.filter(project => project.status === 'running')
     const results = await runLimited(
-      projects.value,
+      runningProjects,
       THREAD_SEARCH_CONCURRENCY,
       project => searchProjectThreads(project, query)
     )
