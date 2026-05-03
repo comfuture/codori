@@ -417,4 +417,43 @@ describe('global command palette', () => {
     expect(mockRouterPush).toHaveBeenCalledWith('/projects/team/api/threads/thread-1')
     expect(wrapper.text()).not.toContain('Review API plan')
   })
+
+  it('waits for in-flight project loading before searching threads', async () => {
+    vi.useFakeTimers()
+    mockProjects.value = []
+    mockProjectsLoaded.value = false
+    mockProjectsLoading.value = true
+    mockChatsLoaded.value = true
+    mockThreadResponses.set('codori', [{
+      id: 'thread-codori',
+      name: 'Codori command palette work',
+      preview: 'Fallback preview',
+      updatedAt: 1_767_000_001
+    }])
+    const wrapper = mountPalette()
+
+    dispatchShortcut({ metaKey: true })
+    await nextTick()
+    await wrapper.get('.command-search').setValue('codori')
+    await nextTick()
+    await vi.advanceTimersByTimeAsync(250)
+    await flushPromises()
+
+    expect(mockStartProject).not.toHaveBeenCalled()
+
+    mockProjects.value = [{
+      projectId: 'codori',
+      projectPath: '/Users/comfuture/Project/codori',
+      status: 'running',
+      error: null
+    }]
+    mockProjectsLoaded.value = true
+    mockProjectsLoading.value = false
+    await nextTick()
+    await flushPromises()
+
+    expect(mockStartProject).toHaveBeenCalledWith('codori')
+    expect(wrapper.text()).toContain('Matching Threads')
+    expect(wrapper.text()).toContain('Codori command palette work')
+  })
 })
