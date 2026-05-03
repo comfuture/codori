@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import { useProjects } from '../composables/useProjects'
 
 const sidebarCollapsed = ref(false)
+const commandPaletteOpen = ref(false)
 const { serviceUpdate, serviceUpdatePending, triggerServiceUpdate } = useProjects()
 
 const showServiceUpdateButton = computed(() =>
@@ -109,7 +110,10 @@ const sidebarUi = computed(() =>
       </template>
 
       <template #default="{ collapsed }">
-        <ProjectSidebar :collapsed="collapsed" />
+        <ProjectSidebar
+          :collapsed="collapsed"
+          @open-command-palette="commandPaletteOpen = true"
+        />
       </template>
 
       <template #footer>
@@ -127,7 +131,7 @@ const sidebarUi = computed(() =>
       </template>
     </UDashboardSidebar>
 
-    <GlobalCommandPalette />
+    <GlobalCommandPalette v-model:open="commandPaletteOpen" />
 
     <NuxtPage />
   </UDashboardGroup>

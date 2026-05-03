@@ -30,7 +30,7 @@ const THREAD_SEARCH_CONCURRENCY = 4
 const THREAD_SEARCH_LIMIT_PER_PROJECT = 3
 const THREAD_SEARCH_TOTAL_LIMIT = 10
 
-const open = ref(false)
+const open = defineModel<boolean>('open', { default: false })
 const searchTerm = ref('')
 const platform = ref('')
 const threadSearchResults = ref<ThreadSearchResult[]>([])

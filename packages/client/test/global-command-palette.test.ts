@@ -148,8 +148,9 @@ const CommandPaletteStub = defineComponent({
   }
 })
 
-const mountPalette = () => {
+const mountPalette = (props: Record<string, unknown> = {}) => {
   const wrapper = mount(GlobalCommandPalette, {
+    props,
     attachTo: document.body,
     global: {
       stubs: {
@@ -287,6 +288,20 @@ describe('global command palette', () => {
     expect(wrapper.text()).toContain('team/api')
     expect(mockRefreshChats).toHaveBeenCalledTimes(1)
     expect(mockRefreshProjects).toHaveBeenCalledTimes(1)
+  })
+
+  it('opens from an external model and emits close updates', async () => {
+    const wrapper = mountPalette({
+      open: true
+    })
+
+    await nextTick()
+
+    expect(wrapper.text()).toContain('New Chat')
+
+    await wrapper.get('.command-close').trigger('click')
+
+    expect(wrapper.emitted('update:open')?.[0]).toEqual([false])
   })
 
   it('uses Ctrl+K on non-macOS platforms', async () => {
