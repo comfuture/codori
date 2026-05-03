@@ -287,6 +287,21 @@ const searchProjectThreads = async (
   }
 }
 
+const waitForProjectsRefresh = async () => {
+  if (projectsLoaded.value || !projectsLoading.value) {
+    return
+  }
+
+  await new Promise<void>((resolve) => {
+    const stop = watch([projectsLoaded, projectsLoading], ([loaded, loading]) => {
+      if (loaded || !loading) {
+        stop()
+        resolve()
+      }
+    })
+  })
+}
+
 const searchThreads = async (query: string) => {
   const sequence = ++threadSearchSequence
   threadSearchLoading.value = true
@@ -295,6 +310,11 @@ const searchThreads = async (query: string) => {
   try {
     if (!projectsLoaded.value) {
       await refreshProjects()
+      await waitForProjectsRefresh()
+    }
+
+    if (sequence !== threadSearchSequence) {
+      return
     }
 
     const results = await runLimited(
