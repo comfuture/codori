@@ -14,6 +14,8 @@ import {
 const mockRouterPush = vi.fn()
 const mockRefreshProjects = vi.fn()
 const mockRefreshChats = vi.fn()
+const mockStartProject = vi.fn()
+const mockGetClient = vi.fn()
 const mockProjects = ref<Array<{
   projectId: string
   projectPath: string
@@ -35,6 +37,7 @@ const mockChats = ref<Array<{
 const mockChatsLoaded = ref(false)
 const mockChatsLoading = ref(false)
 const mountedWrappers: VueWrapper[] = []
+const mockThreadResponses = new Map<string, unknown[]>()
 
 vi.mock('../app/composables/useCodoriRouter', () => ({
   useCodoriRouter: () => ({
@@ -47,7 +50,14 @@ vi.mock('../app/composables/useProjects', () => ({
     projects: mockProjects,
     loaded: mockProjectsLoaded,
     loading: mockProjectsLoading,
-    refreshProjects: mockRefreshProjects
+    refreshProjects: mockRefreshProjects,
+    startProject: mockStartProject
+  })
+}))
+
+vi.mock('../app/composables/useRpc', () => ({
+  useRpc: () => ({
+    getClient: mockGetClient
   })
 }))
 
@@ -95,11 +105,12 @@ const CommandPaletteStub = defineComponent({
       return (props.groups as Array<{
         id: string
         label?: string
+        ignoreFilter?: boolean
         items?: Array<Record<string, unknown>>
       }>).map(group => ({
         ...group,
         items: (group.items ?? []).filter((item) => {
-          if (!search) {
+          if (!search || group.ignoreFilter) {
             return true
           }
 
@@ -216,6 +227,14 @@ describe('global command palette', () => {
     mockRouterPush.mockReset()
     mockRefreshProjects.mockReset().mockResolvedValue(undefined)
     mockRefreshChats.mockReset().mockResolvedValue(undefined)
+    mockStartProject.mockReset().mockResolvedValue(undefined)
+    mockGetClient.mockReset().mockImplementation((projectId: string) => ({
+      request: vi.fn().mockResolvedValue({
+        data: mockThreadResponses.get(projectId) ?? [],
+        nextCursor: null
+      })
+    }))
+    mockThreadResponses.clear()
     mockProjects.value = [
       {
         projectId: 'team/api',
@@ -251,6 +270,7 @@ describe('global command palette', () => {
     for (const wrapper of mountedWrappers.splice(0)) {
       wrapper.unmount()
     }
+    vi.useRealTimers()
     platformSpy.mockRestore()
   })
 
@@ -339,5 +359,47 @@ describe('global command palette', () => {
     expect(wrapper.text()).toContain('codori')
     expect(wrapper.text()).not.toContain('team/api')
     expect(wrapper.text()).not.toContain('Design notes')
+  })
+
+  it('searches matching project thread titles while typing', async () => {
+    vi.useFakeTimers()
+    mockProjectsLoaded.value = true
+    mockChatsLoaded.value = true
+    mockRouterPush.mockResolvedValue(undefined)
+    mockThreadResponses.set('team/api', [{
+      id: 'thread-1',
+      name: 'Review API plan',
+      preview: 'Fallback preview',
+      updatedAt: 1_767_000_000
+    }])
+    mockThreadResponses.set('codori', [])
+    const wrapper = mountPalette()
+
+    dispatchShortcut({ metaKey: true })
+    await nextTick()
+    await wrapper.get('.command-search').setValue('review')
+    await nextTick()
+    await vi.advanceTimersByTimeAsync(250)
+    await flushPromises()
+
+    expect(mockStartProject).toHaveBeenCalledWith('team/api')
+    expect(mockStartProject).toHaveBeenCalledWith('codori')
+    expect(mockGetClient).toHaveBeenCalledWith('team/api')
+    const teamClient = mockGetClient.mock.results.find(result => result.type === 'return')?.value
+    expect(teamClient.request).toHaveBeenCalledWith('thread/list', {
+      limit: 3,
+      sortKey: 'updated_at',
+      cwd: '/Users/comfuture/Project/team-api',
+      searchTerm: 'review'
+    })
+    expect(wrapper.text()).toContain('Matching Threads')
+    expect(wrapper.text()).toContain('Review API plan')
+    expect(wrapper.text()).toContain('team/api')
+
+    await wrapper.findAll('.command-item').find(button => button.text().includes('Review API plan'))!.trigger('click')
+    await flushPromises()
+
+    expect(mockRouterPush).toHaveBeenCalledWith('/projects/team/api/threads/thread-1')
+    expect(wrapper.text()).not.toContain('Review API plan')
   })
 })
