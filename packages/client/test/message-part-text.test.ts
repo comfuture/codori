@@ -70,6 +70,72 @@ vi.mock('@comark/vue', () => {
           })
         }
 
+        type MockComarkNode = string | [string, Record<string, unknown>, ...MockComarkNode[]]
+
+        const renderMockNode = (node: MockComarkNode): ReturnType<typeof h> | string => {
+          if (typeof node === 'string') {
+            return node
+          }
+
+          const [tag, nodeProps, ...children] = node
+          const components = props.components as Record<string, Component>
+          const component = components[tag] ?? tag
+          const renderedChildren = children.map(renderMockNode)
+          return typeof component === 'string'
+            ? h(component, nodeProps, renderedChildren)
+            : h(component, nodeProps, () => renderedChildren)
+        }
+
+        const renderSkillLinkTree = (text: string) => {
+          const skillLinkPattern = /\[\$([a-z][a-z0-9:._/-]*)\]\(([^)]+\/SKILL\.md)\)/giu
+          const nodes: MockComarkNode[] = []
+          let lastIndex = 0
+          let match: RegExpExecArray | null
+
+          while ((match = skillLinkPattern.exec(text)) !== null) {
+            if (match.index > lastIndex) {
+              nodes.push(text.slice(lastIndex, match.index))
+            }
+
+            nodes.push(['a', { href: match[2] }, `$${match[1]}`])
+            lastIndex = match.index + match[0].length
+          }
+
+          if (lastIndex === 0) {
+            return null
+          }
+
+          if (lastIndex < text.length) {
+            nodes.push(text.slice(lastIndex))
+          }
+
+          const state = {
+            markdown: text,
+            tree: {
+              nodes: [['p', {}, ...nodes] as MockComarkNode],
+              frontmatter: {},
+              meta: {}
+            },
+            options: { plugins: props.plugins },
+            tokens: []
+          }
+
+          for (const plugin of props.plugins) {
+            if (
+              plugin
+              && typeof plugin === 'object'
+              && 'post' in plugin
+              && typeof plugin.post === 'function'
+            ) {
+              plugin.post(state)
+            }
+          }
+
+          return h('div', { class: 'mock-comark', 'data-streaming': String(props.streaming) }, [
+            ...state.tree.nodes.map(renderMockNode)
+          ])
+        }
+
         return () => {
           const text = props.markdown
           const components = props.components as Record<string, Component>
@@ -97,6 +163,11 @@ vi.mock('@comark/vue', () => {
               }),
               displayMatch[3]
             ])
+          }
+
+          const skillLinkTree = renderSkillLinkTree(text)
+          if (skillLinkTree) {
+            return skillLinkTree
           }
 
           const inlineMatch = text.match(/^(.*?)\$(.+?)\$(.*)$/)
@@ -128,6 +199,31 @@ vi.mock('@comark/vue', () => {
 
           return h('div', { class: 'mock-comark', 'data-streaming': String(props.streaming) }, text)
         }
+      }
+    })
+  }
+})
+
+vi.mock('../app/components/message-part/SkillReferenceBadge.vue', () => {
+  return {
+    default: defineComponent({
+      name: 'SkillReferenceBadge',
+      props: {
+        name: {
+          type: String,
+          required: true
+        },
+        path: {
+          type: String,
+          default: null
+        }
+      },
+      setup(props) {
+        return () => h('span', {
+          'data-test': 'skill-reference-badge',
+          'data-skill-name': props.name,
+          'data-skill-path': props.path ?? ''
+        }, `$${props.name}`)
       }
     })
   }
@@ -355,5 +451,38 @@ describe('message part text markdown rendering', () => {
       line: null,
       column: null
     })
+  })
+
+  it('renders submitted skill markdown links as skill reference badges through Comark', async () => {
+    const wrapper = await mountText(
+      'assistant',
+      'Use [$imagegen](/Users/demo/.codex/skills/.system/imagegen/SKILL.md) now.'
+    )
+
+    const badge = wrapper.get('[data-test="skill-reference-badge"]')
+    expect(badge.text()).toBe('$imagegen')
+    expect(badge.attributes('data-skill-name')).toBe('imagegen')
+    expect(badge.attributes('data-skill-path')).toBe('/Users/demo/.codex/skills/.system/imagegen/SKILL.md')
+    expect(wrapper.find('a[href="/Users/demo/.codex/skills/.system/imagegen/SKILL.md"]').exists()).toBe(false)
+  })
+
+  it('keeps ordinary markdown links as anchors when the skill badge plugin does not match', async () => {
+    const wrapper = await mountText('assistant', '[docs](https://example.com/docs)')
+
+    expect(wrapper.find('[data-test="skill-reference-badge"]').exists()).toBe(false)
+    expect(wrapper.get('a').attributes('href')).toBe('https://example.com/docs')
+    expect(wrapper.get('a').text()).toBe('docs')
+  })
+
+  it('renders multiple skill references without collapsing surrounding text', async () => {
+    const wrapper = await mountText(
+      'assistant',
+      'Use [$imagegen](/a/imagegen/SKILL.md) and [$browser-use](/b/browser-use/SKILL.md).'
+    )
+
+    const badges = wrapper.findAll('[data-test="skill-reference-badge"]')
+    expect(badges).toHaveLength(2)
+    expect(badges.map(badge => badge.text())).toEqual(['$imagegen', '$browser-use'])
+    expect(wrapper.text()).toContain('Use $imagegen and $browser-use.')
   })
 })
