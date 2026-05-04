@@ -69,6 +69,7 @@ export type RuntimeManagerLike = {
   resetStoredRuntimes?: () => MaybePromise<number>
   dispose?: () => MaybePromise<void>
   config?: {
+    root: string
     server: {
       host: string
       port: number
@@ -1392,11 +1393,10 @@ export const createHttpServer = async (
   return app
 }
 
-export const startHttpServer = async (manager = createRuntimeManager()) => {
+export const startHttpServer = async (manager: RuntimeManagerLike = createRuntimeManager()) => {
   if (!manager.config) {
     throw new CodoriError('INVALID_CONFIG', 'Manager config is required to start the HTTP server.')
   }
-  await resolveValue(manager.resetStoredRuntimes?.() ?? 0)
   const app = await createHttpServer(manager, {
     serviceUpdateController: createServiceUpdateController({
       root: manager.config.root
@@ -1406,5 +1406,11 @@ export const startHttpServer = async (manager = createRuntimeManager()) => {
     host: manager.config.server.host,
     port: manager.config.server.port
   })
+  try {
+    await resolveValue(manager.resetStoredRuntimes?.() ?? 0)
+  } catch (error) {
+    await app.close()
+    throw error
+  }
   return app
 }
