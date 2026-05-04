@@ -19,12 +19,7 @@ const props = defineProps<{
 
 const SKILL_FALLBACK_ICON = '🛠️'
 
-type SkillCatalogState = {
-  promise: Promise<SkillAutocompleteEntry[]>
-  skills: SkillAutocompleteEntry[] | null
-}
-
-const skillCatalogCache = new Map<string, SkillCatalogState>()
+const skillCatalogCache = new Map<string, Promise<SkillAutocompleteEntry[]>>()
 
 const { getProject } = useProjects()
 const { getWorkspaceClient } = useRpc()
@@ -59,24 +54,23 @@ const loadSkillCatalog = (workspace: WorkspaceLocalFileScope, cwd: string) => {
   const cacheKey = `${workspace.kind}:${workspace.id}:${cwd}`
   const existing = skillCatalogCache.get(cacheKey)
   if (existing) {
-    return existing.promise
+    return existing
   }
 
-  const state: SkillCatalogState = {
-    skills: null,
-    promise: getWorkspaceClient(workspace)
-      .request('skills/list', { cwds: [cwd] })
-      .then((response) => {
-        const entries = normalizeSkillsListResponse(response)
-        const entry = entries.find(candidate => candidate.cwd === cwd) ?? entries[0] ?? null
-        const skills = entry?.skills.filter(skill => skill.enabled) ?? []
-        state.skills = skills
-        return skills
-      })
-      .catch(() => [])
-  }
-  skillCatalogCache.set(cacheKey, state)
-  return state.promise
+  const promise = getWorkspaceClient(workspace)
+    .request('skills/list', { cwds: [cwd] })
+    .then((response) => {
+      const entries = normalizeSkillsListResponse(response)
+      const entry = entries.find(candidate => candidate.cwd === cwd) ?? entries[0] ?? null
+      return entry?.skills.filter(skill => skill.enabled) ?? []
+    })
+    .catch((error: unknown) => {
+      skillCatalogCache.delete(cacheKey)
+      throw error
+    })
+
+  skillCatalogCache.set(cacheKey, promise)
+  return promise
 }
 
 const fallbackLabel = computed(() => {
@@ -84,34 +78,62 @@ const fallbackLabel = computed(() => {
   return `${SKILL_FALLBACK_ICON}${normalizedName}`
 })
 
+const isCurrentSkill = (skill: SkillAutocompleteEntry) => {
+  const normalizedName = props.name.replace(/^\$/u, '')
+  const path = props.path ?? null
+  if (path && skill.path !== path) {
+    return false
+  }
+
+  return skill.name.toLowerCase() === normalizedName.toLowerCase()
+}
+
 const label = computed(() => {
   const skill = resolvedSkill.value
-  return skill?.displayName?.trim()
+  if (!skill || !isCurrentSkill(skill)) {
+    return fallbackLabel.value
+  }
+
+  return skill.displayName?.trim()
     || skill?.name
-    || fallbackLabel.value
 })
 
-watchEffect(async () => {
+watchEffect(async (onCleanup) => {
   const name = props.name.replace(/^\$/u, '')
   const workspace = props.workspace
     ?? (props.projectId ? { kind: 'project' as const, id: props.projectId } : null)
   const cwd = workspaceCwd.value
   const key = workspaceKey.value
+  const path = props.path ?? null
 
-  resolvedSkill.value = null
+  let active = true
+  onCleanup(() => {
+    active = false
+  })
+
   if (!workspace || !cwd || !key) {
+    resolvedSkill.value = null
     return
   }
 
-  const skills = await loadSkillCatalog(workspace, cwd)
-  const path = props.path ?? null
-  resolvedSkill.value = skills.find((skill) => {
-    if (path && skill.path === path) {
-      return true
+  try {
+    const skills = await loadSkillCatalog(workspace, cwd)
+    if (!active) {
+      return
     }
 
-    return skill.name.toLowerCase() === name.toLowerCase()
-  }) ?? null
+    resolvedSkill.value = skills.find((skill) => {
+      if (path && skill.path === path) {
+        return true
+      }
+
+      return skill.name.toLowerCase() === name.toLowerCase()
+    }) ?? null
+  } catch {
+    if (active) {
+      resolvedSkill.value = null
+    }
+  }
 })
 </script>
 

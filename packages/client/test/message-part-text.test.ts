@@ -87,7 +87,7 @@ vi.mock('@comark/vue', () => {
         }
 
         const renderSkillLinkTree = (text: string) => {
-          const skillLinkPattern = /\[\$([a-z][a-z0-9:._/-]*)\]\(([^)]+\/SKILL\.md)\)/giu
+          const skillLinkPattern = /\[\$([a-z0-9][a-z0-9:._/-]*)\]\(([^)]+\/SKILL\.md)\)/giu
           const nodes: MockComarkNode[] = []
           let lastIndex = 0
           let match: RegExpExecArray | null

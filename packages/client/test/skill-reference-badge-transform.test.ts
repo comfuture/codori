@@ -102,6 +102,68 @@ describe('skillReferenceBadgePlugin', () => {
     ])
   })
 
+  it('accepts case-insensitive and digit-prefixed skill tokens', async () => {
+    const tree = await parse('Use $ImageGen and $1tool.', {
+      plugins: [
+        skillReferenceBadgePlugin()
+      ]
+    })
+
+    expect(tree.nodes).toEqual([
+      ['p', {},
+        'Use ',
+        [SKILL_REFERENCE_BADGE_TAG, { name: 'ImageGen', raw: 'true' }],
+        ' and ',
+        [SKILL_REFERENCE_BADGE_TAG, { name: '1tool', raw: 'true' }],
+        '.'
+      ]
+    ])
+  })
+
+  it('removes auto-close markers directly after raw skill badges', () => {
+    const tree: ComarkTree = {
+      nodes: [
+        ['p', {},
+          [SKILL_REFERENCE_BADGE_TAG, { name: 'skill-name', raw: 'true' }],
+          '$ and more text'
+        ]
+      ],
+      frontmatter: {},
+      meta: {}
+    }
+
+    const result = transformSkillReferenceBadges(tree)
+
+    expect(result.nodes).toEqual([
+      ['p', {},
+        [SKILL_REFERENCE_BADGE_TAG, { name: 'skill-name', raw: 'true' }],
+        ' and more text'
+      ]
+    ])
+  })
+
+  it('removes trailing auto-close markers after raw skill content', () => {
+    const tree: ComarkTree = {
+      nodes: [
+        ['p', {},
+          [SKILL_REFERENCE_BADGE_TAG, { name: 'skill-name', raw: 'true' }],
+          ' additional text$ '
+        ]
+      ],
+      frontmatter: {},
+      meta: {}
+    }
+
+    const result = transformSkillReferenceBadges(tree)
+
+    expect(result.nodes).toEqual([
+      ['p', {},
+        [SKILL_REFERENCE_BADGE_TAG, { name: 'skill-name', raw: 'true' }],
+        ' additional text '
+      ]
+    ])
+  })
+
   it('does not treat ordinary inline LaTeX as a skill reference', async () => {
     const tree = await parse('Energy: $E = mc^2$.', {
       plugins: [

@@ -2,9 +2,10 @@ import type { ComarkElement, ComarkNode, ComarkPlugin, ComarkTree } from '@comar
 
 export const SKILL_REFERENCE_BADGE_TAG = 'skill-reference-badge'
 
-const RAW_SKILL_PATTERN = /^\$([a-z][a-z0-9:._/-]*)/u
-const SKILL_LINK_LABEL_PATTERN = /^\$([a-z][a-z0-9:._/-]*)$/u
+const RAW_SKILL_PATTERN = /^\$([a-z0-9][a-z0-9:._/-]*)/iu
+const SKILL_LINK_LABEL_PATTERN = /^\$([a-z0-9][a-z0-9:._/-]*)$/iu
 const SKILL_MARKDOWN_PATH_PATTERN = /(?:^|[/\\])SKILL\.md(?:$|[#?:])/iu
+const TRAILING_RAW_SKILL_PUNCTUATION_PATTERN = /[.,!?;:]+$/u
 
 type MarkdownItStateInline = {
   src: string
@@ -31,6 +32,24 @@ type MarkdownItParser = {
 
 const isElementNode = (node: ComarkNode): node is ComarkElement => {
   return Array.isArray(node) && typeof node[0] === 'string'
+}
+
+const getRawSkillMatch = (source: string) => {
+  const match = RAW_SKILL_PATTERN.exec(source)
+  const rawName = match?.[1]
+  if (!rawName) {
+    return null
+  }
+
+  const name = rawName.replace(TRAILING_RAW_SKILL_PUNCTUATION_PATTERN, '')
+  if (name.length < 2) {
+    return null
+  }
+
+  return {
+    name,
+    length: name.length + 1
+  }
 }
 
 const createSkillReferenceBadgeNode = (input: {
@@ -87,6 +106,60 @@ const getSkillLinkReference = (node: ComarkElement) => {
   }
 }
 
+const isRawSkillReferenceNode = (node: ComarkNode) => {
+  return isElementNode(node)
+    && node[0] === SKILL_REFERENCE_BADGE_TAG
+    && node[1].raw === 'true'
+}
+
+const removeRawSkillAutoCloseMarkers = (children: ComarkNode[]) => {
+  const nextChildren = [...children]
+  let shouldTrimTrailingMarker = false
+
+  for (let index = 0; index < nextChildren.length; index += 1) {
+    const child = nextChildren[index]
+    if (!child || !isRawSkillReferenceNode(child)) {
+      continue
+    }
+
+    const nextChild = nextChildren[index + 1]
+    if (typeof nextChild === 'string' && nextChild.startsWith('$')) {
+      const trimmed = nextChild.slice(1)
+      if (trimmed) {
+        nextChildren[index + 1] = trimmed
+      } else {
+        nextChildren.splice(index + 1, 1)
+      }
+      continue
+    }
+
+    shouldTrimTrailingMarker = true
+  }
+
+  if (!shouldTrimTrailingMarker) {
+    return nextChildren
+  }
+
+  for (let index = nextChildren.length - 1; index >= 0; index -= 1) {
+    const child = nextChildren[index]
+    if (typeof child !== 'string') {
+      continue
+    }
+
+    const trimmed = child.replace(/\$(\s*)$/u, '$1')
+    if (trimmed !== child) {
+      if (trimmed) {
+        nextChildren[index] = trimmed
+      } else {
+        nextChildren.splice(index, 1)
+      }
+    }
+    break
+  }
+
+  return nextChildren
+}
+
 const transformNode = (node: ComarkNode): ComarkNode => {
   if (!isElementNode(node)) {
     return node
@@ -98,25 +171,9 @@ const transformNode = (node: ComarkNode): ComarkNode => {
   }
 
   const [tag, props, ...children] = node
-  const nextChildren = children.map(child => transformNode(child))
-  const hasRawSkillReference = nextChildren.some((child) => {
-    return isElementNode(child)
-      && child[0] === SKILL_REFERENCE_BADGE_TAG
-      && child[1].raw === 'true'
-  })
-
-  if (hasRawSkillReference) {
-    const lastIndex = nextChildren.length - 1
-    const lastChild = nextChildren[lastIndex]
-    if (typeof lastChild === 'string' && lastChild.endsWith('$')) {
-      const trimmed = lastChild.slice(0, -1)
-      if (trimmed) {
-        nextChildren[lastIndex] = trimmed
-      } else {
-        nextChildren.pop()
-      }
-    }
-  }
+  const nextChildren = removeRawSkillAutoCloseMarkers(
+    children.map(child => transformNode(child))
+  )
 
   return [
     tag,
@@ -135,8 +192,8 @@ export const transformSkillReferenceBadges = (tree: ComarkTree): ComarkTree => {
 const skillReferenceBadgeMarkdownItPlugin = (md: MarkdownItParser) => {
   md.inline.ruler.before('escape', 'skill_reference_badge', (state, silent) => {
     const source = state.src.slice(state.pos, state.posMax)
-    const match = RAW_SKILL_PATTERN.exec(source)
-    if (!match?.[1]) {
+    const match = getRawSkillMatch(source)
+    if (!match) {
       return false
     }
 
@@ -145,11 +202,11 @@ const skillReferenceBadgeMarkdownItPlugin = (md: MarkdownItParser) => {
     }
 
     const token = state.push('mdc_inline_component', SKILL_REFERENCE_BADGE_TAG, 0)
-    token.attrSet('name', match[1])
+    token.attrSet('name', match.name)
     token.attrSet('raw', 'true')
     token.markup = '$'
-    token.content = match[1]
-    state.pos += match[0].length
+    token.content = match.name
+    state.pos += match.length
     return true
   })
 }

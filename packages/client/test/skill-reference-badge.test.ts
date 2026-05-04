@@ -6,6 +6,21 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const requestMock = vi.fn()
 
+const createDeferred = <T,>() => {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve
+    reject = promiseReject
+  })
+
+  return {
+    promise,
+    resolve,
+    reject
+  }
+}
+
 vi.mock('../app/composables/useProjects', () => {
   return {
     useProjects: () => ({
@@ -139,5 +154,125 @@ describe('SkillReferenceBadge', () => {
     await flushPromises()
 
     expect(wrapper.text()).toBe('🛠️missing-skill')
+  })
+
+  it('retries catalog fetches after transient failures', async () => {
+    requestMock
+      .mockRejectedValueOnce(new Error('temporary failure'))
+      .mockResolvedValueOnce({
+        data: [{
+          cwd: '/Users/demo/Project/retry',
+          errors: [],
+          skills: [{
+            name: 'retry-skill',
+            description: 'Retry skill',
+            enabled: true,
+            path: '/Users/demo/.codex/skills/retry-skill/SKILL.md',
+            scope: 'user',
+            interface: {
+              displayName: 'Retry Skill'
+            }
+          }]
+        }]
+      })
+
+    const firstWrapper = mount(SkillReferenceBadge, {
+      props: {
+        name: 'retry-skill',
+        workspace: { kind: 'project', id: 'retry' },
+        workspaceRootPath: '/Users/demo/Project/retry'
+      },
+      global: {
+        stubs: {
+          UBadge: BadgeStub
+        }
+      }
+    })
+
+    await flushPromises()
+    expect(firstWrapper.text()).toBe('🛠️retry-skill')
+    firstWrapper.unmount()
+
+    const secondWrapper = mount(SkillReferenceBadge, {
+      props: {
+        name: 'retry-skill',
+        workspace: { kind: 'project', id: 'retry' },
+        workspaceRootPath: '/Users/demo/Project/retry'
+      },
+      global: {
+        stubs: {
+          UBadge: BadgeStub
+        }
+      }
+    })
+
+    await flushPromises()
+
+    expect(requestMock).toHaveBeenCalledTimes(2)
+    expect(secondWrapper.text()).toBe('Retry Skill')
+  })
+
+  it('ignores stale catalog responses after workspace changes', async () => {
+    const firstRequest = createDeferred<unknown>()
+    const secondRequest = createDeferred<unknown>()
+    requestMock
+      .mockReturnValueOnce(firstRequest.promise)
+      .mockReturnValueOnce(secondRequest.promise)
+
+    const wrapper = mount(SkillReferenceBadge, {
+      props: {
+        name: 'race-skill',
+        workspace: { kind: 'project', id: 'race' },
+        workspaceRootPath: '/Users/demo/Project/race-a'
+      },
+      global: {
+        stubs: {
+          UBadge: BadgeStub
+        }
+      }
+    })
+
+    await wrapper.setProps({
+      workspaceRootPath: '/Users/demo/Project/race-b'
+    })
+
+    secondRequest.resolve({
+      data: [{
+        cwd: '/Users/demo/Project/race-b',
+        errors: [],
+        skills: [{
+          name: 'race-skill',
+          description: 'Fresh skill',
+          enabled: true,
+          path: '/Users/demo/.codex/skills/race-skill/SKILL.md',
+          scope: 'user',
+          interface: {
+            displayName: 'Fresh Skill'
+          }
+        }]
+      }]
+    })
+    await flushPromises()
+    expect(wrapper.text()).toBe('Fresh Skill')
+
+    firstRequest.resolve({
+      data: [{
+        cwd: '/Users/demo/Project/race-a',
+        errors: [],
+        skills: [{
+          name: 'race-skill',
+          description: 'Stale skill',
+          enabled: true,
+          path: '/Users/demo/.codex/skills/race-skill/SKILL.md',
+          scope: 'user',
+          interface: {
+            displayName: 'Stale Skill'
+          }
+        }]
+      }]
+    })
+    await flushPromises()
+
+    expect(wrapper.text()).toBe('Fresh Skill')
   })
 })
