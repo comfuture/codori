@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import { join, resolve } from 'node:path'
 import { ensureCodoriDirectories, resolveCodoriHome } from './config.js'
@@ -56,8 +56,7 @@ export class RuntimeStore {
     return join(this.runDir, `${digest}.pid.json`)
   }
 
-  load(projectPath: string): RuntimeLoadResult {
-    const runtimePath = this.resolveRuntimePath(projectPath)
+  private loadRuntimePath(runtimePath: string): RuntimeLoadResult {
     if (!existsSync(runtimePath)) {
       return {
         kind: 'missing',
@@ -90,6 +89,16 @@ export class RuntimeStore {
     }
   }
 
+  load(projectPath: string): RuntimeLoadResult {
+    return this.loadRuntimePath(this.resolveRuntimePath(projectPath))
+  }
+
+  list() {
+    return readdirSync(this.runDir, { withFileTypes: true })
+      .filter(entry => entry.isFile() && entry.name.endsWith('.pid.json'))
+      .map(entry => this.loadRuntimePath(join(this.runDir, entry.name)))
+  }
+
   write(record: RuntimeRecord) {
     const runtimePath = this.resolveRuntimePath(record.projectPath)
     writeFileSync(runtimePath, `${JSON.stringify(record, null, 2)}\n`, 'utf8')
@@ -97,5 +106,9 @@ export class RuntimeStore {
 
   remove(projectPath: string) {
     rmSync(this.resolveRuntimePath(projectPath), { force: true })
+  }
+
+  removePath(runtimePath: string) {
+    rmSync(runtimePath, { force: true })
   }
 }

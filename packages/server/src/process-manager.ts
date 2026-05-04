@@ -86,6 +86,32 @@ const waitForExit = async (pid: number, timeoutMs: number) => {
   return !isProcessAlive(pid)
 }
 
+const terminateProcess = async (pid: number) => {
+  if (!isProcessAlive(pid)) {
+    return false
+  }
+
+  try {
+    process.kill(pid, 'SIGTERM')
+  } catch {
+    return false
+  }
+
+  const exited = await waitForExit(pid, CODORI_STOP_TIMEOUT_MS)
+  if (exited) {
+    return true
+  }
+
+  try {
+    process.kill(pid, 'SIGKILL')
+  } catch {
+    return true
+  }
+
+  await waitForExit(pid, CODORI_STOP_TIMEOUT_MS)
+  return true
+}
+
 const spawnDetached = async (command: string, args: string[], cwd: string) =>
   new Promise<ChildProcess>((resolvePromise, reject) => {
     const child = spawn(command, args, {
@@ -470,6 +496,29 @@ export class RuntimeManager {
     return await this.startResolvedProject(project)
   }
 
+  async resetStoredRuntimes() {
+    let stopped = 0
+
+    for (const loaded of this.store.list()) {
+      if (loaded.kind === 'invalid') {
+        this.store.removePath(loaded.path)
+        continue
+      }
+
+      if (loaded.kind === 'missing') {
+        continue
+      }
+
+      if (await terminateProcess(loaded.record.pid)) {
+        stopped += 1
+      }
+      this.store.removePath(loaded.path)
+    }
+
+    this.activeSessions.clear()
+    return stopped
+  }
+
   private async startResolvedProject(project: ProjectRecord): Promise<StartProjectResult> {
     const loaded = this.store.load(project.path)
 
@@ -615,14 +664,7 @@ export class RuntimeManager {
       return this.normalizeStatus(project, null, null)
     }
 
-    if (isProcessAlive(loaded.record.pid)) {
-      process.kill(loaded.record.pid, 'SIGTERM')
-      const exited = await waitForExit(loaded.record.pid, CODORI_STOP_TIMEOUT_MS)
-      if (!exited) {
-        process.kill(loaded.record.pid, 'SIGKILL')
-        await waitForExit(loaded.record.pid, CODORI_STOP_TIMEOUT_MS)
-      }
-    }
+    await terminateProcess(loaded.record.pid)
 
     this.store.remove(project.path)
     return this.normalizeStatus(project, null, null)

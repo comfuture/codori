@@ -66,6 +66,7 @@ export type RuntimeManagerLike = {
     touchActivity?: (at?: number) => MaybePromise<ChatSessionStatusRecord | void>
     release: () => void
   }
+  resetStoredRuntimes?: () => MaybePromise<number>
   dispose?: () => MaybePromise<void>
   config?: {
     server: {
@@ -1395,6 +1396,7 @@ export const startHttpServer = async (manager = createRuntimeManager()) => {
   if (!manager.config) {
     throw new CodoriError('INVALID_CONFIG', 'Manager config is required to start the HTTP server.')
   }
+  await resolveValue(manager.resetStoredRuntimes?.() ?? 0)
   const app = await createHttpServer(manager, {
     serviceUpdateController: createServiceUpdateController({
       root: manager.config.root
