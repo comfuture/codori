@@ -206,6 +206,11 @@ const hasAssistantOutputPart = (message: ChatMessage) =>
     || part.type === 'plan'
   )
 
+const isDisplayOnlySystemEvent = (message: ChatMessage) =>
+  message.role === 'system'
+  && message.parts.length === 1
+  && message.parts[0]?.type === EVENT_PART
+
 const buildToolGroupData = (messages: ChatMessage[]): ToolCallGroupData => {
   const counts = new Map<GroupableToolKind, number>()
   for (const message of messages) {
@@ -252,22 +257,36 @@ const groupToolRun = (toolRun: ChatMessage[]): ChatMessage[] => {
 export const groupTranscriptMessages = (messages: ChatMessage[]): ChatMessage[] => {
   const grouped: ChatMessage[] = []
   let pendingToolRun: ChatMessage[] = []
+  let pendingSystemEvents: ChatMessage[] = []
 
   for (const message of messages) {
     if (getGroupableToolKind(message)) {
+      if (pendingSystemEvents.length > 0) {
+        grouped.push(...pendingToolRun, ...pendingSystemEvents)
+        pendingToolRun = []
+        pendingSystemEvents = []
+      }
+
       pendingToolRun.push(message)
       continue
     }
 
     if (pendingToolRun.length > 0) {
+      if (isDisplayOnlySystemEvent(message)) {
+        pendingSystemEvents.push(message)
+        continue
+      }
+
       grouped.push(...(hasAssistantOutputPart(message) ? groupToolRun(pendingToolRun) : pendingToolRun))
+      grouped.push(...pendingSystemEvents)
       pendingToolRun = []
+      pendingSystemEvents = []
     }
 
     grouped.push(message)
   }
 
-  grouped.push(...pendingToolRun)
+  grouped.push(...pendingToolRun, ...pendingSystemEvents)
   return grouped
 }
 

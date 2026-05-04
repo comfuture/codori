@@ -621,4 +621,56 @@ describe('chat transcript stability', () => {
       user
     ])
   })
+
+  it('groups completed tools across display-only review completion events', () => {
+    const command = itemToMessages({
+      type: 'commandExecution',
+      id: 'cmd-1',
+      command: 'pnpm test',
+      cwd: '/tmp',
+      processId: null,
+      source: 'agent',
+      status: 'completed',
+      commandActions: [],
+      aggregatedOutput: 'Tests passed',
+      exitCode: 0,
+      durationMs: 50
+    })
+    const edit = itemToMessages({
+      type: 'fileChange',
+      id: 'edit-1',
+      changes: [{
+        path: 'packages/client/shared/codex-chat.ts',
+        kind: {
+          type: 'update',
+          move_path: null
+        },
+        diff: ''
+      }],
+      status: 'completed'
+    })
+    const reviewCompleted = itemToMessages({
+      type: 'exitedReviewMode',
+      id: 'review-1',
+      review: 'Final review output'
+    })
+
+    const grouped = groupTranscriptMessages([
+      ...command,
+      ...edit,
+      ...reviewCompleted
+    ])
+
+    expect(grouped).toHaveLength(3)
+    expect(grouped[0]?.parts[0]).toMatchObject({
+      type: TOOL_GROUP_PART,
+      data: {
+        summary: '2 tool calls',
+        details: '1 command, 1 edit',
+        messages: [...command, ...edit]
+      }
+    })
+    expect(grouped[1]).toEqual(reviewCompleted[0])
+    expect(grouped[2]).toEqual(reviewCompleted[1])
+  })
 })

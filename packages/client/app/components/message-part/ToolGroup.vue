@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import {
   ITEM_PART,
   TOOL_GROUP_PART,
@@ -13,9 +13,11 @@ const props = defineProps<{
 
 const open = ref(false)
 
-const childItemParts = props.part.data.messages.flatMap(message =>
-  message.parts.filter((part): part is Extract<ChatPart, { type: typeof ITEM_PART }> =>
-    part.type === ITEM_PART
+const childItemParts = computed(() =>
+  props.part.data.messages.flatMap(message =>
+    message.parts.filter((part): part is Extract<ChatPart, { type: typeof ITEM_PART }> =>
+      part.type === ITEM_PART
+    )
   )
 )
 </script>
