@@ -94,6 +94,10 @@ export class RuntimeStore {
   }
 
   list() {
+    if (!existsSync(this.runDir)) {
+      return []
+    }
+
     return readdirSync(this.runDir, { withFileTypes: true })
       .filter(entry => entry.isFile() && entry.name.endsWith('.pid.json'))
       .map(entry => this.loadRuntimePath(join(this.runDir, entry.name)))

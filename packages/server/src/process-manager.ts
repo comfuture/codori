@@ -497,26 +497,23 @@ export class RuntimeManager {
   }
 
   async resetStoredRuntimes() {
-    let stopped = 0
-
-    for (const loaded of this.store.list()) {
+    const resetResults = await Promise.all(this.store.list().map(async (loaded): Promise<number> => {
       if (loaded.kind === 'invalid') {
         this.store.removePath(loaded.path)
-        continue
+        return 0
       }
 
       if (loaded.kind === 'missing') {
-        continue
+        return 0
       }
 
-      if (await terminateProcess(loaded.record.pid)) {
-        stopped += 1
-      }
+      const stopped = await terminateProcess(loaded.record.pid)
       this.store.removePath(loaded.path)
-    }
+      return stopped ? 1 : 0
+    }))
 
     this.activeSessions.clear()
-    return stopped
+    return resetResults.reduce((total, stopped) => total + stopped, 0)
   }
 
   private async startResolvedProject(project: ProjectRecord): Promise<StartProjectResult> {
