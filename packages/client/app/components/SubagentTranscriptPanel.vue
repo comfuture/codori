@@ -17,6 +17,7 @@ const props = withDefaults(defineProps<{
   showCollapseButton?: boolean
   scrollScope?: string
 }>(), {
+  projectId: null,
   accent: null,
   expanded: false,
   showExpandButton: false,

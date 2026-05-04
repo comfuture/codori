@@ -3,10 +3,10 @@ import { Comark } from '@comark/vue'
 import highlight from '@comark/vue/plugins/highlight'
 import math, { Math as ComarkMath } from '@comark/vue/plugins/math'
 import mermaid from '@comark/vue/plugins/mermaid'
-import { renderMermaidSVG, THEMES } from 'beautiful-mermaid'
-import { computed, defineComponent, h, onMounted, ref, watch } from 'vue'
-import LocalFileLink from './LocalFileLink.vue'
+import { computed } from 'vue'
+import { ChatMarkdownMermaid } from './ChatMarkdownMermaid'
 import ReviewPriorityBadge from './ReviewPriorityBadge.vue'
+import { createChatMarkdownLocalFileLink } from './createChatMarkdownLocalFileLink'
 import { reviewPriorityBadgePlugin } from '../../utils/review-priority-badge'
 import type { WorkspaceLocalFileScope } from '../../../shared/local-files'
 
@@ -22,137 +22,11 @@ const props = defineProps<{
   } | null
 }>()
 
-const ChatMarkdownMermaid = defineComponent({
-  name: 'ChatMarkdownMermaid',
-  props: {
-    content: {
-      type: String,
-      required: true
-    },
-    class: {
-      type: String,
-      default: ''
-    },
-    height: {
-      type: String,
-      default: ''
-    },
-    width: {
-      type: String,
-      default: ''
-    },
-    theme: {
-      type: [String, Object],
-      default: undefined
-    },
-    themeDark: {
-      type: [String, Object],
-      default: undefined
-    }
-  },
-  setup(props, { attrs }) {
-    const svgContent = ref('')
-    const error = ref<string | null>(null)
-    const isDark = ref(false)
-
-    const resolveTheme = () => {
-      const themeProp = isDark.value ? props.themeDark : props.theme
-
-      if (typeof themeProp === 'string' && themeProp in THEMES) {
-        return THEMES[themeProp]
-      }
-
-      if (themeProp && typeof themeProp === 'object') {
-        return themeProp
-      }
-
-      return THEMES[isDark.value ? 'tokyo-night' : 'tokyo-night-light']
-    }
-
-    const renderDiagram = () => {
-      try {
-        svgContent.value = renderMermaidSVG(props.content, resolveTheme())
-        error.value = null
-      } catch (caught) {
-        svgContent.value = ''
-        error.value = caught instanceof Error ? caught.message : 'Failed to render Mermaid diagram'
-      }
-    }
-
-    onMounted(() => {
-      const htmlEl = document.documentElement
-      isDark.value = htmlEl.classList.contains('dark')
-
-      const observer = new MutationObserver(() => {
-        const nextIsDark = htmlEl.classList.contains('dark')
-        if (nextIsDark !== isDark.value) {
-          isDark.value = nextIsDark
-          renderDiagram()
-        }
-      })
-
-      observer.observe(htmlEl, {
-        attributes: true,
-        attributeFilter: ['class']
-      })
-
-      renderDiagram()
-    })
-
-    watch(() => [props.content, props.theme, props.themeDark], () => {
-      renderDiagram()
-    })
-
-    return () => {
-      if (error.value) {
-        return h('pre', {
-          ...attrs,
-          class: ['cd-markdown-mermaid-fallback', props.class].filter(Boolean).join(' '),
-          'data-mermaid-error': error.value
-        }, [
-          h('code', {
-            class: 'language-mermaid'
-          }, props.content)
-        ])
-      }
-
-      return h('div', {
-        ...attrs,
-        class: ['mermaid', props.class].filter(Boolean).join(' '),
-        style: {
-          display: 'flex',
-          justifyContent: 'center',
-          width: props.width || '100%',
-          height: props.height || 'auto'
-        },
-        innerHTML: svgContent.value
-      })
-    }
-  }
-})
-
-const ChatMarkdownLocalFileLink = defineComponent({
-  name: 'ChatMarkdownLocalFileLink',
-  props: {
-    href: {
-      type: String,
-      default: ''
-    },
-    title: {
-      type: String,
-      default: ''
-    }
-  },
-  setup(linkProps, { slots }) {
-    return () => h(LocalFileLink, {
-      href: linkProps.href,
-      title: linkProps.title,
-      projectId: props.projectId ?? null,
-      workspace: props.workspace ?? null,
-      workspaceRootPath: props.workspaceRootPath ?? null
-    }, slots)
-  }
-})
+const ChatMarkdownLocalFileLink = createChatMarkdownLocalFileLink(() => ({
+  projectId: props.projectId ?? null,
+  workspace: props.workspace ?? null,
+  workspaceRootPath: props.workspaceRootPath ?? null
+}))
 
 const components = {
   a: ChatMarkdownLocalFileLink,

@@ -77,6 +77,6 @@ onMounted(() => {
       </template>
     </UDashboardPanel>
 
-        <ThreadPanel :project-id="projectId" />
+    <ThreadPanel :project-id="projectId" />
   </div>
 </template>
