@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import WebSocket, { WebSocketServer } from 'ws'
 import { resolveProjectAttachmentsDir } from '../src/attachment-store.js'
 import { CodoriError } from '../src/errors.js'
-import { createHttpServer, type RuntimeManagerLike } from '../src/http-server.js'
+import { createHttpServer, startHttpServer, type RuntimeManagerLike } from '../src/http-server.js'
 import type { ServiceUpdateController } from '../src/service-update.js'
 import type { ChatSessionStatusRecord, ProjectStatusRecord, StartProjectResult } from '../src/types.js'
 
@@ -167,6 +167,45 @@ const createGitRepo = () => {
 }
 
 describe('createHttpServer', () => {
+  it('does not reset stored runtimes when startup binding fails', async () => {
+    const blocker = createNetServer()
+    await new Promise<void>((resolvePromise, reject) => {
+      blocker.listen(0, '127.0.0.1', (error?: Error) => {
+        if (error) {
+          reject(error)
+          return
+        }
+        resolvePromise()
+      })
+    })
+    occupiedTcpServers.push(blocker)
+
+    const address = blocker.address()
+    if (!address || typeof address === 'string') {
+      throw new Error('Failed to get blocker server address.')
+    }
+
+    let resetCalls = 0
+    const manager = createManager({
+      resetStoredRuntimes: () => {
+        resetCalls += 1
+        return 0
+      },
+      config: {
+        root: '/tmp',
+        server: {
+          host: '127.0.0.1',
+          port: address.port
+        }
+      }
+    })
+
+    await expect(startHttpServer(manager)).rejects.toMatchObject({
+      code: 'EADDRINUSE'
+    })
+    expect(resetCalls).toBe(0)
+  })
+
   it('serves project management routes', async () => {
     const app = await createHttpServer(createManager())
     startedApps.push(app)
