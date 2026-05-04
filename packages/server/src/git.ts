@@ -65,7 +65,7 @@ const ensureValidBranchName = async (projectPath: string, branchName: string) =>
 }
 
 export const listGitBranches = async (projectPath: string): Promise<GitBranchesResult> => {
-  let branchesOutput = ''
+  let branchesOutput: string
   try {
     branchesOutput = await runGit(projectPath, [
       'for-each-ref',
@@ -80,7 +80,7 @@ export const listGitBranches = async (projectPath: string): Promise<GitBranchesR
     }
   }
 
-  let currentBranch: string | null = null
+  let currentBranch: string | null
   try {
     currentBranch = (await runGit(projectPath, ['branch', '--show-current'])) || null
   } catch {

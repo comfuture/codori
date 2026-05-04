@@ -234,12 +234,8 @@ export const createServiceUpdateController = (
     }
 
     pendingStatus = (async () => {
-      let latestVersion: string | null = cachedStatus?.latestVersion ?? null
-      try {
-        latestVersion = await fetchLatestPackageVersion(fetchImpl, registryTimeoutMs)
-      } catch {
-        latestVersion = cachedStatus?.latestVersion ?? null
-      }
+      const latestVersion = await fetchLatestPackageVersion(fetchImpl, registryTimeoutMs)
+        .catch(() => cachedStatus?.latestVersion ?? null)
 
       const nextStatus: ServiceUpdateStatus = {
         enabled: true,

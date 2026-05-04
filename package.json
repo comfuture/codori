@@ -2,7 +2,7 @@
   "name": "codori",
   "private": true,
   "version": "0.3.0",
-  "packageManager": "pnpm@10.33.0",
+  "packageManager": "pnpm@10.33.2",
   "scripts": {
     "build": "pnpm --filter @codori/client build && pnpm --filter @codori/server build",
     "dev": "pnpm --filter @codori/client dev",
@@ -12,16 +12,16 @@
     "test": "pnpm -r --if-present test"
   },
   "devDependencies": {
-    "@eslint/js": "^9.39.1",
-    "@types/node": "^24.7.2",
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^25.6.0",
     "@types/ws": "^8.18.1",
-    "@vue/language-core": "^3.1.1",
-    "eslint": "^9.39.1",
-    "eslint-plugin-vue": "^10.5.1",
-    "globals": "^16.4.0",
-    "typescript": "^5.9.3",
-    "typescript-eslint": "^8.46.1",
-    "vitest": "^3.2.4",
-    "vue-eslint-parser": "^10.2.0"
+    "@vue/language-core": "^3.2.7",
+    "eslint": "^10.3.0",
+    "eslint-plugin-vue": "^10.9.0",
+    "globals": "^17.6.0",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.59.1",
+    "vitest": "^4.1.5",
+    "vue-eslint-parser": "^10.4.0"
   }
 }

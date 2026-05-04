@@ -3,7 +3,7 @@
 
 import { mount } from '@vue/test-utils'
 import { defineComponent, h, nextTick } from 'vue'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import PendingUserRequestDrawer from '../app/components/PendingUserRequestDrawer.vue'
 import type { PendingUserRequest, PendingUserRequestState } from '../shared/pending-user-request'
 
@@ -170,6 +170,10 @@ const mountDrawer = (request: PendingUserRequest | null, submitting = false) =>
       }
     }
   })
+
+afterEach(() => {
+  vi.restoreAllMocks()
+})
 
 describe('pending user request drawer', () => {
   it('renders request-user-input as a sequential flow and emits structured answers on the last answer', async () => {

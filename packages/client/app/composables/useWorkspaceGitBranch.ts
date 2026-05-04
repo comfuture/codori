@@ -46,7 +46,7 @@ const MIN_REFRESH_INTERVAL_MS = 750
 export const WORKSPACE_GIT_BRANCH_ENVIRONMENT_REFRESH_INTERVAL_MS = 10_000
 
 const readJsonResponse = async <T>(response: Response, fallbackMessage: string): Promise<T> => {
-  let body: T | { error?: { message?: string } } | null = null
+  let body: T | { error?: { message?: string } }
 
   try {
     body = await response.json() as T | { error?: { message?: string } }
