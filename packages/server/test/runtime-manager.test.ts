@@ -81,6 +81,15 @@ const closeServer = (server: ReturnType<typeof createServer>) =>
     })
   })
 
+const isProcessAlive = (pid: number) => {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
 const reservePortRange = async (size: number, start = 47000, end = 49000) => {
   for (let candidate = start; candidate <= end - size + 1; candidate += 1) {
     const probes = Array.from({ length: size }, () => createServer())
@@ -147,6 +156,48 @@ describe('RuntimeManager', () => {
     const started = await manager.startProject('demo')
     expect(started.status).toBe('running')
     expect(started.pid).not.toBe(999999)
+  })
+
+  it('resets stored runtimes before a new server starts', async () => {
+    const fixture = createFixture()
+    const manager = createRuntimeManager({
+      homeDir: fixture.homeDir,
+      config: fixture.config,
+      commandFactory: () => ({
+        command: process.execPath,
+        args: ['-e', 'setInterval(() => {}, 1000)']
+      })
+    })
+
+    const started = await manager.startProject('demo')
+    expect(started.pid).not.toBeNull()
+    expect(started.reusedExisting).toBe(false)
+    if (started.pid === null) {
+      throw new Error('Expected a started runtime PID.')
+    }
+    expect(isProcessAlive(started.pid)).toBe(true)
+    manager.dispose()
+
+    const nextManager = createRuntimeManager({
+      homeDir: fixture.homeDir,
+      config: fixture.config,
+      commandFactory: () => ({
+        command: process.execPath,
+        args: ['-e', 'setInterval(() => {}, 1000)']
+      })
+    })
+    runningManagers.push(nextManager)
+
+    const stopped = await nextManager.resetStoredRuntimes()
+    expect(stopped).toBe(1)
+    expect(isProcessAlive(started.pid)).toBe(false)
+
+    const store = new RuntimeStore(fixture.homeDir)
+    expect(store.load(join(fixture.root, 'demo')).kind).toBe('missing')
+
+    const restarted = await nextManager.startProject('demo')
+    expect(restarted.reusedExisting).toBe(false)
+    expect(restarted.pid).not.toBe(started.pid)
   })
 
   it('skips occupied ports while allocating a runtime port', async () => {
