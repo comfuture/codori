@@ -198,6 +198,31 @@ const getGroupableToolKind = (message: ChatMessage): GroupableToolKind | null =>
     : null
 }
 
+const isSuccessfullyCompletedToolMessage = (message: ChatMessage) => {
+  if (message.pending || message.parts.length !== 1) {
+    return false
+  }
+
+  const [part] = message.parts
+  if (part?.type !== ITEM_PART) {
+    return false
+  }
+
+  switch (part.data.kind) {
+    case 'command_execution':
+    case 'file_change':
+    case 'mcp_tool_call':
+    case 'dynamic_tool_call':
+      return part.data.item.status === 'completed'
+    case 'web_search':
+      return part.data.status === 'completed'
+    case 'context_compaction':
+      return true
+    default:
+      return false
+  }
+}
+
 const hasAssistantOutputPart = (message: ChatMessage) =>
   message.role === 'assistant'
   && message.parts.some(part =>
@@ -239,7 +264,7 @@ const buildToolGroupData = (messages: ChatMessage[]): ToolCallGroupData => {
 }
 
 const groupToolRun = (toolRun: ChatMessage[]): ChatMessage[] => {
-  if (toolRun.length <= 1 || toolRun.some(message => message.pending)) {
+  if (toolRun.length <= 1 || toolRun.some(message => !isSuccessfullyCompletedToolMessage(message))) {
     return toolRun
   }
 
@@ -260,7 +285,8 @@ export const groupTranscriptMessages = (messages: ChatMessage[]): ChatMessage[] 
   let pendingSystemEvents: ChatMessage[] = []
 
   for (const message of messages) {
-    if (getGroupableToolKind(message)) {
+    const toolKind = getGroupableToolKind(message)
+    if (toolKind && isSuccessfullyCompletedToolMessage(message)) {
       if (pendingSystemEvents.length > 0) {
         grouped.push(...pendingToolRun, ...pendingSystemEvents)
         pendingToolRun = []

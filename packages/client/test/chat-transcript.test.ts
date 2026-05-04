@@ -563,6 +563,47 @@ describe('chat transcript stability', () => {
     ])
   })
 
+  it('keeps failed and declined tool items out of grouped cards', () => {
+    const failedCommand = itemToMessages({
+      type: 'commandExecution',
+      id: 'cmd-failed',
+      command: 'pnpm test',
+      cwd: '/tmp',
+      processId: null,
+      source: 'agent',
+      status: 'failed',
+      commandActions: [],
+      aggregatedOutput: 'Tests failed',
+      exitCode: 1,
+      durationMs: 30
+    })
+    const declinedEdit = itemToMessages({
+      type: 'fileChange',
+      id: 'edit-declined',
+      changes: [],
+      status: 'declined'
+    })
+    const assistant: ChatMessage = {
+      id: 'assistant-1',
+      role: 'assistant',
+      parts: [{
+        type: 'text',
+        text: 'I found a failure.',
+        state: 'done'
+      }]
+    }
+
+    expect(groupTranscriptMessages([
+      ...failedCommand,
+      ...declinedEdit,
+      assistant
+    ])).toEqual([
+      ...failedCommand,
+      ...declinedEdit,
+      assistant
+    ])
+  })
+
   it('does not group single tool items or tool runs before non-assistant boundaries', () => {
     const singleTool = itemToMessages({
       type: 'contextCompaction',
