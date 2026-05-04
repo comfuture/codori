@@ -1,12 +1,13 @@
 import { defineComponent, h, type PropType } from 'vue'
 import { UChatReasoning } from '#components'
-import { EVENT_PART, ITEM_PART, type ChatMessage, type ChatPart } from '~~/shared/codex-chat'
+import { EVENT_PART, ITEM_PART, TOOL_GROUP_PART, type ChatMessage, type ChatPart } from '~~/shared/codex-chat'
 import type { WorkspaceAttachmentScope } from '~~/shared/chat-attachments'
 import MessagePartAttachment from './message-part/Attachment.vue'
 import MessagePartEvent from './message-part/Event.vue'
 import MessagePartItem from './message-part/Item'
 import MessagePartPlan from './message-part/Plan.vue'
 import MessagePartText from './message-part/Text.vue'
+import MessagePartToolGroup from './message-part/ToolGroup.vue'
 
 export default defineComponent({
   name: 'MessagePartRenderer',
@@ -73,6 +74,10 @@ export default defineComponent({
           return h(MessagePartItem, {
             part: props.part,
             messagePending: props.message?.pending ?? false
+          })
+        case TOOL_GROUP_PART:
+          return h(MessagePartToolGroup, {
+            part: props.part
           })
         default:
           return h('pre', {

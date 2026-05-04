@@ -62,6 +62,7 @@ import {
   eventToMessage,
   findLatestCompletedPlanTurnId,
   findLatestPlanTurnId,
+  groupTranscriptMessages,
   isSubagentActiveStatus,
   itemToMessages,
   replaceStreamingMessage,
@@ -442,6 +443,7 @@ const composerPlaceholder = computed(() =>
 const chatMessagesStatus = computed(() =>
   resolveChatMessagesStatus(status.value, awaitingAssistantOutput.value)
 )
+const displayMessages = computed(() => groupTranscriptMessages(messages.value))
 const chatSpacingOffset = computed(() =>
   Math.max(140, stickyFooterHeight.value + 24)
 )
@@ -4361,7 +4363,7 @@ watch(
 
       <UChatMessages
         v-else
-        :messages="messages"
+        :messages="displayMessages"
         :status="chatMessagesStatus"
         :should-auto-scroll="false"
         :should-scroll-to-bottom="false"
