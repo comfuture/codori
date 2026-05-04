@@ -3,11 +3,13 @@ import { Comark } from '@comark/vue'
 import highlight from '@comark/vue/plugins/highlight'
 import math, { Math as ComarkMath } from '@comark/vue/plugins/math'
 import mermaid from '@comark/vue/plugins/mermaid'
-import { computed } from 'vue'
+import { computed, defineComponent, h } from 'vue'
 import { ChatMarkdownMermaid } from './ChatMarkdownMermaid'
 import ReviewPriorityBadge from './ReviewPriorityBadge.vue'
+import SkillReferenceBadge from './SkillReferenceBadge.vue'
 import { createChatMarkdownLocalFileLink } from './createChatMarkdownLocalFileLink'
 import { reviewPriorityBadgePlugin } from '../../utils/review-priority-badge'
+import { skillReferenceBadgePlugin } from '../../utils/skill-reference-badge'
 import type { WorkspaceLocalFileScope } from '../../../shared/local-files'
 
 const props = defineProps<{
@@ -28,14 +30,43 @@ const ChatMarkdownLocalFileLink = createChatMarkdownLocalFileLink(() => ({
   workspaceRootPath: props.workspaceRootPath ?? null
 }))
 
+const ChatMarkdownSkillReferenceBadge = defineComponent({
+  name: 'ChatMarkdownSkillReferenceBadge',
+  props: {
+    name: {
+      type: String,
+      required: true
+    },
+    path: {
+      type: String,
+      default: null
+    },
+    raw: {
+      type: String,
+      default: null
+    }
+  },
+  setup(componentProps) {
+    return () => h(SkillReferenceBadge, {
+      name: componentProps.name,
+      path: componentProps.path,
+      projectId: props.projectId ?? null,
+      workspace: props.workspace ?? null,
+      workspaceRootPath: props.workspaceRootPath ?? null
+    })
+  }
+})
+
 const components = {
   a: ChatMarkdownLocalFileLink,
   math: ComarkMath,
   mermaid: ChatMarkdownMermaid,
-  'review-priority-badge': ReviewPriorityBadge
+  'review-priority-badge': ReviewPriorityBadge,
+  'skill-reference-badge': ChatMarkdownSkillReferenceBadge
 }
 
 const plugins = [
+  skillReferenceBadgePlugin(),
   math(),
   mermaid(),
   reviewPriorityBadgePlugin(),
