@@ -31,6 +31,7 @@ import {
   shouldApplyNotificationWithoutTurnId
 } from '../utils/chat-turn-engagement'
 import { isFocusWithinContainer } from '../utils/slash-prompt-focus'
+import { isConstrainedBrowserRequiringDeferredSync } from '../utils/browser-capabilities'
 import { useChatAttachments, type DraftAttachment } from '../composables/useChatAttachments'
 import { useChatPlanWorkflow } from '../composables/useChatPlanWorkflow'
 import { useChatReviewWorkflow } from '../composables/useChatReviewWorkflow'
@@ -3865,45 +3866,50 @@ onMounted(() => {
       window.removeEventListener('keydown', handleWorkspaceInteraction)
     }
 
-    const markThreadWorkspaceDeactivated = () => {
-      lastWorkspaceDeactivatedAt = Date.now()
-    }
-    const handleThreadWorkspaceVisible = () => {
-      if (document.visibilityState === 'visible') {
-        void syncActiveThreadAfterReactivation('window/visible')
-      } else {
-        markThreadWorkspaceDeactivated()
+    // Only install aggressive reactivation sync listeners for constrained browsers
+    // that cannot reliably maintain background SSE streaming (e.g., mobile browsers).
+    // Desktop browsers should continue streaming normally without these interruptions.
+    if (isConstrainedBrowserRequiringDeferredSync()) {
+      const markThreadWorkspaceDeactivated = () => {
+        lastWorkspaceDeactivatedAt = Date.now()
       }
-    }
-    const handleThreadWorkspaceFocus = () => {
-      void syncActiveThreadAfterReactivation('window/focus')
-    }
-    const handleThreadWorkspaceInteraction = () => {
-      void syncActiveThreadAfterReactivation('window/interaction')
-    }
-    const handleThreadWorkspaceOnline = () => {
-      void syncActiveThreadAfterReactivation('window/online')
-    }
+      const handleThreadWorkspaceVisible = () => {
+        if (document.visibilityState === 'visible') {
+          void syncActiveThreadAfterReactivation('window/visible')
+        } else {
+          markThreadWorkspaceDeactivated()
+        }
+      }
+      const handleThreadWorkspaceFocus = () => {
+        void syncActiveThreadAfterReactivation('window/focus')
+      }
+      const handleThreadWorkspaceInteraction = () => {
+        void syncActiveThreadAfterReactivation('window/interaction')
+      }
+      const handleThreadWorkspaceOnline = () => {
+        void syncActiveThreadAfterReactivation('window/online')
+      }
 
-    document.addEventListener('visibilitychange', handleThreadWorkspaceVisible)
-    document.addEventListener('freeze', markThreadWorkspaceDeactivated)
-    document.addEventListener('resume', handleThreadWorkspaceFocus)
-    window.addEventListener('pagehide', markThreadWorkspaceDeactivated)
-    window.addEventListener('pageshow', handleThreadWorkspaceFocus)
-    window.addEventListener('focus', handleThreadWorkspaceFocus)
-    window.addEventListener('online', handleThreadWorkspaceOnline)
-    window.addEventListener('pointerdown', handleThreadWorkspaceInteraction, { passive: true })
-    window.addEventListener('keydown', handleThreadWorkspaceInteraction)
-    releaseThreadReactivationListeners = () => {
-      document.removeEventListener('visibilitychange', handleThreadWorkspaceVisible)
-      document.removeEventListener('freeze', markThreadWorkspaceDeactivated)
-      document.removeEventListener('resume', handleThreadWorkspaceFocus)
-      window.removeEventListener('pagehide', markThreadWorkspaceDeactivated)
-      window.removeEventListener('pageshow', handleThreadWorkspaceFocus)
-      window.removeEventListener('focus', handleThreadWorkspaceFocus)
-      window.removeEventListener('online', handleThreadWorkspaceOnline)
-      window.removeEventListener('pointerdown', handleThreadWorkspaceInteraction)
-      window.removeEventListener('keydown', handleThreadWorkspaceInteraction)
+      document.addEventListener('visibilitychange', handleThreadWorkspaceVisible)
+      document.addEventListener('freeze', markThreadWorkspaceDeactivated)
+      document.addEventListener('resume', handleThreadWorkspaceFocus)
+      window.addEventListener('pagehide', markThreadWorkspaceDeactivated)
+      window.addEventListener('pageshow', handleThreadWorkspaceFocus)
+      window.addEventListener('focus', handleThreadWorkspaceFocus)
+      window.addEventListener('online', handleThreadWorkspaceOnline)
+      window.addEventListener('pointerdown', handleThreadWorkspaceInteraction, { passive: true })
+      window.addEventListener('keydown', handleThreadWorkspaceInteraction)
+      releaseThreadReactivationListeners = () => {
+        document.removeEventListener('visibilitychange', handleThreadWorkspaceVisible)
+        document.removeEventListener('freeze', markThreadWorkspaceDeactivated)
+        document.removeEventListener('resume', handleThreadWorkspaceFocus)
+        window.removeEventListener('pagehide', markThreadWorkspaceDeactivated)
+        window.removeEventListener('pageshow', handleThreadWorkspaceFocus)
+        window.removeEventListener('focus', handleThreadWorkspaceFocus)
+        window.removeEventListener('online', handleThreadWorkspaceOnline)
+        window.removeEventListener('pointerdown', handleThreadWorkspaceInteraction)
+        window.removeEventListener('keydown', handleThreadWorkspaceInteraction)
+      }
     }
 
     footerResizeObserver = new ResizeObserver((entries) => {
