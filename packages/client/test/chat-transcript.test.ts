@@ -3,9 +3,11 @@ import type { Thread } from '../shared/generated/codex-app-server/v2/Thread'
 import type { Turn } from '../shared/generated/codex-app-server/v2/Turn'
 import {
   ITEM_PART,
+  TOOL_GROUP_PART,
   asAgentMessageItem,
   findLatestCompletedPlanTurnId,
   findLatestPlanTurnId,
+  groupTranscriptMessages,
   itemToMessages,
   threadToMessages,
   replaceStreamingMessage,
@@ -477,5 +479,146 @@ describe('chat transcript stability', () => {
         }
       }]
     }])
+  })
+
+  it('groups consecutive completed tool messages once assistant output follows', () => {
+    const command = itemToMessages({
+      type: 'commandExecution',
+      id: 'cmd-1',
+      command: 'rg groupTranscriptMessages',
+      cwd: '/tmp',
+      processId: null,
+      source: 'agent',
+      status: 'completed',
+      commandActions: [],
+      aggregatedOutput: 'packages/client/shared/codex-chat.ts',
+      exitCode: 0,
+      durationMs: 42
+    })
+    const search = itemToMessages({
+      type: 'webSearch',
+      id: 'search-1',
+      query: 'openai codex tool grouping',
+      action: null
+    })
+    const assistant: ChatMessage = {
+      id: 'assistant-1',
+      role: 'assistant',
+      parts: [{
+        type: 'text',
+        text: 'Done',
+        state: 'done'
+      }]
+    }
+
+    const grouped = groupTranscriptMessages([...command, ...search, assistant])
+
+    expect(grouped).toHaveLength(2)
+    expect(grouped[0]?.id).toBe('tool-group:2:cmd-1:search-1')
+    expect(grouped[0]?.role).toBe('system')
+    expect(grouped[0]?.parts[0]).toMatchObject({
+      type: TOOL_GROUP_PART,
+      data: {
+        summary: '2 tool calls',
+        details: '1 command, 1 web search',
+        messages: [...command, ...search]
+      }
+    })
+    expect(grouped[1]).toBe(assistant)
+  })
+
+  it('keeps the active streaming tool tail ungrouped', () => {
+    const running = itemToMessages({
+      type: 'mcpToolCall',
+      id: 'mcp-1',
+      server: 'filesystem',
+      tool: 'read_file',
+      arguments: { path: '/tmp/demo.txt' },
+      result: null,
+      error: null,
+      status: 'inProgress',
+      durationMs: null
+    })
+    const completed = itemToMessages({
+      type: 'webSearch',
+      id: 'search-1',
+      query: 'codori',
+      action: null
+    })
+    const assistant: ChatMessage = {
+      id: 'assistant-1',
+      role: 'assistant',
+      parts: [{
+        type: 'reasoning',
+        summary: ['Checking'],
+        content: [],
+        state: 'done'
+      }]
+    }
+
+    expect(groupTranscriptMessages([...running, ...completed, assistant])).toEqual([
+      ...running,
+      ...completed,
+      assistant
+    ])
+  })
+
+  it('does not group single tool items or tool runs before non-assistant boundaries', () => {
+    const singleTool = itemToMessages({
+      type: 'contextCompaction',
+      id: 'compact-1'
+    })
+    const user: ChatMessage = {
+      id: 'user-1',
+      role: 'user',
+      parts: [{
+        type: 'text',
+        text: 'Next request',
+        state: 'done'
+      }]
+    }
+    const assistant: ChatMessage = {
+      id: 'assistant-1',
+      role: 'assistant',
+      parts: [{
+        type: 'text',
+        text: 'Done',
+        state: 'done'
+      }]
+    }
+
+    expect(groupTranscriptMessages([...singleTool, assistant])).toEqual([
+      ...singleTool,
+      assistant
+    ])
+    expect(groupTranscriptMessages([
+      ...itemToMessages({
+        type: 'webSearch',
+        id: 'search-1',
+        query: 'codori',
+        action: null
+      }),
+      ...itemToMessages({
+        type: 'webSearch',
+        id: 'search-2',
+        query: 'openai codex',
+        action: null
+      }),
+      user
+    ])).toEqual([
+      ...itemToMessages({
+        type: 'webSearch',
+        id: 'search-1',
+        query: 'codori',
+        action: null
+      }),
+      ...itemToMessages({
+        type: 'webSearch',
+        id: 'search-2',
+        query: 'openai codex',
+        action: null
+      }),
+      user
+    ])
   })
 })

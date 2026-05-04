@@ -7,6 +7,7 @@ import type { UserInput } from './generated/codex-app-server/v2/UserInput'
 
 export const EVENT_PART = 'data-thread-event' as const
 export const ITEM_PART = 'data-thread-item' as const
+export const TOOL_GROUP_PART = 'data-tool-call-group' as const
 
 export type ThreadEventData =
   | {
@@ -104,6 +105,15 @@ export type ItemData =
       item: Extract<ThreadItem, { type: 'contextCompaction' }>
     }
 
+export type GroupableToolKind = Exclude<ItemData['kind'], 'subagent_activity'>
+
+export type ToolCallGroupData = {
+  id: string
+  messages: ChatMessage[]
+  summary: string
+  details: string
+}
+
 export type ChatPart =
   | {
       type: 'text'
@@ -139,12 +149,126 @@ export type ChatPart =
       type: typeof ITEM_PART
       data: ItemData
     }
+  | {
+      type: typeof TOOL_GROUP_PART
+      data: ToolCallGroupData
+    }
 
 export type ChatMessage = {
   id: string
   role: 'user' | 'assistant' | 'system'
   pending?: boolean
   parts: ChatPart[]
+}
+
+const groupableToolKinds: GroupableToolKind[] = [
+  'command_execution',
+  'file_change',
+  'mcp_tool_call',
+  'dynamic_tool_call',
+  'web_search',
+  'context_compaction'
+]
+
+const groupableToolKindLabels: Record<GroupableToolKind, { singular: string, plural: string }> = {
+  command_execution: { singular: 'command', plural: 'commands' },
+  file_change: { singular: 'edit', plural: 'edits' },
+  mcp_tool_call: { singular: 'MCP tool', plural: 'MCP tools' },
+  dynamic_tool_call: { singular: 'internal tool', plural: 'internal tools' },
+  web_search: { singular: 'web search', plural: 'web searches' },
+  context_compaction: { singular: 'compaction', plural: 'compactions' }
+}
+
+const pluralize = (count: number, labels: { singular: string, plural: string }) =>
+  `${count} ${count === 1 ? labels.singular : labels.plural}`
+
+const getGroupableToolKind = (message: ChatMessage): GroupableToolKind | null => {
+  if (message.role !== 'system' || message.parts.length !== 1) {
+    return null
+  }
+
+  const [part] = message.parts
+  if (part?.type !== ITEM_PART) {
+    return null
+  }
+
+  const kind = part.data.kind
+  return groupableToolKinds.includes(kind as GroupableToolKind)
+    ? kind as GroupableToolKind
+    : null
+}
+
+const hasAssistantOutputPart = (message: ChatMessage) =>
+  message.role === 'assistant'
+  && message.parts.some(part =>
+    part.type === 'text'
+    || part.type === 'reasoning'
+    || part.type === 'plan'
+  )
+
+const buildToolGroupData = (messages: ChatMessage[]): ToolCallGroupData => {
+  const counts = new Map<GroupableToolKind, number>()
+  for (const message of messages) {
+    const kind = getGroupableToolKind(message)
+    if (!kind) {
+      continue
+    }
+
+    counts.set(kind, (counts.get(kind) ?? 0) + 1)
+  }
+
+  const details = groupableToolKinds
+    .map((kind) => {
+      const count = counts.get(kind) ?? 0
+      return count > 0 ? pluralize(count, groupableToolKindLabels[kind]) : null
+    })
+    .filter((detail): detail is string => Boolean(detail))
+    .join(', ')
+
+  return {
+    id: `tool-group:${messages.length}:${messages[0]?.id ?? 'start'}:${messages[messages.length - 1]?.id ?? 'end'}`,
+    messages,
+    summary: pluralize(messages.length, { singular: 'tool call', plural: 'tool calls' }),
+    details
+  }
+}
+
+const groupToolRun = (toolRun: ChatMessage[]): ChatMessage[] => {
+  if (toolRun.length <= 1 || toolRun.some(message => message.pending)) {
+    return toolRun
+  }
+
+  const data = buildToolGroupData(toolRun)
+  return [{
+    id: data.id,
+    role: 'system',
+    parts: [{
+      type: TOOL_GROUP_PART,
+      data
+    }]
+  }]
+}
+
+export const groupTranscriptMessages = (messages: ChatMessage[]): ChatMessage[] => {
+  const grouped: ChatMessage[] = []
+  let pendingToolRun: ChatMessage[] = []
+
+  for (const message of messages) {
+    if (getGroupableToolKind(message)) {
+      pendingToolRun.push(message)
+      continue
+    }
+
+    if (pendingToolRun.length > 0) {
+      grouped.push(...(hasAssistantOutputPart(message) ? groupToolRun(pendingToolRun) : pendingToolRun))
+      pendingToolRun = []
+    }
+
+    grouped.push(message)
+  }
+
+  grouped.push(...pendingToolRun)
+  return grouped
 }
 
 export const asAgentMessageItem = (input: {
