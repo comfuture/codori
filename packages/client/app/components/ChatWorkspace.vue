@@ -31,6 +31,12 @@ import {
   shouldApplyNotificationWithoutTurnId
 } from '../utils/chat-turn-engagement'
 import { isFocusWithinContainer } from '../utils/slash-prompt-focus'
+import {
+  isConstrainedBrowserRequiringDeferredSync,
+  resumeThreadStreamAfterReactivation,
+  shouldAttemptThreadReactivationSync,
+  type ThreadReactivationReason
+} from '../utils/thread-reactivation'
 import { useChatAttachments, type DraftAttachment } from '../composables/useChatAttachments'
 import { useChatPlanWorkflow } from '../composables/useChatPlanWorkflow'
 import { useChatReviewWorkflow } from '../composables/useChatReviewWorkflow'
@@ -85,6 +91,7 @@ import type { ModelListResponse } from '~~/shared/generated/codex-app-server/v2/
 import type { ThreadReadResponse } from '~~/shared/generated/codex-app-server/v2/ThreadReadResponse'
 import type { Thread } from '~~/shared/generated/codex-app-server/v2/Thread'
 import type { ThreadItem } from '~~/shared/generated/codex-app-server/v2/ThreadItem'
+import type { ThreadResumeParams } from '~~/shared/generated/codex-app-server/v2/ThreadResumeParams'
 import type { ThreadResumeResponse } from '~~/shared/generated/codex-app-server/v2/ThreadResumeResponse'
 import type { ThreadStartResponse } from '~~/shared/generated/codex-app-server/v2/ThreadStartResponse'
 import type { TurnStartResponse } from '~~/shared/generated/codex-app-server/v2/TurnStartResponse'
@@ -903,6 +910,13 @@ const syncPromptSelectionFromThread = (
 ) => {
   normalizePromptSelection(model ?? null, effort ?? null)
 }
+
+const buildThreadResumeParams = (threadId: string): ThreadResumeParams => ({
+  threadId,
+  cwd: selectedProject.value?.projectPath ?? null,
+  approvalPolicy: 'never',
+  persistExtendedHistory: true
+})
 
 const loadPromptControls = async () => {
   if (promptControlsLoaded.value) {
@@ -2480,12 +2494,7 @@ const hydrateThread = async (threadId: string) => {
         setSessionLiveStream(nextLiveStream)
       }
 
-      const resumeResponse = await client.request<ThreadResumeResponse>('thread/resume', {
-        threadId,
-        cwd: selectedProject.value?.projectPath ?? null,
-        approvalPolicy: 'never',
-        persistExtendedHistory: true
-      })
+      const resumeResponse = await client.request<ThreadResumeResponse>('thread/resume', buildThreadResumeParams(threadId))
       const response = await client.request<ThreadReadResponse>('thread/read', {
         threadId,
         includeTurns: true
@@ -2581,7 +2590,11 @@ const hasPotentiallyMissedThreadOutput = () =>
     )
   )
 
-const shouldSyncThreadAfterReactivation = (now: number) => {
+const shouldSyncThreadAfterReactivation = (
+  now: number,
+  reason: ThreadReactivationReason,
+  transportConnected: boolean
+) => {
   if (sendMessageLocked.value || pendingThreadHydration || session.pendingLiveStream) {
     return false
   }
@@ -2598,47 +2611,66 @@ const shouldSyncThreadAfterReactivation = (now: number) => {
     return false
   }
 
-  if (lastWorkspaceDeactivatedAt === null) {
+  const deactivatedAt = lastWorkspaceDeactivatedAt
+  const hadDocumentDeactivation = deactivatedAt !== null
+  if (!shouldAttemptThreadReactivationSync({
+    reason,
+    browserRequiresDeferredSync: isConstrainedBrowserRequiringDeferredSync(),
+    transportConnected,
+    hadDocumentDeactivation
+  })) {
+    return false
+  }
+
+  if (!transportConnected) {
     return true
   }
 
-  return now - lastWorkspaceDeactivatedAt >= THREAD_REACTIVATION_INACTIVE_GRACE_MS
+  return !hadDocumentDeactivation
+    || now - deactivatedAt >= THREAD_REACTIVATION_INACTIVE_GRACE_MS
 }
 
-const syncActiveThreadAfterReactivation = (reason: string) => {
+const syncActiveThreadAfterReactivation = (reason: ThreadReactivationReason) => {
   if (pendingThreadReactivationSync) {
     return pendingThreadReactivationSync
   }
 
-  const now = Date.now()
-  if (!shouldSyncThreadAfterReactivation(now)) {
-    return null
-  }
-
-  lastThreadReactivationSyncAt = now
   const threadId = activeThreadId.value
   if (!threadId) {
     return null
   }
 
+  const client = getRuntimeClient()
+  const now = Date.now()
+  if (!shouldSyncThreadAfterReactivation(now, reason, client.isConnected())) {
+    return null
+  }
+
+  lastThreadReactivationSyncAt = now
+
   const syncPromise = (async () => {
     try {
       await ensureProjectRuntime()
-      const client = getRuntimeClient()
-      await client.reconnect()
+      await ensureObservedThreadSubscription()
 
-      const response = await client.request<ThreadReadResponse>('thread/read', {
-        threadId,
-        includeTurns: true
-      })
+      const { resumeResponse, readResponse } = await resumeThreadStreamAfterReactivation(
+        client,
+        buildThreadResumeParams(threadId)
+      )
       if (activeThreadId.value !== threadId) {
         return
       }
 
-      syncThreadSnapshot(response.thread)
+      syncPromptSelectionFromThread(
+        resumeResponse.model ?? null,
+        (resumeResponse.reasoningEffort as ReasoningEffort | null | undefined) ?? null
+      )
+      refreshWorkspaceGitBranchesInBackground('thread/resume')
+      syncThreadSnapshot(readResponse.thread)
       markAwaitingAssistantOutput(false)
+      lastWorkspaceDeactivatedAt = null
 
-      const activeTurn = findActiveTurn(response.thread)
+      const activeTurn = findActiveTurn(readResponse.thread)
       if (!activeTurn) {
         clearLiveStream()
         if (!error.value) {
@@ -3878,6 +3910,12 @@ onMounted(() => {
     const handleThreadWorkspaceFocus = () => {
       void syncActiveThreadAfterReactivation('window/focus')
     }
+    const handleThreadWorkspaceResume = () => {
+      void syncActiveThreadAfterReactivation('document/resume')
+    }
+    const handleThreadWorkspacePageShow = () => {
+      void syncActiveThreadAfterReactivation('window/pageshow')
+    }
     const handleThreadWorkspaceInteraction = () => {
       void syncActiveThreadAfterReactivation('window/interaction')
     }
@@ -3887,9 +3925,9 @@ onMounted(() => {
 
     document.addEventListener('visibilitychange', handleThreadWorkspaceVisible)
     document.addEventListener('freeze', markThreadWorkspaceDeactivated)
-    document.addEventListener('resume', handleThreadWorkspaceFocus)
+    document.addEventListener('resume', handleThreadWorkspaceResume)
     window.addEventListener('pagehide', markThreadWorkspaceDeactivated)
-    window.addEventListener('pageshow', handleThreadWorkspaceFocus)
+    window.addEventListener('pageshow', handleThreadWorkspacePageShow)
     window.addEventListener('focus', handleThreadWorkspaceFocus)
     window.addEventListener('online', handleThreadWorkspaceOnline)
     window.addEventListener('pointerdown', handleThreadWorkspaceInteraction, { passive: true })
@@ -3897,9 +3935,9 @@ onMounted(() => {
     releaseThreadReactivationListeners = () => {
       document.removeEventListener('visibilitychange', handleThreadWorkspaceVisible)
       document.removeEventListener('freeze', markThreadWorkspaceDeactivated)
-      document.removeEventListener('resume', handleThreadWorkspaceFocus)
+      document.removeEventListener('resume', handleThreadWorkspaceResume)
       window.removeEventListener('pagehide', markThreadWorkspaceDeactivated)
-      window.removeEventListener('pageshow', handleThreadWorkspaceFocus)
+      window.removeEventListener('pageshow', handleThreadWorkspacePageShow)
       window.removeEventListener('focus', handleThreadWorkspaceFocus)
       window.removeEventListener('online', handleThreadWorkspaceOnline)
       window.removeEventListener('pointerdown', handleThreadWorkspaceInteraction)
