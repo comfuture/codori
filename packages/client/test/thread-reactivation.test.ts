@@ -55,8 +55,31 @@ describe('thread reactivation policy', () => {
       reason: 'window/focus',
       browserRequiresDeferredSync: false,
       transportConnected: true,
-      hadDocumentDeactivation: true
+      hadDocumentDeactivation: false
     })).toBe(false)
+
+    expect(shouldAttemptThreadReactivationSync({
+      reason: 'window/interaction',
+      browserRequiresDeferredSync: false,
+      transportConnected: true,
+      hadDocumentDeactivation: false
+    })).toBe(false)
+  })
+
+  it('recovers desktop streams after deactivation even when the transport appears connected', () => {
+    expect(shouldAttemptThreadReactivationSync({
+      reason: 'window/visible',
+      browserRequiresDeferredSync: false,
+      transportConnected: true,
+      hadDocumentDeactivation: true
+    })).toBe(true)
+
+    expect(shouldAttemptThreadReactivationSync({
+      reason: 'window/focus',
+      browserRequiresDeferredSync: false,
+      transportConnected: true,
+      hadDocumentDeactivation: true
+    })).toBe(true)
 
     expect(shouldAttemptThreadReactivationSync({
       reason: 'window/interaction',

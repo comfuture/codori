@@ -38,6 +38,11 @@ const desktopRecoveryReasons = new Set<ThreadReactivationReason>([
   'document/resume'
 ])
 
+const desktopDeactivationRecoveryReasons = new Set<ThreadReactivationReason>([
+  'window/visible',
+  'window/focus'
+])
+
 const resolveBrowserRuntime = (): BrowserRuntime | null => {
   if (typeof navigator === 'undefined') {
     return null
@@ -86,6 +91,10 @@ export const shouldAttemptThreadReactivationSync = (input: {
   }
 
   if (desktopRecoveryReasons.has(input.reason)) {
+    return true
+  }
+
+  if (input.hadDocumentDeactivation && desktopDeactivationRecoveryReasons.has(input.reason)) {
     return true
   }
 
