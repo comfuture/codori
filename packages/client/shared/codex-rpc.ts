@@ -304,6 +304,10 @@ export class CodexRpcClient {
     }
   }
 
+  isConnected() {
+    return this.initialized && this.socket?.readyState === WebSocket.OPEN
+  }
+
   async connect() {
     if (this.initialized && this.socket?.readyState === WebSocket.OPEN) {
       return
