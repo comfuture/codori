@@ -2555,12 +2555,6 @@ const hydrateThread = async (threadId: string) => {
         return
       }
 
-      if (!session.liveStream) {
-        status.value = 'streaming'
-        return
-      }
-
-      setLiveStreamTurnId(session.liveStream, restoredTurnId)
       status.value = 'streaming'
     } catch (caughtError) {
       clearLiveStream()

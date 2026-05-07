@@ -15,7 +15,8 @@ const hasVisibleAssistantPart = (part: ChatMessage['parts'][number]) => {
     case 'plan':
       return part.text.trim().length > 0
     case 'reasoning':
-      return [...part.summary, ...part.content].some(text => text.trim().length > 0)
+      return part.summary.some(text => text.trim().length > 0)
+        || part.content.some(text => text.trim().length > 0)
     case 'attachment':
     case ITEM_PART:
     case TOOL_GROUP_PART:
@@ -29,14 +30,22 @@ export const hasVisibleAssistantOutputAfterLatestUserMessage = (
   messages: ChatMessage[]
 ) => {
   const latestUserMessageIndex = messages.findLastIndex(message => message.role === 'user')
-  const candidateMessages = latestUserMessageIndex === -1
-    ? messages
-    : messages.slice(latestUserMessageIndex + 1)
 
-  return candidateMessages.some(message =>
-    message.role === 'assistant'
-    && message.parts.some(hasVisibleAssistantPart)
-  )
+  for (let index = latestUserMessageIndex + 1; index < messages.length; index += 1) {
+    const message = messages[index]
+    if (!message) {
+      continue
+    }
+
+    if (
+      message.role === 'assistant'
+      && message.parts.some(hasVisibleAssistantPart)
+    ) {
+      return true
+    }
+  }
+
+  return false
 }
 
 export const resolveChatMessagesStatus = (
