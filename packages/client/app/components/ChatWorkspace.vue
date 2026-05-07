@@ -33,7 +33,9 @@ import {
 import { isFocusWithinContainer } from '../utils/slash-prompt-focus'
 import {
   isConstrainedBrowserRequiringDeferredSync,
+  isActiveTurnStatus,
   resumeThreadStreamAfterReactivation,
+  resolveHydratedActiveTurn,
   shouldAttemptThreadReactivationSync,
   type ThreadReactivationReason
 } from '../utils/thread-reactivation'
@@ -1018,14 +1020,6 @@ let fileAutocompleteRequestSequence = 0
 const THREAD_REACTIVATION_SYNC_MIN_INTERVAL_MS = 8_000
 const THREAD_REACTIVATION_INACTIVE_GRACE_MS = 500
 
-const isActiveTurnStatus = (value: string | null | undefined) => {
-  if (!value) {
-    return false
-  }
-
-  return !/(completed|failed|error|cancelled|canceled|interrupted|stopped)/i.test(value)
-}
-
 const currentLiveStream = () =>
   session.liveStream?.threadId === activeThreadId.value
     ? session.liveStream
@@ -1166,6 +1160,17 @@ const replayBufferedNotifications = (liveStream: LiveStream) => {
 
     applyNotification(notification)
   }
+}
+
+const restoreHydratedLiveStreamTurn = (
+  liveStream: LiveStream,
+  activeTurnId: string
+) => {
+  setLiveStreamTurnId(liveStream, activeTurnId)
+
+  replayBufferedNotifications(liveStream)
+
+  return session.liveStream === liveStream ? liveStream.turnId : null
 }
 
 const clearLiveStream = (reason?: Error) => {
@@ -2464,9 +2469,6 @@ async function ensureProjectRuntime() {
   await startProject(workspaceId.value)
 }
 
-const findActiveTurn = (thread: Thread) =>
-  thread.turns.findLast(turn => isActiveTurnStatus(turn.status))
-
 const syncThreadSnapshot = (thread: Thread) => {
   activeThreadId.value = thread.id
   threadTitle.value = resolveThreadSummaryTitle(thread)
@@ -2525,24 +2527,28 @@ const hydrateThread = async (threadId: string) => {
       refreshWorkspaceGitBranchesInBackground('thread/resume')
       syncThreadSnapshot(response.thread)
       markAwaitingAssistantOutput(false)
-      const activeTurn = findActiveTurn(response.thread)
+      const activeTurn = resolveHydratedActiveTurn({
+        readThread: response.thread,
+        resumeThread: resumeResponse.thread
+      })
       const liveStream = session.liveStream
+      const activeTurnId = activeTurn?.id ?? null
 
-      if (liveStream) {
-        const bufferedTurnId = activeTurn?.id
-          ?? liveStream.bufferedNotifications
-            .map(notificationTurnId)
-            .find((turnId): turnId is string => Boolean(turnId))
-
-        if (bufferedTurnId) {
-          setLiveStreamTurnId(liveStream, bufferedTurnId)
+      if (!activeTurnId) {
+        if (session.liveStream === liveStream) {
+          clearLiveStream()
         }
-
-        replayBufferedNotifications(liveStream)
+        if (!error.value) {
+          status.value = 'ready'
+        }
+        return
       }
 
-      if (!activeTurn) {
-        clearLiveStream()
+      const restoredTurnId = liveStream
+        ? restoreHydratedLiveStreamTurn(liveStream, activeTurnId)
+        : activeTurnId
+
+      if (!restoredTurnId) {
         if (!error.value) {
           status.value = 'ready'
         }
@@ -2554,18 +2560,8 @@ const hydrateThread = async (threadId: string) => {
         return
       }
 
-      setLiveStreamTurnId(session.liveStream, activeTurn.id)
+      setLiveStreamTurnId(session.liveStream, restoredTurnId)
       status.value = 'streaming'
-
-      const pendingNotifications = session.liveStream.bufferedNotifications.splice(0, session.liveStream.bufferedNotifications.length)
-      for (const notification of pendingNotifications) {
-        const turnId = notificationTurnId(notification)
-        if (turnId && turnId !== activeTurn.id) {
-          continue
-        }
-
-        applyNotification(notification)
-      }
     } catch (caughtError) {
       clearLiveStream()
       const errorMessage = caughtError instanceof Error ? caughtError.message : String(caughtError)
@@ -2684,9 +2680,17 @@ const syncActiveThreadAfterReactivation = (reason: ThreadReactivationReason) => 
       markAwaitingAssistantOutput(false)
       lastWorkspaceDeactivatedAt = null
 
-      const activeTurn = findActiveTurn(readResponse.thread)
-      if (!activeTurn) {
-        clearLiveStream()
+      const activeTurn = resolveHydratedActiveTurn({
+        readThread: readResponse.thread,
+        resumeThread: resumeResponse.thread
+      })
+      const liveStream = await ensureObservedThreadSubscription()
+      const activeTurnId = activeTurn?.id ?? null
+
+      if (!activeTurnId) {
+        if (session.liveStream === liveStream) {
+          clearLiveStream()
+        }
         if (!error.value) {
           status.value = 'ready'
         }
@@ -2696,11 +2700,20 @@ const syncActiveThreadAfterReactivation = (reason: ThreadReactivationReason) => 
         return
       }
 
-      const liveStream = await ensureObservedThreadSubscription()
-      if (liveStream) {
-        setLiveStreamTurnId(liveStream, activeTurn.id)
-        replayBufferedNotifications(liveStream)
+      const restoredTurnId = liveStream
+        ? restoreHydratedLiveStreamTurn(liveStream, activeTurnId)
+        : activeTurnId
+
+      if (!restoredTurnId) {
+        if (!error.value) {
+          status.value = 'ready'
+        }
+        if (pinnedToBottom.value) {
+          void scheduleScrollToBottom('auto')
+        }
+        return
       }
+
       status.value = 'streaming'
       if (pinnedToBottom.value) {
         void scheduleScrollToBottom('auto')
