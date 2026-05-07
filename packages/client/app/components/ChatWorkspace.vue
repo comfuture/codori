@@ -62,7 +62,11 @@ import {
   resolveThreadSummaryTitle,
   useThreadSummaries
 } from '../composables/useThreadSummaries'
-import { resolveChatMessagesStatus, shouldAwaitAssistantOutput } from '../utils/chat-messages-status'
+import {
+  hasVisibleAssistantOutputAfterLatestUserMessage,
+  resolveChatMessagesStatus,
+  shouldAwaitAssistantOutput
+} from '../utils/chat-messages-status'
 import {
   ITEM_PART,
   eventToMessage,
@@ -447,10 +451,20 @@ const composerPlaceholder = computed(() =>
         ? 'Ask Codex anything. @ to use plugins or use files'
         : 'Describe the change you want Codex to make'
 )
-const chatMessagesStatus = computed(() =>
-  resolveChatMessagesStatus(status.value, awaitingAssistantOutput.value)
-)
 const displayMessages = computed(() => groupTranscriptMessages(messages.value))
+const showAwaitingAssistantIndicator = computed(() =>
+  awaitingAssistantOutput.value
+  && !hasVisibleAssistantOutputAfterLatestUserMessage(displayMessages.value)
+)
+const chatMessagesStatus = computed(() =>
+  resolveChatMessagesStatus(status.value, showAwaitingAssistantIndicator.value)
+)
+const chatMessagesRootClass = computed(() =>
+  [
+    'min-h-full px-4 py-5 md:px-6',
+    showAwaitingAssistantIndicator.value ? '[&>article:last-of-type]:!min-h-0' : null
+  ].filter(Boolean).join(' ')
+)
 const chatSpacingOffset = computed(() =>
   Math.max(140, stickyFooterHeight.value + 24)
 )
@@ -4415,7 +4429,7 @@ watch(
           }
         }"
         :ui="{
-          root: 'min-h-full px-4 py-5 md:px-6',
+          root: chatMessagesRootClass,
           message: 'max-w-none',
           content: 'w-full max-w-5xl'
         }"
@@ -4431,7 +4445,7 @@ watch(
         </template>
         <template #indicator>
           <UChatShimmer
-            v-if="awaitingAssistantOutput"
+            v-if="showAwaitingAssistantIndicator"
             text="Thinking..."
             class="px-1 py-2"
           />
