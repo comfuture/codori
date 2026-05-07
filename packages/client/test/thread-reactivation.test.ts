@@ -2,12 +2,37 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  findActiveTurn,
   isConstrainedBrowserRequiringDeferredSync,
+  isActiveTurnStatus,
   resumeThreadStreamAfterReactivation,
+  resolveHydratedActiveTurn,
   shouldAttemptThreadReactivationSync
 } from '../app/utils/thread-reactivation'
 import type { ThreadReadResponse } from '../shared/generated/codex-app-server/v2/ThreadReadResponse'
 import type { ThreadResumeResponse } from '../shared/generated/codex-app-server/v2/ThreadResumeResponse'
+import type { Thread } from '../shared/generated/codex-app-server/v2/Thread'
+import type { Turn } from '../shared/generated/codex-app-server/v2/Turn'
+
+const makeTurn = (id: string, status: Turn['status']): Turn => ({
+  id,
+  status,
+  items: [],
+  error: null,
+  startedAt: null,
+  completedAt: null,
+  durationMs: null
+})
+
+const makeThreadSnapshot = (
+  turns: Turn[],
+  status: Thread['status']['type'] = 'active'
+): Pick<Thread, 'status' | 'turns'> => ({
+  status: status === 'active'
+    ? { type: 'active', activeFlags: [] }
+    : { type: status },
+  turns
+})
 
 describe('thread reactivation policy', () => {
   afterEach(() => {
@@ -112,6 +137,42 @@ describe('thread reactivation policy', () => {
       transportConnected: true,
       hadDocumentDeactivation: false
     })).toBe(false)
+  })
+
+  it('resolves active turn state from resume before the read snapshot', () => {
+    const readCompletedTurn = makeTurn('turn-read-completed', 'completed')
+    const resumeActiveTurn = makeTurn('turn-resume-active', 'inProgress')
+
+    expect(isActiveTurnStatus('inProgress')).toBe(true)
+    expect(isActiveTurnStatus('completed')).toBe(false)
+    expect(isActiveTurnStatus('running')).toBe(false)
+    expect(findActiveTurn({
+      turns: [readCompletedTurn, resumeActiveTurn]
+    })).toBe(resumeActiveTurn)
+    expect(resolveHydratedActiveTurn({
+      readThread: makeThreadSnapshot([readCompletedTurn]),
+      resumeThread: { turns: [resumeActiveTurn] }
+    })).toBe(resumeActiveTurn)
+  })
+
+  it('does not revive a resume turn that the read snapshot marks completed', () => {
+    const readCompletedTurn = makeTurn('turn-stale-active', 'completed')
+    const resumeActiveTurn = makeTurn('turn-stale-active', 'inProgress')
+
+    expect(resolveHydratedActiveTurn({
+      readThread: makeThreadSnapshot([readCompletedTurn]),
+      resumeThread: { turns: [resumeActiveTurn] }
+    })).toBeNull()
+  })
+
+  it('ignores resume active turns when the read snapshot is idle', () => {
+    const readCompletedTurn = makeTurn('turn-read-completed', 'completed')
+    const resumeActiveTurn = makeTurn('turn-resume-active', 'inProgress')
+
+    expect(resolveHydratedActiveTurn({
+      readThread: makeThreadSnapshot([readCompletedTurn], 'idle'),
+      resumeThread: { turns: [resumeActiveTurn] }
+    })).toBeNull()
   })
 
   it('rehydrates through thread/resume before thread/read after reconnecting', async () => {

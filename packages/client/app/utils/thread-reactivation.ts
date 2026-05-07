@@ -2,6 +2,8 @@ import type { ThreadReadParams } from '~~/shared/generated/codex-app-server/v2/T
 import type { ThreadReadResponse } from '~~/shared/generated/codex-app-server/v2/ThreadReadResponse'
 import type { ThreadResumeParams } from '~~/shared/generated/codex-app-server/v2/ThreadResumeParams'
 import type { ThreadResumeResponse } from '~~/shared/generated/codex-app-server/v2/ThreadResumeResponse'
+import type { Thread } from '~~/shared/generated/codex-app-server/v2/Thread'
+import type { Turn } from '~~/shared/generated/codex-app-server/v2/Turn'
 
 export type ThreadReactivationReason =
   | 'window/visible'
@@ -31,6 +33,9 @@ export type ThreadReactivationResumeResult = {
   resumeResponse: ThreadResumeResponse
   readResponse: ThreadReadResponse
 }
+
+type ThreadWithTurns = Pick<Thread, 'turns'>
+type ThreadActivationSnapshot = Pick<Thread, 'status' | 'turns'>
 
 const desktopRecoveryReasons = new Set<ThreadReactivationReason>([
   'window/online',
@@ -99,6 +104,42 @@ export const shouldAttemptThreadReactivationSync = (input: {
   }
 
   return input.browserRequiresDeferredSync && input.hadDocumentDeactivation
+}
+
+export const isActiveTurnStatus = (value: string | null | undefined) => {
+  return value === 'inProgress'
+}
+
+export const findActiveTurn = (thread: ThreadWithTurns): Turn | null =>
+  thread.turns.findLast(turn => isActiveTurnStatus(turn.status)) ?? null
+
+const findTurnById = (thread: ThreadWithTurns, turnId: string) =>
+  thread.turns.findLast(turn => turn.id === turnId) ?? null
+
+export const resolveHydratedActiveTurn = (input: {
+  readThread: ThreadActivationSnapshot
+  resumeThread?: ThreadWithTurns | null
+}) => {
+  if (input.readThread.status.type !== 'active') {
+    return null
+  }
+
+  const readActiveTurn = findActiveTurn(input.readThread)
+  if (readActiveTurn) {
+    return readActiveTurn
+  }
+
+  const resumeActiveTurn = input.resumeThread ? findActiveTurn(input.resumeThread) : null
+  if (!resumeActiveTurn) {
+    return null
+  }
+
+  const matchingReadTurn = findTurnById(input.readThread, resumeActiveTurn.id)
+  if (matchingReadTurn && !isActiveTurnStatus(matchingReadTurn.status)) {
+    return null
+  }
+
+  return resumeActiveTurn
 }
 
 export const resumeThreadStreamAfterReactivation = async (
