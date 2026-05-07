@@ -31,6 +31,7 @@ import {
   shouldApplyNotificationWithoutTurnId
 } from '../utils/chat-turn-engagement'
 import { isFocusWithinContainer } from '../utils/slash-prompt-focus'
+import { isChatScrollNearBottom } from '../utils/chat-scroll'
 import {
   isConstrainedBrowserRequiringDeferredSync,
   isActiveTurnStatus,
@@ -469,6 +470,11 @@ const chatMessagesRootClass = computed(() =>
 )
 const chatSpacingOffset = computed(() =>
   Math.max(140, stickyFooterHeight.value + 24)
+)
+const showScrollToBottomLink = computed(() =>
+  !showWelcomeState.value
+  && displayMessages.value.length > 0
+  && !pinnedToBottom.value
 )
 const showWelcomeState = computed(() =>
   messages.value.length === 0
@@ -2377,7 +2383,7 @@ const updatePinnedState = () => {
     return
   }
 
-  pinnedToBottom.value = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 80
+  pinnedToBottom.value = isChatScrollNearBottom(viewport)
 }
 
 const scrollToBottom = (behavior: ScrollBehavior = 'auto') => {
@@ -2390,6 +2396,11 @@ const scrollToBottom = (behavior: ScrollBehavior = 'auto') => {
     top: viewport.scrollHeight,
     behavior
   })
+  pinnedToBottom.value = true
+}
+
+const jumpToChatBottom = () => {
+  scrollToBottom('smooth')
 }
 
 const ensureChatSession = async () => {
@@ -2435,7 +2446,7 @@ const scheduleScrollToBottom = async (behavior: ScrollBehavior = 'auto') => {
   }
 
   requestAnimationFrame(() => {
-    if (pinnedToBottom.value || isBusy.value) {
+    if (pinnedToBottom.value) {
       scrollToBottom(behavior)
     }
   })
@@ -3492,7 +3503,7 @@ const sendMessage = async () => {
       await pendingThreadHydration
     }
 
-    pinnedToBottom.value = true
+    updatePinnedState()
     error.value = null
     attachmentError.value = null
 
@@ -4330,7 +4341,7 @@ watch(
 </script>
 
 <template>
-  <section class="flex h-full min-h-0 flex-col bg-default">
+  <section class="relative flex h-full min-h-0 flex-col bg-default">
     <div
       ref="scrollViewport"
       class="min-h-0 flex-1 overflow-y-auto"
@@ -4458,6 +4469,25 @@ watch(
           />
         </template>
       </UChatMessages>
+    </div>
+
+    <div
+      v-if="showScrollToBottomLink"
+      class="pointer-events-none absolute inset-x-0 z-10 flex justify-center px-4 md:px-6"
+      :style="{ bottom: `${stickyFooterHeight + 12}px` }"
+    >
+      <UTooltip text="Jump to latest">
+        <UButton
+          type="button"
+          color="neutral"
+          variant="outline"
+          size="sm"
+          icon="i-lucide-arrow-down"
+          label="Jump to latest"
+          class="pointer-events-auto rounded-full border border-default bg-default/95 shadow-lg backdrop-blur"
+          @click="jumpToChatBottom"
+        />
+      </UTooltip>
     </div>
 
     <div
