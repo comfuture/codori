@@ -15,7 +15,10 @@ import {
   type ChatMessage
 } from '../shared/codex-chat'
 import { mergeThreadSummary, renameThreadSummary } from '../app/composables/useThreadSummaries'
-import { resolveChatMessagesStatus } from '../app/utils/chat-messages-status'
+import {
+  hasVisibleAssistantOutputAfterLatestUserMessage,
+  resolveChatMessagesStatus
+} from '../app/utils/chat-messages-status'
 
 const makeTurn = (input: Pick<Turn, 'id' | 'items' | 'status' | 'error'> & Partial<Pick<Turn, 'startedAt' | 'completedAt' | 'durationMs'>>): Turn => ({
   id: input.id,
@@ -250,6 +253,68 @@ describe('chat transcript stability', () => {
     expect(resolveChatMessagesStatus('streaming', true)).toBe('submitted')
     expect(resolveChatMessagesStatus('streaming', false)).toBe('streaming')
     expect(resolveChatMessagesStatus('ready', true)).toBe('ready')
+  })
+
+  it('detects visible assistant output only after the latest user message', () => {
+    expect(hasVisibleAssistantOutputAfterLatestUserMessage([{
+      id: 'assistant-previous',
+      role: 'assistant',
+      parts: [{
+        type: 'text',
+        text: 'Previous reply',
+        state: 'done'
+      }]
+    }, {
+      id: 'user-current',
+      role: 'user',
+      pending: true,
+      parts: [{
+        type: 'text',
+        text: 'New request',
+        state: 'streaming'
+      }]
+    }])).toBe(false)
+
+    expect(hasVisibleAssistantOutputAfterLatestUserMessage([{
+      id: 'user-current',
+      role: 'user',
+      pending: true,
+      parts: [{
+        type: 'text',
+        text: 'New request',
+        state: 'streaming'
+      }]
+    }, {
+      id: 'assistant-empty',
+      role: 'assistant',
+      pending: true,
+      parts: [{
+        type: 'reasoning',
+        summary: [],
+        content: [],
+        state: 'streaming'
+      }]
+    }])).toBe(false)
+
+    expect(hasVisibleAssistantOutputAfterLatestUserMessage([{
+      id: 'user-current',
+      role: 'user',
+      pending: true,
+      parts: [{
+        type: 'text',
+        text: 'New request',
+        state: 'streaming'
+      }]
+    }, {
+      id: 'assistant-current',
+      role: 'assistant',
+      pending: true,
+      parts: [{
+        type: 'text',
+        text: 'Streaming reply',
+        state: 'streaming'
+      }]
+    }])).toBe(true)
   })
 
   it('updates cached thread summaries in place when a live title arrives', () => {
