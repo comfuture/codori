@@ -88,4 +88,30 @@ describe('CommandExecution', () => {
     expect(wrapper.text()).toContain('Exit code 0')
     expect(wrapper.text()).not.toContain('Run failed · exit code 0')
   })
+
+  it('renders ANSI-styled output without exposing escape codes', () => {
+    const wrapper = mount(CommandExecution, {
+      props: {
+        item: makeCommandItem({
+          aggregatedOutput: 'plain \x1B[31;1mred bold\x1B[0m done'
+        })
+      },
+      global: {
+        stubs: {
+          UChatTool: ChatToolStub
+        }
+      }
+    })
+
+    const segments = wrapper.findAll('[data-ansi-output-segment]')
+    expect(wrapper.text()).toContain('plain red bold done')
+    expect(wrapper.text()).not.toContain('\x1B[31;1m')
+    expect(segments.map(segment => segment.element.textContent)).toEqual([
+      'plain ',
+      'red bold',
+      ' done'
+    ])
+    expect(segments[1]?.attributes('style')).toContain('color: rgb(220, 38, 38)')
+    expect(segments[1]?.attributes('style')).toContain('font-weight: 700')
+  })
 })

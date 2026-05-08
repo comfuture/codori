@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { CommandExecutionItem } from '~~/shared/codex-chat'
+import AnsiOutput from './AnsiOutput.vue'
 import { useChatToolState } from './use-chat-tool-state'
 
 const props = defineProps<{
@@ -44,10 +45,10 @@ const { open, isLoading, isStreaming } = useChatToolState(() => props.item.statu
     @update:open="open = $event"
   >
     <div class="space-y-3">
-      <pre
+      <AnsiOutput
         v-if="output"
-        class="overflow-x-auto rounded-xl border border-default/70 bg-elevated/40 px-3 py-3 text-xs leading-6 text-toned"
-      >{{ output }}</pre>
+        :text="output"
+      />
       <p
         v-else
         class="text-xs text-muted"
