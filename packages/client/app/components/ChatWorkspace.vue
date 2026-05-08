@@ -31,7 +31,10 @@ import {
   shouldApplyNotificationWithoutTurnId
 } from '../utils/chat-turn-engagement'
 import { isFocusWithinContainer } from '../utils/slash-prompt-focus'
-import { isChatScrollNearBottom } from '../utils/chat-scroll'
+import {
+  resolveChatScrollPinnedState,
+  type ChatScrollMetrics
+} from '../utils/chat-scroll'
 import {
   isConstrainedBrowserRequiringDeferredSync,
   isActiveTurnStatus,
@@ -272,6 +275,7 @@ const skillAutocompleteListRef = ref<HTMLElement | null>(null)
 const mentionAutocompleteDropdownRef = ref<HTMLElement | null>(null)
 const mentionAutocompleteListRef = ref<HTMLElement | null>(null)
 const scrollViewport = ref<HTMLElement | null>(null)
+const transcriptContentRef = ref<HTMLElement | null>(null)
 const stickyFooterRef = ref<HTMLElement | null>(null)
 const stickyFooterHeight = ref(140)
 const pinnedToBottom = ref(true)
@@ -467,7 +471,7 @@ const chatMessagesStatus = computed(() =>
 const chatMessagesRootClass = computed(() =>
   [
     'min-h-full px-4 py-5 md:px-6',
-    showAwaitingAssistantIndicator.value ? '[&>article:last-of-type]:!min-h-0' : null
+    '[&>article:last-of-type]:!min-h-0'
   ].filter(Boolean).join(' ')
 )
 const chatSpacingOffset = computed(() =>
@@ -1017,6 +1021,9 @@ let releaseThreadReactivationListeners: (() => void) | null = null
 let runtimeSubscriptionKey: string | null = null
 const linkedChatThreadIds = new Set<string>()
 let footerResizeObserver: ResizeObserver | null = null
+let transcriptContentResizeObserver: ResizeObserver | null = null
+let scrollToBottomFrame: number | null = null
+let lastScrollMetrics: ChatScrollMetrics | null = null
 let lastWorkspaceDeactivatedAt: number | null = null
 let lastThreadReactivationSyncAt = 0
 let skipNextSkillMentionSync = false
@@ -2379,13 +2386,25 @@ const getFallbackItemData = (message: ChatMessage) => {
   return itemPart.data
 }
 
+const readChatScrollMetrics = (viewport: HTMLElement): ChatScrollMetrics => ({
+  clientHeight: viewport.clientHeight,
+  scrollHeight: viewport.scrollHeight,
+  scrollTop: viewport.scrollTop
+})
+
 const updatePinnedState = () => {
   const viewport = scrollViewport.value
   if (!viewport) {
     return
   }
 
-  pinnedToBottom.value = isChatScrollNearBottom(viewport)
+  const currentMetrics = readChatScrollMetrics(viewport)
+  pinnedToBottom.value = resolveChatScrollPinnedState({
+    current: currentMetrics,
+    previous: lastScrollMetrics,
+    wasPinned: pinnedToBottom.value
+  })
+  lastScrollMetrics = currentMetrics
 }
 
 const scrollToBottom = (behavior: ScrollBehavior = 'auto') => {
@@ -2399,6 +2418,7 @@ const scrollToBottom = (behavior: ScrollBehavior = 'auto') => {
     behavior
   })
   pinnedToBottom.value = true
+  lastScrollMetrics = readChatScrollMetrics(viewport)
 }
 
 const jumpToChatBottom = () => {
@@ -2447,11 +2467,23 @@ const scheduleScrollToBottom = async (behavior: ScrollBehavior = 'auto') => {
     return
   }
 
-  requestAnimationFrame(() => {
+  if (scrollToBottomFrame !== null) {
+    window.cancelAnimationFrame(scrollToBottomFrame)
+  }
+
+  scrollToBottomFrame = requestAnimationFrame(() => {
+    scrollToBottomFrame = null
     if (pinnedToBottom.value) {
       scrollToBottom(behavior)
     }
   })
+}
+
+const maintainBottomScrollIfPinned = () => {
+  updatePinnedState()
+  if (pinnedToBottom.value) {
+    void scheduleScrollToBottom('auto')
+  }
 }
 
 async function ensureProjectRuntime() {
@@ -3991,6 +4023,7 @@ onMounted(() => {
       const nextHeight = borderBoxSize ?? entry?.target.getBoundingClientRect().height
       if (typeof nextHeight === 'number' && Number.isFinite(nextHeight)) {
         stickyFooterHeight.value = Math.ceil(nextHeight)
+        maintainBottomScrollIfPinned()
       }
     })
 
@@ -4013,6 +4046,12 @@ onBeforeUnmount(() => {
   releaseThreadReactivationListeners = null
   footerResizeObserver?.disconnect()
   footerResizeObserver = null
+  transcriptContentResizeObserver?.disconnect()
+  transcriptContentResizeObserver = null
+  if (scrollToBottomFrame !== null) {
+    window.cancelAnimationFrame(scrollToBottomFrame)
+    scrollToBottomFrame = null
+  }
 })
 
 watch(() => props.threadId ?? null, (threadId) => {
@@ -4072,6 +4111,21 @@ watch(pendingThreadId, async (threadId) => {
   await router.push(toProjectThreadRoute(workspaceId.value, threadId))
   pendingThreadId.value = null
 })
+
+if (import.meta.client) {
+  watch(transcriptContentRef, (element) => {
+    transcriptContentResizeObserver?.disconnect()
+    transcriptContentResizeObserver = null
+
+    if (!element) {
+      return
+    }
+
+    transcriptContentResizeObserver = new ResizeObserver(maintainBottomScrollIfPinned)
+    transcriptContentResizeObserver.observe(element)
+    maintainBottomScrollIfPinned()
+  }, { flush: 'post' })
+}
 
 watch(messages, () => {
   void scheduleScrollToBottom(status.value === 'streaming' ? 'auto' : 'smooth')
@@ -4440,44 +4494,49 @@ watch(
         </div>
       </div>
 
-      <UChatMessages
+      <div
         v-else
-        :messages="displayMessages"
-        :status="chatMessagesStatus"
-        :should-auto-scroll="false"
-        :should-scroll-to-bottom="false"
-        :auto-scroll="false"
-        :spacing-offset="chatSpacingOffset"
-        :user="{
-          ui: {
-            root: 'scroll-mt-4',
-            container: 'gap-3 pb-8',
-            content: 'px-4 py-3 rounded-2xl min-h-12'
-          }
-        }"
-        :ui="{
-          root: chatMessagesRootClass,
-          message: 'max-w-none',
-          content: 'w-full max-w-5xl'
-        }"
-        compact
+        ref="transcriptContentRef"
+        class="min-h-full"
       >
-        <template #content="{ message }">
-          <MessageContent
-            :message="message as ChatMessage"
-            :project-id="workspaceKind === 'project' ? workspaceId : undefined"
-            :workspace="{ kind: workspaceKind, id: workspaceId }"
-            :workspace-root-path="selectedProject?.projectPath ?? null"
-          />
-        </template>
-        <template #indicator>
-          <UChatShimmer
-            v-if="showAwaitingAssistantIndicator"
-            text="Thinking..."
-            class="px-1 py-2"
-          />
-        </template>
-      </UChatMessages>
+        <UChatMessages
+          :messages="displayMessages"
+          :status="chatMessagesStatus"
+          :should-auto-scroll="false"
+          :should-scroll-to-bottom="false"
+          :auto-scroll="false"
+          :spacing-offset="chatSpacingOffset"
+          :user="{
+            ui: {
+              root: 'scroll-mt-4',
+              container: 'gap-3 pb-8',
+              content: 'px-4 py-3 rounded-2xl min-h-12'
+            }
+          }"
+          :ui="{
+            root: chatMessagesRootClass,
+            message: 'max-w-none',
+            content: 'w-full max-w-5xl'
+          }"
+          compact
+        >
+          <template #content="{ message }">
+            <MessageContent
+              :message="message as ChatMessage"
+              :project-id="workspaceKind === 'project' ? workspaceId : undefined"
+              :workspace="{ kind: workspaceKind, id: workspaceId }"
+              :workspace-root-path="selectedProject?.projectPath ?? null"
+            />
+          </template>
+          <template #indicator>
+            <UChatShimmer
+              v-if="showAwaitingAssistantIndicator"
+              text="Thinking..."
+              class="px-1 py-2"
+            />
+          </template>
+        </UChatMessages>
+      </div>
     </div>
 
     <div
