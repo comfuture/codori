@@ -161,6 +161,12 @@ export type ChatMessage = {
   parts: ChatPart[]
 }
 
+type ItemToMessagesOptions = {
+  webSearchPending?: boolean
+  webSearchStatus?: WebSearchStatus
+  includeReviewOutput?: boolean
+}
+
 const groupableToolKinds: GroupableToolKind[] = [
   'command_execution',
   'file_change',
@@ -349,6 +355,38 @@ const attachmentMediaTypeFromUrl = (url: string) => {
   return match?.[1] || 'image/*'
 }
 
+const normalizeReviewOutputText = (text: string) =>
+  text.replace(/\r\n?/gu, '\n').trim()
+
+const hasSameReviewOutputText = (left: string, right: string) =>
+  normalizeReviewOutputText(left) === normalizeReviewOutputText(right)
+
+export const hasAssistantTextMessageWithText = (messages: ChatMessage[], text: string) => {
+  const normalizedText = normalizeReviewOutputText(text)
+  if (!normalizedText) {
+    return false
+  }
+
+  return messages.some(message =>
+    message.role === 'assistant'
+    && message.parts.some(part =>
+      part.type === 'text'
+      && normalizeReviewOutputText(part.text) === normalizedText
+    )
+  )
+}
+
+const isSyntheticReviewOutputMessage = (message: ChatMessage, text: string) =>
+  message.id.endsWith('-review-output')
+  && message.role === 'assistant'
+  && message.parts.some(part =>
+    part.type === 'text'
+    && hasSameReviewOutputText(part.text, text)
+  )
+
+export const removeSyntheticReviewOutputMessages = (messages: ChatMessage[], text: string) =>
+  messages.filter(message => !isSyntheticReviewOutputMessage(message, text))
+
 const userInputToParts = (input: UserInput): ChatPart[] => {
   if (input.type === 'text') {
     if (!input.text.trim()) {
@@ -414,10 +452,7 @@ const shouldHideReviewBootstrapUserMessage = (
 
 export const itemToMessages = (
   item: ThreadItem,
-  options: {
-    webSearchPending?: boolean
-    webSearchStatus?: WebSearchStatus
-  } = {}
+  options: ItemToMessagesOptions = {}
 ): ChatMessage[] => {
   switch (item.type) {
     case 'userMessage':
@@ -562,7 +597,7 @@ export const itemToMessages = (
         }]
       }]
     case 'exitedReviewMode': {
-      return [{
+      const messages: ChatMessage[] = [{
         id: `${item.id}-review-completed`,
         role: 'system',
         parts: [{
@@ -571,20 +606,32 @@ export const itemToMessages = (
             kind: 'review.completed'
           }
         }]
-      }, {
-        id: `${item.id}-review-output`,
-        role: 'assistant',
-        parts: [{
-          type: 'text',
-          text: item.review,
-          state: 'done'
-        }]
       }]
+
+      if (options.includeReviewOutput !== false) {
+        messages.push({
+          id: `${item.id}-review-output`,
+          role: 'assistant',
+          parts: [{
+            type: 'text',
+            text: item.review,
+            state: 'done'
+          }]
+        })
+      }
+
+      return messages
     }
     default:
       return []
   }
 }
+
+const turnHasAgentMessageWithReviewOutput = (turn: Turn, reviewOutput: string) =>
+  turn.items.some(item =>
+    item.type === 'agentMessage'
+    && hasSameReviewOutputText(item.text, reviewOutput)
+  )
 
 export const threadToMessages = (thread: Thread) =>
   thread.turns.flatMap((turn) =>
@@ -594,6 +641,9 @@ export const threadToMessages = (thread: Thread) =>
       }
 
       return itemToMessages(item, {
+        includeReviewOutput: item.type === 'exitedReviewMode'
+          ? !turnHasAgentMessageWithReviewOutput(turn, item.review)
+          : undefined,
         webSearchPending: item.type === 'webSearch' && turn.status === 'inProgress',
         webSearchStatus: item.type === 'webSearch'
           ? (turn.status === 'failed'
