@@ -60,7 +60,9 @@ export default defineComponent({
             status: itemData.status
           })
         case 'context_compaction':
-          return h(MessageItemContextCompaction)
+          return h(MessageItemContextCompaction, {
+            pending: props.messagePending
+          })
         default:
           return null
       }

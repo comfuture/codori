@@ -592,6 +592,55 @@ describe('chat transcript stability', () => {
     expect(grouped[1]).toBe(assistant)
   })
 
+  it('keeps context compaction separate from adjacent grouped tool items', () => {
+    const compaction = itemToMessages({
+      type: 'contextCompaction',
+      id: 'compact-1'
+    })
+    const command = itemToMessages({
+      type: 'commandExecution',
+      id: 'cmd-1',
+      command: 'pnpm test',
+      cwd: '/tmp',
+      processId: null,
+      source: 'agent',
+      status: 'completed',
+      commandActions: [],
+      aggregatedOutput: 'Tests passed',
+      exitCode: 0,
+      durationMs: 42
+    })
+    const search = itemToMessages({
+      type: 'webSearch',
+      id: 'search-1',
+      query: 'openai codex compaction',
+      action: null
+    })
+    const assistant: ChatMessage = {
+      id: 'assistant-1',
+      role: 'assistant',
+      parts: [{
+        type: 'text',
+        text: 'Done',
+        state: 'done'
+      }]
+    }
+
+    const grouped = groupTranscriptMessages([...compaction, ...command, ...search, assistant])
+
+    expect(grouped).toHaveLength(3)
+    expect(grouped[0]).toEqual(compaction[0])
+    expect(grouped[1]?.parts[0]).toMatchObject({
+      type: TOOL_GROUP_PART,
+      data: {
+        summary: '2 tool calls',
+        details: '1 command, 1 web search',
+        messages: [...command, ...search]
+      }
+    })
+    expect(grouped[2]).toBe(assistant)
+  })
+
   it('keeps the active streaming tool tail ungrouped', () => {
     const running = itemToMessages({
       type: 'mcpToolCall',
