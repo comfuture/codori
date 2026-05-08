@@ -87,6 +87,28 @@ describe('transformSkillReferenceBadges', () => {
 })
 
 describe('skillReferenceBadgePlugin', () => {
+  it('parses submitted skill markdown links before raw skill matching can break link labels', async () => {
+    const tree = await parse('Use [$imagegen](/Users/demo/.codex/skills/.system/imagegen/SKILL.md) now.', {
+      plugins: [
+        skillReferenceBadgePlugin()
+      ]
+    })
+
+    expect(tree.nodes).toEqual([
+      ['p', {},
+        'Use ',
+        [
+          SKILL_REFERENCE_BADGE_TAG,
+          {
+            name: 'imagegen',
+            path: '/Users/demo/.codex/skills/.system/imagegen/SKILL.md'
+          }
+        ],
+        ' now.'
+      ]
+    ])
+  })
+
   it('parses raw skill references before math auto-close consumes them', async () => {
     const tree = await parse('$skill-name additional text', {
       plugins: [

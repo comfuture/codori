@@ -79,6 +79,21 @@ const decodeSkillHref = (href: unknown) => {
   }
 }
 
+const isRawSkillReferenceNode = (node: ComarkNode): node is ComarkElement => {
+  return isElementNode(node)
+    && node[0] === SKILL_REFERENCE_BADGE_TAG
+    && node[1].raw === 'true'
+}
+
+const getRawSkillReferenceNodeName = (node: ComarkNode) => {
+  if (!isRawSkillReferenceNode(node)) {
+    return null
+  }
+
+  const name = node[1].name
+  return typeof name === 'string' && name ? name : null
+}
+
 const getSkillLinkReference = (node: ComarkElement) => {
   if (node[0] !== 'a') {
     return null
@@ -90,12 +105,27 @@ const getSkillLinkReference = (node: ComarkElement) => {
     return null
   }
 
-  const children = node.slice(2)
-  if (children.length !== 1 || typeof children[0] !== 'string') {
+  const children = node.slice(2) as ComarkNode[]
+  if (children.length !== 1) {
     return null
   }
 
-  const match = SKILL_LINK_LABEL_PATTERN.exec(children[0].trim())
+  const [label] = children
+  if (label == null) {
+    return null
+  }
+
+  if (typeof label !== 'string') {
+    const rawSkillName = getRawSkillReferenceNodeName(label)
+    return rawSkillName
+      ? {
+          name: rawSkillName,
+          path: href
+        }
+      : null
+  }
+
+  const match = SKILL_LINK_LABEL_PATTERN.exec(label.trim())
   if (!match?.[1]) {
     return null
   }
@@ -104,12 +134,6 @@ const getSkillLinkReference = (node: ComarkElement) => {
     name: match[1],
     path: href
   }
-}
-
-const isRawSkillReferenceNode = (node: ComarkNode) => {
-  return isElementNode(node)
-    && node[0] === SKILL_REFERENCE_BADGE_TAG
-    && node[1].raw === 'true'
 }
 
 const removeRawSkillAutoCloseMarkers = (children: ComarkNode[]) => {
@@ -197,6 +221,7 @@ const skillReferenceBadgeMarkdownItPlugin = (md: MarkdownItParser) => {
       return false
     }
 
+    state.pos += match.length
     if (silent) {
       return true
     }
@@ -206,7 +231,6 @@ const skillReferenceBadgeMarkdownItPlugin = (md: MarkdownItParser) => {
     token.attrSet('raw', 'true')
     token.markup = '$'
     token.content = match.name
-    state.pos += match.length
     return true
   })
 }
