@@ -8,7 +8,9 @@ import {
   findLatestCompletedPlanTurnId,
   findLatestPlanTurnId,
   groupTranscriptMessages,
+  hasAssistantTextMessageWithText,
   itemToMessages,
+  removeSyntheticReviewOutputMessages,
   threadToMessages,
   replaceStreamingMessage,
   upsertStreamingMessage,
@@ -478,6 +480,76 @@ describe('chat transcript stability', () => {
         state: 'done'
       }]
     }])
+  })
+
+  it('does not duplicate review output when the server also sends an assistant message', () => {
+    expect(threadToMessages(makeThread({
+      id: 'thread-1',
+      preview: '',
+      cwd: '/tmp',
+      createdAt: 0,
+      updatedAt: 0,
+      name: null,
+      turns: [makeTurn({
+        id: 'turn-1',
+        status: 'completed',
+        error: null,
+        items: [{
+          type: 'exitedReviewMode',
+          id: 'review-1',
+          review: 'Final review output'
+        }, asAgentMessageItem({
+          id: 'agent-review-1',
+          text: 'Final review output'
+        })]
+      })]
+    }))).toEqual<ChatMessage[]>([{
+      id: 'review-1-review-completed',
+      role: 'system',
+      parts: [{
+        type: 'data-thread-event',
+        data: {
+          kind: 'review.completed'
+        }
+      }]
+    }, {
+      id: 'agent-review-1',
+      role: 'assistant',
+      parts: [{
+        type: 'text',
+        text: 'Final review output',
+        state: 'done'
+      }]
+    }])
+  })
+
+  it('removes synthetic review output once the real assistant review message arrives', () => {
+    const syntheticReviewOutput: ChatMessage = {
+      id: 'review-1-review-output',
+      role: 'assistant',
+      parts: [{
+        type: 'text',
+        text: 'Final review output',
+        state: 'done'
+      }]
+    }
+    const realReviewOutput: ChatMessage = {
+      id: 'agent-review-1',
+      role: 'assistant',
+      parts: [{
+        type: 'text',
+        text: 'Final review output',
+        state: 'done'
+      }]
+    }
+
+    expect(hasAssistantTextMessageWithText([syntheticReviewOutput], 'Final review output')).toBe(true)
+    expect(removeSyntheticReviewOutputMessages([
+      syntheticReviewOutput,
+      realReviewOutput
+    ], 'Final review output')).toEqual([
+      realReviewOutput
+    ])
   })
 
   it('keeps hydrated web-search items pending for in-progress turns', () => {
