@@ -105,7 +105,7 @@ export type ItemData =
       item: Extract<ThreadItem, { type: 'contextCompaction' }>
     }
 
-export type GroupableToolKind = Exclude<ItemData['kind'], 'subagent_activity'>
+export type GroupableToolKind = Exclude<ItemData['kind'], 'subagent_activity' | 'context_compaction'>
 
 export type ToolCallGroupData = {
   id: string
@@ -166,8 +166,7 @@ const groupableToolKinds: GroupableToolKind[] = [
   'file_change',
   'mcp_tool_call',
   'dynamic_tool_call',
-  'web_search',
-  'context_compaction'
+  'web_search'
 ]
 
 const groupableToolKindLabels: Record<GroupableToolKind, { singular: string, plural: string }> = {
@@ -175,8 +174,7 @@ const groupableToolKindLabels: Record<GroupableToolKind, { singular: string, plu
   file_change: { singular: 'edit', plural: 'edits' },
   mcp_tool_call: { singular: 'MCP tool', plural: 'MCP tools' },
   dynamic_tool_call: { singular: 'internal tool', plural: 'internal tools' },
-  web_search: { singular: 'web search', plural: 'web searches' },
-  context_compaction: { singular: 'compaction', plural: 'compactions' }
+  web_search: { singular: 'web search', plural: 'web searches' }
 }
 
 const pluralize = (count: number, labels: { singular: string, plural: string }) =>
@@ -216,8 +214,6 @@ const isSuccessfullyCompletedToolMessage = (message: ChatMessage) => {
       return part.data.item.status === 'completed'
     case 'web_search':
       return part.data.status === 'completed'
-    case 'context_compaction':
-      return true
     default:
       return false
   }
