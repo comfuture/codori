@@ -9,8 +9,10 @@ import {
   findLatestPlanTurnId,
   groupTranscriptMessages,
   hasAssistantTextMessageWithText,
+  hasAssistantTextMessageWithTextInLatestTurn,
   itemToMessages,
   removeSyntheticReviewOutputMessages,
+  removeSyntheticReviewOutputMessagesInLatestTurn,
   threadToMessages,
   replaceStreamingMessage,
   upsertStreamingMessage,
@@ -549,6 +551,85 @@ describe('chat transcript stability', () => {
       realReviewOutput
     ], 'Final review output')).toEqual([
       realReviewOutput
+    ])
+  })
+
+  it('scopes live review output dedupe to the latest turn', () => {
+    const previousReviewOutput: ChatMessage = {
+      id: 'agent-previous',
+      role: 'assistant',
+      parts: [{
+        type: 'text',
+        text: 'Looks good',
+        state: 'done'
+      }]
+    }
+    const latestUserMessage: ChatMessage = {
+      id: 'user-latest',
+      role: 'user',
+      parts: [{
+        type: 'text',
+        text: 'Review again',
+        state: 'done'
+      }]
+    }
+    const currentReviewOutput: ChatMessage = {
+      id: 'agent-current',
+      role: 'assistant',
+      parts: [{
+        type: 'text',
+        text: 'Looks good',
+        state: 'done'
+      }]
+    }
+
+    expect(hasAssistantTextMessageWithTextInLatestTurn([
+      previousReviewOutput,
+      latestUserMessage
+    ], 'Looks good')).toBe(false)
+    expect(hasAssistantTextMessageWithTextInLatestTurn([
+      previousReviewOutput,
+      latestUserMessage,
+      currentReviewOutput
+    ], 'Looks good')).toBe(true)
+  })
+
+  it('only removes matching synthetic review output from the latest turn', () => {
+    const previousSyntheticReviewOutput: ChatMessage = {
+      id: 'review-previous-review-output',
+      role: 'assistant',
+      parts: [{
+        type: 'text',
+        text: 'Looks good',
+        state: 'done'
+      }]
+    }
+    const latestUserMessage: ChatMessage = {
+      id: 'user-latest',
+      role: 'user',
+      parts: [{
+        type: 'text',
+        text: 'Review again',
+        state: 'done'
+      }]
+    }
+    const currentSyntheticReviewOutput: ChatMessage = {
+      id: 'review-current-review-output',
+      role: 'assistant',
+      parts: [{
+        type: 'text',
+        text: 'Looks good',
+        state: 'done'
+      }]
+    }
+
+    expect(removeSyntheticReviewOutputMessagesInLatestTurn([
+      previousSyntheticReviewOutput,
+      latestUserMessage,
+      currentSyntheticReviewOutput
+    ], 'Looks good')).toEqual([
+      previousSyntheticReviewOutput,
+      latestUserMessage
     ])
   })
 

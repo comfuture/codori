@@ -79,10 +79,10 @@ import {
   findLatestCompletedPlanTurnId,
   findLatestPlanTurnId,
   groupTranscriptMessages,
-  hasAssistantTextMessageWithText,
+  hasAssistantTextMessageWithTextInLatestTurn,
   isSubagentActiveStatus,
   itemToMessages,
-  removeSyntheticReviewOutputMessages,
+  removeSyntheticReviewOutputMessagesInLatestTurn,
   replaceStreamingMessage,
   threadToMessages,
   upsertStreamingMessage,
@@ -3128,12 +3128,12 @@ const applyItemCompletedNotification = (notification: CodexRpcNotification) => {
     latestPlanTurnId.value = notificationTurnId(notification) ?? currentLiveStream()?.turnId ?? null
   }
   if (params.item.type === 'agentMessage') {
-    messages.value = removeSyntheticReviewOutputMessages(messages.value, params.item.text)
+    messages.value = removeSyntheticReviewOutputMessagesInLatestTurn(messages.value, params.item.text)
   }
   markAssistantOutputStartedForItem(params.item)
   for (const nextMessage of itemToMessages(params.item, {
     includeReviewOutput: params.item.type === 'exitedReviewMode'
-      ? !hasAssistantTextMessageWithText(messages.value, params.item.review)
+      ? !hasAssistantTextMessageWithTextInLatestTurn(messages.value, params.item.review)
       : undefined
   })) {
     const confirmedMessage = {
