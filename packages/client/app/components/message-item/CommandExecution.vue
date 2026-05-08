@@ -19,9 +19,15 @@ const title = computed(() => {
 })
 
 const output = computed(() => props.item.aggregatedOutput?.trim() ?? '')
-const icon = computed(() =>
-  props.item.status === 'failed' ? 'i-lucide-triangle-alert' : 'i-lucide-terminal'
-)
+const exitSummary = computed(() => {
+  if (props.item.exitCode === null) {
+    return null
+  }
+
+  return props.item.status === 'failed'
+    ? `Run failed · exit code ${props.item.exitCode}`
+    : `Exit code ${props.item.exitCode}`
+})
 const { open, isLoading, isStreaming } = useChatToolState(() => props.item.status, props.item.status !== 'completed')
 </script>
 
@@ -29,7 +35,7 @@ const { open, isLoading, isStreaming } = useChatToolState(() => props.item.statu
   <UChatTool
     :text="title"
     :suffix="item.command"
-    :icon="icon"
+    icon="i-lucide-terminal"
     :loading="isLoading"
     :streaming="isStreaming"
     variant="card"
@@ -49,18 +55,11 @@ const { open, isLoading, isStreaming } = useChatToolState(() => props.item.statu
         Waiting for output.
       </p>
       <p
-        v-if="item.exitCode !== null"
+        v-if="exitSummary"
         class="text-xs font-medium text-muted"
       >
-        Exit code {{ item.exitCode }}
+        {{ exitSummary }}
       </p>
-      <UAlert
-        v-if="item.status === 'failed' && item.exitCode !== null"
-        color="error"
-        variant="soft"
-        icon="i-lucide-triangle-alert"
-        :title="`Command failed with exit code ${item.exitCode}`"
-      />
     </div>
   </UChatTool>
 </template>
