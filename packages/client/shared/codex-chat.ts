@@ -376,6 +376,29 @@ export const hasAssistantTextMessageWithText = (messages: ChatMessage[], text: s
   )
 }
 
+const isTurnBoundaryMessage = (message: ChatMessage) =>
+  message.role === 'user'
+  || (
+    message.role === 'system'
+    && message.parts.some(part =>
+      part.type === EVENT_PART
+      && part.data.kind === 'turn.started'
+    )
+  )
+
+const findLatestTurnBoundaryIndex = (messages: ChatMessage[]) => {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    if (isTurnBoundaryMessage(messages[index]!)) {
+      return index
+    }
+  }
+
+  return -1
+}
+
+export const hasAssistantTextMessageWithTextInLatestTurn = (messages: ChatMessage[], text: string) =>
+  hasAssistantTextMessageWithText(messages.slice(findLatestTurnBoundaryIndex(messages) + 1), text)
+
 const isSyntheticReviewOutputMessage = (message: ChatMessage, text: string) =>
   message.id.endsWith('-review-output')
   && message.role === 'assistant'
@@ -386,6 +409,14 @@ const isSyntheticReviewOutputMessage = (message: ChatMessage, text: string) =>
 
 export const removeSyntheticReviewOutputMessages = (messages: ChatMessage[], text: string) =>
   messages.filter(message => !isSyntheticReviewOutputMessage(message, text))
+
+export const removeSyntheticReviewOutputMessagesInLatestTurn = (messages: ChatMessage[], text: string) => {
+  const latestTurnBoundaryIndex = findLatestTurnBoundaryIndex(messages)
+  return messages.filter((message, index) =>
+    index <= latestTurnBoundaryIndex
+    || !isSyntheticReviewOutputMessage(message, text)
+  )
+}
 
 const userInputToParts = (input: UserInput): ChatPart[] => {
   if (input.type === 'text') {
