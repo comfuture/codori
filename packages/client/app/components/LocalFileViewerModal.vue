@@ -40,28 +40,46 @@ const relativePathLabel = computed(() => {
   return file.value.relativePath || file.value.name
 })
 
+const textFile = computed(() =>
+  file.value?.kind === 'text' ? file.value : null
+)
+
+const imageFile = computed(() =>
+  file.value?.kind === 'image' ? file.value : null
+)
+
 const lineCount = computed(() => {
-  if (!file.value) {
+  if (!textFile.value) {
     return 0
   }
 
-  return file.value.text.split('\n').length
+  return textFile.value.text.split('\n').length
 })
 
 const inferredLanguage = computed(() =>
-  file.value ? inferLocalFileLanguage(file.value.path, file.value.text) : null
+  textFile.value ? inferLocalFileLanguage(textFile.value.path, textFile.value.text) : null
 )
 
 const languageLabel = computed(() =>
   resolveLocalFileLanguageLabel(inferredLanguage.value)
 )
 
+const mediaTypeLabel = computed(() =>
+  imageFile.value?.mediaType ?? null
+)
+
+const imagePreviewSrc = computed(() =>
+  imageFile.value
+    ? `data:${imageFile.value.mediaType};base64,${imageFile.value.base64}`
+    : ''
+)
+
 const highlightedMarkdown = computed(() => {
-  if (!file.value) {
+  if (!textFile.value) {
     return ''
   }
 
-  return buildHighlightedFileMarkdown(file.value.text, inferredLanguage.value)
+  return buildHighlightedFileMarkdown(textFile.value.text, inferredLanguage.value)
 })
 
 const lineNumberWidth = computed(() =>
@@ -85,13 +103,18 @@ const isSameWorkspace = (left: WorkspaceLocalFileScope | null, right: WorkspaceL
   left?.kind === right?.kind && left?.id === right?.id
 
 const syncRenderedCodeLines = async () => {
-  if (!lineContainer.value) {
+  if (!textFile.value) {
     return
   }
 
   await nextTick()
+  await nextTick()
   requestAnimationFrame(() => {
-    const renderedLines = Array.from(lineContainer.value?.querySelectorAll<HTMLElement>('.line') ?? [])
+    if (!lineContainer.value || !textFile.value) {
+      return
+    }
+
+    const renderedLines = Array.from(lineContainer.value.querySelectorAll<HTMLElement>('.line'))
     for (const [index, line] of renderedLines.entries()) {
       const lineNumber = index + 1
       line.dataset.fileLine = String(lineNumber)
@@ -153,13 +176,13 @@ watch(
 )
 
 watch(() => state.value.line, () => {
-  if (file.value) {
+  if (textFile.value) {
     void syncRenderedCodeLines()
   }
 })
 
 watch(highlightedMarkdown, () => {
-  if (file.value) {
+  if (textFile.value) {
     void syncRenderedCodeLines()
   }
 }, { flush: 'post' })
@@ -188,10 +211,11 @@ watch(highlightedMarkdown, () => {
             </div>
             <div class="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted">
               <span v-if="file">{{ formatLocalFileSize(file.size) }}</span>
-              <span v-if="file">{{ lineCount }} lines</span>
+              <span v-if="textFile">{{ lineCount }} lines</span>
               <span v-if="updatedAtLabel">{{ updatedAtLabel }}</span>
+              <span v-if="mediaTypeLabel">{{ mediaTypeLabel }}</span>
               <span v-if="languageLabel">{{ languageLabel }}</span>
-              <span v-if="state.line">Line {{ state.line }}</span>
+              <span v-if="textFile && state.line">Line {{ state.line }}</span>
             </div>
           </div>
 
@@ -226,7 +250,20 @@ watch(highlightedMarkdown, () => {
         </div>
 
         <div
-          v-else-if="file"
+          v-else-if="imageFile"
+          class="local-file-viewer-image min-h-0 flex-1 overflow-auto bg-elevated/15"
+        >
+          <div class="flex min-h-full items-center justify-center p-6">
+            <img
+              class="max-h-full max-w-full object-contain"
+              :src="imagePreviewSrc"
+              :alt="imageFile.name"
+            >
+          </div>
+        </div>
+
+        <div
+          v-else-if="textFile"
           ref="lineContainer"
           class="local-file-viewer-code min-h-0 flex-1 overflow-auto bg-elevated/15"
           :style="{ '--lfv-line-number-width': lineNumberWidth }"
