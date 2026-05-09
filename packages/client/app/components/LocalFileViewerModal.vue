@@ -108,7 +108,6 @@ const syncRenderedCodeLines = async () => {
   }
 
   await nextTick()
-  await nextTick()
   requestAnimationFrame(() => {
     if (!lineContainer.value || !textFile.value) {
       return
