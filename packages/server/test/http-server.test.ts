@@ -1166,6 +1166,64 @@ describe('createHttpServer', () => {
     })
   })
 
+  it('rejects local image previews when file contents are not a valid image', async () => {
+    const projectPath = mkdtempSync(join(os.tmpdir(), 'codori-local-file-'))
+    tempDirs.push(projectPath)
+    const filePath = join(projectPath, 'assets', 'not-an-image.png')
+    mkdirSync(join(projectPath, 'assets'), { recursive: true })
+    writeFileSync(filePath, Buffer.from([0x00, 0x01, 0x02, 0x03]))
+
+    const app = await createHttpServer(createManager({
+      getProjectStatus: () => ({
+        ...createProjectRecord(),
+        projectPath
+      })
+    }))
+    startedApps.push(app)
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/projects/demo/local-file?path=${encodeURIComponent(filePath)}`
+    })
+
+    expect(response.statusCode).toBe(415)
+    expect(response.json()).toEqual({
+      error: {
+        code: 'UNSUPPORTED_MEDIA_TYPE',
+        message: 'Local image preview is only available for valid PNG, JPEG, GIF, WebP, or SVG files.'
+      }
+    })
+  })
+
+  it('rejects local image previews when text files are renamed with image extensions', async () => {
+    const projectPath = mkdtempSync(join(os.tmpdir(), 'codori-local-file-'))
+    tempDirs.push(projectPath)
+    const filePath = join(projectPath, 'assets', 'not-an-image.png')
+    mkdirSync(join(projectPath, 'assets'), { recursive: true })
+    writeFileSync(filePath, '<html>not an image</html>\n', 'utf8')
+
+    const app = await createHttpServer(createManager({
+      getProjectStatus: () => ({
+        ...createProjectRecord(),
+        projectPath
+      })
+    }))
+    startedApps.push(app)
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/projects/demo/local-file?path=${encodeURIComponent(filePath)}`
+    })
+
+    expect(response.statusCode).toBe(415)
+    expect(response.json()).toEqual({
+      error: {
+        code: 'UNSUPPORTED_MEDIA_TYPE',
+        message: 'Local image preview is only available for valid PNG, JPEG, GIF, WebP, or SVG files.'
+      }
+    })
+  })
+
   it('returns an inline image preview payload for chat local image files', async () => {
     const chatPath = mkdtempSync(join(os.tmpdir(), 'codori-local-chat-file-'))
     tempDirs.push(chatPath)
