@@ -1116,12 +1116,91 @@ describe('createHttpServer', () => {
     expect(response.statusCode).toBe(200)
     expect(response.json()).toEqual({
       file: {
+        kind: 'text',
         path: expect.stringMatching(/src\/viewer\.ts$/),
         relativePath: 'src/viewer.ts',
         name: 'viewer.ts',
         size: 'export const viewer = true\n'.length,
         updatedAt: expect.any(Number),
         text: 'export const viewer = true\n'
+      }
+    })
+  })
+
+  it('returns an inline image preview payload for project local image files', async () => {
+    const projectPath = mkdtempSync(join(os.tmpdir(), 'codori-local-file-'))
+    tempDirs.push(projectPath)
+    const filePath = join(projectPath, 'assets', 'pixel.png')
+    const imageBuffer = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+      'base64'
+    )
+    mkdirSync(join(projectPath, 'assets'), { recursive: true })
+    writeFileSync(filePath, imageBuffer)
+
+    const app = await createHttpServer(createManager({
+      getProjectStatus: () => ({
+        ...createProjectRecord(),
+        projectPath
+      })
+    }))
+    startedApps.push(app)
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/projects/demo/local-file?path=${encodeURIComponent(filePath)}`
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toEqual({
+      file: {
+        kind: 'image',
+        path: expect.stringMatching(/assets\/pixel\.png$/),
+        relativePath: 'assets/pixel.png',
+        name: 'pixel.png',
+        size: imageBuffer.length,
+        updatedAt: expect.any(Number),
+        mediaType: 'image/png',
+        base64: imageBuffer.toString('base64')
+      }
+    })
+  })
+
+  it('returns an inline image preview payload for chat local image files', async () => {
+    const chatPath = mkdtempSync(join(os.tmpdir(), 'codori-local-chat-file-'))
+    tempDirs.push(chatPath)
+    const filePath = join(chatPath, 'screenshots', 'preview.png')
+    const imageBuffer = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+      'base64'
+    )
+    mkdirSync(join(chatPath, 'screenshots'), { recursive: true })
+    writeFileSync(filePath, imageBuffer)
+
+    const app = await createHttpServer(createManager({
+      getChatStatus: () => ({
+        ...createChatRecord(),
+        chatPath
+      })
+    }))
+    startedApps.push(app)
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/chats/chat-test/local-file?path=${encodeURIComponent(filePath)}`
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toEqual({
+      file: {
+        kind: 'image',
+        path: expect.stringMatching(/screenshots\/preview\.png$/),
+        relativePath: 'screenshots/preview.png',
+        name: 'preview.png',
+        size: imageBuffer.length,
+        updatedAt: expect.any(Number),
+        mediaType: 'image/png',
+        base64: imageBuffer.toString('base64')
       }
     })
   })
