@@ -1,17 +1,30 @@
 import { basename, resolve } from 'node:path'
 import { readFile, realpath, stat } from 'node:fs/promises'
+import { lookup as lookupMimeType } from 'mime-types'
 import { isPathInsideDirectory } from './attachment-store.js'
 
 export const MAX_LOCAL_FILE_VIEW_BYTES = 1024 * 1024
 
-export type LocalFileReadResult = {
+type LocalFileReadResultBase = {
   path: string
   relativePath: string
   name: string
   size: number
   updatedAt: number
+}
+
+export type LocalFileTextReadResult = LocalFileReadResultBase & {
+  kind: 'text'
   text: string
 }
+
+export type LocalFileImageReadResult = LocalFileReadResultBase & {
+  kind: 'image'
+  mediaType: string
+  base64: string
+}
+
+export type LocalFileReadResult = LocalFileTextReadResult | LocalFileImageReadResult
 
 export class LocalFileViewError extends Error {
   readonly code: 'FORBIDDEN' | 'NOT_FOUND' | 'NOT_A_FILE' | 'TOO_LARGE' | 'BINARY'
@@ -34,6 +47,26 @@ const hasBinaryContent = (buffer: Buffer) => {
   }
 
   return false
+}
+
+const SUPPORTED_IMAGE_MEDIA_TYPES = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/gif',
+  'image/webp',
+  'image/svg+xml'
+])
+
+const getSupportedImageMediaType = (filePath: string) => {
+  const inferred = lookupMimeType(filePath)
+  if (typeof inferred !== 'string') {
+    return null
+  }
+
+  const mediaType = inferred.toLowerCase()
+  return SUPPORTED_IMAGE_MEDIA_TYPES.has(mediaType)
+    ? mediaType
+    : null
 }
 
 export const readProjectLocalFile = async (
@@ -71,16 +104,31 @@ export const readProjectLocalFile = async (
   }
 
   const buffer = await readFile(resolvedTargetPath)
+  const baseFile = {
+    path: resolvedTargetPath,
+    relativePath: resolvedTargetPath.slice(resolvedProjectRoot.length).replace(/^[/\\]+/, ''),
+    name: basename(resolvedTargetPath),
+    size: fileStat.size,
+    updatedAt: fileStat.mtimeMs
+  }
+
+  const imageMediaType = getSupportedImageMediaType(resolvedTargetPath)
+  if (imageMediaType) {
+    return {
+      ...baseFile,
+      kind: 'image',
+      mediaType: imageMediaType,
+      base64: buffer.toString('base64')
+    }
+  }
+
   if (hasBinaryContent(buffer)) {
     throw new LocalFileViewError('BINARY', 'Binary files are not supported by the local file viewer.')
   }
 
   return {
-    path: resolvedTargetPath,
-    relativePath: resolvedTargetPath.slice(resolvedProjectRoot.length).replace(/^[/\\]+/, ''),
-    name: basename(resolvedTargetPath),
-    size: fileStat.size,
-    updatedAt: fileStat.mtimeMs,
+    ...baseFile,
+    kind: 'text',
     text: buffer.toString('utf8')
   }
 }

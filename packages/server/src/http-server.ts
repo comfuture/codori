@@ -23,7 +23,7 @@ import {
 } from './attachment-store.js'
 import { CodoriError } from './errors.js'
 import { createGitBranch, listGitBranches, switchGitBranch } from './git.js'
-import { LocalFileViewError, readProjectLocalFile } from './local-file-viewer.js'
+import { LocalFileViewError, readProjectLocalFile, type LocalFileReadResult } from './local-file-viewer.js'
 import { createRuntimeManager } from './process-manager.js'
 import {
   createServiceUpdateController,
@@ -117,14 +117,7 @@ type ProjectGitBranchMutationRequest = {
 }
 
 type ProjectLocalFileResponse = {
-  file: {
-    path: string
-    relativePath: string
-    name: string
-    size: number
-    updatedAt: number
-    text: string
-  }
+  file: LocalFileReadResult
 }
 
 export type HttpServerOptions = {
