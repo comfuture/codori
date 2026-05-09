@@ -7,15 +7,27 @@ export type LocalFileLinkTarget = {
   column: number | null
 }
 
+type LocalFileResponseBase = {
+  path: string
+  relativePath: string
+  name: string
+  size: number
+  updatedAt: number
+}
+
+export type LocalFileTextResponse = LocalFileResponseBase & {
+  kind: 'text'
+  text: string
+}
+
+export type LocalFileImageResponse = LocalFileResponseBase & {
+  kind: 'image'
+  mediaType: string
+  base64: string
+}
+
 export type ProjectLocalFileResponse = {
-  file: {
-    path: string
-    relativePath: string
-    name: string
-    size: number
-    updatedAt: number
-    text: string
-  }
+  file: LocalFileTextResponse | LocalFileImageResponse
 }
 
 export type WorkspaceLocalFileScope =
