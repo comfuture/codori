@@ -44,7 +44,6 @@ describe('chat goal workflow', () => {
     )
     const threadGoals = ref<Record<string, ThreadGoal>>({})
     const workflow = useChatGoalWorkflow({
-      projectId: 'codori',
       activeThreadId,
       threadGoals,
       ensurePendingLiveStream,
@@ -101,6 +100,28 @@ describe('chat goal workflow', () => {
       status: 'active'
     })
     expect(threadGoals.value['thread-1']?.objective).toBe('Ship issue #68')
+  })
+
+  it('preserves the current goal status when saving edited objective text', async () => {
+    const { threadGoals, workflow } = createWorkflow()
+    threadGoals.value = {
+      'thread-1': testGoal({ status: 'paused' })
+    }
+    request.mockResolvedValue({
+      goal: testGoal({
+        objective: 'Updated paused goal',
+        status: 'paused'
+      })
+    })
+
+    await workflow.saveGoalEdit('Updated paused goal')
+
+    expect(request).toHaveBeenCalledWith('thread/goal/set', {
+      threadId: 'thread-1',
+      objective: 'Updated paused goal',
+      status: 'paused'
+    })
+    expect(threadGoals.value['thread-1']?.status).toBe('paused')
   })
 
   it('updates goal status and clears goals through native RPCs', async () => {

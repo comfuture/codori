@@ -99,10 +99,12 @@ watch(() => [props.open, props.mode] as const, async ([open, mode]) => {
   }
 
   await nextTick()
-  const element = objectiveTextarea.value instanceof HTMLTextAreaElement
-    ? objectiveTextarea.value
-    : objectiveTextarea.value?.$el?.querySelector?.('textarea')
-  element?.focus()
+  requestAnimationFrame(() => {
+    const element = objectiveTextarea.value instanceof HTMLTextAreaElement
+      ? objectiveTextarea.value
+      : objectiveTextarea.value?.$el?.querySelector?.('textarea')
+    element?.focus()
+  })
 })
 </script>
 

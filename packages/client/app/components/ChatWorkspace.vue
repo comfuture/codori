@@ -185,6 +185,7 @@ import {
   resolveSubagentAccent,
   toSubagentAvatarText
 } from '~~/shared/subagent-panels'
+import { goalStatusLabel } from '~~/shared/thread-goal'
 const props = defineProps<{
   projectId?: string
   chatId?: string
@@ -2210,7 +2211,6 @@ const {
 } = reviewWorkflow
 
 const goalWorkflow = useChatGoalWorkflow({
-  projectId: workspaceId.value,
   activeThreadId,
   threadGoals,
   ensurePendingLiveStream,
@@ -4917,7 +4917,7 @@ watch(
               <span class="shrink-0 font-medium">Goal</span>
               <span class="truncate">{{ currentThreadGoal.objective }}</span>
               <span class="shrink-0 text-muted">
-                {{ currentThreadGoal.status === 'budgetLimited' ? 'limited' : currentThreadGoal.status }}
+                {{ goalStatusLabel(currentThreadGoal.status) }}
               </span>
             </button>
           </div>
