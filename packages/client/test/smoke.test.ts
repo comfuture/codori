@@ -599,6 +599,8 @@ describe('client package', () => {
 
   it('applies thread-level notifications before an active turn id exists', () => {
     expect(shouldApplyNotificationWithoutTurnId('thread/name/updated')).toBe(true)
+    expect(shouldApplyNotificationWithoutTurnId('thread/goal/updated')).toBe(true)
+    expect(shouldApplyNotificationWithoutTurnId('thread/goal/cleared')).toBe(true)
     expect(shouldApplyNotificationWithoutTurnId('serverRequest/resolved')).toBe(true)
     expect(shouldApplyNotificationWithoutTurnId('item/agentMessage/delta')).toBe(false)
   })

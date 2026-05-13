@@ -38,8 +38,10 @@ describe('chat goal workflow', () => {
     })
   })
 
-  const createWorkflow = () => {
-    const activeThreadId = ref<string | null>('thread-1')
+  const createWorkflow = (input: { activeThreadId?: string | null } = {}) => {
+    const activeThreadId = ref<string | null>(
+      Object.hasOwn(input, 'activeThreadId') ? input.activeThreadId ?? null : 'thread-1'
+    )
     const threadGoals = ref<Record<string, ThreadGoal>>({})
     const workflow = useChatGoalWorkflow({
       projectId: 'codori',
@@ -71,6 +73,18 @@ describe('chat goal workflow', () => {
     expect(threadGoals.value['thread-1']?.objective).toBe('Keep the goal visible')
     expect(workflow.goalDrawerOpen.value).toBe(true)
     expect(workflow.goalDrawerLoading.value).toBe(false)
+  })
+
+  it('opens an empty summary without starting a thread when no thread exists', async () => {
+    const { workflow } = createWorkflow({ activeThreadId: null })
+
+    await workflow.openGoalSummary()
+
+    expect(ensurePendingLiveStream).not.toHaveBeenCalled()
+    expect(request).not.toHaveBeenCalled()
+    expect(workflow.goalDrawerOpen.value).toBe(true)
+    expect(workflow.goalDrawerLoading.value).toBe(false)
+    expect(workflow.currentThreadGoal.value).toBeNull()
   })
 
   it('sets an active thread goal from inline /goal text', async () => {

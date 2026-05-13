@@ -72,6 +72,20 @@ export const useChatGoalWorkflow = (options: UseChatGoalWorkflowOptions) => {
     return liveStream.threadId
   }
 
+  const getActiveGoalThreadId = () => options.activeThreadId.value
+
+  const requireActiveGoalThreadId = () => {
+    const threadId = getActiveGoalThreadId()
+    if (threadId) {
+      return threadId
+    }
+
+    const messageText = 'Start a session before changing a thread goal.'
+    goalDrawerError.value = messageText
+    options.setComposerError(messageText)
+    return null
+  }
+
   const getGoal = async (threadId: string) => {
     const response = await options.getClient(options.projectId).request<ThreadGoalGetResponse>('thread/goal/get', {
       threadId
@@ -92,7 +106,11 @@ export const useChatGoalWorkflow = (options: UseChatGoalWorkflowOptions) => {
     goalDrawerError.value = null
 
     try {
-      const threadId = await ensureGoalThreadId()
+      const threadId = getActiveGoalThreadId()
+      if (!threadId) {
+        return
+      }
+
       await getGoal(threadId)
     } catch (caughtError) {
       goalDrawerError.value = caughtError instanceof Error ? caughtError.message : String(caughtError)
@@ -105,7 +123,7 @@ export const useChatGoalWorkflow = (options: UseChatGoalWorkflowOptions) => {
     const trimmedObjective = objective.trim()
     if (!trimmedObjective) {
       options.setComposerError('Goal objective must not be empty.')
-      return
+      return false
     }
 
     goalDrawerSubmitting.value = true
@@ -124,10 +142,12 @@ export const useChatGoalWorkflow = (options: UseChatGoalWorkflowOptions) => {
         goalDrawerMode.value = 'summary'
         goalDrawerOpen.value = true
       }
+      return true
     } catch (caughtError) {
       const messageText = caughtError instanceof Error ? caughtError.message : String(caughtError)
       goalDrawerError.value = messageText
       options.setComposerError(messageText)
+      return false
     } finally {
       goalDrawerSubmitting.value = false
     }
@@ -138,7 +158,11 @@ export const useChatGoalWorkflow = (options: UseChatGoalWorkflowOptions) => {
     goalDrawerError.value = null
 
     try {
-      const threadId = await ensureGoalThreadId()
+      const threadId = requireActiveGoalThreadId()
+      if (!threadId) {
+        return false
+      }
+
       const response = await options.getClient(options.projectId).request<ThreadGoalSetResponse>('thread/goal/set', {
         threadId,
         status
@@ -146,10 +170,12 @@ export const useChatGoalWorkflow = (options: UseChatGoalWorkflowOptions) => {
       setThreadGoalState(response.goal)
       goalDrawerMode.value = 'summary'
       goalDrawerOpen.value = true
+      return true
     } catch (caughtError) {
       const messageText = caughtError instanceof Error ? caughtError.message : String(caughtError)
       goalDrawerError.value = messageText
       options.setComposerError(messageText)
+      return false
     } finally {
       goalDrawerSubmitting.value = false
     }
@@ -160,17 +186,23 @@ export const useChatGoalWorkflow = (options: UseChatGoalWorkflowOptions) => {
     goalDrawerError.value = null
 
     try {
-      const threadId = await ensureGoalThreadId()
+      const threadId = requireActiveGoalThreadId()
+      if (!threadId) {
+        return false
+      }
+
       await options.getClient(options.projectId).request<ThreadGoalClearResponse>('thread/goal/clear', {
         threadId
       })
       clearThreadGoalState(threadId)
       goalDrawerMode.value = 'summary'
       goalDrawerOpen.value = true
+      return true
     } catch (caughtError) {
       const messageText = caughtError instanceof Error ? caughtError.message : String(caughtError)
       goalDrawerError.value = messageText
       options.setComposerError(messageText)
+      return false
     } finally {
       goalDrawerSubmitting.value = false
     }
@@ -183,7 +215,14 @@ export const useChatGoalWorkflow = (options: UseChatGoalWorkflowOptions) => {
     goalDrawerLoading.value = true
 
     try {
-      const threadId = await ensureGoalThreadId()
+      const threadId = getActiveGoalThreadId()
+      if (!threadId) {
+        goalDrawerMode.value = 'summary'
+        goalDrawerError.value = 'No goal is currently set for this thread.'
+        goalDraftObjective.value = ''
+        return
+      }
+
       const goal = currentThreadGoal.value ?? await getGoal(threadId)
       if (!goal) {
         goalDrawerMode.value = 'summary'
@@ -201,7 +240,7 @@ export const useChatGoalWorkflow = (options: UseChatGoalWorkflowOptions) => {
   }
 
   const saveGoalEdit = async (objective: string) => {
-    await setGoalObjective(objective, { openSummary: true })
+    return await setGoalObjective(objective, { openSummary: true })
   }
 
   const handleGoalDrawerOpenChange = (open: boolean) => {

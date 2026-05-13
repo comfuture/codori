@@ -9,6 +9,7 @@ import {
   watch
 } from 'vue'
 import LocalFileViewerModal from './LocalFileViewerModal.vue'
+import GoalDrawer from './GoalDrawer.vue'
 import MessageContent from './MessageContent.vue'
 import PlanTaskListPanel from './PlanTaskListPanel.vue'
 import PlanImplementationPromptDrawer from './PlanImplementationPromptDrawer.vue'
@@ -44,6 +45,7 @@ import {
   type ThreadReactivationReason
 } from '../utils/thread-reactivation'
 import { useChatAttachments, type DraftAttachment } from '../composables/useChatAttachments'
+import { useChatGoalWorkflow } from '../composables/useChatGoalWorkflow'
 import { useChatPlanWorkflow } from '../composables/useChatPlanWorkflow'
 import { useChatReviewWorkflow } from '../composables/useChatReviewWorkflow'
 import { useSubagentPanelsController } from '../composables/useSubagentPanelsController'
@@ -284,6 +286,7 @@ const { syncThreadSummary, updateThreadSummaryTitle } = useThreadSummaries(works
 const {
   messages,
   subagentPanels,
+  threadGoals,
   threadPlans,
   threadCollaborationModeMasks,
   collaborationModeMasks,
@@ -1596,6 +1599,10 @@ const resolveSlashCommandIcon = (command: SlashCommandDefinition) => {
     return 'i-lucide-search-check'
   }
 
+  if (command.name === 'goal') {
+    return 'i-lucide-flag'
+  }
+
   if (command.name === 'usage' || command.name === 'status') {
     return 'i-lucide-gauge'
   }
@@ -2023,6 +2030,59 @@ const handleSlashCommandSubmission = async (
       return {
         consumed: true
       }
+    case 'openGoal':
+      error.value = null
+      status.value = 'ready'
+      clearSlashCommandDraft()
+      await openGoalSummary()
+      await focusPromptAt(0)
+      return {
+        consumed: true
+      }
+    case 'setGoalObjective': {
+      const succeeded = await setGoalObjective(dispatchAction.objective)
+      if (succeeded) {
+        error.value = null
+        status.value = 'ready'
+        clearSlashCommandDraft()
+        await focusPromptAt(0)
+      }
+      return {
+        consumed: true
+      }
+    }
+    case 'setGoalStatus': {
+      const succeeded = await setGoalStatus(dispatchAction.status)
+      if (succeeded) {
+        error.value = null
+        status.value = 'ready'
+        clearSlashCommandDraft()
+        await focusPromptAt(0)
+      }
+      return {
+        consumed: true
+      }
+    }
+    case 'clearGoal': {
+      const succeeded = await clearGoal()
+      if (succeeded) {
+        error.value = null
+        status.value = 'ready'
+        clearSlashCommandDraft()
+        await focusPromptAt(0)
+      }
+      return {
+        consumed: true
+      }
+    }
+    case 'editGoal':
+      error.value = null
+      status.value = 'ready'
+      clearSlashCommandDraft()
+      await openGoalEditor()
+      return {
+        consumed: true
+      }
     case 'activatePlanMode':
       try {
         await setCurrentThreadCollaborationMode('plan')
@@ -2148,6 +2208,34 @@ const {
   handleReviewDrawerOpenChange,
   handleReviewDrawerBack
 } = reviewWorkflow
+
+const goalWorkflow = useChatGoalWorkflow({
+  projectId: workspaceId.value,
+  activeThreadId,
+  threadGoals,
+  ensurePendingLiveStream,
+  getClient: () => getRuntimeClient(),
+  setComposerError
+})
+
+const {
+  goalDrawerOpen,
+  goalDrawerMode,
+  goalDrawerLoading,
+  goalDrawerSubmitting,
+  goalDrawerError,
+  goalDraftObjective,
+  currentThreadGoal,
+  applyThreadGoalUpdatedNotification,
+  applyThreadGoalClearedNotification,
+  openGoalSummary,
+  setGoalObjective,
+  setGoalStatus,
+  clearGoal,
+  openGoalEditor,
+  saveGoalEdit,
+  handleGoalDrawerOpenChange
+} = goalWorkflow
 
 const planWorkflow = useChatPlanWorkflow({
   projectId: workspaceId.value,
@@ -2787,6 +2875,7 @@ const resetDraftThread = () => {
   autoRedirectThreadId.value = null
   messages.value = []
   subagentPanels.value = []
+  threadGoals.value = {}
   error.value = null
   tokenUsage.value = null
   latestPlanTurnId.value = null
@@ -3225,6 +3314,14 @@ const applyNotification = (notification: CodexRpcNotification) => {
       }
 
       updateThreadSummaryTitle(nextThreadId, nextTitle, notificationThreadUpdatedAt(notification))
+      return
+    }
+    case 'thread/goal/updated': {
+      applyThreadGoalUpdatedNotification(notification.params)
+      return
+    }
+    case 'thread/goal/cleared': {
+      applyThreadGoalClearedNotification(notification.params)
       return
     }
     case 'serverRequest/resolved': {
@@ -4804,6 +4901,27 @@ watch(
             <span>{{ currentCollaborationModeLabel }} mode</span>
           </div>
 
+          <div
+            v-if="currentThreadGoal"
+            class="mb-2 flex px-1 text-xs text-toned"
+          >
+            <button
+              type="button"
+              class="inline-flex max-w-full items-center gap-2 rounded-full border border-default bg-default/70 px-2.5 py-1 text-left transition hover:border-primary/30 hover:text-highlighted"
+              @click="void openGoalSummary()"
+            >
+              <UIcon
+                name="i-lucide-flag"
+                class="size-3.5 shrink-0 text-primary"
+              />
+              <span class="shrink-0 font-medium">Goal</span>
+              <span class="truncate">{{ currentThreadGoal.objective }}</span>
+              <span class="shrink-0 text-muted">
+                {{ currentThreadGoal.status === 'budgetLimited' ? 'limited' : currentThreadGoal.status }}
+              </span>
+            </button>
+          </div>
+
           <UChatPrompt
             ref="chatPromptRef"
             v-model="input"
@@ -5082,6 +5200,22 @@ watch(
     @choose-base-branch-mode="openBaseBranchPicker"
     @choose-base-branch="(branch) => startReview({ type: 'baseBranch', branch })"
     @back="handleReviewDrawerBack"
+  />
+
+  <GoalDrawer
+    v-model:draft-objective="goalDraftObjective"
+    :open="goalDrawerOpen"
+    :mode="goalDrawerMode"
+    :goal="currentThreadGoal"
+    :loading="goalDrawerLoading"
+    :submitting="goalDrawerSubmitting"
+    :error="goalDrawerError"
+    @update:open="handleGoalDrawerOpenChange"
+    @edit="openGoalEditor"
+    @save-objective="saveGoalEdit"
+    @pause="setGoalStatus('paused')"
+    @resume="setGoalStatus('active')"
+    @clear="clearGoal"
   />
 
   <UsageStatusModal
