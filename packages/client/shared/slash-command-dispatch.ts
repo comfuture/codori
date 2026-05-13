@@ -15,6 +15,23 @@ export type SlashCommandDispatchAction =
       type: 'openUsageStatus'
     }
   | {
+      type: 'openGoal'
+    }
+  | {
+      type: 'setGoalObjective'
+      objective: string
+    }
+  | {
+      type: 'setGoalStatus'
+      status: 'active' | 'paused'
+    }
+  | {
+      type: 'clearGoal'
+    }
+  | {
+      type: 'editGoal'
+    }
+  | {
       type: 'activatePlanMode'
     }
   | {
@@ -68,6 +85,47 @@ export const resolveSlashCommandDispatch = (input: {
       return {
         type: 'openUsageStatus'
       }
+    case 'goal': {
+      if (attachmentsCount > 0) {
+        return {
+          type: 'error',
+          message: 'Slash commands do not support image attachments yet.'
+        }
+      }
+
+      if (slashCommand.isBare) {
+        return {
+          type: 'openGoal'
+        }
+      }
+
+      const normalizedArgs = slashCommand.args.trim().toLowerCase()
+      switch (normalizedArgs) {
+        case 'pause':
+          return {
+            type: 'setGoalStatus',
+            status: 'paused'
+          }
+        case 'resume':
+          return {
+            type: 'setGoalStatus',
+            status: 'active'
+          }
+        case 'clear':
+          return {
+            type: 'clearGoal'
+          }
+        case 'edit':
+          return {
+            type: 'editGoal'
+          }
+        default:
+          return {
+            type: 'setGoalObjective',
+            objective: slashCommand.args
+          }
+      }
+    }
     case 'plan':
       if (!planModeAvailable) {
         return {

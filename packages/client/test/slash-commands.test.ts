@@ -30,9 +30,10 @@ describe('slash command helpers', () => {
   })
 
   it('filters available commands by prefix and formats completion text', () => {
-    expect(filterSlashCommands(SLASH_COMMANDS, '')).toHaveLength(4)
+    expect(filterSlashCommands(SLASH_COMMANDS, '')).toHaveLength(5)
     expect(filterSlashCommands(SLASH_COMMANDS, 'pl').map(command => command.name)).toEqual(['plan'])
     expect(filterSlashCommands(SLASH_COMMANDS, 're').map(command => command.name)).toEqual(['review'])
+    expect(filterSlashCommands(SLASH_COMMANDS, 'go').map(command => command.name)).toEqual(['goal'])
     expect(filterSlashCommands(SLASH_COMMANDS, 'us').map(command => command.name)).toEqual(['usage'])
     expect(filterSlashCommands(SLASH_COMMANDS, 'st').map(command => command.name)).toEqual(['status'])
     expect(toSlashCommandCompletion(SLASH_COMMANDS[0]!)).toBe('/plan ')
@@ -61,6 +62,18 @@ describe('slash command helpers', () => {
     expect(parseSubmittedSlashCommand('/review compare this')).toEqual({
       name: 'review',
       args: 'compare this',
+      isBare: false
+    })
+
+    expect(parseSubmittedSlashCommand('/goal')).toEqual({
+      name: 'goal',
+      args: '',
+      isBare: true
+    })
+
+    expect(parseSubmittedSlashCommand('/goal ship issue #68')).toEqual({
+      name: 'goal',
+      args: 'ship issue #68',
       isBare: false
     })
 

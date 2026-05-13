@@ -46,4 +46,100 @@ describe('slash command dispatch', () => {
       message: 'Plan mode is unavailable in the current runtime.'
     })
   })
+
+  it('routes bare /goal to goal inspection', () => {
+    expect(resolveSlashCommandDispatch({
+      slashCommand: {
+        name: 'goal',
+        args: '',
+        isBare: true
+      },
+      attachmentsCount: 0,
+      planModeAvailable: true
+    })).toEqual({
+      type: 'openGoal'
+    })
+  })
+
+  it('routes inline /goal text to a goal objective update', () => {
+    expect(resolveSlashCommandDispatch({
+      slashCommand: {
+        name: 'goal',
+        args: 'Ship issue #68',
+        isBare: false
+      },
+      attachmentsCount: 0,
+      planModeAvailable: true
+    })).toEqual({
+      type: 'setGoalObjective',
+      objective: 'Ship issue #68'
+    })
+  })
+
+  it('routes /goal control commands to goal actions', () => {
+    expect(resolveSlashCommandDispatch({
+      slashCommand: {
+        name: 'goal',
+        args: 'pause',
+        isBare: false
+      },
+      attachmentsCount: 0,
+      planModeAvailable: true
+    })).toEqual({
+      type: 'setGoalStatus',
+      status: 'paused'
+    })
+
+    expect(resolveSlashCommandDispatch({
+      slashCommand: {
+        name: 'goal',
+        args: 'resume',
+        isBare: false
+      },
+      attachmentsCount: 0,
+      planModeAvailable: true
+    })).toEqual({
+      type: 'setGoalStatus',
+      status: 'active'
+    })
+
+    expect(resolveSlashCommandDispatch({
+      slashCommand: {
+        name: 'goal',
+        args: 'clear',
+        isBare: false
+      },
+      attachmentsCount: 0,
+      planModeAvailable: true
+    })).toEqual({
+      type: 'clearGoal'
+    })
+
+    expect(resolveSlashCommandDispatch({
+      slashCommand: {
+        name: 'goal',
+        args: 'edit',
+        isBare: false
+      },
+      attachmentsCount: 0,
+      planModeAvailable: true
+    })).toEqual({
+      type: 'editGoal'
+    })
+  })
+
+  it('rejects /goal commands with image attachments', () => {
+    expect(resolveSlashCommandDispatch({
+      slashCommand: {
+        name: 'goal',
+        args: 'Ship issue #68',
+        isBare: false
+      },
+      attachmentsCount: 1,
+      planModeAvailable: true
+    })).toEqual({
+      type: 'error',
+      message: 'Slash commands do not support image attachments yet.'
+    })
+  })
 })
