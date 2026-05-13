@@ -3,6 +3,7 @@ import type { ChatMessage, SubagentAgentStatus, VisualSubagentPanel } from '~~/s
 import type { CollaborationModeMask } from '~~/shared/collaboration-mode'
 import type { ReasoningEffort } from '~~/shared/generated/codex-app-server/ReasoningEffort'
 import type { CodexRpcNotification } from '~~/shared/codex-rpc'
+import type { ThreadGoal } from '~~/shared/generated/codex-app-server/v2/ThreadGoal'
 import type { ThreadPlanState } from '~~/shared/turn-plan'
 import {
   FALLBACK_MODELS,
@@ -40,6 +41,7 @@ export type SubagentPanelState = VisualSubagentPanel & {
 export type ChatSession = {
   messages: Ref<ChatMessage[]>
   subagentPanels: Ref<SubagentPanelState[]>
+  threadGoals: Ref<Record<string, ThreadGoal>>
   threadPlans: Ref<Record<string, ThreadPlanState>>
   threadCollaborationModeMasks: Ref<Record<string, CollaborationModeMask>>
   collaborationModeMasks: Ref<CollaborationModeMask[]>
@@ -76,6 +78,7 @@ const createSession = (): ChatSession => {
   const session: ChatSession = {
     messages: ref([]) as Ref<ChatMessage[]>,
     subagentPanels: ref([]) as Ref<SubagentPanelState[]>,
+    threadGoals: ref({}) as Ref<Record<string, ThreadGoal>>,
     threadPlans: ref({}) as Ref<Record<string, ThreadPlanState>>,
     threadCollaborationModeMasks: ref({}) as Ref<Record<string, CollaborationModeMask>>,
     collaborationModeMasks: ref([]) as Ref<CollaborationModeMask[]>,
