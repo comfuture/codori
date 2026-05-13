@@ -1,4 +1,4 @@
-export type SlashCommandName = 'plan' | 'review' | 'usage' | 'status'
+export type SlashCommandName = 'plan' | 'review' | 'goal' | 'usage' | 'status'
 
 export type SlashCommandDefinition = {
   name: SlashCommandName
@@ -32,6 +32,12 @@ export const SLASH_COMMANDS: SlashCommandDefinition[] = [{
   description: 'Review current changes or compare against a base branch.',
   supportsInlineArgs: false,
   completeOnSpace: true,
+  executeOnEnter: true
+}, {
+  name: 'goal',
+  description: 'Set, inspect, or manage the persistent goal for this thread.',
+  supportsInlineArgs: true,
+  completeOnSpace: false,
   executeOnEnter: true
 }, {
   name: 'usage',
