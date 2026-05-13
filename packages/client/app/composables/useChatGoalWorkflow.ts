@@ -21,11 +21,10 @@ type GoalRpcClient = {
 }
 
 type UseChatGoalWorkflowOptions = {
-  projectId: string
   activeThreadId: Ref<string | null>
   threadGoals: Ref<Record<string, ThreadGoal>>
   ensurePendingLiveStream: () => Promise<LiveStream>
-  getClient: (projectId: string) => GoalRpcClient
+  getClient: () => GoalRpcClient
   setComposerError: (messageText: string) => void
 }
 
@@ -87,7 +86,7 @@ export const useChatGoalWorkflow = (options: UseChatGoalWorkflowOptions) => {
   }
 
   const getGoal = async (threadId: string) => {
-    const response = await options.getClient(options.projectId).request<ThreadGoalGetResponse>('thread/goal/get', {
+    const response = await options.getClient().request<ThreadGoalGetResponse>('thread/goal/get', {
       threadId
     })
     const goal = normalizeThreadGoal(response.goal)
@@ -119,7 +118,10 @@ export const useChatGoalWorkflow = (options: UseChatGoalWorkflowOptions) => {
     }
   }
 
-  const setGoalObjective = async (objective: string, input?: { openSummary?: boolean }) => {
+  const setGoalObjective = async (objective: string, input?: {
+    openSummary?: boolean
+    status?: ThreadGoalStatus
+  }) => {
     const trimmedObjective = objective.trim()
     if (!trimmedObjective) {
       options.setComposerError('Goal objective must not be empty.')
@@ -131,10 +133,10 @@ export const useChatGoalWorkflow = (options: UseChatGoalWorkflowOptions) => {
 
     try {
       const threadId = await ensureGoalThreadId()
-      const response = await options.getClient(options.projectId).request<ThreadGoalSetResponse>('thread/goal/set', {
+      const response = await options.getClient().request<ThreadGoalSetResponse>('thread/goal/set', {
         threadId,
         objective: trimmedObjective,
-        status: 'active'
+        status: input?.status ?? 'active'
       })
       setThreadGoalState(response.goal)
       goalDraftObjective.value = response.goal.objective
@@ -163,7 +165,7 @@ export const useChatGoalWorkflow = (options: UseChatGoalWorkflowOptions) => {
         return false
       }
 
-      const response = await options.getClient(options.projectId).request<ThreadGoalSetResponse>('thread/goal/set', {
+      const response = await options.getClient().request<ThreadGoalSetResponse>('thread/goal/set', {
         threadId,
         status
       })
@@ -191,7 +193,7 @@ export const useChatGoalWorkflow = (options: UseChatGoalWorkflowOptions) => {
         return false
       }
 
-      await options.getClient(options.projectId).request<ThreadGoalClearResponse>('thread/goal/clear', {
+      await options.getClient().request<ThreadGoalClearResponse>('thread/goal/clear', {
         threadId
       })
       clearThreadGoalState(threadId)
@@ -240,7 +242,10 @@ export const useChatGoalWorkflow = (options: UseChatGoalWorkflowOptions) => {
   }
 
   const saveGoalEdit = async (objective: string) => {
-    return await setGoalObjective(objective, { openSummary: true })
+    return await setGoalObjective(objective, {
+      openSummary: true,
+      status: currentThreadGoal.value?.status
+    })
   }
 
   const handleGoalDrawerOpenChange = (open: boolean) => {
