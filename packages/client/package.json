@@ -47,7 +47,8 @@
     "ofetch": "^1.5.1",
     "shiki": "^4.0.2",
     "tailwindcss": "^4.2.4",
-    "vue": "^3.5.33"
+    "vue": "^3.5.33",
+    "vue-router": "^5.0.6"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^6.0.6",
