@@ -6,6 +6,7 @@
   "scripts": {
     "build": "pnpm --filter @codori/client build && pnpm --filter @codori/server build",
     "dev": "pnpm --filter @codori/client dev",
+    "run:local": "pnpm build && node packages/server/dist/cli.js serve --root .. --host 127.0.0.1",
     "lint": "pnpm -r --if-present lint",
     "release:publish": "node ./scripts/publish-release.mjs",
     "typecheck": "pnpm -r --if-present typecheck",
