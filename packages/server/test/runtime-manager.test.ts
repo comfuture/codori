@@ -125,6 +125,19 @@ const waitForFile = async (path: string, timeoutMs = 1_000) => {
   throw new Error(`Timed out waiting for ${path}.`)
 }
 
+const waitForCondition = async (condition: () => boolean, timeoutMs = 1_000) => {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (condition()) {
+      return
+    }
+
+    await new Promise(resolvePromise => setTimeout(resolvePromise, 25))
+  }
+
+  throw new Error('Timed out waiting for condition.')
+}
+
 describe('RuntimeManager', () => {
   it('starts once and reuses the existing process', async () => {
     const fixture = createFixture()
@@ -438,6 +451,41 @@ describe('RuntimeManager', () => {
     expect(stoppedProject.status).toBe('stopped')
     expect(isProcessAlive(project.pid)).toBe(false)
     expect(new RuntimeStore(fixture.homeDir).load(fixture.root).kind).toBe('missing')
+  })
+
+  it('stops the shared runtime after the final stopped workspace session closes', async () => {
+    const fixture = createFixture()
+    const manager = createRuntimeManager({
+      homeDir: fixture.homeDir,
+      config: fixture.config,
+      commandFactory: () => ({
+        command: process.execPath,
+        args: ['-e', 'setInterval(() => {}, 1000)']
+      })
+    })
+    runningManagers.push(manager)
+
+    const project = await manager.startProject('demo')
+    expect(project.pid).not.toBeNull()
+    if (project.pid === null) {
+      throw new Error('Expected a started shared runtime PID.')
+    }
+    const projectPid = project.pid
+
+    const session = manager.acquireProjectSession('demo')
+    const stoppedProject = await manager.stopProject('demo')
+
+    expect(stoppedProject.status).toBe('stopped')
+    expect(isProcessAlive(projectPid)).toBe(true)
+
+    session.release()
+
+    const store = new RuntimeStore(fixture.homeDir)
+    await waitForCondition(() => !isProcessAlive(projectPid) && store.load(fixture.root).kind === 'missing')
+
+    const restarted = await manager.startProject('demo')
+    expect(restarted.status).toBe('running')
+    expect(restarted.reusedExisting).toBe(false)
   })
 
   it('updates the last activity timestamp when project activity is noted', async () => {

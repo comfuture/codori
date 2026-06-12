@@ -149,6 +149,8 @@ export class RuntimeManager {
 
   private sharedRuntimeStart: Promise<StartProjectResult> | null = null
 
+  private sharedRuntimeStop: Promise<boolean> | null = null
+
   private idleReaper: NodeJS.Timeout | null = null
 
   private idleSweepInFlight = false
@@ -429,6 +431,11 @@ export class RuntimeManager {
     this.activeSessions.delete(projectId)
   }
 
+  private releaseWorkspaceSession(workspaceId: string) {
+    this.decrementActiveSessions(workspaceId)
+    void this.stopSharedRuntimeIfUnused().catch(() => {})
+  }
+
   private loadActiveRuntime() {
     const project = this.sharedRuntimeProject()
     const loaded = this.store.load(project.path)
@@ -518,7 +525,7 @@ export class RuntimeManager {
         }
 
         released = true
-        this.decrementActiveSessions(project.id)
+        this.releaseWorkspaceSession(project.id)
       }
     }
   }
@@ -538,7 +545,7 @@ export class RuntimeManager {
         }
 
         released = true
-        this.decrementActiveSessions(runtimeProject.id)
+        this.releaseWorkspaceSession(runtimeProject.id)
       }
     }
   }
@@ -605,6 +612,10 @@ export class RuntimeManager {
   }
 
   private async startSharedRuntime(workspace: ProjectRecord): Promise<StartProjectResult> {
+    if (this.sharedRuntimeStop) {
+      await this.sharedRuntimeStop
+    }
+
     if (this.sharedRuntimeStart) {
       await this.sharedRuntimeStart
       const runtime = this.loadActiveRuntime()
@@ -756,6 +767,30 @@ export class RuntimeManager {
   }
 
   private async stopSharedRuntimeIfUnused() {
+    if (
+      this.workspaceActivity.size > 0
+      || this.getTotalActiveSessionCount() > 0
+      || this.sharedRuntimeStart
+    ) {
+      return false
+    }
+
+    if (this.sharedRuntimeStop) {
+      return await this.sharedRuntimeStop
+    }
+
+    const stop = this.stopSharedRuntimeNow()
+    this.sharedRuntimeStop = stop
+    try {
+      return await stop
+    } finally {
+      if (this.sharedRuntimeStop === stop) {
+        this.sharedRuntimeStop = null
+      }
+    }
+  }
+
+  private async stopSharedRuntimeNow() {
     if (this.workspaceActivity.size > 0 || this.getTotalActiveSessionCount() > 0) {
       return false
     }

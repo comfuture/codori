@@ -153,7 +153,7 @@ Stop behavior:
 
 - Project and chat stop commands deactivate that logical workspace.
 - Stopping one workspace does not terminate the shared app-server while other workspaces may still use it.
-- Stopping the final active workspace terminates the shared app-server immediately unless a proxied WebSocket session is still open.
+- Stopping the final active workspace terminates the shared app-server immediately unless a proxied WebSocket session is still open; in that case, Codori terminates the runtime when the final session closes.
 - Idle cleanup and server reset also terminate the shared process when applicable.
 - Return a stable stopped status for the requested workspace.
 
