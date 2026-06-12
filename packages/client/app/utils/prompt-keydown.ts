@@ -6,13 +6,23 @@ export type PromptKeydownCaptureHandlers = {
   handleEnter: PromptKeydownHandler
 }
 
+const isPlainEnterKeydown = (event: KeyboardEvent) =>
+  event.key === 'Enter'
+  && !event.altKey
+  && !event.ctrlKey
+  && !event.metaKey
+  && !event.shiftKey
+
 export const routePromptKeydownCapture = (
   event: KeyboardEvent,
   handlers: PromptKeydownCaptureHandlers
 ) => {
-  const isEnter = event.key === 'Enter'
+  if (event.key !== 'Enter') {
+    handlers.handleNavigation(event)
+    return
+  }
 
-  if (isEnter) {
+  if (isPlainEnterKeydown(event)) {
     handlers.handleEnterCapture(event)
     if (event.defaultPrevented) {
       return
@@ -24,7 +34,5 @@ export const routePromptKeydownCapture = (
     return
   }
 
-  if (isEnter) {
-    handlers.handleEnter(event)
-  }
+  handlers.handleEnter(event)
 }

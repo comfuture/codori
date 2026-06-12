@@ -1,11 +1,18 @@
 import { describe, expect, it, vi } from 'vitest'
 import { routePromptKeydownCapture } from '../app/utils/prompt-keydown'
 
-const makeKeydownEvent = (key: string) => {
+const makeKeydownEvent = (
+  key: string,
+  init: Partial<Pick<KeyboardEvent, 'altKey' | 'ctrlKey' | 'metaKey' | 'shiftKey'>> = {}
+) => {
   let defaultPrevented = false
 
   return {
     key,
+    altKey: init.altKey ?? false,
+    ctrlKey: init.ctrlKey ?? false,
+    metaKey: init.metaKey ?? false,
+    shiftKey: init.shiftKey ?? false,
     get defaultPrevented() {
       return defaultPrevented
     },
@@ -31,6 +38,31 @@ describe('prompt keydown routing', () => {
     expect(handleEnterCapture).not.toHaveBeenCalled()
     expect(handleNavigation).toHaveBeenCalledWith(event)
     expect(handleEnter).not.toHaveBeenCalled()
+  })
+
+  it('keeps modified Enter out of exact capture handling', () => {
+    const events = [
+      makeKeydownEvent('Enter', { altKey: true }),
+      makeKeydownEvent('Enter', { ctrlKey: true }),
+      makeKeydownEvent('Enter', { metaKey: true }),
+      makeKeydownEvent('Enter', { shiftKey: true })
+    ]
+    const handleEnterCapture = vi.fn()
+    const handleNavigation = vi.fn()
+    const handleEnter = vi.fn()
+
+    for (const event of events) {
+      routePromptKeydownCapture(event, {
+        handleEnterCapture,
+        handleNavigation,
+        handleEnter
+      })
+    }
+
+    expect(handleEnterCapture).not.toHaveBeenCalled()
+    expect(handleNavigation).toHaveBeenCalledTimes(events.length)
+    expect(handleEnter).toHaveBeenCalledTimes(events.length)
+    expect(events.every(event => !event.defaultPrevented)).toBe(true)
   })
 
   it('lets Enter capture handlers stop downstream prompt handling', () => {
