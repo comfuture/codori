@@ -18,6 +18,7 @@ const makeTurn = (id: string, status: Turn['status']): Turn => ({
   id,
   status,
   items: [],
+  itemsView: 'full',
   error: null,
   startedAt: null,
   completedAt: null,

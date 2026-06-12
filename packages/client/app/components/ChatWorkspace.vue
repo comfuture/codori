@@ -4002,6 +4002,20 @@ const onPromptEnter = (event: KeyboardEvent) => {
   void sendMessage()
 }
 
+const onPromptKeydownCapture = (event: KeyboardEvent) => {
+  onPromptEnterCapture(event)
+  if (event.defaultPrevented) {
+    return
+  }
+
+  onPromptKeydown(event)
+  if (event.defaultPrevented) {
+    return
+  }
+
+  onPromptEnter(event)
+}
+
 const ensureRuntimeSubscriptions = () => {
   const scope = workspaceScope.value
   if (!scope.id) {
@@ -4934,9 +4948,7 @@ watch(
             }"
             autoresize
             @submit.prevent="sendMessage"
-            @keydown.enter.exact.capture="onPromptEnterCapture"
-            @keydown="onPromptKeydown"
-            @keydown.enter="onPromptEnter"
+            @keydown.capture="onPromptKeydownCapture"
             @input="syncPromptSelectionFromDom"
             @click="syncPromptSelectionFromDom"
             @keyup="syncPromptSelectionFromDom"

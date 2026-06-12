@@ -45,6 +45,7 @@ describe('Codex RPC payload parsing', () => {
         turn: {
           id: 'turn-1',
           items: [],
+          itemsView: 'full',
           status: 'completed',
           error: null,
           startedAt: 1,
