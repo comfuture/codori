@@ -5,15 +5,15 @@
 Codori is a self-hosted remote coding control plane for Codex app-server.
 
 - `@codori/server` discovers local Git projects under a configured root directory.
-- It manages one Codex app-server process per discovered project.
-- `@codori/client` provides a browser UI for browsing projects, starting/stopping project runtimes, listing prior Codex threads, starting new threads, and resuming prior threads.
+- It manages one shared Codex app-server process for project and projectless chat workspaces.
+- `@codori/client` provides a browser UI for browsing projects, activating/stopping project workspaces, listing prior Codex threads, starting new threads, and resuming prior threads.
 - Codori does not provide a private network tunnel. Users must expose the service through their own network layer such as Tailscale or Cloudflare Tunnel.
 
 ## 2. Goals
 
 - Provide a single server process that can enumerate local projects from one root directory.
-- Ensure each project has at most one active Codex app-server process.
-- Expose predictable CLI and HTTP management surfaces for project runtime control.
+- Ensure one Codex app-server process can cover multiple logical project/chat workspaces through explicit `cwd` handling.
+- Expose predictable CLI and HTTP management surfaces for logical project workspace runtime control.
 - Provide a Nuxt UI dashboard for project selection and per-project Codex chat.
 - Reuse only the useful, stable parts of Corazon instead of importing Corazon wholesale.
 
@@ -23,7 +23,7 @@ Codori is a self-hosted remote coding control plane for Codex app-server.
 - No tunnel, reverse proxy, or ingress automation in v1.
 - No multi-root support in v1.
 - No Codori-owned thread database in v1.
-- No direct browser connection to raw project app-server ports.
+- No direct browser connection to raw app-server ports.
 
 ## 4. Users And Usage Model
 
@@ -37,7 +37,7 @@ Expected usage:
 2. User exposes the service with an external private network solution if remote access is required.
 3. User opens the Codori dashboard.
 4. User chooses a project from the sidebar.
-5. Codori starts that project’s Codex app-server on demand if necessary.
+5. Codori starts the shared Codex app-server on demand if necessary.
 6. User starts a fresh thread or resumes a previous thread from the selected project.
 
 ## 5. Root Configuration
@@ -72,10 +72,10 @@ Config shape:
 Rules:
 
 - `root` is required at runtime after precedence resolution.
-- `ports.start` and `ports.end` define the inclusive port allocation range for project app-servers.
-- `idleShutdown.enabled` controls whether idle runtimes are reaped automatically.
-- `idleShutdown.timeoutMs` defines the inactivity window before a runtime becomes eligible for automatic stop.
-- `idleShutdown.sweepIntervalMs` defines how often Codori evaluates running runtimes for idle cleanup.
+- `ports.start` and `ports.end` define the inclusive port allocation range for the shared app-server.
+- `idleShutdown.enabled` controls whether the idle shared runtime is reaped automatically.
+- `idleShutdown.timeoutMs` defines the inactivity window before the shared runtime becomes eligible for automatic stop.
+- `idleShutdown.sweepIntervalMs` defines how often Codori evaluates the shared runtime for idle cleanup.
 - Invalid config should produce a startup error with a precise message.
 
 ## 6. Project Discovery
@@ -106,33 +106,34 @@ Discovery constraints:
 
 ## 7. Runtime Process Management
 
-Each discovered project can have at most one active Codex app-server.
+One Codori server instance can have at most one active Codex app-server process. Discovered projects and projectless chats are logical workspaces that share that process.
 
 Start command:
 
 ```bash
-codex app-server --listen ws://0.0.0.0:{PORT_NUMBER}
+codex app-server --listen ws://127.0.0.1:{PORT_NUMBER}
 ```
 
 Start behavior:
 
 - Resolve project directory from project id.
-- Check for an existing PID file.
-- If PID file exists and process is alive, return its stored port and do not spawn another process.
-- If PID file exists and process is dead, remove the stale PID file and continue.
+- Check for an existing shared runtime PID file.
+- If the shared PID file exists and the process is alive, return its stored port and do not spawn another process.
+- If the shared PID file exists and the process is dead, remove the stale PID file and continue.
 - Select the first available TCP port in the configured safe range.
-- Spawn the process with `cwd` set to the project directory.
+- Spawn the process with `cwd` set to the configured Codori root directory.
+- Track the selected project or chat as a logical active workspace.
 - Persist runtime metadata to a PID JSON file under `~/.codori/run/`.
 
 PID/runtime file requirements:
 
-- Filename uses a stable hash of the absolute project path.
+- Filename uses a stable hash of the configured root directory.
 - File contents:
 
 ```json
 {
-  "projectId": "codori",
-  "projectPath": "/Users/comfuture/Project/codori",
+  "projectId": "codori:shared-app-server",
+  "projectPath": "/Users/comfuture/Project",
   "pid": 12345,
   "port": 46001,
   "startedAt": 1760000000000,
@@ -142,22 +143,24 @@ PID/runtime file requirements:
 
 Idle lifecycle behavior:
 
-- Codori updates `lastActivityAt` when it starts or reuses a runtime.
+- Codori updates `lastActivityAt` when it starts or reuses the shared runtime.
 - Proxied WebSocket traffic counts as activity.
-- A runtime with at least one active proxied WebSocket session is not considered idle.
-- When `Date.now() - lastActivityAt >= idleShutdown.timeoutMs` and there are no active sessions, Codori stops the runtime automatically.
-- The next project interaction follows the same on-demand start path and transparently recreates the runtime.
+- The shared runtime is not considered idle while any workspace has an active proxied WebSocket session.
+- When `Date.now() - lastActivityAt >= idleShutdown.timeoutMs` and there are no active sessions, Codori stops the shared runtime automatically.
+- The next project or chat interaction follows the same on-demand start path and transparently recreates the shared runtime.
 
 Stop behavior:
 
-- If process is running, terminate it.
-- Remove the PID file after the process exits or after Codori determines it is already gone.
-- Return a stable stopped status even if the process was already absent.
+- Project and chat stop commands deactivate that logical workspace.
+- Stopping one workspace does not terminate the shared app-server while other workspaces may still use it.
+- Stopping the final active workspace terminates the shared app-server immediately unless a proxied WebSocket session is still open.
+- Idle cleanup and server reset also terminate the shared process when applicable.
+- Return a stable stopped status for the requested workspace.
 
 Status behavior:
 
-- `running`: PID file exists and process is alive
-- `stopped`: no PID file or PID file cleaned due to dead process
+- `running`: the workspace has been activated and the shared app-server process is alive
+- `stopped`: the workspace is not active, or the shared runtime is absent/dead
 - `error`: malformed runtime metadata or spawn/runtime failure detected by Codori
 
 ## 8. CLI Contract
@@ -178,7 +181,7 @@ Behavior:
 
 - Starts the HTTP + WebSocket management server.
 - Resolves config and validates required values.
-- Does not eagerly start project app-servers.
+- Does not eagerly start the shared app-server.
 
 ### `codori list`
 
@@ -188,7 +191,7 @@ codori list [--root <path>] [--json]
 
 Behavior:
 
-- Prints all discovered projects with runtime status.
+- Prints all discovered projects with logical workspace runtime status.
 
 ### `codori start`
 
@@ -198,8 +201,8 @@ codori start <projectId> [--root <path>] [--json]
 
 Behavior:
 
-- Starts the project runtime if not already running.
-- Returns the listening port either way.
+- Activates the project workspace and starts the shared runtime if it is not already running.
+- Returns the shared runtime listening port either way.
 
 ### `codori stop`
 
@@ -254,8 +257,8 @@ Returns:
 
 - resolved project metadata
 - runtime status
-- active port
-- whether the process was newly started or already running
+- active shared runtime port
+- whether the shared process was newly started or already running
 
 ### `POST /api/projects/:projectId/stop`
 
@@ -269,22 +272,22 @@ Returns:
 Returns:
 
 - same runtime envelope used by list/detail responses
-- includes `startedAt`, `lastActivityAt`, `activeSessionCount`, and `idleDeadlineAt` when the runtime is running
+- includes workspace-specific `startedAt`, `lastActivityAt`, `activeSessionCount`, and `idleDeadlineAt` when that workspace is active
 
 ### `WS /api/projects/:projectId/rpc`
 
 Behavior:
 
 - Resolve target project.
-- Ensure the project app-server is running; if not, start it first.
-- Open a WebSocket client connection from Codori server to the project app-server.
+- Ensure the shared app-server is running; if not, start it first.
+- Open a WebSocket client connection from Codori server to the shared app-server.
 - Proxy frames transparently in both directions.
 - Close both ends cleanly if either side disconnects.
 
 Protocol notes:
 
-- The project app-server is JSON-RPC over WebSocket.
-- The browser client should treat Codori as the single origin and should not connect directly to the project app-server port.
+- The shared app-server is JSON-RPC over WebSocket.
+- The browser client should treat Codori as the single origin and should not connect directly to the app-server port.
 
 ## 10. Client UX Requirements
 

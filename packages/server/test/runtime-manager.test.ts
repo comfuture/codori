@@ -1,5 +1,5 @@
 import { createServer } from 'node:net'
-import { mkdirSync, mkdtempSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -23,6 +23,7 @@ afterEach(async () => {
         await manager.stopProject(workspace.id)
       }
     }
+    await manager.resetStoredRuntimes()
     manager.dispose()
   }
 
@@ -43,6 +44,7 @@ const createFixture = () => {
   const homeDir = mkdtempSync(join(os.tmpdir(), 'codori-home-'))
   const root = mkdtempSync(join(os.tmpdir(), 'codori-root-'))
   mkdirSync(join(root, 'demo', '.git'), { recursive: true })
+  mkdirSync(join(root, 'other', '.git'), { recursive: true })
   const documentsDir = join(homeDir, 'Documents')
 
   const config = resolveConfig({
@@ -110,6 +112,19 @@ const reservePortRange = async (size: number, start = 47000, end = 49000) => {
   throw new Error('Failed to reserve a free TCP port range for the runtime-manager test.')
 }
 
+const waitForFile = async (path: string, timeoutMs = 1_000) => {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (existsSync(path)) {
+      return
+    }
+
+    await new Promise(resolvePromise => setTimeout(resolvePromise, 25))
+  }
+
+  throw new Error(`Timed out waiting for ${path}.`)
+}
+
 describe('RuntimeManager', () => {
   it('starts once and reuses the existing process', async () => {
     const fixture = createFixture()
@@ -125,18 +140,107 @@ describe('RuntimeManager', () => {
 
     const started = await manager.startProject('demo')
     const reused = await manager.startProject('demo')
+    const other = await manager.startProject('other')
 
     expect(started.status).toBe('running')
     expect(reused.reusedExisting).toBe(true)
     expect(reused.port).toBe(started.port)
+    expect(other.reusedExisting).toBe(true)
+    expect(other.pid).toBe(started.pid)
+    expect(other.port).toBe(started.port)
+  })
+
+  it('deduplicates concurrent starts across workspaces', async () => {
+    const fixture = createFixture()
+    let commandCalls = 0
+    const manager = createRuntimeManager({
+      homeDir: fixture.homeDir,
+      documentsDir: fixture.documentsDir,
+      config: fixture.config,
+      commandFactory: () => {
+        commandCalls += 1
+        return {
+          command: process.execPath,
+          args: ['-e', 'setInterval(() => {}, 1000)']
+        }
+      }
+    })
+    runningManagers.push(manager)
+
+    const [demo, other, chat] = await Promise.all([
+      manager.startProject('demo'),
+      manager.startProject('other'),
+      manager.createChatSession()
+    ])
+
+    expect(commandCalls).toBe(1)
+    expect(other.reusedExisting).toBe(true)
+    expect(chat.reusedExisting).toBe(true)
+    expect(other.pid).toBe(demo.pid)
+    expect(chat.pid).toBe(demo.pid)
+    expect(other.port).toBe(demo.port)
+    expect(chat.port).toBe(demo.port)
+  })
+
+  it('starts the default app-server command on loopback from the configured root', async () => {
+    const fixture = createFixture()
+    const capturePath = join(fixture.homeDir, 'codex-spawn.json')
+    const fakeCodexPath = join(fixture.homeDir, 'fake-codex.cjs')
+    writeFileSync(fakeCodexPath, [
+      '#!/usr/bin/env node',
+      "const { writeFileSync } = require('node:fs')",
+      'writeFileSync(process.env.CODORI_CAPTURE_PATH, JSON.stringify({',
+      '  argv: process.argv.slice(2),',
+      '  cwd: process.cwd()',
+      '}))',
+      'setInterval(() => {}, 1000)'
+    ].join('\n'))
+    chmodSync(fakeCodexPath, 0o755)
+    const previousCodexBin = process.env.CODORI_CODEX_BIN
+    const previousCapturePath = process.env.CODORI_CAPTURE_PATH
+    process.env.CODORI_CODEX_BIN = fakeCodexPath
+    process.env.CODORI_CAPTURE_PATH = capturePath
+
+    try {
+      const manager = createRuntimeManager({
+        homeDir: fixture.homeDir,
+        config: fixture.config
+      })
+      runningManagers.push(manager)
+
+      const started = await manager.startProject('demo')
+      await waitForFile(capturePath)
+      const capture = JSON.parse(readFileSync(capturePath, 'utf8')) as {
+        argv: string[]
+        cwd: string
+      }
+
+      expect(realpathSync(capture.cwd)).toBe(realpathSync(fixture.root))
+      expect(capture.argv).toEqual([
+        'app-server',
+        '--listen',
+        `ws://127.0.0.1:${started.port}`
+      ])
+    } finally {
+      if (previousCodexBin === undefined) {
+        delete process.env.CODORI_CODEX_BIN
+      } else {
+        process.env.CODORI_CODEX_BIN = previousCodexBin
+      }
+      if (previousCapturePath === undefined) {
+        delete process.env.CODORI_CAPTURE_PATH
+      } else {
+        process.env.CODORI_CAPTURE_PATH = previousCapturePath
+      }
+    }
   })
 
   it('cleans a stale pid file before starting', async () => {
     const fixture = createFixture()
     const store = new RuntimeStore(fixture.homeDir)
     store.write({
-      projectId: 'demo',
-      projectPath: join(fixture.root, 'demo'),
+      projectId: 'codori:shared-app-server',
+      projectPath: fixture.root,
       pid: 999999,
       port: 46000,
       startedAt: Date.now(),
@@ -193,7 +297,7 @@ describe('RuntimeManager', () => {
     expect(isProcessAlive(started.pid)).toBe(false)
 
     const store = new RuntimeStore(fixture.homeDir)
-    expect(store.load(join(fixture.root, 'demo')).kind).toBe('missing')
+    expect(store.load(fixture.root).kind).toBe('missing')
 
     const restarted = await nextManager.startProject('demo')
     expect(restarted.reusedExisting).toBe(false)
@@ -250,14 +354,14 @@ describe('RuntimeManager', () => {
     expect(started.lastActivityAt).not.toBeNull()
 
     const store = new RuntimeStore(fixture.homeDir)
-    const loaded = store.load(join(fixture.root, 'demo'))
+    const loaded = store.load(fixture.root)
     expect(loaded.kind).toBe('valid')
     if (loaded.kind !== 'valid') {
       throw new Error('Expected a valid runtime record.')
     }
 
     const session = manager.acquireProjectSession('demo')
-    const refreshed = store.load(join(fixture.root, 'demo'))
+    const refreshed = store.load(fixture.root)
     expect(refreshed.kind).toBe('valid')
     if (refreshed.kind !== 'valid') {
       throw new Error('Expected a refreshed runtime record.')
@@ -278,6 +382,64 @@ describe('RuntimeManager', () => {
     expect(manager.getProjectStatus('demo').status).toBe('stopped')
   })
 
+  it('keeps the shared runtime alive when one of multiple workspaces is stopped', async () => {
+    const fixture = createFixture()
+    const manager = createRuntimeManager({
+      homeDir: fixture.homeDir,
+      documentsDir: fixture.documentsDir,
+      config: fixture.config,
+      commandFactory: () => ({
+        command: process.execPath,
+        args: ['-e', 'setInterval(() => {}, 1000)']
+      })
+    })
+    runningManagers.push(manager)
+
+    const project = await manager.startProject('demo')
+    const chat = await manager.createChatSession()
+
+    expect(project.pid).not.toBeNull()
+    expect(chat.pid).toBe(project.pid)
+    expect(chat.port).toBe(project.port)
+    if (project.pid === null) {
+      throw new Error('Expected a started shared runtime PID.')
+    }
+
+    const stoppedProject = await manager.stopProject('demo')
+
+    expect(stoppedProject.status).toBe('stopped')
+    expect(stoppedProject.pid).toBeNull()
+    expect(isProcessAlive(project.pid)).toBe(true)
+    expect(manager.getChatStatus(chat.chatId).status).toBe('running')
+    expect(manager.getChatStatus(chat.chatId).pid).toBe(project.pid)
+  })
+
+  it('stops the shared runtime when the final workspace is stopped', async () => {
+    const fixture = createFixture()
+    const manager = createRuntimeManager({
+      homeDir: fixture.homeDir,
+      documentsDir: fixture.documentsDir,
+      config: fixture.config,
+      commandFactory: () => ({
+        command: process.execPath,
+        args: ['-e', 'setInterval(() => {}, 1000)']
+      })
+    })
+    runningManagers.push(manager)
+
+    const project = await manager.startProject('demo')
+    expect(project.pid).not.toBeNull()
+    if (project.pid === null) {
+      throw new Error('Expected a started shared runtime PID.')
+    }
+
+    const stoppedProject = await manager.stopProject('demo')
+
+    expect(stoppedProject.status).toBe('stopped')
+    expect(isProcessAlive(project.pid)).toBe(false)
+    expect(new RuntimeStore(fixture.homeDir).load(fixture.root).kind).toBe('missing')
+  })
+
   it('updates the last activity timestamp when project activity is noted', async () => {
     const fixture = createFixture()
     const manager = createRuntimeManager({
@@ -292,7 +454,7 @@ describe('RuntimeManager', () => {
 
     await manager.startProject('demo')
     const store = new RuntimeStore(fixture.homeDir)
-    const loaded = store.load(join(fixture.root, 'demo'))
+    const loaded = store.load(fixture.root)
     expect(loaded.kind).toBe('valid')
     if (loaded.kind !== 'valid') {
       throw new Error('Expected a valid runtime record.')
@@ -330,18 +492,23 @@ describe('RuntimeManager', () => {
     runningManagers.push(manager)
 
     const created = await manager.createChatSession()
+    const second = await manager.createChatSession()
 
     expect(created.status).toBe('running')
     expect(created.reusedExisting).toBe(false)
     expect(created.title).toBe('New Chat')
     expect(created.chatId).toMatch(/^chat-/)
     expect(created.chatPath.startsWith(join(fixture.documentsDir, 'Chats'))).toBe(true)
-    expect(spawnedCwds).toEqual([created.chatPath])
+    expect(second.status).toBe('running')
+    expect(second.reusedExisting).toBe(true)
+    expect(second.pid).toBe(created.pid)
+    expect(second.port).toBe(created.port)
+    expect(spawnedCwds).toEqual([fixture.root])
 
     const recent = manager.listChatStatuses()
-    expect(recent).toHaveLength(1)
-    expect(recent[0]?.chatId).toBe(created.chatId)
-    expect(recent[0]?.title).toBe('New Chat')
+    expect(recent).toHaveLength(2)
+    expect(recent.some(chat => chat.chatId === created.chatId && chat.title === 'New Chat')).toBe(true)
+    expect(recent.some(chat => chat.chatId === second.chatId && chat.title === 'New Chat')).toBe(true)
   })
 
   it('deletes a chat and removes its scratch directory', async () => {
