@@ -75,6 +75,7 @@ import {
   resolveChatMessagesStatus,
   shouldAwaitAssistantOutput
 } from '../utils/chat-messages-status'
+import { routePromptKeydownCapture } from '../utils/prompt-keydown'
 import {
   ITEM_PART,
   eventToMessage,
@@ -4003,17 +4004,11 @@ const onPromptEnter = (event: KeyboardEvent) => {
 }
 
 const onPromptKeydownCapture = (event: KeyboardEvent) => {
-  onPromptEnterCapture(event)
-  if (event.defaultPrevented) {
-    return
-  }
-
-  onPromptKeydown(event)
-  if (event.defaultPrevented) {
-    return
-  }
-
-  onPromptEnter(event)
+  routePromptKeydownCapture(event, {
+    handleEnterCapture: onPromptEnterCapture,
+    handleNavigation: onPromptKeydown,
+    handleEnter: onPromptEnter
+  })
 }
 
 const ensureRuntimeSubscriptions = () => {
