@@ -733,34 +733,9 @@ describe('createHttpServer', () => {
   })
 
   it('bridges project and chat websocket routes to the same runtime port', async () => {
-    const tcpServer = createNetServer()
-    await new Promise<void>((resolvePromise, reject) => {
-      tcpServer.listen(0, '127.0.0.1', (error?: Error) => {
-        if (error) {
-          reject(error)
-          return
-        }
-        resolvePromise()
-      })
-    })
-    const address = tcpServer.address()
-    if (!address || typeof address === 'string') {
-      throw new Error('Failed to get test server address.')
-    }
-    const backendPort = address.port
-    await new Promise<void>((resolvePromise, reject) => {
-      tcpServer.close((error) => {
-        if (error) {
-          reject(error)
-          return
-        }
-        resolvePromise()
-      })
-    })
-
     const backend = new WebSocketServer({
       host: '127.0.0.1',
-      port: backendPort
+      port: 0
     })
     startedSocketServers.push(backend)
     await new Promise<void>((resolvePromise) => {
@@ -768,6 +743,11 @@ describe('createHttpServer', () => {
         resolvePromise()
       })
     })
+    const address = backend.address()
+    if (!address || typeof address === 'string') {
+      throw new Error('Failed to get test server address.')
+    }
+    const backendPort = address.port
     backend.on('connection', (socket: WebSocket) => {
       socket.on('message', (message: WebSocket.RawData) => {
         socket.send(`shared:${rawDataToString(message)}`)

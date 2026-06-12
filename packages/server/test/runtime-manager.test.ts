@@ -275,6 +275,35 @@ describe('RuntimeManager', () => {
     expect(started.pid).not.toBe(999999)
   })
 
+  it('clears stale workspace activity when the shared runtime dies before restart', async () => {
+    const fixture = createFixture()
+    const manager = createRuntimeManager({
+      homeDir: fixture.homeDir,
+      config: fixture.config,
+      commandFactory: () => ({
+        command: process.execPath,
+        args: ['-e', 'setInterval(() => {}, 1000)']
+      })
+    })
+    runningManagers.push(manager)
+
+    const demo = await manager.startProject('demo')
+    expect(demo.pid).not.toBeNull()
+    if (demo.pid === null) {
+      throw new Error('Expected a started shared runtime PID.')
+    }
+    const demoPid = demo.pid
+    process.kill(demoPid, 'SIGTERM')
+    await waitForCondition(() => !isProcessAlive(demoPid))
+
+    expect(manager.getProjectStatus('demo').status).toBe('stopped')
+
+    const other = await manager.startProject('other')
+    expect(other.status).toBe('running')
+    expect(other.reusedExisting).toBe(false)
+    expect(manager.getProjectStatus('demo').status).toBe('stopped')
+  })
+
   it('resets stored runtimes before a new server starts', async () => {
     const fixture = createFixture()
     const manager = createRuntimeManager({
