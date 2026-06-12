@@ -174,6 +174,14 @@ CODORI_SERVER_WS_BASE=wss://my-codori-host.your-tailnet.ts.net \
 pnpm --filter @codori/client dev
 ```
 
+Run a local Codori server with the freshly built client bundle:
+
+```bash
+pnpm run:local
+```
+
+This rebuilds the client and server first, then serves Codori on `http://127.0.0.1:4310` with the repository parent directory as the project root.
+
 Build the workspace:
 
 ```bash
