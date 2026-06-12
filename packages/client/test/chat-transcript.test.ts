@@ -27,6 +27,7 @@ import {
 const makeTurn = (input: Pick<Turn, 'id' | 'items' | 'status' | 'error'> & Partial<Pick<Turn, 'startedAt' | 'completedAt' | 'durationMs'>>): Turn => ({
   id: input.id,
   items: input.items,
+  itemsView: 'full',
   status: input.status,
   error: input.error,
   startedAt: input.startedAt ?? null,
@@ -36,6 +37,7 @@ const makeTurn = (input: Pick<Turn, 'id' | 'items' | 'status' | 'error'> & Parti
 
 const makeThread = (input: Pick<Thread, 'id' | 'preview' | 'cwd' | 'createdAt' | 'updatedAt' | 'name' | 'turns'>): Thread => ({
   id: input.id,
+  sessionId: input.id,
   forkedFromId: null,
   preview: input.preview,
   ephemeral: false,
@@ -47,6 +49,7 @@ const makeThread = (input: Pick<Thread, 'id' | 'preview' | 'cwd' | 'createdAt' |
   cwd: input.cwd,
   cliVersion: '0.0.0-test',
   source: 'appServer',
+  threadSource: null,
   agentNickname: null,
   agentRole: null,
   gitInfo: null,
