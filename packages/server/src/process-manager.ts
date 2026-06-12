@@ -436,6 +436,11 @@ export class RuntimeManager {
     void this.stopSharedRuntimeIfUnused().catch(() => {})
   }
 
+  private removeSharedRuntime(project: ProjectRecord) {
+    this.store.remove(project.path)
+    this.workspaceActivity.clear()
+  }
+
   private loadActiveRuntime() {
     const project = this.sharedRuntimeProject()
     const loaded = this.store.load(project.path)
@@ -445,12 +450,12 @@ export class RuntimeManager {
     }
 
     if (loaded.kind === 'invalid') {
-      this.store.remove(project.path)
+      this.removeSharedRuntime(project)
       return null
     }
 
     if (!isProcessAlive(loaded.record.pid)) {
-      this.store.remove(project.path)
+      this.removeSharedRuntime(project)
       return null
     }
 
@@ -475,7 +480,7 @@ export class RuntimeManager {
     }
 
     if (!isProcessAlive(loaded.record.pid)) {
-      this.store.remove(project.path)
+      this.removeSharedRuntime(project)
       return {
         runtime: null,
         error: null
@@ -652,7 +657,7 @@ export class RuntimeManager {
     }
 
     if (loaded.kind !== 'missing') {
-      this.store.remove(runtimeProject.path)
+      this.removeSharedRuntime(runtimeProject)
     }
 
     const port = await findAvailablePort(this.config.ports.start, this.config.ports.end)
