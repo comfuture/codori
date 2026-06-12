@@ -260,7 +260,7 @@ Codori ignores common heavy directories during recursive scanning such as `node_
 - If a PID/runtime file points to a live shared process, Codori reuses it instead of spawning another app-server.
 - Codori records `startedAt` and `lastActivityAt` for the shared runtime under `~/.codori/run/`.
 - The shared runtime is stopped automatically after the configured inactivity timeout when no workspace has an active proxied WebSocket session.
-- Stopping the final active workspace stops the shared runtime immediately unless a proxied WebSocket session is still open.
+- Stopping the final active workspace stops the shared runtime immediately unless a proxied WebSocket session is still open; if one is open, Codori stops the runtime when that final session closes.
 - Workspaces with an active proxied WebSocket session keep the shared runtime from being reaped as idle.
 - If a PID/runtime file is stale, Codori cleans it up and starts a fresh runtime.
 - Runtime metadata is stored under `~/.codori/run/`.
