@@ -10,7 +10,7 @@ It is designed for people who keep many Git repositories under one parent direct
 
 - discover projects
 - open the right project in a browser dashboard
-- start exactly one Codex app-server per project when needed
+- start a shared Codex app-server runtime only when needed
 - continue previous Codex threads in that same project context
 
 Codori is intentionally small. It manages project runtimes and gives you a UI. It does not try to become your VPN, ingress proxy, auth platform, or deployment layer.
@@ -19,14 +19,14 @@ Codori follows a few hard constraints:
 
 - Project-first: one root directory, many Git repositories, one control plane.
 - Thin management layer: Codori manages Codex app-server processes but does not replace them.
-- Safe runtime model: one project gets at most one active app-server, tracked by PID/runtime files.
+- Safe runtime model: one Codori server gets one shared app-server process, tracked by PID/runtime files, while each project or chat stays a logical workspace.
 - Bring-your-own network: private access is your responsibility.
 - Keep the surface area focused: Codori solves project discovery, runtime control, and Codex access without trying to absorb adjacent infrastructure concerns.
 
 ## Requirements
 
 - Node.js 22+
-- `codex` installed on the host that will run project app-servers
+- `codex` installed on the host that will run the shared app-server
 
 ## Usage
 
@@ -35,7 +35,7 @@ The normal flow is simple:
 1. Run the Codori server on the machine that already has your projects and local tooling.
 2. Open the Codori UI from that same server origin locally or through your own private network path.
 3. Pick a project from the sidebar and start coding.
-4. Let Codori start the project runtime only when chat or thread access actually needs it.
+4. Let Codori start the shared runtime only when chat or thread access actually needs it.
 
 Start the Codori management server:
 
@@ -255,15 +255,17 @@ Codori ignores common heavy directories during recursive scanning such as `node_
 
 ## Runtime Model
 
-- Each project gets at most one active Codex app-server.
-- If a PID/runtime file points to a live process, Codori reuses it instead of spawning another runtime.
-- Codori records `startedAt` and `lastActivityAt` for each runtime under `~/.codori/run/`.
-- Idle runtimes are stopped automatically after the configured inactivity timeout.
-- Runtimes with an active proxied WebSocket session are never reaped as idle.
+- Each Codori server instance starts at most one active Codex app-server process.
+- Projects and projectless chats are logical workspaces. Codori keeps their activity and WebSocket session counts separate while proxying them to the shared app-server.
+- If a PID/runtime file points to a live shared process, Codori reuses it instead of spawning another app-server.
+- Codori records `startedAt` and `lastActivityAt` for the shared runtime under `~/.codori/run/`.
+- The shared runtime is stopped automatically after the configured inactivity timeout when no workspace has an active proxied WebSocket session.
+- Stopping the final active workspace stops the shared runtime immediately unless a proxied WebSocket session is still open.
+- Workspaces with an active proxied WebSocket session keep the shared runtime from being reaped as idle.
 - If a PID/runtime file is stale, Codori cleans it up and starts a fresh runtime.
 - Runtime metadata is stored under `~/.codori/run/`.
 
-This keeps the browser UI stateless with respect to process ownership while still making runtime state explicit on disk.
+This keeps the browser UI stateless with respect to process ownership while preserving workspace context through explicit Codex app-server `cwd` parameters.
 
 ## Client UI
 
@@ -274,17 +276,17 @@ The client dashboard provides:
 - a new thread action
 - a previous threads panel for resume
 
-When you open a stopped project and start chatting, Codori starts its app-server first and then connects the UI through the Codori WebSocket proxy.
+When you open a stopped project and start chatting, Codori ensures the shared app-server is running and then connects the UI through the Codori WebSocket proxy.
 
 ## What Codori Does
 
 - Scans a configured root directory and finds descendant directories that contain a direct `.git` child.
-- Exposes CLI commands to list, start, stop, and inspect project runtimes.
-- Starts project-specific Codex app-server processes on demand.
+- Exposes CLI commands to list, start, stop, and inspect logical project workspace runtimes.
+- Starts one shared Codex app-server process on demand.
 - Allocates a free TCP port from a configured safe range.
 - Stores runtime metadata under `~/.codori/run/`.
 - Provides a Nuxt UI dashboard for project selection, chat, and thread resume.
-- Proxies browser WebSocket traffic to the correct project app-server.
+- Proxies browser WebSocket traffic for each project or chat workspace to the shared app-server.
 - Serves the built dashboard bundle from the same origin as the management API.
 
 ## What Codori Does Not Do
@@ -309,13 +311,13 @@ npx @codori/server list --root ~/Project
 npx @codori/server list --root ~/Project --json
 ```
 
-Start a project runtime:
+Start a project workspace runtime:
 
 ```bash
 npx @codori/server start codori --root ~/Project
 ```
 
-Stop a project runtime:
+Stop a project workspace runtime:
 
 ```bash
 npx @codori/server stop codori --root ~/Project
@@ -337,8 +339,8 @@ Notes:
 ## Security Notes
 
 - Codori assumes the host machine is trusted.
-- Codori can start Codex runtimes that can act on the selected repository.
-- Anyone who can reach your Codori server can potentially interact with those runtimes unless you place Codori behind a private network or another access control layer.
+- Codori can start a shared Codex runtime that can act on selected repositories through explicit workspace `cwd` values.
+- Anyone who can reach your Codori server can potentially interact with that runtime unless you place Codori behind a private network or another access control layer.
 - For remote use, prefer a private tailnet or equivalent private tunnel over direct public exposure.
 
 ## Practical Recommendation

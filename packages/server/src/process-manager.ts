@@ -48,17 +48,23 @@ type RuntimeManagerOptions = {
   commandFactory?: CommandFactory
 }
 
+type WorkspaceActivityRecord = {
+  startedAt: number
+  lastActivityAt: number
+}
+
 const CODORI_STOP_TIMEOUT_MS = 3_000
 const CODORI_STOP_POLL_MS = 50
 const CHAT_PARENT_DIR_NAME = 'Chats'
 const CHAT_MARKER_FILE = '.codori-chat.json'
 const CHAT_RECENT_LIMIT = 5
 const CHAT_RUNTIME_ID_PREFIX = 'chat:'
+const SHARED_RUNTIME_ID = 'codori:shared-app-server'
 const DEFAULT_CHAT_TITLE = 'New Chat'
 
 const defaultCommandFactory: CommandFactory = (port) => ({
   command: process.env.CODORI_CODEX_BIN ?? 'codex',
-  args: ['app-server', '--listen', `ws://0.0.0.0:${port}`]
+  args: ['app-server', '--listen', `ws://127.0.0.1:${port}`]
 })
 
 const isProcessAlive = (pid: number) => {
@@ -138,6 +144,10 @@ export class RuntimeManager {
   private readonly commandFactory: CommandFactory
 
   private readonly activeSessions = new Map<string, number>()
+
+  private readonly workspaceActivity = new Map<string, WorkspaceActivityRecord>()
+
+  private sharedRuntimeStart: Promise<StartProjectResult> | null = null
 
   private idleReaper: NodeJS.Timeout | null = null
 
@@ -286,6 +296,13 @@ export class RuntimeManager {
     }
   }
 
+  private sharedRuntimeProject(): ProjectRecord {
+    return {
+      id: SHARED_RUNTIME_ID,
+      path: this.config.root
+    }
+  }
+
   private resolveProject(projectId: string) {
     const project = this.listProjects().find(entry => entry.id === projectId)
     if (project) {
@@ -297,17 +314,19 @@ export class RuntimeManager {
 
   private normalizeStatus(project: ProjectRecord, runtime: RuntimeRecord | null, error: string | null): ProjectStatusRecord {
     const activeSessionCount = this.getActiveSessionCount(project.id)
+    const activity = this.workspaceActivity.get(project.id) ?? null
+    const running = activity !== null && runtime !== null
     return {
       projectId: project.id,
       projectPath: project.path,
-      status: error ? 'error' : runtime ? 'running' : 'stopped',
-      pid: runtime?.pid ?? null,
-      port: runtime?.port ?? null,
-      startedAt: runtime?.startedAt ?? null,
-      lastActivityAt: runtime?.lastActivityAt ?? null,
+      status: error ? 'error' : running ? 'running' : 'stopped',
+      pid: running ? runtime.pid : null,
+      port: running ? runtime.port : null,
+      startedAt: running ? activity.startedAt : null,
+      lastActivityAt: running ? activity.lastActivityAt : null,
       activeSessionCount,
       idleTimeoutMs: this.config.idleShutdown.enabled ? this.config.idleShutdown.timeoutMs : null,
-      idleDeadlineAt: this.resolveIdleDeadline(runtime, activeSessionCount),
+      idleDeadlineAt: this.resolveIdleDeadline(activity, activeSessionCount),
       error
     }
   }
@@ -317,17 +336,20 @@ export class RuntimeManager {
     runtime: RuntimeRecord | null,
     error: string | null
   ): ChatSessionStatusRecord {
-    const activeSessionCount = this.getActiveSessionCount(this.chatRuntimeId(chat.chatId))
+    const workspaceId = this.chatRuntimeId(chat.chatId)
+    const activeSessionCount = this.getActiveSessionCount(workspaceId)
+    const activity = this.workspaceActivity.get(workspaceId) ?? null
+    const running = activity !== null && runtime !== null
     return {
       ...chat,
-      status: error ? 'error' : runtime ? 'running' : 'stopped',
-      pid: runtime?.pid ?? null,
-      port: runtime?.port ?? null,
-      startedAt: runtime?.startedAt ?? null,
-      lastActivityAt: runtime?.lastActivityAt ?? null,
+      status: error ? 'error' : running ? 'running' : 'stopped',
+      pid: running ? runtime.pid : null,
+      port: running ? runtime.port : null,
+      startedAt: running ? activity.startedAt : null,
+      lastActivityAt: running ? activity.lastActivityAt : null,
       activeSessionCount,
       idleTimeoutMs: this.config.idleShutdown.enabled ? this.config.idleShutdown.timeoutMs : null,
-      idleDeadlineAt: this.resolveIdleDeadline(runtime, activeSessionCount),
+      idleDeadlineAt: this.resolveIdleDeadline(activity, activeSessionCount),
       error
     }
   }
@@ -336,12 +358,20 @@ export class RuntimeManager {
     return this.activeSessions.get(projectId) ?? 0
   }
 
-  private resolveIdleDeadline(runtime: RuntimeRecord | null, activeSessionCount: number) {
-    if (!runtime || !this.config.idleShutdown.enabled || activeSessionCount > 0) {
+  private getTotalActiveSessionCount() {
+    let total = 0
+    for (const count of this.activeSessions.values()) {
+      total += count
+    }
+    return total
+  }
+
+  private resolveIdleDeadline(activity: WorkspaceActivityRecord | null, activeSessionCount: number) {
+    if (!activity || !this.config.idleShutdown.enabled || activeSessionCount > 0) {
       return null
     }
 
-    return runtime.lastActivityAt + this.config.idleShutdown.timeoutMs
+    return activity.lastActivityAt + this.config.idleShutdown.timeoutMs
   }
 
   private writeRuntime(record: RuntimeRecord) {
@@ -354,6 +384,35 @@ export class RuntimeManager {
       ...record,
       lastActivityAt: Math.max(record.lastActivityAt, at)
     })
+  }
+
+  private activateWorkspace(workspaceId: string, at = Date.now()) {
+    const activity = this.workspaceActivity.get(workspaceId)
+    if (activity) {
+      activity.lastActivityAt = Math.max(activity.lastActivityAt, at)
+      return activity
+    }
+
+    const nextActivity = {
+      startedAt: at,
+      lastActivityAt: at
+    }
+    this.workspaceActivity.set(workspaceId, nextActivity)
+    return nextActivity
+  }
+
+  private touchWorkspaceActivity(workspaceId: string, at = Date.now()) {
+    const activity = this.workspaceActivity.get(workspaceId)
+    if (!activity) {
+      return null
+    }
+
+    activity.lastActivityAt = Math.max(activity.lastActivityAt, at)
+    return activity
+  }
+
+  private deactivateWorkspace(workspaceId: string) {
+    this.workspaceActivity.delete(workspaceId)
   }
 
   private incrementActiveSessions(projectId: string) {
@@ -370,7 +429,8 @@ export class RuntimeManager {
     this.activeSessions.delete(projectId)
   }
 
-  private loadActiveRuntime(project: ProjectRecord) {
+  private loadActiveRuntime() {
+    const project = this.sharedRuntimeProject()
     const loaded = this.store.load(project.path)
 
     if (loaded.kind === 'missing') {
@@ -390,30 +450,49 @@ export class RuntimeManager {
     return loaded.record
   }
 
-  private readRunningRuntime(project: ProjectRecord) {
+  private readSharedRuntime() {
+    const project = this.sharedRuntimeProject()
     const loaded = this.store.load(project.path)
     if (loaded.kind === 'missing') {
-      return this.normalizeStatus(project, null, null)
+      return {
+        runtime: null,
+        error: null
+      }
     }
 
     if (loaded.kind === 'invalid') {
-      return this.normalizeStatus(project, null, loaded.error)
+      return {
+        runtime: null,
+        error: loaded.error
+      }
     }
 
     if (!isProcessAlive(loaded.record.pid)) {
       this.store.remove(project.path)
-      return this.normalizeStatus(project, null, null)
+      return {
+        runtime: null,
+        error: null
+      }
     }
 
-    return this.normalizeStatus(project, loaded.record, null)
+    return {
+      runtime: loaded.record,
+      error: null
+    }
+  }
+
+  private readRunningRuntime(project: ProjectRecord) {
+    const shared = this.readSharedRuntime()
+    return this.normalizeStatus(project, shared.runtime, shared.error)
   }
 
   private touchProjectRuntime(project: ProjectRecord, at = Date.now()) {
-    const runtime = this.loadActiveRuntime(project)
+    const runtime = this.loadActiveRuntime()
     if (!runtime) {
       return this.normalizeStatus(project, null, null)
     }
 
+    this.touchWorkspaceActivity(project.id, at)
     return this.normalizeStatus(project, this.touchRuntimeRecord(runtime, at), null)
   }
 
@@ -513,75 +592,97 @@ export class RuntimeManager {
     }))
 
     this.activeSessions.clear()
+    this.workspaceActivity.clear()
     return resetResults.reduce((total, stopped) => total + stopped, 0)
   }
 
   private async startResolvedProject(project: ProjectRecord): Promise<StartProjectResult> {
-    const loaded = this.store.load(project.path)
+    const started = await this.startSharedRuntime(project)
+    return {
+      ...this.normalizeStatus(project, this.loadActiveRuntime(), null),
+      reusedExisting: started.reusedExisting
+    }
+  }
+
+  private async startSharedRuntime(workspace: ProjectRecord): Promise<StartProjectResult> {
+    if (this.sharedRuntimeStart) {
+      await this.sharedRuntimeStart
+      const runtime = this.loadActiveRuntime()
+      this.activateWorkspace(workspace.id)
+      if (!runtime) {
+        throw new CodoriError('PROCESS_START_FAILED', 'Shared app-server runtime did not start.')
+      }
+      return {
+        ...this.normalizeStatus(workspace, this.touchRuntimeRecord(runtime), null),
+        reusedExisting: true
+      }
+    }
+
+    this.sharedRuntimeStart = this.startSharedRuntimeNow(workspace)
+    try {
+      return await this.sharedRuntimeStart
+    } finally {
+      this.sharedRuntimeStart = null
+    }
+  }
+
+  private async startSharedRuntimeNow(workspace: ProjectRecord): Promise<StartProjectResult> {
+    const runtimeProject = this.sharedRuntimeProject()
+    const loaded = this.store.load(runtimeProject.path)
 
     if (loaded.kind === 'valid' && isProcessAlive(loaded.record.pid)) {
-      const runtime = this.touchRuntimeRecord(loaded.record)
+      const now = Date.now()
+      this.activateWorkspace(workspace.id, now)
+      const runtime = this.touchRuntimeRecord(loaded.record, now)
       return {
-        ...this.normalizeStatus(project, runtime, null),
+        ...this.normalizeStatus(workspace, runtime, null),
         reusedExisting: true
       }
     }
 
     if (loaded.kind !== 'missing') {
-      this.store.remove(project.path)
+      this.store.remove(runtimeProject.path)
     }
 
     const port = await findAvailablePort(this.config.ports.start, this.config.ports.end)
-    const command = this.commandFactory(port, project)
-    const child = await spawnDetached(command.command, command.args, project.path)
+    const command = this.commandFactory(port, runtimeProject)
+    const child = await spawnDetached(command.command, command.args, runtimeProject.path)
 
     if (typeof child.pid !== 'number') {
-      throw new CodoriError('PROCESS_START_FAILED', `Failed to determine PID for project "${project.id}".`)
+      throw new CodoriError('PROCESS_START_FAILED', 'Failed to determine PID for shared app-server runtime.')
     }
 
     const now = Date.now()
     const runtime: RuntimeRecord = {
-      projectId: project.id,
-      projectPath: project.path,
+      projectId: runtimeProject.id,
+      projectPath: runtimeProject.path,
       pid: child.pid,
       port,
       startedAt: now,
       lastActivityAt: now
     }
     this.writeRuntime(runtime)
+    this.activateWorkspace(workspace.id, now)
 
     return {
-      ...this.normalizeStatus(project, runtime, null),
+      ...this.normalizeStatus(workspace, runtime, null),
       reusedExisting: false
     }
   }
 
   private readRunningChatRuntime(chat: ChatSessionRecord) {
-    const runtimeProject = this.chatToRuntimeProject(chat)
-    const loaded = this.store.load(runtimeProject.path)
-    if (loaded.kind === 'missing') {
-      return this.normalizeChatStatus(chat, null, null)
-    }
-
-    if (loaded.kind === 'invalid') {
-      return this.normalizeChatStatus(chat, null, loaded.error)
-    }
-
-    if (!isProcessAlive(loaded.record.pid)) {
-      this.store.remove(runtimeProject.path)
-      return this.normalizeChatStatus(chat, null, null)
-    }
-
-    return this.normalizeChatStatus(chat, loaded.record, null)
+    const shared = this.readSharedRuntime()
+    return this.normalizeChatStatus(chat, shared.runtime, shared.error)
   }
 
   private touchChatRuntime(chat: ChatSessionRecord, at = Date.now()) {
     const runtimeProject = this.chatToRuntimeProject(chat)
-    const runtime = this.loadActiveRuntime(runtimeProject)
+    const runtime = this.loadActiveRuntime()
     if (!runtime) {
       return this.normalizeChatStatus(chat, null, null)
     }
 
+    this.touchWorkspaceActivity(runtimeProject.id, at)
     return this.normalizeChatStatus(chat, this.touchRuntimeRecord(runtime, at), null)
   }
 
@@ -601,7 +702,6 @@ export class RuntimeManager {
   async deleteChatSession(chatId: string): Promise<DeleteChatSessionResult> {
     const chat = this.resolveChatSession(chatId)
     await this.stopChatSession(chatId)
-    this.activeSessions.delete(this.chatRuntimeId(chatId))
     await rm(chat.chatPath, { recursive: true, force: true })
 
     return { chatId }
@@ -650,21 +750,25 @@ export class RuntimeManager {
   }
 
   private async stopResolvedProject(project: ProjectRecord) {
-    const loaded = this.store.load(project.path)
-
-    if (loaded.kind === 'missing') {
-      return this.normalizeStatus(project, null, null)
-    }
-
-    if (loaded.kind === 'invalid') {
-      this.store.remove(project.path)
-      return this.normalizeStatus(project, null, null)
-    }
-
-    await terminateProcess(loaded.record.pid)
-
-    this.store.remove(project.path)
+    this.deactivateWorkspace(project.id)
+    await this.stopSharedRuntimeIfUnused()
     return this.normalizeStatus(project, null, null)
+  }
+
+  private async stopSharedRuntimeIfUnused() {
+    if (this.workspaceActivity.size > 0 || this.getTotalActiveSessionCount() > 0) {
+      return false
+    }
+
+    const runtimeProject = this.sharedRuntimeProject()
+    const runtime = this.loadActiveRuntime()
+    if (!runtime) {
+      return false
+    }
+
+    await terminateProcess(runtime.pid)
+    this.store.remove(runtimeProject.path)
+    return true
   }
 
   async reapIdleRuntimes() {
@@ -676,26 +780,22 @@ export class RuntimeManager {
     let stopped = 0
 
     try {
+      const runtimeProject = this.sharedRuntimeProject()
+      const runtime = this.loadActiveRuntime()
+      if (!runtime) {
+        return 0
+      }
+
+      if (this.getTotalActiveSessionCount() > 0) {
+        return 0
+      }
+
       const now = Date.now()
-      for (const project of [
-        ...this.listProjects(),
-        ...this.listChatSessions(Number.POSITIVE_INFINITY).map(chat => this.chatToRuntimeProject(chat))
-      ]) {
-        const runtime = this.loadActiveRuntime(project)
-        if (!runtime) {
-          continue
-        }
-
-        if (this.getActiveSessionCount(project.id) > 0) {
-          continue
-        }
-
-        if (now - runtime.lastActivityAt < this.config.idleShutdown.timeoutMs) {
-          continue
-        }
-
-        await this.stopResolvedProject(project)
-        stopped += 1
+      if (now - runtime.lastActivityAt >= this.config.idleShutdown.timeoutMs) {
+        await terminateProcess(runtime.pid)
+        this.store.remove(runtimeProject.path)
+        this.workspaceActivity.clear()
+        stopped = 1
       }
 
       return stopped

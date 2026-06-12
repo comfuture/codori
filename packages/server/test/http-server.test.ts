@@ -10,7 +10,12 @@ import { resolveProjectAttachmentsDir } from '../src/attachment-store.js'
 import { CodoriError } from '../src/errors.js'
 import { createHttpServer, startHttpServer, type RuntimeManagerLike } from '../src/http-server.js'
 import type { ServiceUpdateController } from '../src/service-update.js'
-import type { ChatSessionStatusRecord, ProjectStatusRecord, StartProjectResult } from '../src/types.js'
+import type {
+  ChatSessionStatusRecord,
+  ProjectStatusRecord,
+  StartChatSessionResult,
+  StartProjectResult
+} from '../src/types.js'
 
 const startedApps: Array<Awaited<ReturnType<typeof createHttpServer>>> = []
 const startedSocketServers: WebSocketServer[] = []
@@ -650,7 +655,7 @@ describe('createHttpServer', () => {
     })
   })
 
-  it('bridges websocket frames to the project app-server', async () => {
+  it('bridges websocket frames to the shared app-server', async () => {
     const tcpServer = createNetServer()
     await new Promise<void>((resolvePromise, reject) => {
       tcpServer.listen(0, '127.0.0.1', (error?: Error) => {
@@ -725,6 +730,103 @@ describe('createHttpServer', () => {
       })
       client.once('error', reject)
     })
+  })
+
+  it('bridges project and chat websocket routes to the same runtime port', async () => {
+    const tcpServer = createNetServer()
+    await new Promise<void>((resolvePromise, reject) => {
+      tcpServer.listen(0, '127.0.0.1', (error?: Error) => {
+        if (error) {
+          reject(error)
+          return
+        }
+        resolvePromise()
+      })
+    })
+    const address = tcpServer.address()
+    if (!address || typeof address === 'string') {
+      throw new Error('Failed to get test server address.')
+    }
+    const backendPort = address.port
+    await new Promise<void>((resolvePromise, reject) => {
+      tcpServer.close((error) => {
+        if (error) {
+          reject(error)
+          return
+        }
+        resolvePromise()
+      })
+    })
+
+    const backend = new WebSocketServer({
+      host: '127.0.0.1',
+      port: backendPort
+    })
+    startedSocketServers.push(backend)
+    await new Promise<void>((resolvePromise) => {
+      backend.once('listening', () => {
+        resolvePromise()
+      })
+    })
+    backend.on('connection', (socket: WebSocket) => {
+      socket.on('message', (message: WebSocket.RawData) => {
+        socket.send(`shared:${rawDataToString(message)}`)
+      })
+    })
+
+    const starts: string[] = []
+    const manager = createManager({
+      startProject: () => {
+        starts.push('project')
+        return {
+          ...createProjectRecord(),
+          port: backendPort,
+          reusedExisting: true
+        } satisfies StartProjectResult
+      },
+      startChatSession: () => {
+        starts.push('chat')
+        return {
+          ...createChatRecord(),
+          port: backendPort,
+          reusedExisting: true
+        } satisfies StartChatSessionResult
+      }
+    })
+    const app = await createHttpServer(manager)
+    startedApps.push(app)
+    await app.listen({
+      host: '127.0.0.1',
+      port: 0
+    })
+
+    const serverAddress = app.addresses()[0]
+    const sendAndRead = async (url: string, message: string) => await new Promise<string>((resolvePromise, reject) => {
+      const client = new WebSocket(url)
+      client.once('open', () => {
+        client.send(message)
+      })
+      client.once('message', (data: WebSocket.RawData) => {
+        try {
+          resolvePromise(rawDataToString(data))
+        } catch (error) {
+          reject(error instanceof Error ? error : new Error(String(error)))
+        } finally {
+          client.close()
+        }
+      })
+      client.once('error', reject)
+    })
+
+    await expect(sendAndRead(
+      `ws://127.0.0.1:${serverAddress.port}/api/projects/demo/rpc`,
+      'project'
+    )).resolves.toBe('shared:project')
+    await expect(sendAndRead(
+      `ws://127.0.0.1:${serverAddress.port}/api/chats/chat-test/rpc`,
+      'chat'
+    )).resolves.toBe('shared:chat')
+    expect(starts).toEqual(['project', 'chat'])
   })
 
   it('marks websocket sessions active while the proxy is connected', async () => {
