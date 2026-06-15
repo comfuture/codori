@@ -130,6 +130,21 @@ const resetInlineThreads = () => {
   inlineThreadsHasMore.value = false
 }
 
+const waitForProjectsRefresh = async () => {
+  if (loaded.value || !loading.value) {
+    return
+  }
+
+  await new Promise<void>((resolve) => {
+    const stop = watch([loaded, loading], ([projectsLoaded, projectsLoading]) => {
+      if (projectsLoaded || !projectsLoading) {
+        stop()
+        resolve()
+      }
+    })
+  })
+}
+
 const fetchInlineThreads = async () => {
   const projectId = activeProjectId.value
   if (!projectId || props.collapsed) {
@@ -146,6 +161,11 @@ const fetchInlineThreads = async () => {
   try {
     if (!loaded.value) {
       await refreshProjects()
+      await waitForProjectsRefresh()
+    }
+
+    if (sequence !== inlineThreadFetchSequence) {
+      return
     }
 
     const project = getProject(projectId)
