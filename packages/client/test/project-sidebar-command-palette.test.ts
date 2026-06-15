@@ -375,6 +375,41 @@ describe('project sidebar inline threads', () => {
     expect(mockOpenPanel).toHaveBeenCalledTimes(1)
   })
 
+  it('waits for an in-flight project refresh before loading selected project threads', async () => {
+    mockProjects.value = []
+    mockProjectsLoaded.value = false
+    mockProjectsLoading.value = true
+    mockRpcRequest.mockResolvedValue(makeThreadListResponse(1))
+
+    const wrapper = mountSidebar({
+      collapsed: false
+    })
+    await waitForSidebar()
+
+    expect(mockRefreshProjects).toHaveBeenCalledTimes(1)
+    expect(mockGetClient).not.toHaveBeenCalled()
+    expect(wrapper.text()).not.toContain('Project "codori" was not found.')
+
+    mockProjects.value = [
+      makeProject({
+        projectId: 'codori',
+        projectPath: '/repo/codori'
+      })
+    ]
+    mockProjectsLoaded.value = true
+    mockProjectsLoading.value = false
+    await waitForSidebar()
+
+    expect(mockGetClient).toHaveBeenCalledWith('codori')
+    expect(mockRpcRequest).toHaveBeenCalledWith('thread/list', {
+      limit: 5,
+      sortKey: 'updated_at',
+      sortDirection: 'desc',
+      cwd: '/repo/codori'
+    })
+    expect(wrapper.text()).toContain('Thread 1')
+  })
+
   it('keeps collapsed sidebar project-only and does not fetch inline threads', async () => {
     mockRpcRequest.mockResolvedValue(makeThreadListResponse(2))
 
