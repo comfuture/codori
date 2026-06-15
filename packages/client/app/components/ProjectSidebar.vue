@@ -7,7 +7,12 @@ import { useCodoriRouter } from '../composables/useCodoriRouter'
 import { useProjects } from '../composables/useProjects'
 import { useRpc } from '../composables/useRpc'
 import { useThreadPanel } from '../composables/useThreadPanel'
-import { resolveThreadSummaryTitle, type ThreadSummary } from '../composables/useThreadSummaries'
+import {
+  resolveProjectThreadSummaryKey,
+  resolveThreadSummaryTitle,
+  useThreadSummaries,
+  type ThreadSummary
+} from '../composables/useThreadSummaries'
 import { isMacLikePlatform } from '../utils/global-command-palette-shortcut'
 import { sortSidebarProjects } from '../utils/project-sidebar-order'
 import type { ThreadListParams } from '~~/shared/generated/codex-app-server/v2/ThreadListParams'
@@ -67,7 +72,6 @@ const router = useCodoriRouter()
 const addProjectOpen = ref(false)
 const platform = ref(typeof navigator === 'undefined' ? '' : navigator.platform)
 const isMac = computed(() => isMacLikePlatform(platform.value))
-const inlineThreads = ref<ThreadSummary[]>([])
 const inlineThreadsProjectId = ref<string | null>(null)
 const inlineThreadsLoading = ref(false)
 const inlineThreadsError = ref<string | null>(null)
@@ -92,6 +96,17 @@ const {
   refreshChats,
   deleteChat
 } = useChats()
+
+const inlineThreadSummariesForProject = (projectId: string | null) =>
+  useThreadSummaries(resolveProjectThreadSummaryKey(projectId))
+
+const inlineThreads = computed<ThreadSummary[]>(() => {
+  if (!inlineThreadsProjectId.value) {
+    return []
+  }
+
+  return inlineThreadSummariesForProject(inlineThreadsProjectId.value).threads.value
+})
 
 const activeProjectId = computed(() => {
   const param = route.params.projectId
@@ -123,7 +138,6 @@ onMounted(() => {
 })
 
 const resetInlineThreads = () => {
-  inlineThreads.value = []
   inlineThreadsProjectId.value = null
   inlineThreadsLoading.value = false
   inlineThreadsError.value = null
@@ -196,17 +210,16 @@ const fetchInlineThreads = async () => {
       return
     }
 
-    inlineThreads.value = response.data.map(thread => ({
+    inlineThreadSummariesForProject(projectId).setThreads(response.data.map(thread => ({
       id: thread.id,
       title: resolveThreadSummaryTitle(thread),
       updatedAt: thread.updatedAt
-    }))
+    })))
     inlineThreadsHasMore.value = response.nextCursor !== null
   } catch (caughtError) {
     if (sequence !== inlineThreadFetchSequence) {
       return
     }
-    inlineThreads.value = []
     inlineThreadsError.value = caughtError instanceof Error ? caughtError.message : String(caughtError)
   } finally {
     if (sequence === inlineThreadFetchSequence) {
@@ -265,8 +278,12 @@ const chatItems = computed<ChatNavigationItem[][]>(() => [
   }))
 ])
 
+const inlineThreadsHasOverflow = computed(() =>
+  inlineThreadsHasMore.value || inlineThreads.value.length > INLINE_THREAD_ROW_LIMIT
+)
+
 const visibleInlineThreads = computed(() =>
-  inlineThreadsHasMore.value
+  inlineThreadsHasOverflow.value
     ? inlineThreads.value.slice(0, INLINE_THREAD_ROWS_WITH_MORE)
     : inlineThreads.value.slice(0, INLINE_THREAD_ROW_LIMIT)
 )
@@ -336,7 +353,7 @@ const projectItems = computed<ProjectSidebarNavigationItem[][]>(() => [
       })
     }
 
-    if (inlineThreadsHasMore.value) {
+    if (inlineThreadsHasOverflow.value) {
       items.push({
         itemKind: 'more',
         label: 'more..',
