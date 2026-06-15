@@ -6,6 +6,7 @@ import { useProjects } from '../composables/useProjects'
 import { useRpc } from '../composables/useRpc'
 import { useThreadPanel } from '../composables/useThreadPanel'
 import {
+  resolveProjectThreadSummaryKey,
   resolveThreadSummaryTitle,
   useThreadSummaries,
   type ThreadSummary
@@ -26,9 +27,7 @@ const route = useRoute()
 const { loaded, refreshProjects, startProject, getProject } = useProjects()
 const { getClient } = useRpc()
 const { closePanel } = useThreadPanel()
-const resolveThreadSummaryKey = (projectId: string | null) =>
-  projectId ? `project:${projectId}` : '__missing-project__'
-const currentThreadSummaries = () => useThreadSummaries(resolveThreadSummaryKey(props.projectId))
+const currentThreadSummaries = () => useThreadSummaries(resolveProjectThreadSummaryKey(props.projectId))
 const threads = computed(() => currentThreadSummaries().threads.value)
 const loading = computed(() => currentThreadSummaries().loading.value)
 const error = computed(() => currentThreadSummaries().error.value)

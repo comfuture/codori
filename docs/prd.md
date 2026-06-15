@@ -300,7 +300,7 @@ Routes:
 Layout:
 
 - Use Nuxt UI dashboard primitives as the main shell.
-- Left sidebar shows projects and basic runtime state.
+- Left sidebar shows projects, recent project threads for the selected project, and projectless chats.
 - Main panel shows the selected project chat screen.
 - Top navbar includes:
   - `New thread`

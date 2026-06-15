@@ -1,19 +1,27 @@
 /* eslint-disable vue/one-component-per-file */
 // @vitest-environment jsdom
 
-import { mount } from '@vue/test-utils'
-import { defineComponent, h, ref } from 'vue'
+import { flushPromises, mount } from '@vue/test-utils'
+import { defineComponent, h, nextTick, ref } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import ProjectSidebar from '../app/components/ProjectSidebar.vue'
+import type { ProjectRecord } from '../shared/codori'
+import type { ThreadListResponse } from '../shared/generated/codex-app-server/v2/ThreadListResponse'
 
 const mockRoute = {
-  params: {}
+  params: {} as Record<string, unknown>
 }
 const mockRouterPush = vi.fn()
 const mockRefreshProjects = vi.fn()
 const mockRefreshChats = vi.fn()
-const mockProjects = ref([])
+const mockStartProject = vi.fn()
+const mockGetClient = vi.fn()
+const mockRpcRequest = vi.fn()
+const mockOpenPanel = vi.fn()
+const mockProjects = ref<ProjectRecord[]>([])
 const mockChats = ref([])
+const mockProjectsLoaded = ref(true)
+const mockProjectsLoading = ref(false)
 
 vi.mock('../app/composables/useCodoriRoute', () => ({
   useCodoriRoute: () => mockRoute
@@ -28,9 +36,24 @@ vi.mock('../app/composables/useCodoriRouter', () => ({
 vi.mock('../app/composables/useProjects', () => ({
   useProjects: () => ({
     projects: mockProjects,
-    loaded: ref(true),
-    loading: ref(false),
-    refreshProjects: mockRefreshProjects
+    loaded: mockProjectsLoaded,
+    loading: mockProjectsLoading,
+    refreshProjects: mockRefreshProjects,
+    startProject: mockStartProject,
+    getProject: (projectId: string | null) =>
+      mockProjects.value.find(project => project.projectId === projectId) ?? null
+  })
+}))
+
+vi.mock('../app/composables/useRpc', () => ({
+  useRpc: () => ({
+    getClient: mockGetClient
+  })
+}))
+
+vi.mock('../app/composables/useThreadPanel', () => ({
+  useThreadPanel: () => ({
+    openPanel: mockOpenPanel
   })
 }))
 
@@ -94,6 +117,88 @@ const KbdStub = defineComponent({
   }
 })
 
+const NavigationMenuStub = defineComponent({
+  name: 'NavigationMenuStub',
+  props: {
+    items: {
+      type: Array,
+      default: () => []
+    }
+  },
+  setup(props, { slots }) {
+    const flattenItems = () => (props.items as unknown[])
+      .flatMap(group => Array.isArray(group) ? group : [group])
+      .filter(Boolean) as Array<Record<string, unknown>>
+
+    return () => h('nav', { class: 'navigation-menu-stub' }, flattenItems().map((item) => {
+      const children = [
+        h('span', { class: 'navigation-menu-icon' }, String(item.icon ?? '')),
+        slots['item-label']?.({ item }) ?? h('span', String(item.label ?? '')),
+        slots['item-trailing']?.({ item })
+      ]
+      const baseAttrs = {
+        class: ['navigation-menu-item', item.itemKind ? `navigation-menu-item-${String(item.itemKind)}` : ''],
+        'data-kind': String(item.itemKind ?? ''),
+        'data-label': String(item.label ?? ''),
+        'data-to': String(item.to ?? ''),
+        'data-active': item.active ? 'true' : 'false',
+        onClick: (event: MouseEvent) => {
+          const onSelect = item.onSelect
+          if (typeof onSelect === 'function') {
+            event.preventDefault()
+            onSelect(event)
+          }
+        }
+      }
+
+      return item.to
+        ? h('a', {
+            ...baseAttrs,
+            href: String(item.to)
+          }, children)
+        : h('button', {
+            ...baseAttrs,
+            type: 'button',
+            disabled: Boolean(item.disabled)
+          }, children)
+    }))
+  }
+})
+
+const makeProject = (input: Partial<ProjectRecord> & Pick<ProjectRecord, 'projectId' | 'projectPath'>): ProjectRecord => ({
+  status: 'running',
+  pid: 101,
+  port: 46000,
+  startedAt: 1,
+  lastActivityAt: 1,
+  activeSessionCount: 0,
+  idleTimeoutMs: null,
+  idleDeadlineAt: null,
+  error: null,
+  ...input
+})
+
+const makeThread = (index: number) => ({
+  id: `thread-${index}`,
+  name: `Thread ${index}`,
+  preview: null,
+  updatedAt: 1_000 - index
+})
+
+const makeThreadListResponse = (
+  count: number,
+  nextCursor: string | null = null
+) => ({
+  data: Array.from({ length: count }, (_, index) => makeThread(index + 1)),
+  nextCursor,
+  backwardsCursor: null
+}) as unknown as ThreadListResponse
+
+const waitForSidebar = async () => {
+  await flushPromises()
+  await nextTick()
+}
+
 const mountSidebar = (props: Record<string, unknown> = {}) =>
   mount(ProjectSidebar, {
     props,
@@ -102,12 +207,7 @@ const mountSidebar = (props: Record<string, unknown> = {}) =>
         UTooltip: TooltipStub,
         UButton: ButtonStub,
         UKbd: KbdStub,
-        UNavigationMenu: defineComponent({
-          name: 'NavigationMenuStub',
-          setup() {
-            return () => h('nav')
-          }
-        }),
+        UNavigationMenu: NavigationMenuStub,
         AddProjectModal: defineComponent({
           name: 'AddProjectModalStub',
           setup() {
@@ -117,7 +217,7 @@ const mountSidebar = (props: Record<string, unknown> = {}) =>
         ProjectStatusDot: defineComponent({
           name: 'ProjectStatusDotStub',
           setup() {
-            return () => h('span')
+            return () => h('span', { class: 'status-dot-stub' })
           }
         })
       }
@@ -128,11 +228,22 @@ describe('project sidebar command palette trigger', () => {
   let platformSpy: ReturnType<typeof vi.spyOn>
 
   beforeEach(() => {
+    mockRoute.params = {}
     mockRouterPush.mockReset()
     mockRefreshProjects.mockReset()
     mockRefreshChats.mockReset()
+    mockStartProject.mockReset()
+    mockGetClient.mockReset()
+    mockRpcRequest.mockReset()
+    mockOpenPanel.mockReset()
     mockProjects.value = []
     mockChats.value = []
+    mockProjectsLoaded.value = true
+    mockProjectsLoading.value = false
+    mockGetClient.mockReturnValue({
+      request: mockRpcRequest
+    })
+    mockRpcRequest.mockResolvedValue(makeThreadListResponse(0))
     platformSpy = vi.spyOn(window.navigator, 'platform', 'get').mockReturnValue('MacIntel')
   })
 
@@ -178,5 +289,103 @@ describe('project sidebar command palette trigger', () => {
     await wrapper.get('button[aria-label="Search Codori"]').trigger('click')
 
     expect(wrapper.emitted('openCommandPalette')).toHaveLength(1)
+  })
+})
+
+describe('project sidebar inline threads', () => {
+  let platformSpy: ReturnType<typeof vi.spyOn>
+
+  beforeEach(() => {
+    mockRoute.params = {
+      projectId: 'codori'
+    }
+    mockRouterPush.mockReset()
+    mockRefreshProjects.mockReset()
+    mockRefreshChats.mockReset()
+    mockStartProject.mockReset()
+    mockGetClient.mockReset()
+    mockRpcRequest.mockReset()
+    mockOpenPanel.mockReset()
+    mockProjects.value = [
+      makeProject({
+        projectId: 'codori',
+        projectPath: '/repo/codori'
+      }),
+      makeProject({
+        projectId: 'other',
+        projectPath: '/repo/other'
+      })
+    ]
+    mockChats.value = []
+    mockProjectsLoaded.value = true
+    mockProjectsLoading.value = false
+    mockGetClient.mockReturnValue({
+      request: mockRpcRequest
+    })
+    platformSpy = vi.spyOn(window.navigator, 'platform', 'get').mockReturnValue('MacIntel')
+  })
+
+  afterEach(() => {
+    platformSpy.mockRestore()
+  })
+
+  it('renders selected project threads inline without project status dots', async () => {
+    mockRpcRequest.mockResolvedValue(makeThreadListResponse(2))
+
+    const wrapper = mountSidebar({
+      collapsed: false
+    })
+    await waitForSidebar()
+
+    expect(wrapper.find('.status-dot-stub').exists()).toBe(false)
+    expect(wrapper.text()).toContain('codori')
+    expect(wrapper.text()).toContain('other')
+    expect(wrapper.text()).toContain('Thread 1')
+    expect(wrapper.text()).toContain('Thread 2')
+
+    const threadLink = wrapper.get('[data-kind="thread"][data-to="/projects/codori/threads/thread-1"]')
+    expect(threadLink.text()).toContain('Thread 1')
+    expect(wrapper.find('[data-kind="thread"][data-to="/projects/other/threads/thread-1"]').exists()).toBe(false)
+    expect(mockGetClient).toHaveBeenCalledTimes(1)
+    expect(mockGetClient).toHaveBeenCalledWith('codori')
+    expect(mockRpcRequest).toHaveBeenCalledWith('thread/list', {
+      limit: 5,
+      sortKey: 'updated_at',
+      sortDirection: 'desc',
+      cwd: '/repo/codori'
+    })
+  })
+
+  it('uses the fifth inline row for more.. when additional threads exist', async () => {
+    mockRpcRequest.mockResolvedValue(makeThreadListResponse(5, 'next-page'))
+
+    const wrapper = mountSidebar({
+      collapsed: false
+    })
+    await waitForSidebar()
+
+    expect(wrapper.text()).toContain('Thread 1')
+    expect(wrapper.text()).toContain('Thread 4')
+    expect(wrapper.text()).not.toContain('Thread 5')
+    expect(wrapper.text()).toContain('more..')
+    expect(wrapper.findAll('[data-kind="thread"]')).toHaveLength(4)
+
+    await wrapper.get('[data-kind="more"]').trigger('click')
+
+    expect(mockOpenPanel).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps collapsed sidebar project-only and does not fetch inline threads', async () => {
+    mockRpcRequest.mockResolvedValue(makeThreadListResponse(2))
+
+    const wrapper = mountSidebar({
+      collapsed: true
+    })
+    await waitForSidebar()
+
+    expect(mockGetClient).not.toHaveBeenCalled()
+    expect(mockRpcRequest).not.toHaveBeenCalled()
+    expect(wrapper.text()).not.toContain('Thread 1')
+    expect(wrapper.findAll('[data-kind="thread"]')).toHaveLength(0)
   })
 })
