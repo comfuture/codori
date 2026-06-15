@@ -5,6 +5,10 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { defineComponent, h, nextTick, reactive, ref } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import ProjectSidebar from '../app/components/ProjectSidebar.vue'
+import {
+  resolveProjectThreadSummaryKey,
+  useThreadSummaries
+} from '../app/composables/useThreadSummaries'
 import type { ProjectRecord } from '../shared/codori'
 import type { ThreadListResponse } from '../shared/generated/codex-app-server/v2/ThreadListResponse'
 
@@ -210,6 +214,15 @@ const createDeferred = <T>() => {
   }
 }
 
+const resetThreadSummaries = () => {
+  for (const projectId of ['codori', 'other']) {
+    const summaries = useThreadSummaries(resolveProjectThreadSummaryKey(projectId))
+    summaries.setThreads([])
+    summaries.setLoading(false)
+    summaries.setError(null)
+  }
+}
+
 const mountedWrappers: Array<{ unmount: () => void }> = []
 
 const mountSidebar = (props: Record<string, unknown> = {}) => {
@@ -251,6 +264,7 @@ describe('project sidebar command palette trigger', () => {
 
   beforeEach(() => {
     mockRoute.params = {}
+    resetThreadSummaries()
     mockRouterPush.mockReset()
     mockRefreshProjects.mockReset()
     mockRefreshChats.mockReset()
@@ -321,6 +335,7 @@ describe('project sidebar inline threads', () => {
     mockRoute.params = {
       projectId: 'codori'
     }
+    resetThreadSummaries()
     mockRouterPush.mockReset()
     mockRefreshProjects.mockReset()
     mockRefreshChats.mockReset()
@@ -395,6 +410,31 @@ describe('project sidebar inline threads', () => {
     await wrapper.get('[data-kind="more"]').trigger('click')
 
     expect(mockOpenPanel).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps selected project inline rows synced with shared thread summaries', async () => {
+    mockRpcRequest.mockResolvedValue(makeThreadListResponse(1))
+
+    const wrapper = mountSidebar({
+      collapsed: false
+    })
+    await waitForSidebar()
+
+    expect(wrapper.text()).toContain('Thread 1')
+
+    const summaries = useThreadSummaries(resolveProjectThreadSummaryKey('codori'))
+    summaries.syncThreadSummary({
+      id: 'thread-new',
+      name: 'Fresh thread',
+      preview: '',
+      updatedAt: 2_000
+    })
+    summaries.updateThreadSummaryTitle('thread-1', 'Renamed thread', 3_000)
+    await nextTick()
+
+    expect(wrapper.text()).toContain('Fresh thread')
+    expect(wrapper.text()).toContain('Renamed thread')
+    expect(wrapper.text()).not.toContain('Thread 1')
   })
 
   it('does not render stale inline threads under a newly selected project', async () => {
