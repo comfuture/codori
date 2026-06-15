@@ -2,15 +2,15 @@
 // @vitest-environment jsdom
 
 import { flushPromises, mount } from '@vue/test-utils'
-import { defineComponent, h, nextTick, ref } from 'vue'
+import { defineComponent, h, nextTick, reactive, ref } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import ProjectSidebar from '../app/components/ProjectSidebar.vue'
 import type { ProjectRecord } from '../shared/codori'
 import type { ThreadListResponse } from '../shared/generated/codex-app-server/v2/ThreadListResponse'
 
-const mockRoute = {
+const mockRoute = reactive({
   params: {} as Record<string, unknown>
-}
+})
 const mockRouterPush = vi.fn()
 const mockRefreshProjects = vi.fn()
 const mockRefreshChats = vi.fn()
@@ -199,8 +199,21 @@ const waitForSidebar = async () => {
   await nextTick()
 }
 
-const mountSidebar = (props: Record<string, unknown> = {}) =>
-  mount(ProjectSidebar, {
+const createDeferred = <T>() => {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise
+  })
+  return {
+    promise,
+    resolve
+  }
+}
+
+const mountedWrappers: Array<{ unmount: () => void }> = []
+
+const mountSidebar = (props: Record<string, unknown> = {}) => {
+  const wrapper = mount(ProjectSidebar, {
     props,
     global: {
       stubs: {
@@ -223,6 +236,15 @@ const mountSidebar = (props: Record<string, unknown> = {}) =>
       }
     }
   })
+  mountedWrappers.push(wrapper)
+  return wrapper
+}
+
+afterEach(() => {
+  for (const wrapper of mountedWrappers.splice(0)) {
+    wrapper.unmount()
+  }
+})
 
 describe('project sidebar command palette trigger', () => {
   let platformSpy: ReturnType<typeof vi.spyOn>
@@ -375,6 +397,26 @@ describe('project sidebar inline threads', () => {
     expect(mockOpenPanel).toHaveBeenCalledTimes(1)
   })
 
+  it('does not render stale inline threads under a newly selected project', async () => {
+    mockRpcRequest.mockResolvedValueOnce(makeThreadListResponse(2))
+
+    const wrapper = mountSidebar({
+      collapsed: false
+    })
+    await waitForSidebar()
+
+    expect(wrapper.text()).toContain('Thread 1')
+
+    mockRpcRequest.mockResolvedValueOnce(makeThreadListResponse(0))
+    mockRoute.params = {
+      projectId: 'other'
+    }
+    await nextTick()
+
+    expect(wrapper.text()).not.toContain('Thread 1')
+    expect(wrapper.text()).toContain('Loading threads...')
+  })
+
   it('waits for an in-flight project refresh before loading selected project threads', async () => {
     mockProjects.value = []
     mockProjectsLoaded.value = false
@@ -408,6 +450,58 @@ describe('project sidebar inline threads', () => {
       cwd: '/repo/codori'
     })
     expect(wrapper.text()).toContain('Thread 1')
+  })
+
+  it('refreshes projects when mounted collapsed with an active project', async () => {
+    mockProjects.value = []
+    mockProjectsLoaded.value = false
+    mockProjectsLoading.value = false
+    mockRpcRequest.mockResolvedValue(makeThreadListResponse(1))
+
+    mountSidebar({
+      collapsed: true
+    })
+    await waitForSidebar()
+
+    expect(mockRefreshProjects).toHaveBeenCalledTimes(1)
+    expect(mockGetClient).not.toHaveBeenCalled()
+  })
+
+  it('does not continue a stale stopped-project fetch after project selection changes', async () => {
+    const startProject = createDeferred<unknown>()
+    mockProjects.value = [
+      makeProject({
+        projectId: 'codori',
+        projectPath: '/repo/codori',
+        status: 'stopped',
+        pid: null,
+        port: null
+      }),
+      makeProject({
+        projectId: 'other',
+        projectPath: '/repo/other'
+      })
+    ]
+    mockStartProject.mockReturnValue(startProject.promise)
+    mockRpcRequest.mockResolvedValue(makeThreadListResponse(0))
+
+    mountSidebar({
+      collapsed: false
+    })
+    await waitForSidebar()
+
+    expect(mockStartProject).toHaveBeenCalledWith('codori')
+
+    mockRoute.params = {
+      projectId: 'other'
+    }
+    await waitForSidebar()
+
+    startProject.resolve({})
+    await waitForSidebar()
+
+    expect(mockGetClient).not.toHaveBeenCalledWith('codori')
+    expect(mockGetClient).toHaveBeenCalledWith('other')
   })
 
   it('keeps collapsed sidebar project-only and does not fetch inline threads', async () => {
