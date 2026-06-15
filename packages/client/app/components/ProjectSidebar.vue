@@ -1,13 +1,21 @@
 <script setup lang="ts">
 import type { NavigationMenuItem } from '@nuxt/ui'
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useChats } from '../composables/useChats'
 import { useCodoriRoute } from '../composables/useCodoriRoute'
 import { useCodoriRouter } from '../composables/useCodoriRouter'
 import { useProjects } from '../composables/useProjects'
+import { useRpc } from '../composables/useRpc'
+import { useThreadPanel } from '../composables/useThreadPanel'
+import { resolveThreadSummaryTitle, type ThreadSummary } from '../composables/useThreadSummaries'
 import { isMacLikePlatform } from '../utils/global-command-palette-shortcut'
 import { sortSidebarProjects } from '../utils/project-sidebar-order'
-import { toChatRoute, toChatsRoute, toProjectRoute } from '~~/shared/codori'
+import type { ThreadListParams } from '~~/shared/generated/codex-app-server/v2/ThreadListParams'
+import type { ThreadListResponse } from '~~/shared/generated/codex-app-server/v2/ThreadListResponse'
+import { toChatRoute, toChatsRoute, toProjectRoute, toProjectThreadRoute } from '~~/shared/codori'
+
+const INLINE_THREAD_ROW_LIMIT = 5
+const INLINE_THREAD_ROWS_WITH_MORE = INLINE_THREAD_ROW_LIMIT - 1
 
 const props = defineProps<{
   collapsed?: boolean
@@ -16,11 +24,36 @@ const emit = defineEmits<{
   openCommandPalette: []
 }>()
 type ProjectNavigationItem = NavigationMenuItem & {
+  itemKind: 'project'
   projectId: string
   projectPath: string
-  status: 'running' | 'stopped' | 'error'
   error: string | null
 }
+
+type ProjectThreadNavigationItem = NavigationMenuItem & {
+  itemKind: 'thread'
+  projectId: string
+  threadId: string
+  title: string
+  updatedAt: number
+}
+
+type ProjectThreadMoreNavigationItem = NavigationMenuItem & {
+  itemKind: 'more'
+  projectId: string
+}
+
+type ProjectThreadStatusNavigationItem = NavigationMenuItem & {
+  itemKind: 'thread-status'
+  projectId: string
+  message: string
+}
+
+type ProjectSidebarNavigationItem =
+  | ProjectNavigationItem
+  | ProjectThreadNavigationItem
+  | ProjectThreadMoreNavigationItem
+  | ProjectThreadStatusNavigationItem
 
 type ChatNavigationItem = NavigationMenuItem & {
   chatId: string
@@ -34,12 +67,22 @@ const router = useCodoriRouter()
 const addProjectOpen = ref(false)
 const platform = ref(typeof navigator === 'undefined' ? '' : navigator.platform)
 const isMac = computed(() => isMacLikePlatform(platform.value))
+const inlineThreads = ref<ThreadSummary[]>([])
+const inlineThreadsProjectId = ref<string | null>(null)
+const inlineThreadsLoading = ref(false)
+const inlineThreadsError = ref<string | null>(null)
+const inlineThreadsHasMore = ref(false)
+let inlineThreadFetchSequence = 0
 const {
   projects,
   loaded,
   loading,
   refreshProjects,
+  startProject,
+  getProject
 } = useProjects()
+const { getClient } = useRpc()
+const { openPanel } = useThreadPanel()
 const {
   chats,
   loaded: chatsLoaded,
@@ -61,17 +104,96 @@ const activeChatId = computed(() => {
   const param = route.params.chatId
   return typeof param === 'string' ? param : null
 })
+const activeThreadId = computed(() => {
+  const param = route.params.threadId
+  return typeof param === 'string' ? param : null
+})
 
 onMounted(() => {
   if (typeof navigator !== 'undefined') {
     platform.value = navigator.platform
   }
-  if (!loaded.value) {
+  if (!loaded.value && !activeProjectId.value) {
     void refreshProjects()
   }
   if (!chatsLoaded.value) {
     void refreshChats()
   }
+  void fetchInlineThreads()
+})
+
+const resetInlineThreads = () => {
+  inlineThreads.value = []
+  inlineThreadsProjectId.value = null
+  inlineThreadsLoading.value = false
+  inlineThreadsError.value = null
+  inlineThreadsHasMore.value = false
+}
+
+const fetchInlineThreads = async () => {
+  const projectId = activeProjectId.value
+  if (!projectId || props.collapsed) {
+    resetInlineThreads()
+    return
+  }
+
+  const sequence = ++inlineThreadFetchSequence
+  inlineThreadsProjectId.value = projectId
+  inlineThreadsLoading.value = true
+  inlineThreadsError.value = null
+  inlineThreadsHasMore.value = false
+
+  try {
+    if (!loaded.value) {
+      await refreshProjects()
+    }
+
+    const project = getProject(projectId)
+    if (!project) {
+      throw new Error(`Project "${projectId}" was not found.`)
+    }
+
+    if (project.status !== 'running') {
+      await startProject(projectId)
+    }
+
+    const refreshedProject = getProject(projectId) ?? project
+    const client = getClient(projectId)
+    const response = await client.request<ThreadListResponse>('thread/list', {
+      limit: INLINE_THREAD_ROW_LIMIT,
+      sortKey: 'updated_at',
+      sortDirection: 'desc',
+      cwd: refreshedProject.projectPath
+    } satisfies ThreadListParams)
+
+    if (sequence !== inlineThreadFetchSequence) {
+      return
+    }
+
+    inlineThreads.value = response.data.map(thread => ({
+      id: thread.id,
+      title: resolveThreadSummaryTitle(thread),
+      updatedAt: thread.updatedAt
+    }))
+    inlineThreadsHasMore.value = response.nextCursor !== null
+  } catch (caughtError) {
+    if (sequence !== inlineThreadFetchSequence) {
+      return
+    }
+    inlineThreads.value = []
+    inlineThreadsError.value = caughtError instanceof Error ? caughtError.message : String(caughtError)
+  } finally {
+    if (sequence === inlineThreadFetchSequence) {
+      inlineThreadsLoading.value = false
+    }
+  }
+}
+
+watch([
+  activeProjectId,
+  () => props.collapsed
+], () => {
+  void fetchInlineThreads()
 })
 
 const formatChatTitle = (chat: { chatId: string, title: string | null }) =>
@@ -117,26 +239,107 @@ const chatItems = computed<ChatNavigationItem[][]>(() => [
   }))
 ])
 
-const projectItems = computed<ProjectNavigationItem[][]>(() => [
-  sortSidebarProjects(projects.value, activeProjectId.value).map(project => ({
-    label: project.projectId,
-    icon: 'i-lucide-folder-git-2',
-    to: toProjectRoute(project.projectId),
-    active: activeProjectId.value === project.projectId,
-    tooltip: {
-      text: project.projectId
-    },
-    projectId: project.projectId,
-    projectPath: project.projectPath,
-    status: project.status,
-    error: project.error
-  }))
+const visibleInlineThreads = computed(() =>
+  inlineThreadsHasMore.value
+    ? inlineThreads.value.slice(0, INLINE_THREAD_ROWS_WITH_MORE)
+    : inlineThreads.value.slice(0, INLINE_THREAD_ROW_LIMIT)
+)
+
+const projectItems = computed<ProjectSidebarNavigationItem[][]>(() => [
+  sortSidebarProjects(projects.value, activeProjectId.value).flatMap((project) => {
+    const items: ProjectSidebarNavigationItem[] = [{
+      itemKind: 'project',
+      label: project.projectId,
+      icon: 'i-lucide-folder-git-2',
+      to: toProjectRoute(project.projectId),
+      active: activeProjectId.value === project.projectId && !activeThreadId.value,
+      tooltip: {
+        text: project.projectId
+      },
+      projectId: project.projectId,
+      projectPath: project.projectPath,
+      error: project.error
+    }]
+
+    if (props.collapsed || activeProjectId.value !== project.projectId) {
+      return items
+    }
+
+    if (inlineThreadsProjectId.value === project.projectId && inlineThreadsLoading.value) {
+      items.push({
+        itemKind: 'thread-status',
+        label: 'Loading threads...',
+        icon: 'i-lucide-loader-circle',
+        disabled: true,
+        projectId: project.projectId,
+        message: 'Loading threads...'
+      })
+      return items
+    }
+
+    if (inlineThreadsProjectId.value === project.projectId && inlineThreadsError.value) {
+      items.push({
+        itemKind: 'thread-status',
+        label: 'Threads unavailable',
+        icon: 'i-lucide-circle-alert',
+        disabled: true,
+        projectId: project.projectId,
+        message: inlineThreadsError.value
+      })
+      return items
+    }
+
+    for (const thread of visibleInlineThreads.value) {
+      items.push({
+        itemKind: 'thread',
+        label: thread.title,
+        icon: 'i-lucide-message-square-text',
+        to: toProjectThreadRoute(project.projectId, thread.id),
+        active: activeThreadId.value === thread.id,
+        tooltip: {
+          text: thread.title
+        },
+        projectId: project.projectId,
+        threadId: thread.id,
+        title: thread.title,
+        updatedAt: thread.updatedAt
+      })
+    }
+
+    if (inlineThreadsHasMore.value) {
+      items.push({
+        itemKind: 'more',
+        label: 'more..',
+        icon: 'i-lucide-ellipsis',
+        projectId: project.projectId,
+        tooltip: {
+          text: 'Open all threads'
+        },
+        onSelect: () => {
+          openPanel()
+        }
+      })
+    }
+
+    return items
+  })
 ])
 
 const asProjectItem = (item: NavigationMenuItem) => item as ProjectNavigationItem
+const asProjectSidebarItem = (item: NavigationMenuItem) => item as ProjectSidebarNavigationItem
+const asProjectThreadItem = (item: NavigationMenuItem) => item as ProjectThreadNavigationItem
+const asProjectThreadMoreItem = (item: NavigationMenuItem) => item as ProjectThreadMoreNavigationItem
+const asProjectThreadStatusItem = (item: NavigationMenuItem) => item as ProjectThreadStatusNavigationItem
 const asChatItem = (item: NavigationMenuItem) => item as ChatNavigationItem
 
-const isActiveProject = (item: ProjectNavigationItem) => activeProjectId.value === item.projectId
+const isProjectItem = (item: NavigationMenuItem): item is ProjectNavigationItem =>
+  asProjectSidebarItem(item).itemKind === 'project'
+const isThreadItem = (item: NavigationMenuItem): item is ProjectThreadNavigationItem =>
+  asProjectSidebarItem(item).itemKind === 'thread'
+const isMoreItem = (item: NavigationMenuItem): item is ProjectThreadMoreNavigationItem =>
+  asProjectSidebarItem(item).itemKind === 'more'
+const isThreadStatusItem = (item: NavigationMenuItem): item is ProjectThreadStatusNavigationItem =>
+  asProjectSidebarItem(item).itemKind === 'thread-status'
 </script>
 
 <template>
@@ -328,7 +531,7 @@ const isActiveProject = (item: ProjectNavigationItem) => activeProjectId.value =
       >
         <template #item-label="{ item }">
           <div
-            v-if="!props.collapsed"
+            v-if="!props.collapsed && isProjectItem(item)"
             class="min-w-0"
           >
             <div class="truncate font-medium text-highlighted">
@@ -344,17 +547,32 @@ const isActiveProject = (item: ProjectNavigationItem) => activeProjectId.value =
               {{ asProjectItem(item).error }}
             </div>
           </div>
-        </template>
-
-        <template #item-trailing="{ item }">
           <div
-            v-if="!props.collapsed"
-            class="flex items-center"
+            v-else-if="!props.collapsed && isThreadItem(item)"
+            class="min-w-0 ps-2"
           >
-            <ProjectStatusDot
-              :status="asProjectItem(item).status"
-              :pulse="isActiveProject(asProjectItem(item))"
-            />
+            <div class="truncate text-xs font-medium text-highlighted">
+              {{ asProjectThreadItem(item).title }}
+            </div>
+          </div>
+          <div
+            v-else-if="!props.collapsed && isMoreItem(item)"
+            class="min-w-0 ps-2"
+          >
+            <div class="truncate text-xs font-medium text-muted">
+              {{ asProjectThreadMoreItem(item).label }}
+            </div>
+          </div>
+          <div
+            v-else-if="!props.collapsed && isThreadStatusItem(item)"
+            class="min-w-0 ps-2"
+          >
+            <div
+              class="truncate text-xs"
+              :class="asProjectThreadStatusItem(item).message === 'Loading threads...' ? 'text-muted' : 'text-error'"
+            >
+              {{ asProjectThreadStatusItem(item).message }}
+            </div>
           </div>
         </template>
       </UNavigationMenu>

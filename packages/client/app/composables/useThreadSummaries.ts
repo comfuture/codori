@@ -86,6 +86,9 @@ const createState = (): ThreadSummariesState => ({
   error: ref<string | null>(null)
 })
 
+export const resolveProjectThreadSummaryKey = (projectId: string | null) =>
+  projectId ? `project:${projectId}` : '__missing-project__'
+
 const createApi = (state: ThreadSummariesState): UseThreadSummariesResult => ({
   ...state,
   setThreads: (nextThreads: ThreadSummary[]) => {
