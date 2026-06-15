@@ -113,7 +113,7 @@ onMounted(() => {
   if (typeof navigator !== 'undefined') {
     platform.value = navigator.platform
   }
-  if (!loaded.value && !activeProjectId.value) {
+  if (!loaded.value) {
     void refreshProjects()
   }
   if (!chatsLoaded.value) {
@@ -160,7 +160,9 @@ const fetchInlineThreads = async () => {
 
   try {
     if (!loaded.value) {
-      await refreshProjects()
+      if (!loading.value) {
+        await refreshProjects()
+      }
       await waitForProjectsRefresh()
     }
 
@@ -175,6 +177,10 @@ const fetchInlineThreads = async () => {
 
     if (project.status !== 'running') {
       await startProject(projectId)
+    }
+
+    if (sequence !== inlineThreadFetchSequence) {
+      return
     }
 
     const refreshedProject = getProject(projectId) ?? project
@@ -285,7 +291,11 @@ const projectItems = computed<ProjectSidebarNavigationItem[][]>(() => [
       return items
     }
 
-    if (inlineThreadsProjectId.value === project.projectId && inlineThreadsLoading.value) {
+    if (inlineThreadsProjectId.value !== project.projectId) {
+      return items
+    }
+
+    if (inlineThreadsLoading.value) {
       items.push({
         itemKind: 'thread-status',
         label: 'Loading threads...',
@@ -297,7 +307,7 @@ const projectItems = computed<ProjectSidebarNavigationItem[][]>(() => [
       return items
     }
 
-    if (inlineThreadsProjectId.value === project.projectId && inlineThreadsError.value) {
+    if (inlineThreadsError.value) {
       items.push({
         itemKind: 'thread-status',
         label: 'Threads unavailable',
