@@ -19,6 +19,8 @@ npx @codori/server --root ~/Project --host 127.0.0.1 --port 4310
 
 The server serves the dashboard UI, REST API, and websocket proxy from the same origin.
 
+`@codori/server` includes the Codex CLI runtime it uses to start app-server. A separate global `codex` installation is not required. Set `CODORI_CODEX_BIN` to an executable path to opt into a custom runtime.
+
 ## Service Installation
 
 Use the npm package invocation as the canonical entrypoint:

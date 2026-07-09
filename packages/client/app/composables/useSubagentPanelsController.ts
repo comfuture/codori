@@ -126,6 +126,8 @@ const fallbackMcpToolMessage = (itemId: string): ChatMessage => ({
         server: 'mcp',
         tool: 'tool',
         arguments: null,
+        appContext: null,
+        pluginId: null,
         result: null,
         error: null,
         status: 'inProgress',

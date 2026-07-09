@@ -6,6 +6,7 @@ import {
   statSync
 } from 'node:fs'
 import { mkdir, rm, writeFile } from 'node:fs/promises'
+import { createRequire } from 'node:module'
 import os from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -61,11 +62,27 @@ const CHAT_RECENT_LIMIT = 5
 const CHAT_RUNTIME_ID_PREFIX = 'chat:'
 const SHARED_RUNTIME_ID = 'codori:shared-app-server'
 const DEFAULT_CHAT_TITLE = 'New Chat'
+const require = createRequire(import.meta.url)
 
-const defaultCommandFactory: CommandFactory = (port) => ({
-  command: process.env.CODORI_CODEX_BIN ?? 'codex',
-  args: ['app-server', '--listen', `ws://127.0.0.1:${port}`]
-})
+export const resolveCodexCommand = (
+  port: number,
+  codexBin = process.env.CODORI_CODEX_BIN
+): ReturnType<CommandFactory> => {
+  const args = ['app-server', '--listen', `ws://127.0.0.1:${port}`]
+  if (codexBin) {
+    return {
+      command: codexBin,
+      args
+    }
+  }
+
+  return {
+    command: process.execPath,
+    args: [require.resolve('@openai/codex/bin/codex.js'), ...args]
+  }
+}
+
+const defaultCommandFactory: CommandFactory = (port) => resolveCodexCommand(port)
 
 const isProcessAlive = (pid: number) => {
   try {

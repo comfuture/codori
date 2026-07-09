@@ -26,7 +26,8 @@ Codori follows a few hard constraints:
 ## Requirements
 
 - Node.js 22+
-- `codex` installed on the host that will run the shared app-server
+
+The server package includes a matching Codex CLI runtime, so a separate host-global `codex` installation is not required. Set `CODORI_CODEX_BIN` to an executable path only when you intentionally want to override the bundled runtime.
 
 ## Usage
 
@@ -165,6 +166,14 @@ Run the client UI in development:
 ```bash
 pnpm --filter @codori/client dev
 ```
+
+Regenerate the app-server protocol bindings with the Codex version pinned by the server package:
+
+```bash
+pnpm generate:codex-types
+```
+
+The script includes experimental protocol bindings because Codori uses `collaborationMode/list`.
 
 Run the client alone against a remote Codori server:
 

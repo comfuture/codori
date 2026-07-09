@@ -5,11 +5,7 @@ import type { ReasoningEffort } from '~~/shared/generated/codex-app-server/Reaso
 import type { CodexRpcNotification } from '~~/shared/codex-rpc'
 import type { ThreadGoal } from '~~/shared/generated/codex-app-server/v2/ThreadGoal'
 import type { ThreadPlanState } from '~~/shared/turn-plan'
-import {
-  FALLBACK_MODELS,
-  type ModelOption,
-  type TokenUsageSnapshot
-} from '~~/shared/chat-prompt-controls'
+import type { ModelOption, TokenUsageSnapshot } from '~~/shared/chat-prompt-controls'
 
 export type ChatStatus = 'ready' | 'submitted' | 'streaming' | 'error'
 
@@ -57,9 +53,11 @@ export type ChatSession = {
   loadVersion: Ref<number>
   promptControlsLoaded: Ref<boolean>
   promptControlsLoading: Ref<boolean>
+  promptControlsError: Ref<string | null>
   availableModels: Ref<ModelOption[]>
   selectedModel: Ref<string>
   selectedEffort: Ref<ReasoningEffort>
+  selectedServiceTier: Ref<string | null>
   modelContextWindow: Ref<number | null>
   tokenUsage: Ref<TokenUsageSnapshot | null>
   latestPlanTurnId: Ref<string | null>
@@ -94,9 +92,11 @@ const createSession = (): ChatSession => {
     loadVersion: ref(0),
     promptControlsLoaded: ref(false),
     promptControlsLoading: ref(false),
-    availableModels: ref(FALLBACK_MODELS) as Ref<ModelOption[]>,
-    selectedModel: ref(FALLBACK_MODELS[0]!.model),
-    selectedEffort: ref(FALLBACK_MODELS[0]!.defaultReasoningEffort),
+    promptControlsError: ref(null) as Ref<string | null>,
+    availableModels: ref([]) as Ref<ModelOption[]>,
+    selectedModel: ref(''),
+    selectedEffort: ref('medium') as Ref<ReasoningEffort>,
+    selectedServiceTier: ref(null) as Ref<string | null>,
     modelContextWindow: ref(null) as Ref<number | null>,
     tokenUsage: ref(null) as Ref<TokenUsageSnapshot | null>,
     latestPlanTurnId: ref(null) as Ref<string | null>,

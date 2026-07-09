@@ -6,7 +6,9 @@ export const FALLBACK_REASONING_EFFORTS = [
   'low',
   'medium',
   'high',
-  'xhigh'
+  'xhigh',
+  'max',
+  'ultra'
 ] as const satisfies readonly ReasoningEffort[]
 
 const HIDDEN_REASONING_EFFORTS = new Set<ReasoningEffort>([
@@ -22,6 +24,14 @@ export type ModelOption = {
   isDefault: boolean
   defaultReasoningEffort: ReasoningEffort
   supportedReasoningEfforts: ReasoningEffort[]
+  serviceTiers: ServiceTierOption[]
+  defaultServiceTier: string | null
+}
+
+export type ServiceTierOption = {
+  id: string
+  name: string
+  description: string
 }
 
 export type TokenUsageSnapshot = {
@@ -57,43 +67,15 @@ type ModelRecord = {
   isDefault?: unknown
   defaultReasoningEffort?: unknown
   supportedReasoningEfforts?: unknown
+  serviceTiers?: unknown
+  defaultServiceTier?: unknown
 }
-
-export const FALLBACK_MODELS: ModelOption[] = [
-  {
-    id: 'gpt-5.4',
-    model: 'gpt-5.4',
-    displayName: 'GPT-5.4',
-    hidden: false,
-    isDefault: true,
-    defaultReasoningEffort: 'medium',
-    supportedReasoningEfforts: [...FALLBACK_REASONING_EFFORTS]
-  },
-  {
-    id: 'gpt-5.4-mini',
-    model: 'gpt-5.4-mini',
-    displayName: 'GPT-5.4 Mini',
-    hidden: false,
-    isDefault: false,
-    defaultReasoningEffort: 'medium',
-    supportedReasoningEfforts: [...FALLBACK_REASONING_EFFORTS]
-  },
-  {
-    id: 'gpt-5.3-codex',
-    model: 'gpt-5.3-codex',
-    displayName: 'GPT-5.3 Codex',
-    hidden: false,
-    isDefault: false,
-    defaultReasoningEffort: 'medium',
-    supportedReasoningEfforts: [...FALLBACK_REASONING_EFFORTS]
-  }
-]
 
 const isObjectRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
 
 const isReasoningEffort = (value: unknown): value is ReasoningEffort =>
-  typeof value === 'string' && FALLBACK_REASONING_EFFORTS.includes(value as ReasoningEffort)
+  typeof value === 'string' && (FALLBACK_REASONING_EFFORTS as readonly string[]).includes(value)
 
 const toFiniteNumber = (value: unknown) => {
   if (typeof value === 'number' && Number.isFinite(value)) {
@@ -129,6 +111,25 @@ const toReasoningEfforts = (value: unknown): ReasoningEffort[] => {
   })
 }
 
+const toServiceTiers = (value: unknown): ServiceTierOption[] => {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value.flatMap((entry) => {
+    const record = isObjectRecord(entry) ? entry : null
+    if (!record || typeof record.id !== 'string' || typeof record.name !== 'string') {
+      return []
+    }
+
+    return [{
+      id: record.id,
+      name: record.name,
+      description: typeof record.description === 'string' ? record.description : ''
+    }]
+  })
+}
+
 const normalizeModel = (value: unknown): ModelOption | null => {
   const record = isObjectRecord(value) ? value as ModelRecord : null
   if (!record || typeof record.model !== 'string') {
@@ -139,6 +140,11 @@ const normalizeModel = (value: unknown): ModelOption | null => {
   const defaultReasoningEffort = isReasoningEffort(record.defaultReasoningEffort)
     ? record.defaultReasoningEffort
     : supportedReasoningEfforts[0] ?? 'medium'
+  const serviceTiers = toServiceTiers(record.serviceTiers)
+  const defaultServiceTier = typeof record.defaultServiceTier === 'string'
+    && serviceTiers.some(tier => tier.id === record.defaultServiceTier)
+    ? record.defaultServiceTier
+    : null
 
   return {
     id: typeof record.id === 'string' ? record.id : record.model,
@@ -151,7 +157,9 @@ const normalizeModel = (value: unknown): ModelOption | null => {
     defaultReasoningEffort,
     supportedReasoningEfforts: supportedReasoningEfforts.length > 0
       ? supportedReasoningEfforts
-      : [...FALLBACK_REASONING_EFFORTS]
+      : [...FALLBACK_REASONING_EFFORTS],
+    serviceTiers,
+    defaultServiceTier
   }
 }
 
@@ -166,32 +174,11 @@ export const normalizeModelList = (value: unknown): ModelOption[] => {
     .map(normalizeModel)
     .filter((entry): entry is ModelOption => entry !== null)
 
-  return models.length > 0 ? models : FALLBACK_MODELS
-}
-
-export const ensureModelOption = (
-  models: ModelOption[],
-  model: string | null | undefined,
-  effort?: ReasoningEffort | null
-) => {
-  if (!model || models.some(entry => entry.model === model)) {
-    return models
-  }
-
-  return [{
-    id: model,
-    model,
-    displayName: model,
-    hidden: false,
-    isDefault: false,
-    defaultReasoningEffort: effort ?? 'medium',
-    supportedReasoningEfforts: [...FALLBACK_REASONING_EFFORTS]
-  }, ...models]
+  return models
 }
 
 export const visibleModelOptions = (models: ModelOption[]) => {
-  const visible = models.filter(model => !model.hidden)
-  return visible.length > 0 ? visible : FALLBACK_MODELS
+  return models.filter(model => !model.hidden)
 }
 
 export const resolveSelectedModel = (
@@ -203,7 +190,7 @@ export const resolveSelectedModel = (
   }
 
   const defaultModel = models.find(model => model.isDefault)?.model
-  return defaultModel ?? models[0]?.model ?? FALLBACK_MODELS[0]!.model
+  return defaultModel ?? models[0]?.model ?? ''
 }
 
 export const resolveEffortOptions = (
@@ -211,9 +198,11 @@ export const resolveEffortOptions = (
   model: string | null | undefined
 ) => {
   const selectedModel = models.find(entry => entry.model === model)
-  const supportedEfforts = selectedModel?.supportedReasoningEfforts.length
-    ? selectedModel.supportedReasoningEfforts
-    : [...FALLBACK_REASONING_EFFORTS]
+  if (!selectedModel) {
+    return []
+  }
+
+  const supportedEfforts = selectedModel.supportedReasoningEfforts
   const selectableEfforts = supportedEfforts.filter(effort => !HIDDEN_REASONING_EFFORTS.has(effort))
   return selectableEfforts.length > 0 ? selectableEfforts : supportedEfforts
 }
@@ -248,6 +237,62 @@ export const coercePromptSelection = (
   }
 }
 
+export const resolveSelectedServiceTier = (
+  models: ModelOption[],
+  model: string | null | undefined,
+  preferredServiceTier?: string | null
+) => {
+  const selectedModel = models.find(entry => entry.model === model)
+  if (!selectedModel) {
+    return null
+  }
+
+  if (preferredServiceTier === null || preferredServiceTier === 'default') {
+    return null
+  }
+
+  if (preferredServiceTier) {
+    const matchedTier = selectedModel.serviceTiers.find(tier =>
+      tier.id === preferredServiceTier
+      || tier.name.toLocaleLowerCase() === preferredServiceTier.toLocaleLowerCase()
+    )
+    if (matchedTier) {
+      return matchedTier.id
+    }
+  }
+
+  return selectedModel.defaultServiceTier
+}
+
+export const isPromptSelectionValid = (
+  models: ModelOption[],
+  model: string | null | undefined,
+  effort: ReasoningEffort | null | undefined,
+  serviceTier: string | null | undefined
+) => {
+  const selectedModel = models.find(entry => entry.model === model)
+  if (!selectedModel || !effort || !resolveEffortOptions(models, model).includes(effort)) {
+    return false
+  }
+
+  return serviceTier == null || selectedModel.serviceTiers.some(tier => tier.id === serviceTier)
+}
+
+export const isPromptControlsReady = (
+  loaded: boolean,
+  models: ModelOption[],
+  model: string | null | undefined,
+  effort: ReasoningEffort | null | undefined,
+  serviceTier: string | null | undefined
+) => loaded && isPromptSelectionValid(models, model, effort, serviceTier)
+
+export const canSubmitToLoadPromptControls = (
+  isChatWorkspace: boolean,
+  workspaceId: string | null | undefined,
+  loading: boolean,
+  error: string | null | undefined
+) => isChatWorkspace && !workspaceId && !loading && !error
+
 export const normalizeConfigDefaults = (value: unknown) => {
   const config = isObjectRecord(value) && isObjectRecord(value.config)
     ? value.config
@@ -268,6 +313,11 @@ export const normalizeConfigDefaults = (value: unknown) => {
       ? activeProfile.model_reasoning_effort
       : isReasoningEffort(config?.model_reasoning_effort)
         ? config.model_reasoning_effort
+        : null,
+    serviceTier: typeof activeProfile?.service_tier === 'string' && activeProfile.service_tier !== 'default'
+      ? activeProfile.service_tier
+      : typeof config?.service_tier === 'string' && config.service_tier !== 'default'
+        ? config.service_tier
         : null,
     contextWindow: toFiniteNumber(config?.model_context_window)
   }
@@ -299,12 +349,16 @@ export const normalizeThreadTokenUsage = (value: unknown): TokenUsageSnapshot | 
 
 export const buildTurnOverrides = (
   model: string | null | undefined,
-  effort: ReasoningEffort | null | undefined
+  effort: ReasoningEffort | null | undefined,
+  serviceTier: string | null | undefined
 ) => {
   const overrides: {
     model?: string
     effort?: ReasoningEffort
-  } = {}
+    serviceTier: string | null
+  } = {
+    serviceTier: serviceTier ?? null
+  }
 
   if (model) {
     overrides.model = model

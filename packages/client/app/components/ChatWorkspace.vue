@@ -33,6 +33,10 @@ import {
 } from '../utils/chat-turn-engagement'
 import { isFocusWithinContainer } from '../utils/slash-prompt-focus'
 import {
+  runAfterPromptControlsReady,
+  withPromptControlsTimeout
+} from '../utils/prompt-controls-readiness'
+import {
   resolveChatScrollPinnedState,
   type ChatScrollMetrics
 } from '../utils/chat-scroll'
@@ -102,14 +106,21 @@ import {
 } from '~~/shared/collaboration-mode'
 import type { ConfigReadParams } from '~~/shared/generated/codex-app-server/v2/ConfigReadParams'
 import type { ConfigReadResponse } from '~~/shared/generated/codex-app-server/v2/ConfigReadResponse'
+import type { ModelListParams } from '~~/shared/generated/codex-app-server/v2/ModelListParams'
 import type { ModelListResponse } from '~~/shared/generated/codex-app-server/v2/ModelListResponse'
 import type { ThreadReadResponse } from '~~/shared/generated/codex-app-server/v2/ThreadReadResponse'
 import type { Thread } from '~~/shared/generated/codex-app-server/v2/Thread'
 import type { ThreadItem } from '~~/shared/generated/codex-app-server/v2/ThreadItem'
 import type { ThreadResumeParams } from '~~/shared/generated/codex-app-server/v2/ThreadResumeParams'
 import type { ThreadResumeResponse } from '~~/shared/generated/codex-app-server/v2/ThreadResumeResponse'
+import type { ThreadStartParams } from '~~/shared/generated/codex-app-server/v2/ThreadStartParams'
 import type { ThreadStartResponse } from '~~/shared/generated/codex-app-server/v2/ThreadStartResponse'
+import type { ThreadSettingsUpdateParams } from '~~/shared/generated/codex-app-server/v2/ThreadSettingsUpdateParams'
+import type { ThreadSettingsUpdateResponse } from '~~/shared/generated/codex-app-server/v2/ThreadSettingsUpdateResponse'
+import type { TurnStartParams } from '~~/shared/generated/codex-app-server/v2/TurnStartParams'
 import type { TurnStartResponse } from '~~/shared/generated/codex-app-server/v2/TurnStartResponse'
+import type { TurnSteerParams } from '~~/shared/generated/codex-app-server/v2/TurnSteerParams'
+import type { TurnSteerResponse } from '~~/shared/generated/codex-app-server/v2/TurnSteerResponse'
 import type { ReasoningEffort } from '~~/shared/generated/codex-app-server/ReasoningEffort'
 import {
   notificationRequestId,
@@ -122,16 +133,18 @@ import {
 } from '~~/shared/codex-rpc'
 import {
   buildTurnOverrides,
+  canSubmitToLoadPromptControls,
   coercePromptSelection,
-  ensureModelOption,
-  FALLBACK_MODELS,
   formatCompactTokenCount,
   formatReasoningEffortLabel,
+  isPromptControlsReady,
+  isPromptSelectionValid,
   normalizeConfigDefaults,
   normalizeModelList,
   normalizeThreadTokenUsage,
   resolveContextWindowState,
   resolveEffortOptions,
+  resolveSelectedServiceTier,
   shouldShowContextWindowIndicator,
   visibleModelOptions
 } from '~~/shared/chat-prompt-controls'
@@ -304,9 +317,11 @@ const {
   loadVersion,
   promptControlsLoaded,
   promptControlsLoading,
+  promptControlsError,
   availableModels,
   selectedModel,
   selectedEffort,
+  selectedServiceTier,
   modelContextWindow,
   tokenUsage,
   latestPlanTurnId,
@@ -399,6 +414,15 @@ const multiAgentMentionError = computed(() =>
     ? 'Send to one agent at a time.'
     : null
 )
+const hasValidPromptControlSelection = computed(() =>
+  isPromptControlsReady(
+    promptControlsLoaded.value,
+    availableModels.value,
+    selectedModel.value,
+    selectedEffort.value,
+    selectedServiceTier.value
+  )
+)
 const composerError = computed(() =>
   attachmentError.value
   ?? multiAgentMentionError.value
@@ -434,17 +458,27 @@ const fileAutocompleteLoading = ref(false)
 const fileAutocompleteError = ref<string | null>(null)
 const fileAutocompleteResults = ref<NormalizedFuzzyFileSearchMatch[]>([])
 const usageStatusModalOpen = ref(false)
+const promptControlsPopoverOpen = ref(false)
 const isWorkflowBusy = computed(() =>
   status.value === 'submitted'
   || status.value === 'streaming'
   || isUploading.value
+)
+const canLoadPromptControlsOnSubmit = computed(() =>
+  canSubmitToLoadPromptControls(
+    isChatSessionWorkspace.value,
+    workspaceScope.value.id,
+    promptControlsLoading.value,
+    promptControlsError.value
+  )
 )
 const hasDraftContent = computed(() =>
   input.value.trim().length > 0
   || attachments.value.length > 0
 )
 const isComposerDisabled = computed(() =>
-  isUploading.value
+  (!hasValidPromptControlSelection.value && !canLoadPromptControlsOnSubmit.value)
+  || isUploading.value
   || interruptRequested.value
   || hasPendingRequest.value
   || reviewStartPending.value
@@ -818,18 +852,10 @@ const starterPrompts = computed(() => {
   ]
 })
 
-const effectiveModelList = computed(() => {
-  const withSelected = ensureModelOption(
-    availableModels.value.length > 0 ? availableModels.value : FALLBACK_MODELS,
-    selectedModel.value,
-    selectedEffort.value
-  )
-  return visibleModelOptions(withSelected)
-})
+const effectiveModelList = computed(() => visibleModelOptions(availableModels.value))
 const selectedModelOption = computed(() =>
   effectiveModelList.value.find(model => model.model === selectedModel.value)
-  ?? effectiveModelList.value[0]
-  ?? FALLBACK_MODELS[0]
+  ?? null
 )
 const modelSelectItems = computed(() =>
   effectiveModelList.value.map(model => ({
@@ -844,6 +870,34 @@ const effortSelectItems = computed(() =>
     value: effort
   }))
 )
+const selectedModelServiceTiers = computed(() => selectedModelOption.value?.serviceTiers ?? [])
+const selectedServiceTierOption = computed(() =>
+  selectedModelServiceTiers.value.find(tier => tier.id === selectedServiceTier.value)
+  ?? null
+)
+const selectedSpeedLabel = computed(() => selectedServiceTierOption.value?.name ?? 'Standard')
+const compactSelectedModelLabel = computed(() =>
+  selectedModelOption.value?.displayName
+    .replace(/^GPT-/, '')
+    .replaceAll('-', ' ')
+  ?? null
+)
+const promptControlsSummary = computed(() => {
+  if (promptControlsLoading.value) {
+    return 'Loading models'
+  }
+  if (!compactSelectedModelLabel.value) {
+    return 'Models unavailable'
+  }
+
+  return `${compactSelectedModelLabel.value} ${formatReasoningEffortLabel(selectedEffort.value)}`
+})
+const promptControlsAriaLabel = computed(() =>
+  `Model settings: ${promptControlsSummary.value}, Speed ${selectedSpeedLabel.value}`
+)
+const toggleSelectedServiceTier = (tierId: string) => {
+  selectedServiceTier.value = selectedServiceTier.value === tierId ? null : tierId
+}
 const contextWindowState = computed(() =>
   resolveContextWindowState(tokenUsage.value, modelContextWindow.value)
 )
@@ -918,15 +972,22 @@ const skillAutocompleteEmptyState = computed(() => {
 
 const normalizePromptSelection = (
   preferredModel?: string | null,
-  preferredEffort?: ReasoningEffort | null
+  preferredEffort?: ReasoningEffort | null,
+  preferredServiceTier?: string | null
 ) => {
-  const withSelected = ensureModelOption(
-    availableModels.value.length > 0 ? availableModels.value : FALLBACK_MODELS,
-    preferredModel ?? selectedModel.value,
-    preferredEffort ?? selectedEffort.value
-  )
-  const visibleModels = visibleModelOptions(withSelected)
+  const visibleModels = visibleModelOptions(availableModels.value)
+  if (visibleModels.length === 0) {
+    selectedModel.value = ''
+    selectedServiceTier.value = null
+    return false
+  }
+
   const nextSelection = coercePromptSelection(visibleModels, preferredModel ?? selectedModel.value, preferredEffort ?? selectedEffort.value)
+  const nextServiceTier = resolveSelectedServiceTier(
+    visibleModels,
+    nextSelection.model,
+    preferredServiceTier === undefined ? selectedServiceTier.value : preferredServiceTier
+  )
 
   availableModels.value = visibleModels
   if (selectedModel.value !== nextSelection.model) {
@@ -935,24 +996,34 @@ const normalizePromptSelection = (
   if (selectedEffort.value !== nextSelection.effort) {
     selectedEffort.value = nextSelection.effort
   }
+  if (selectedServiceTier.value !== nextServiceTier) {
+    selectedServiceTier.value = nextServiceTier
+  }
+
+  return isPromptSelectionValid(
+    visibleModels,
+    nextSelection.model,
+    nextSelection.effort,
+    nextServiceTier
+  )
 }
 
 const syncPromptSelectionFromThread = (
   model: string | null | undefined,
-  effort: ReasoningEffort | null | undefined
+  effort: ReasoningEffort | null | undefined,
+  serviceTier: string | null | undefined
 ) => {
-  normalizePromptSelection(model ?? null, effort ?? null)
+  normalizePromptSelection(model ?? null, effort ?? null, serviceTier ?? null)
 }
 
 const buildThreadResumeParams = (threadId: string): ThreadResumeParams => ({
   threadId,
   cwd: selectedProject.value?.projectPath ?? null,
-  approvalPolicy: 'never',
-  persistExtendedHistory: true
+  approvalPolicy: 'never'
 })
 
-const loadPromptControls = async () => {
-  if (promptControlsLoaded.value) {
+const loadPromptControls = async (options?: { force?: boolean }) => {
+  if (promptControlsLoaded.value && !options?.force) {
     return
   }
 
@@ -961,29 +1032,65 @@ const loadPromptControls = async () => {
   }
 
   promptControlsPromise = (async () => {
+    const initialModel = selectedModel.value
+    const initialEffort = selectedEffort.value
+    const initialServiceTier = selectedServiceTier.value
     promptControlsLoading.value = true
+    promptControlsLoaded.value = false
+    promptControlsError.value = null
+    availableModels.value = []
+    selectedModel.value = ''
+    selectedServiceTier.value = null
 
     try {
       await ensureProjectRuntime()
       const client = getRuntimeClient()
-      const initialModel = selectedModel.value
-      const initialEffort = selectedEffort.value
-      let nextModels = availableModels.value.length > 0 ? availableModels.value : FALLBACK_MODELS
       let defaultModel: string | null = null
       let defaultEffort: ReasoningEffort | null = null
+      let defaultServiceTier: string | null = null
 
       const [modelsResponse, configResponse] = await Promise.allSettled([
-        client.request<ModelListResponse>('model/list'),
-        client.request<ConfigReadResponse>('config/read', {
-          includeLayers: false,
-          cwd: selectedProject.value?.projectPath ?? null
-        } satisfies ConfigReadParams)
+        withPromptControlsTimeout((async () => {
+          const models: ModelListResponse['data'] = []
+          const seenCursors = new Set<string>()
+          let cursor: string | null = null
+
+          do {
+            const response: ModelListResponse = await client.request<ModelListResponse>('model/list', {
+              cursor,
+              limit: 100,
+              includeHidden: false
+            } satisfies ModelListParams)
+            models.push(...response.data)
+
+            if (response.nextCursor && seenCursors.has(response.nextCursor)) {
+              throw new Error('The Codex app-server repeated a model-list cursor.')
+            }
+            if (response.nextCursor) {
+              seenCursors.add(response.nextCursor)
+            }
+            cursor = response.nextCursor
+          } while (cursor)
+
+          return models
+        })(), 'model list'),
+        withPromptControlsTimeout(
+          client.request<ConfigReadResponse>('config/read', {
+            includeLayers: false,
+            cwd: selectedProject.value?.projectPath ?? null
+          } satisfies ConfigReadParams),
+          'configuration',
+          5_000
+        )
       ])
 
-      if (modelsResponse.status === 'fulfilled') {
-        nextModels = visibleModelOptions(normalizeModelList(modelsResponse.value))
-      } else {
-        nextModels = visibleModelOptions(nextModels)
+      if (modelsResponse.status === 'rejected') {
+        throw modelsResponse.reason
+      }
+
+      const nextModels = visibleModelOptions(normalizeModelList(modelsResponse.value))
+      if (nextModels.length === 0) {
+        throw new Error('The Codex app-server returned no selectable models.')
       }
 
       if (configResponse.status === 'fulfilled') {
@@ -993,19 +1100,27 @@ const loadPromptControls = async () => {
         }
         defaultModel = defaults.model
         defaultEffort = defaults.effort
+        defaultServiceTier = defaults.serviceTier
       }
 
       availableModels.value = nextModels
 
-      const preferredModel = selectedModel.value !== initialModel
-        ? selectedModel.value
-        : defaultModel ?? initialModel
-      const preferredEffort = selectedEffort.value !== initialEffort
-        ? selectedEffort.value
-        : defaultEffort ?? initialEffort
+      const preserveExistingSelection = Boolean(initialModel)
+      const preferredModel = preserveExistingSelection ? initialModel : defaultModel
+      const preferredEffort = preserveExistingSelection ? initialEffort : defaultEffort ?? initialEffort
+      const preferredServiceTier = preserveExistingSelection ? initialServiceTier : defaultServiceTier
 
-      normalizePromptSelection(preferredModel, preferredEffort)
+      if (!normalizePromptSelection(preferredModel, preferredEffort, preferredServiceTier)) {
+        throw new Error('The Codex app-server did not provide a valid model selection.')
+      }
       promptControlsLoaded.value = true
+    } catch (caughtError) {
+      availableModels.value = []
+      selectedModel.value = ''
+      selectedServiceTier.value = null
+      const detail = caughtError instanceof Error ? caughtError.message : String(caughtError)
+      promptControlsError.value = `Models are unavailable: ${detail}`
+      throw caughtError
     } finally {
       promptControlsLoading.value = false
       promptControlsPromise = null
@@ -1013,6 +1128,19 @@ const loadPromptControls = async () => {
   })()
 
   return await promptControlsPromise
+}
+
+const retryPromptControls = () => {
+  void loadPromptControls({ force: true }).catch(() => {})
+}
+
+const ensurePromptControlsReady = async () => {
+  if (!hasValidPromptControlSelection.value) {
+    await loadPromptControls()
+  }
+  if (!hasValidPromptControlSelection.value) {
+    throw new Error(promptControlsError.value ?? 'A valid app-server model selection is required.')
+  }
 }
 
 const optimisticAttachmentSnapshots = new Map<string, DraftAttachment[]>()
@@ -2155,6 +2283,15 @@ const markAssistantOutputStartedForItem = (item: ThreadItem) => {
   }
 }
 
+const applySelectedThreadSettings = async (threadId: string) => {
+  await getRuntimeClient().request<ThreadSettingsUpdateResponse>('thread/settings/update', {
+    threadId,
+    model: selectedModel.value,
+    effort: selectedEffort.value,
+    serviceTier: selectedServiceTier.value
+  } satisfies ThreadSettingsUpdateParams)
+}
+
 const restoreDraftIfPristine = (
   text: string,
   submittedAttachments: DraftAttachment[],
@@ -2176,7 +2313,7 @@ const reviewWorkflow = useChatReviewWorkflow({
   input,
   attachments,
   hasPendingRequest,
-  isWorkflowBusy,
+  isWorkflowBusy: computed(() => isWorkflowBusy.value || sendMessageLocked.value),
   supportsGit: supportsWorkspaceGit,
   error,
   status,
@@ -2187,7 +2324,18 @@ const reviewWorkflow = useChatReviewWorkflow({
   clearAttachments,
   restoreDraftIfPristine: (text, submittedAttachments) =>
     restoreDraftIfPristine(text, submittedAttachments),
-  ensurePendingLiveStream,
+  ensurePendingLiveStream: async () => {
+    await ensurePromptControlsReady()
+    if (pendingThreadHydration && shouldAwaitThreadHydration({
+      hasPendingThreadHydration: true,
+      routeThreadId: routeThreadId.value
+    })) {
+      await pendingThreadHydration
+    }
+    const liveStream = await ensurePendingLiveStream()
+    await applySelectedThreadSettings(liveStream.threadId)
+    return liveStream
+  },
   getClient: () => getRuntimeClient(),
   lockLiveStreamTurnId,
   replayBufferedNotifications,
@@ -2403,8 +2551,8 @@ const submitTurnStart = async (input: {
     cwd: selectedProject.value?.projectPath ?? null,
     approvalPolicy: 'never',
     collaborationMode,
-    ...buildTurnOverrides(selectedModel.value, selectedEffort.value)
-  })
+    ...buildTurnOverrides(selectedModel.value, selectedEffort.value, selectedServiceTier.value)
+  } satisfies TurnStartParams)
 
   tokenUsage.value = null
   setLiveStreamTurnId(liveStream, turnStart.turn.id)
@@ -2428,12 +2576,11 @@ const sendMentionedAgentMessage = async (input: {
 
   if (currentTurnId) {
     try {
-      await client.request<TurnStartResponse>('turn/steer', {
+      await client.request<TurnSteerResponse>('turn/steer', {
         threadId,
         expectedTurnId: currentTurnId,
-        input: buildTurnStartInput(text, uploadedAttachments, additionalInput),
-        ...buildTurnOverrides(selectedModel.value, selectedEffort.value)
-      })
+        input: buildTurnStartInput(text, uploadedAttachments, additionalInput)
+      } satisfies TurnSteerParams)
       return
     } catch (caughtError) {
       const errorToHandle = caughtError instanceof Error ? caughtError : new Error(String(caughtError))
@@ -2448,8 +2595,8 @@ const sendMentionedAgentMessage = async (input: {
     input: buildTurnStartInput(text, uploadedAttachments, additionalInput),
     cwd: selectedProject.value?.projectPath ?? null,
     approvalPolicy: 'never',
-    ...buildTurnOverrides(selectedModel.value, selectedEffort.value)
-  })
+    ...buildTurnOverrides(selectedModel.value, selectedEffort.value, selectedServiceTier.value)
+  } satisfies TurnStartParams)
 
   upsertSubagentPanel(threadId, (panel) => ({
     ...(panel ?? createSubagentPanelState(threadId)),
@@ -2628,6 +2775,7 @@ const hydrateThread = async (threadId: string) => {
 
     try {
       await ensureProjectRuntime()
+      await ensurePromptControlsReady()
       const client = getRuntimeClient()
       activeThreadId.value = threadId
 
@@ -2656,7 +2804,8 @@ const hydrateThread = async (threadId: string) => {
 
       syncPromptSelectionFromThread(
         resumeResponse.model ?? null,
-        (resumeResponse.reasoningEffort as ReasoningEffort | null | undefined) ?? null
+        (resumeResponse.reasoningEffort as ReasoningEffort | null | undefined) ?? null,
+        resumeResponse.serviceTier ?? null
       )
       refreshWorkspaceGitBranchesInBackground('thread/resume')
       syncThreadSnapshot(response.thread)
@@ -2789,6 +2938,7 @@ const syncActiveThreadAfterReactivation = (reason: ThreadReactivationReason) => 
   const syncPromise = (async () => {
     try {
       await ensureProjectRuntime()
+      await ensurePromptControlsReady()
       await ensureObservedThreadSubscription()
 
       const { resumeResponse, readResponse } = await resumeThreadStreamAfterReactivation(
@@ -2801,7 +2951,8 @@ const syncActiveThreadAfterReactivation = (reason: ThreadReactivationReason) => 
 
       syncPromptSelectionFromThread(
         resumeResponse.model ?? null,
-        (resumeResponse.reasoningEffort as ReasoningEffort | null | undefined) ?? null
+        (resumeResponse.reasoningEffort as ReasoningEffort | null | undefined) ?? null,
+        resumeResponse.serviceTier ?? null
       )
       refreshWorkspaceGitBranchesInBackground('thread/resume')
       syncThreadSnapshot(readResponse.thread)
@@ -2904,14 +3055,17 @@ const ensureThread = async () => {
     }
   }
 
+  await ensurePromptControlsReady()
+
   await ensureProjectRuntime()
   const client = getRuntimeClient()
   const response = await client.request<ThreadStartResponse>('thread/start', {
+    model: selectedModel.value,
+    serviceTier: selectedServiceTier.value,
     cwd: selectedProject.value?.projectPath ?? null,
     approvalPolicy: 'never',
-    experimentalRawEvents: false,
-    persistExtendedHistory: true
-  })
+    experimentalRawEvents: false
+  } satisfies ThreadStartParams)
 
   activeThreadId.value = response.thread.id
   refreshWorkspaceGitBranchesInBackground('thread/start')
@@ -3083,6 +3237,8 @@ const fallbackMcpToolMessage = (itemId: string): ChatMessage => ({
         server: 'mcp',
         tool: 'tool',
         arguments: null,
+        appContext: null,
+        pluginId: null,
         result: null,
         error: null,
         status: 'inProgress',
@@ -3554,11 +3710,17 @@ const sendMessage = async () => {
     return
   }
 
-  if (sendMessageLocked.value || hasPendingRequest.value) {
+  if (sendMessageLocked.value || hasPendingRequest.value || reviewStartPending.value) {
     return
   }
 
   sendMessageLocked.value = true
+  try {
+    await ensurePromptControlsReady()
+  } catch {
+    sendMessageLocked.value = false
+    return
+  }
   refreshWorkspaceGitBranchesInBackground('submit')
   const rawText = input.value
   const submittedAttachments = attachments.value.slice()
@@ -3684,12 +3846,11 @@ const sendMessage = async () => {
           uploadedAttachments = await uploadAttachments(liveStream.threadId, submittedAttachments)
           const turnId = await waitForLiveStreamTurnId(liveStream)
 
-          await client.request<TurnStartResponse>('turn/steer', {
+          await client.request<TurnSteerResponse>('turn/steer', {
             threadId: liveStream.threadId,
             expectedTurnId: turnId,
-            input: buildTurnStartInput(text, uploadedAttachments, submittedMentionInput.pluginInput),
-            ...buildTurnOverrides(selectedModel.value, selectedEffort.value)
-          })
+            input: buildTurnStartInput(text, uploadedAttachments, submittedMentionInput.pluginInput)
+          } satisfies TurnSteerParams)
           tokenUsage.value = null
         } catch (caughtError) {
           const errorToHandle = caughtError instanceof Error ? caughtError : new Error(String(caughtError))
@@ -3719,7 +3880,10 @@ const sendMessage = async () => {
         return
       }
 
-      const liveStream = await ensurePendingLiveStream()
+      const liveStream = await runAfterPromptControlsReady(
+        ensurePromptControlsReady,
+        ensurePendingLiveStream
+      )
       startedLiveStream = liveStream
       updateThreadTitleFromUserInput(liveStream.threadId, text)
       await submitTurnStart({
@@ -4047,7 +4211,7 @@ onMounted(() => {
   }
 
   if (ensureRuntimeSubscriptions()) {
-    void loadPromptControls()
+    void loadPromptControls().catch(() => {})
   }
   refreshWorkspaceGitBranchesInBackground('mount')
   void scheduleScrollToBottom('auto')
@@ -4310,6 +4474,12 @@ watch(
 )
 
 watch([selectedModel, availableModels], () => {
+  if (effectiveModelList.value.length === 0) {
+    selectedModel.value = ''
+    selectedServiceTier.value = null
+    return
+  }
+
   const nextSelection = coercePromptSelection(effectiveModelList.value, selectedModel.value, selectedEffort.value)
   if (selectedModel.value !== nextSelection.model) {
     selectedModel.value = nextSelection.model
@@ -4318,6 +4488,15 @@ watch([selectedModel, availableModels], () => {
 
   if (selectedEffort.value !== nextSelection.effort) {
     selectedEffort.value = nextSelection.effort
+  }
+
+  const nextServiceTier = resolveSelectedServiceTier(
+    effectiveModelList.value,
+    nextSelection.model,
+    selectedServiceTier.value
+  )
+  if (selectedServiceTier.value !== nextServiceTier) {
+    selectedServiceTier.value = nextServiceTier
   }
 }, { flush: 'sync' })
 
@@ -4586,7 +4765,8 @@ watch(
               v-for="prompt in starterPrompts"
               :key="prompt.title"
               type="button"
-              class="rounded-3xl border border-default/70 bg-elevated/25 px-5 py-5 text-left transition hover:border-primary/30 hover:bg-elevated/45"
+              :disabled="isComposerDisabled"
+              class="rounded-3xl border border-default/70 bg-elevated/25 px-5 py-5 text-left transition enabled:hover:border-primary/30 enabled:hover:bg-elevated/45 disabled:cursor-not-allowed disabled:opacity-50"
               @click="sendStarterPrompt(prompt.text)"
             >
               <div class="text-sm font-semibold text-highlighted">
@@ -4686,6 +4866,26 @@ watch(
           :title="composerError"
           class="mb-3"
         />
+
+        <div
+          v-if="promptControlsError"
+          class="mb-3 flex items-center gap-3 rounded-xl border border-error/30 bg-error/10 px-3 py-2 text-sm text-error"
+        >
+          <UIcon
+            name="i-lucide-circle-alert"
+            class="size-4 shrink-0"
+          />
+          <span class="min-w-0 flex-1">{{ promptControlsError }}</span>
+          <UButton
+            type="button"
+            color="error"
+            variant="soft"
+            size="xs"
+            label="Retry models"
+            :loading="promptControlsLoading"
+            @click="retryPromptControls"
+          />
+        </div>
 
         <div
           v-if="pendingRequest"
@@ -5024,28 +5224,116 @@ watch(
                     @click="openFilePicker"
                   />
 
-                  <USelect
-                    v-model="selectedModel"
-                    :items="modelSelectItems"
-                    color="neutral"
-                    variant="ghost"
-                    size="sm"
-                    :loading="promptControlsLoading"
-                    :disabled="isComposerDisabled"
-                    class="min-w-0 flex-1 sm:max-w-52 sm:flex-none"
-                    :ui="{ base: 'rounded-full border border-default/70 bg-default/70', value: 'truncate', content: 'min-w-56' }"
-                  />
+                  <UPopover
+                    v-model:open="promptControlsPopoverOpen"
+                    :content="{ side: 'top', align: 'start' }"
+                  >
+                    <UButton
+                      type="button"
+                      color="neutral"
+                      variant="ghost"
+                      size="sm"
+                      :disabled="!hasValidPromptControlSelection || isComposerDisabled"
+                      :aria-expanded="promptControlsPopoverOpen"
+                      :aria-label="promptControlsAriaLabel"
+                      class="min-w-0 max-w-64 rounded-full border border-default/70 bg-default/70"
+                    >
+                      <UIcon
+                        v-if="selectedServiceTier"
+                        name="i-lucide-zap"
+                        class="size-3.5 shrink-0 text-primary"
+                      />
+                      <span class="truncate">{{ promptControlsSummary }}</span>
+                      <UIcon
+                        name="i-lucide-chevron-down"
+                        class="size-3.5 shrink-0 text-muted"
+                      />
+                    </UButton>
 
-                  <USelect
-                    v-model="selectedEffort"
-                    :items="effortSelectItems"
-                    color="neutral"
-                    variant="ghost"
-                    size="sm"
-                    :disabled="isComposerDisabled"
-                    class="min-w-0 flex-1 sm:max-w-36 sm:flex-none"
-                    :ui="{ base: 'rounded-full border border-default/70 bg-default/70', value: 'truncate' }"
-                  />
+                    <template #content>
+                      <div class="w-[calc(100vw-1rem)] max-w-80 space-y-4 p-4">
+                        <div class="grid grid-cols-[4.5rem_1fr] items-center gap-3">
+                          <label
+                            for="chat-model-select"
+                            class="text-xs font-medium text-muted"
+                          >Model</label>
+                          <USelect
+                            id="chat-model-select"
+                            v-model="selectedModel"
+                            :items="modelSelectItems"
+                            aria-label="Model"
+                            color="neutral"
+                            variant="outline"
+                            size="sm"
+                            class="min-w-0"
+                            :ui="{ value: 'truncate' }"
+                          />
+                        </div>
+
+                        <div class="grid grid-cols-[4.5rem_1fr] items-center gap-3">
+                          <label
+                            for="chat-effort-select"
+                            class="text-xs font-medium text-muted"
+                          >Effort</label>
+                          <USelect
+                            id="chat-effort-select"
+                            v-model="selectedEffort"
+                            :items="effortSelectItems"
+                            aria-label="Effort"
+                            color="neutral"
+                            variant="outline"
+                            size="sm"
+                            class="min-w-0"
+                          />
+                        </div>
+
+                        <div class="grid grid-cols-[4.5rem_1fr] items-start gap-3">
+                          <span
+                            id="chat-speed-label"
+                            class="pt-1.5 text-xs font-medium text-muted"
+                          >Speed</span>
+                          <div
+                            role="group"
+                            aria-labelledby="chat-speed-label"
+                            class="flex min-w-0 flex-wrap gap-2"
+                          >
+                            <UButton
+                              type="button"
+                              color="neutral"
+                              :variant="selectedServiceTier === null ? 'soft' : 'ghost'"
+                              size="xs"
+                              label="Standard"
+                              :aria-pressed="selectedServiceTier === null"
+                              class="rounded-full border border-default/70"
+                              @click="selectedServiceTier = null"
+                            />
+                            <UTooltip
+                              v-for="tier in selectedModelServiceTiers"
+                              :key="tier.id"
+                              :text="tier.description || tier.name"
+                            >
+                              <UButton
+                                type="button"
+                                color="primary"
+                                :variant="selectedServiceTier === tier.id ? 'soft' : 'ghost'"
+                                size="xs"
+                                :label="tier.name"
+                                :aria-pressed="selectedServiceTier === tier.id"
+                                class="rounded-full border border-default/70"
+                                @click="toggleSelectedServiceTier(tier.id)"
+                              />
+                            </UTooltip>
+                            <span
+                              v-if="selectedModelServiceTiers.length === 0"
+                              class="self-center text-xs text-muted"
+                            >
+                              No accelerated tier for this model
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </template>
+                  </UPopover>
 
                   <WorkspaceBranchControl
                     v-if="showWorkspaceBranchControl"
