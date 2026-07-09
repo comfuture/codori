@@ -47,6 +47,7 @@ import {
   normalizeConfigDefaults,
   normalizeModelList,
   normalizeThreadTokenUsage,
+  parseModelListPage,
   resolveContextWindowState,
   resolveSelectedServiceTier,
   shouldShowContextWindowIndicator,
@@ -834,6 +835,25 @@ describe('client package', () => {
     expect(canSubmitToLoadPromptControls(true, '', true, null)).toBe(false)
     expect(canSubmitToLoadPromptControls(true, '', false, 'Models are unavailable')).toBe(false)
     expect(canSubmitToLoadPromptControls(false, '', false, null)).toBe(false)
+  })
+
+  it('validates model-list pages at the app-server boundary', () => {
+    expect(parseModelListPage({
+      data: [{ model: 'gpt-5.6-sol' }],
+      nextCursor: 'next-page'
+    })).toEqual({
+      data: [{ model: 'gpt-5.6-sol' }],
+      nextCursor: 'next-page'
+    })
+    expect(() => parseModelListPage(undefined)).toThrow(
+      'The Codex app-server returned an invalid model-list response.'
+    )
+    expect(() => parseModelListPage({ data: null })).toThrow(
+      'The Codex app-server returned an invalid model-list response.'
+    )
+    expect(() => parseModelListPage({ data: [], nextCursor: 42 })).toThrow(
+      'The Codex app-server returned an invalid model-list cursor.'
+    )
   })
 
   it('keeps the complete 5.6 model family returned by app-server selectable', () => {

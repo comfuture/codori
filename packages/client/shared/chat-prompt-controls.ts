@@ -74,6 +74,21 @@ type ModelRecord = {
 const isObjectRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
 
+export const parseModelListPage = (value: unknown) => {
+  if (!isObjectRecord(value) || !Array.isArray(value.data)) {
+    throw new Error('The Codex app-server returned an invalid model-list response.')
+  }
+
+  if (value.nextCursor != null && typeof value.nextCursor !== 'string') {
+    throw new Error('The Codex app-server returned an invalid model-list cursor.')
+  }
+
+  return {
+    data: value.data,
+    nextCursor: value.nextCursor ?? null
+  }
+}
+
 const isReasoningEffort = (value: unknown): value is ReasoningEffort =>
   typeof value === 'string' && (FALLBACK_REASONING_EFFORTS as readonly string[]).includes(value)
 
