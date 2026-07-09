@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
+  hasPromptSubmissionContent,
+  resolvePromptControlsReadinessError,
   runAfterPromptControlsReady,
+  runThreadHydrationWithoutPromptControlsGate,
   withPromptControlsTimeout
 } from '../app/utils/prompt-controls-readiness'
 
@@ -80,6 +83,58 @@ describe('prompt controls readiness gate', () => {
     )).rejects.toThrow('model/list unavailable')
 
     expect(request.mock.calls.map(([method]) => method)).toEqual(['model/list'])
+  })
+
+  it('hydrates an existing transcript without waiting for prompt controls', async () => {
+    const promptControls = deferred<void>()
+    const syncPromptSelection = vi.fn()
+    const hydrateThread = vi.fn(async () => ({ threadId: 'thread-1' }))
+    const hydration = runThreadHydrationWithoutPromptControlsGate(
+      async () => await promptControls.promise,
+      hydrateThread,
+      syncPromptSelection
+    )
+
+    await expect(hydration).resolves.toEqual({
+      threadId: 'thread-1'
+    })
+    expect(hydrateThread).toHaveBeenCalledOnce()
+    expect(syncPromptSelection).not.toHaveBeenCalled()
+
+    promptControls.resolve()
+    await vi.waitFor(() => {
+      expect(syncPromptSelection).toHaveBeenCalledOnce()
+    })
+  })
+
+  it('keeps a prompt-control failure out of existing transcript hydration', async () => {
+    const syncPromptSelection = vi.fn()
+
+    await expect(runThreadHydrationWithoutPromptControlsGate(
+      async () => {
+        throw new Error('model/list unavailable')
+      },
+      async () => ({ threadId: 'thread-1' }),
+      syncPromptSelection
+    )).resolves.toEqual({ threadId: 'thread-1' })
+    await Promise.resolve()
+
+    expect(syncPromptSelection).not.toHaveBeenCalled()
+  })
+
+  it('keeps empty submissions out of prompt-control loading', () => {
+    expect(hasPromptSubmissionContent('   ', 0)).toBe(false)
+    expect(hasPromptSubmissionContent('hello', 0)).toBe(true)
+    expect(hasPromptSubmissionContent('', 1)).toBe(true)
+  })
+
+  it('provides a visible fallback when a loaded selection becomes invalid', () => {
+    expect(resolvePromptControlsReadinessError(null)).toBe(
+      'A valid app-server model selection is required.'
+    )
+    expect(resolvePromptControlsReadinessError('Models are unavailable')).toBe(
+      'Models are unavailable'
+    )
   })
 
   it('releases the submission gate when model/list never responds', async () => {

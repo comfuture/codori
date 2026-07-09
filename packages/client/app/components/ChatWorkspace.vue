@@ -33,7 +33,10 @@ import {
 } from '../utils/chat-turn-engagement'
 import { isFocusWithinContainer } from '../utils/slash-prompt-focus'
 import {
+  hasPromptSubmissionContent,
+  resolvePromptControlsReadinessError,
   runAfterPromptControlsReady,
+  runThreadHydrationWithoutPromptControlsGate,
   withPromptControlsTimeout
 } from '../utils/prompt-controls-readiness'
 import {
@@ -107,7 +110,6 @@ import {
 import type { ConfigReadParams } from '~~/shared/generated/codex-app-server/v2/ConfigReadParams'
 import type { ConfigReadResponse } from '~~/shared/generated/codex-app-server/v2/ConfigReadResponse'
 import type { ModelListParams } from '~~/shared/generated/codex-app-server/v2/ModelListParams'
-import type { ModelListResponse } from '~~/shared/generated/codex-app-server/v2/ModelListResponse'
 import type { ThreadReadResponse } from '~~/shared/generated/codex-app-server/v2/ThreadReadResponse'
 import type { Thread } from '~~/shared/generated/codex-app-server/v2/Thread'
 import type { ThreadItem } from '~~/shared/generated/codex-app-server/v2/ThreadItem'
@@ -142,6 +144,7 @@ import {
   normalizeConfigDefaults,
   normalizeModelList,
   normalizeThreadTokenUsage,
+  parseModelListPage,
   resolveContextWindowState,
   resolveEffortOptions,
   resolveSelectedServiceTier,
@@ -1051,16 +1054,16 @@ const loadPromptControls = async (options?: { force?: boolean }) => {
 
       const [modelsResponse, configResponse] = await Promise.allSettled([
         withPromptControlsTimeout((async () => {
-          const models: ModelListResponse['data'] = []
+          const models: unknown[] = []
           const seenCursors = new Set<string>()
           let cursor: string | null = null
 
           do {
-            const response: ModelListResponse = await client.request<ModelListResponse>('model/list', {
+            const response = parseModelListPage(await client.request<unknown>('model/list', {
               cursor,
               limit: 100,
               includeHidden: false
-            } satisfies ModelListParams)
+            } satisfies ModelListParams))
             models.push(...response.data)
 
             if (response.nextCursor && seenCursors.has(response.nextCursor)) {
@@ -1139,7 +1142,9 @@ const ensurePromptControlsReady = async () => {
     await loadPromptControls()
   }
   if (!hasValidPromptControlSelection.value) {
-    throw new Error(promptControlsError.value ?? 'A valid app-server model selection is required.')
+    const readinessError = resolvePromptControlsReadinessError(promptControlsError.value)
+    promptControlsError.value = readinessError
+    throw new Error(readinessError)
   }
 }
 
@@ -2775,7 +2780,6 @@ const hydrateThread = async (threadId: string) => {
 
     try {
       await ensureProjectRuntime()
-      await ensurePromptControlsReady()
       const client = getRuntimeClient()
       activeThreadId.value = threadId
 
@@ -2792,21 +2796,33 @@ const hydrateThread = async (threadId: string) => {
         setSessionLiveStream(nextLiveStream)
       }
 
-      const resumeResponse = await client.request<ThreadResumeResponse>('thread/resume', buildThreadResumeParams(threadId))
-      const response = await client.request<ThreadReadResponse>('thread/read', {
-        threadId,
-        includeTurns: true
-      })
+      const { resumeResponse, response } = await runThreadHydrationWithoutPromptControlsGate(
+        ensurePromptControlsReady,
+        async () => {
+          const resumeResponse = await client.request<ThreadResumeResponse>('thread/resume', buildThreadResumeParams(threadId))
+          const response = await client.request<ThreadReadResponse>('thread/read', {
+            threadId,
+            includeTurns: true
+          })
+          return { resumeResponse, response }
+        },
+        ({ resumeResponse }) => {
+          if (loadVersion.value !== requestVersion || activeThreadId.value !== threadId) {
+            return
+          }
+
+          syncPromptSelectionFromThread(
+            resumeResponse.model ?? null,
+            (resumeResponse.reasoningEffort as ReasoningEffort | null | undefined) ?? null,
+            resumeResponse.serviceTier ?? null
+          )
+        }
+      )
 
       if (loadVersion.value !== requestVersion) {
         return
       }
 
-      syncPromptSelectionFromThread(
-        resumeResponse.model ?? null,
-        (resumeResponse.reasoningEffort as ReasoningEffort | null | undefined) ?? null,
-        resumeResponse.serviceTier ?? null
-      )
       refreshWorkspaceGitBranchesInBackground('thread/resume')
       syncThreadSnapshot(response.thread)
       markAwaitingAssistantOutput(false)
@@ -2938,22 +2954,30 @@ const syncActiveThreadAfterReactivation = (reason: ThreadReactivationReason) => 
   const syncPromise = (async () => {
     try {
       await ensureProjectRuntime()
-      await ensurePromptControlsReady()
       await ensureObservedThreadSubscription()
 
-      const { resumeResponse, readResponse } = await resumeThreadStreamAfterReactivation(
-        client,
-        buildThreadResumeParams(threadId)
+      const { resumeResponse, readResponse } = await runThreadHydrationWithoutPromptControlsGate(
+        ensurePromptControlsReady,
+        async () => await resumeThreadStreamAfterReactivation(
+          client,
+          buildThreadResumeParams(threadId)
+        ),
+        ({ resumeResponse }) => {
+          if (activeThreadId.value !== threadId) {
+            return
+          }
+
+          syncPromptSelectionFromThread(
+            resumeResponse.model ?? null,
+            (resumeResponse.reasoningEffort as ReasoningEffort | null | undefined) ?? null,
+            resumeResponse.serviceTier ?? null
+          )
+        }
       )
       if (activeThreadId.value !== threadId) {
         return
       }
 
-      syncPromptSelectionFromThread(
-        resumeResponse.model ?? null,
-        (resumeResponse.reasoningEffort as ReasoningEffort | null | undefined) ?? null,
-        resumeResponse.serviceTier ?? null
-      )
       refreshWorkspaceGitBranchesInBackground('thread/resume')
       syncThreadSnapshot(readResponse.thread)
       markAwaitingAssistantOutput(false)
@@ -3711,6 +3735,10 @@ const sendMessage = async () => {
   }
 
   if (sendMessageLocked.value || hasPendingRequest.value || reviewStartPending.value) {
+    return
+  }
+
+  if (!hasPromptSubmissionContent(input.value, attachments.value.length)) {
     return
   }
 
