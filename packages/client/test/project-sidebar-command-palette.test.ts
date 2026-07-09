@@ -9,7 +9,7 @@ import {
   resolveProjectThreadSummaryKey,
   useThreadSummaries
 } from '../app/composables/useThreadSummaries'
-import type { ProjectRecord } from '../shared/codori'
+import type { ChatSessionRecord, ProjectRecord } from '../shared/codori'
 import type { ThreadListResponse } from '../shared/generated/codex-app-server/v2/ThreadListResponse'
 
 const mockRoute = reactive({
@@ -23,7 +23,7 @@ const mockGetClient = vi.fn()
 const mockRpcRequest = vi.fn()
 const mockOpenPanel = vi.fn()
 const mockProjects = ref<ProjectRecord[]>([])
-const mockChats = ref([])
+const mockChats = ref<ChatSessionRecord[]>([])
 const mockProjectsLoaded = ref(true)
 const mockProjectsLoading = ref(false)
 
@@ -93,6 +93,9 @@ const ButtonStub = defineComponent({
     return () => h('button', {
       type: 'button',
       'aria-label': ariaLabel(),
+      'data-icon': String(attrs.icon ?? ''),
+      'data-color': String(attrs.color ?? ''),
+      'data-variant': String(attrs.variant ?? ''),
       onClick: (event: MouseEvent) => emit('click', event)
     }, [
       slots.default?.() ?? props.label,
@@ -130,21 +133,44 @@ const NavigationMenuStub = defineComponent({
     }
   },
   setup(props, { slots }) {
-    const flattenItems = () => (props.items as unknown[])
-      .flatMap(group => Array.isArray(group) ? group : [group])
-      .filter(Boolean) as Array<Record<string, unknown>>
+    const flattenNavigationItems = (
+      items: unknown[],
+      depth = 0
+    ): Array<{ item: Record<string, unknown>, depth: number }> =>
+      items
+        .flatMap((entry) => {
+          const groupItems = Array.isArray(entry) ? entry : [entry]
+          return groupItems.flatMap((item) => {
+            if (!item || typeof item !== 'object') {
+              return []
+            }
+            const navigationItem = item as Record<string, unknown>
+            const children = Array.isArray(navigationItem.children)
+              ? flattenNavigationItems(navigationItem.children, depth + 1)
+              : []
+            return [{
+              item: navigationItem,
+              depth
+            }, ...children]
+          })
+        })
 
-    return () => h('nav', { class: 'navigation-menu-stub' }, flattenItems().map((item) => {
+    return () => h('nav', { class: 'navigation-menu-stub' }, flattenNavigationItems(props.items as unknown[]).map(({ item, depth }) => {
       const children = [
         h('span', { class: 'navigation-menu-icon' }, String(item.icon ?? '')),
         slots['item-label']?.({ item }) ?? h('span', String(item.label ?? '')),
         slots['item-trailing']?.({ item })
       ]
       const baseAttrs = {
-        class: ['navigation-menu-item', item.itemKind ? `navigation-menu-item-${String(item.itemKind)}` : ''],
+        class: [
+          'navigation-menu-item',
+          item.itemKind ? `navigation-menu-item-${String(item.itemKind)}` : '',
+          item.class
+        ],
         'data-kind': String(item.itemKind ?? ''),
         'data-label': String(item.label ?? ''),
         'data-to': String(item.to ?? ''),
+        'data-depth': String(depth),
         'data-active': item.active ? 'true' : 'false',
         onClick: (event: MouseEvent) => {
           const onSelect = item.onSelect
@@ -188,6 +214,28 @@ const makeThread = (index: number) => ({
   preview: null,
   updatedAt: 1_000 - index
 })
+
+const makeChat = (input: Partial<ChatSessionRecord> & Pick<ChatSessionRecord, 'chatId'>): ChatSessionRecord => {
+  const { chatId, ...rest } = input
+  return {
+    chatId,
+    chatPath: `/chats/${chatId}`,
+    threadId: null,
+    title: null,
+    createdAt: 1,
+    updatedAt: null,
+    status: 'running',
+    pid: 101,
+    port: 46000,
+    startedAt: 1,
+    lastActivityAt: 1,
+    activeSessionCount: 0,
+    idleTimeoutMs: null,
+    idleDeadlineAt: null,
+    error: null,
+    ...rest
+  }
+}
 
 const makeThreadListResponse = (
   count: number,
@@ -287,7 +335,7 @@ describe('project sidebar command palette trigger', () => {
     platformSpy.mockRestore()
   })
 
-  it('renders an input-like expanded search trigger before project action buttons', async () => {
+  it('renders search first and keeps add project in the projects section', async () => {
     const wrapper = mountSidebar({
       collapsed: false
     })
@@ -297,8 +345,14 @@ describe('project sidebar command palette trigger', () => {
     expect(wrapper.text()).toContain('K')
 
     const actionLabels = wrapper.findAll('button').map(button => button.attributes('aria-label') ?? button.text())
-    expect(actionLabels.indexOf('Search Codori')).toBeLessThan(actionLabels.indexOf('Add project'))
-    expect(actionLabels.indexOf('Add project')).toBeLessThan(actionLabels.indexOf('Refresh projects'))
+    expect(actionLabels.indexOf('Search Codori')).toBeLessThan(actionLabels.indexOf('New Chat'))
+    expect(actionLabels.indexOf('New Chat')).toBeLessThan(actionLabels.indexOf('Add project'))
+    expect(actionLabels).not.toContain('Refresh projects')
+
+    const addProject = wrapper.get('button[aria-label="Add project"]')
+    expect(addProject.attributes('data-icon')).toBe('i-lucide-folder-plus')
+    expect(addProject.attributes('data-color')).toBe('primary')
+    expect(addProject.attributes('data-variant')).toBe('soft')
 
     await wrapper.get('button[aria-label="Search Codori"]').trigger('click')
 
@@ -321,10 +375,48 @@ describe('project sidebar command palette trigger', () => {
     })
 
     expect(wrapper.text()).not.toContain('Search')
+    expect(wrapper.text()).toContain('⌘')
+    expect(wrapper.text()).toContain('K')
 
     await wrapper.get('button[aria-label="Search Codori"]').trigger('click')
 
     expect(wrapper.emitted('openCommandPalette')).toHaveLength(1)
+  })
+
+  it('emphasizes the active chat row', async () => {
+    mockRoute.params = {
+      chatId: 'chat-a'
+    }
+    mockChats.value = [
+      makeChat({
+        chatId: 'chat-a',
+        title: 'Chat A'
+      }),
+      makeChat({
+        chatId: 'chat-b',
+        title: 'Chat B'
+      })
+    ]
+
+    const wrapper = mountSidebar({
+      collapsed: false
+    })
+    await waitForSidebar()
+
+    const chatRoot = wrapper.get('[data-kind="chat-root"]')
+    const activeChat = wrapper.get('[data-to="/chats/chat-a"]')
+    const inactiveChat = wrapper.get('[data-to="/chats/chat-b"]')
+    expect(chatRoot.attributes('data-depth')).toBe('0')
+    expect(chatRoot.text()).toContain('Projectless Chats')
+    expect(chatRoot.text()).toContain('2')
+    expect(activeChat.attributes('data-depth')).toBe('1')
+    expect(activeChat.attributes('data-active')).toBe('true')
+    expect(activeChat.classes()).toContain('before:bg-primary/5')
+    expect(activeChat.classes()).not.toContain('ring-1')
+    expect(activeChat.classes()).not.toContain('shadow-sm')
+    expect(inactiveChat.attributes('data-depth')).toBe('1')
+    expect(inactiveChat.attributes('data-active')).toBe('false')
+    expect(inactiveChat.classes()).not.toContain('before:bg-primary/5')
   })
 })
 
@@ -382,7 +474,19 @@ describe('project sidebar inline threads', () => {
 
     const threadLink = wrapper.get('[data-kind="thread"][data-to="/projects/codori/threads/thread-1"]')
     expect(threadLink.text()).toContain('Thread 1')
+    expect(threadLink.attributes('data-depth')).toBe('1')
     expect(wrapper.find('[data-kind="thread"][data-to="/projects/other/threads/thread-1"]').exists()).toBe(false)
+
+    const activeProject = wrapper.get('[data-kind="project"][data-to="/projects/codori"]')
+    const inactiveProject = wrapper.get('[data-kind="project"][data-to="/projects/other"]')
+    expect(activeProject.attributes('data-depth')).toBe('0')
+    expect(activeProject.attributes('data-active')).toBe('true')
+    expect(activeProject.classes()).toContain('before:bg-primary/5')
+    expect(activeProject.classes()).not.toContain('ring-1')
+    expect(activeProject.classes()).not.toContain('shadow-sm')
+    expect(inactiveProject.attributes('data-depth')).toBe('0')
+    expect(inactiveProject.attributes('data-active')).toBe('false')
+    expect(inactiveProject.classes()).not.toContain('before:bg-primary/5')
     expect(mockGetClient).toHaveBeenCalledTimes(1)
     expect(mockGetClient).toHaveBeenCalledWith('codori')
     expect(mockRpcRequest).toHaveBeenCalledWith('thread/list', {
@@ -410,6 +514,35 @@ describe('project sidebar inline threads', () => {
     await wrapper.get('[data-kind="more"]').trigger('click')
 
     expect(mockOpenPanel).toHaveBeenCalledTimes(1)
+  })
+
+  it('emphasizes the active inline thread row', async () => {
+    mockRoute.params = {
+      projectId: 'codori',
+      threadId: 'thread-1'
+    }
+    mockRpcRequest.mockResolvedValue(makeThreadListResponse(2))
+
+    const wrapper = mountSidebar({
+      collapsed: false
+    })
+    await waitForSidebar()
+
+    const activeProject = wrapper.get('[data-kind="project"][data-to="/projects/codori"]')
+    const activeThread = wrapper.get('[data-kind="thread"][data-to="/projects/codori/threads/thread-1"]')
+    const inactiveThread = wrapper.get('[data-kind="thread"][data-to="/projects/codori/threads/thread-2"]')
+    expect(activeProject.attributes('data-active')).toBe('true')
+    expect(activeProject.classes()).toContain('before:bg-primary/5')
+    expect(activeProject.classes()).not.toContain('ring-1')
+    expect(activeProject.classes()).not.toContain('shadow-sm')
+    expect(activeThread.attributes('data-depth')).toBe('1')
+    expect(activeThread.attributes('data-active')).toBe('true')
+    expect(activeThread.classes()).toContain('before:bg-primary/5')
+    expect(activeThread.classes()).not.toContain('ring-1')
+    expect(activeThread.classes()).not.toContain('shadow-sm')
+    expect(inactiveThread.attributes('data-depth')).toBe('1')
+    expect(inactiveThread.attributes('data-active')).toBe('false')
+    expect(inactiveThread.classes()).not.toContain('before:bg-primary/5')
   })
 
   it('keeps selected project inline rows synced with shared thread summaries', async () => {
