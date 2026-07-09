@@ -4745,7 +4745,7 @@ watch(
               <span class="h-px flex-1 bg-border" />
             </div>
             <USelectMenu
-              :model-value="null"
+              :model-value="undefined"
               :items="starterProjectItems"
               value-key="value"
               :filter-fields="['label', 'description']"
@@ -4822,15 +4822,19 @@ watch(
           :spacing-offset="chatSpacingOffset"
           :user="{
             ui: {
-              root: 'scroll-mt-4',
+              root: 'scroll-mt-4 max-w-none',
               container: 'gap-3 pb-8',
-              content: 'px-4 py-3 rounded-2xl min-h-12'
+              content: 'w-full max-w-5xl px-4 py-3 rounded-2xl min-h-12'
+            }
+          }"
+          :assistant="{
+            ui: {
+              root: 'max-w-none',
+              content: 'w-full max-w-5xl'
             }
           }"
           :ui="{
-            root: chatMessagesRootClass,
-            message: 'max-w-none',
-            content: 'w-full max-w-5xl'
+            root: chatMessagesRootClass
           }"
           compact
         >
@@ -5333,7 +5337,7 @@ watch(
                               label="Standard"
                               :aria-pressed="selectedServiceTier === null"
                               class="rounded-full border border-default/70"
-                              @click="selectedServiceTier = null"
+                              @click="() => { selectedServiceTier = null }"
                             />
                             <UTooltip
                               v-for="tier in selectedModelServiceTiers"

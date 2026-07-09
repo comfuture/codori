@@ -24,6 +24,10 @@ const serviceUpdateTooltip = computed(() => {
     : `Update @codori/server ${serviceUpdate.value.installedVersion} -> ${serviceUpdate.value.latestVersion}`
 })
 
+const handleServiceUpdate = async () => {
+  await triggerServiceUpdate()
+}
+
 const sidebarUi = computed(() =>
   sidebarCollapsed.value
     ? {
@@ -89,7 +93,7 @@ const sidebarUi = computed(() =>
                 size="xs"
                 :loading="serviceUpdatePending || serviceUpdate.updating"
                 :disabled="serviceUpdatePending || serviceUpdate.updating"
-                @click="triggerServiceUpdate"
+                @click="handleServiceUpdate"
               >
                 {{ serviceUpdateLabel }}
               </UButton>

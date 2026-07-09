@@ -647,7 +647,7 @@ const isThreadStatusItem = (item: NavigationMenuItem): item is ProjectThreadStat
             size="xs"
             :square="props.collapsed"
             aria-label="Add project"
-            @click="addProjectOpen = true"
+            @click="() => { addProjectOpen = true }"
           />
         </UTooltip>
       </div>

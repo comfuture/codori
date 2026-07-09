@@ -286,7 +286,7 @@ watch(
       :min-size="20"
       :max-size="40"
       resizable
-      :ui="{ header: '!p-0 bg-[var(--ui-bg)]', body: '!p-0' }"
+      :ui="{ body: '!p-0' }"
     >
       <template #header>
         <div
@@ -355,7 +355,7 @@ watch(
             size="xs"
             square
             aria-label="Close subagents drawer"
-            @click="isMobileSubagentsDrawerOpen = false"
+            @click="() => { isMobileSubagentsDrawerOpen = false }"
           />
         </div>
       </template>

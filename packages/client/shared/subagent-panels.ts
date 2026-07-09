@@ -81,7 +81,10 @@ export const toSubagentAvatarText = (name: string) => {
   return Array.from(normalized || 'AG').slice(0, 2).join('')
 }
 
-export const resolveSubagentStatusMeta = (status: SubagentAgentStatus) => {
+export const resolveSubagentStatusMeta = (status: SubagentAgentStatus): {
+  color: 'primary' | 'info' | 'success' | 'warning' | 'error' | 'neutral'
+  label: string
+} => {
   switch (status) {
     case 'pendingInit':
       return { color: 'primary', label: 'pending' }
