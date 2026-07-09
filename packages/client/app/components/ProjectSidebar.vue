@@ -61,11 +61,22 @@ type ProjectSidebarNavigationItem =
   | ProjectThreadStatusNavigationItem
 
 type ChatNavigationItem = NavigationMenuItem & {
+  itemKind: 'chat'
   chatId: string
   title: string | null
   createdAt: number
   updatedAt: number | null
 }
+
+type ChatRootNavigationItem = NavigationMenuItem & {
+  itemKind: 'chat-root'
+  chatCount: number
+  children: ChatNavigationItem[]
+}
+
+type ChatSidebarNavigationItem =
+  | ChatRootNavigationItem
+  | ChatNavigationItem
 
 const route = useCodoriRoute()
 const router = useCodoriRouter()
@@ -123,6 +134,24 @@ const activeThreadId = computed(() => {
   const param = route.params.threadId
   return typeof param === 'string' ? param : null
 })
+
+const ACTIVE_NAVIGATION_ITEM_CLASS = 'font-semibold before:bg-primary/5'
+const ACTIVE_NAVIGATION_ITEM_UI = {
+  linkLeadingIcon: 'text-dimmed group-data-[state=open]:text-dimmed'
+}
+
+const navigationItemClass = (active: boolean) =>
+  active ? ACTIVE_NAVIGATION_ITEM_CLASS : undefined
+const navigationItemUi = (active: boolean) =>
+  active ? ACTIVE_NAVIGATION_ITEM_UI : undefined
+
+const isActiveNavigationItem = (item: NavigationMenuItem) => item.active === true
+const navigationTitleClass = (item: NavigationMenuItem) =>
+  isActiveNavigationItem(item) ? 'font-semibold text-highlighted' : 'font-medium text-highlighted'
+const navigationMetaClass = (item: NavigationMenuItem) =>
+  isActiveNavigationItem(item) ? 'font-medium text-muted' : 'text-muted'
+const navigationInlineTitleClass = (item: NavigationMenuItem) =>
+  isActiveNavigationItem(item) ? 'font-semibold text-highlighted' : 'font-medium text-highlighted'
 
 onMounted(() => {
   if (typeof navigator !== 'undefined') {
@@ -262,21 +291,40 @@ const removeChat = async (chatId: string) => {
   }
 }
 
-const chatItems = computed<ChatNavigationItem[][]>(() => [
-  chats.value.map(chat => ({
-    label: formatChatTitle(chat),
-    icon: 'i-lucide-message-square',
-    to: toChatRoute(chat.chatId),
-    active: activeChatId.value === chat.chatId,
+const chatItems = computed<ChatSidebarNavigationItem[][]>(() => {
+  const children = chats.value.map((chat) => {
+    const active = activeChatId.value === chat.chatId
+    return {
+      itemKind: 'chat' as const,
+      label: formatChatTitle(chat),
+      icon: 'i-lucide-message-square',
+      to: toChatRoute(chat.chatId),
+      active,
+      class: navigationItemClass(active),
+      ui: navigationItemUi(active),
+      tooltip: {
+        text: chat.chatId
+      },
+      chatId: chat.chatId,
+      title: chat.title,
+      createdAt: chat.createdAt,
+      updatedAt: chat.updatedAt
+    }
+  })
+
+  return [[{
+    itemKind: 'chat-root',
+    label: 'Projectless Chats',
+    icon: 'i-lucide-messages-square',
+    chatCount: children.length,
+    defaultOpen: activeChatId.value !== null,
+    open: activeChatId.value !== null,
+    children,
     tooltip: {
-      text: chat.chatId
-    },
-    chatId: chat.chatId,
-    title: chat.title,
-    createdAt: chat.createdAt,
-    updatedAt: chat.updatedAt
-  }))
-])
+      text: 'Projectless Chats'
+    }
+  }]]
+})
 
 const inlineThreadsHasOverflow = computed(() =>
   inlineThreadsHasMore.value || inlineThreads.value.length > INLINE_THREAD_ROW_LIMIT
@@ -289,31 +337,35 @@ const visibleInlineThreads = computed(() =>
 )
 
 const projectItems = computed<ProjectSidebarNavigationItem[][]>(() => [
-  sortSidebarProjects(projects.value, activeProjectId.value).flatMap((project) => {
-    const items: ProjectSidebarNavigationItem[] = [{
+  sortSidebarProjects(projects.value, activeProjectId.value).map((project) => {
+    const active = activeProjectId.value === project.projectId
+    const children: ProjectSidebarNavigationItem[] = []
+    const item: ProjectNavigationItem = {
       itemKind: 'project',
       label: project.projectId,
       icon: 'i-lucide-folder-git-2',
       to: toProjectRoute(project.projectId),
-      active: activeProjectId.value === project.projectId && !activeThreadId.value,
+      active,
+      class: navigationItemClass(active),
+      ui: navigationItemUi(active),
       tooltip: {
         text: project.projectId
       },
       projectId: project.projectId,
       projectPath: project.projectPath,
       error: project.error
-    }]
+    }
 
     if (props.collapsed || activeProjectId.value !== project.projectId) {
-      return items
+      return item
     }
 
     if (inlineThreadsProjectId.value !== project.projectId) {
-      return items
+      return item
     }
 
     if (inlineThreadsLoading.value) {
-      items.push({
+      children.push({
         itemKind: 'thread-status',
         label: 'Loading threads...',
         icon: 'i-lucide-loader-circle',
@@ -321,11 +373,14 @@ const projectItems = computed<ProjectSidebarNavigationItem[][]>(() => [
         projectId: project.projectId,
         message: 'Loading threads...'
       })
-      return items
+      item.children = children
+      item.defaultOpen = true
+      item.open = true
+      return item
     }
 
     if (inlineThreadsError.value) {
-      items.push({
+      children.push({
         itemKind: 'thread-status',
         label: 'Threads unavailable',
         icon: 'i-lucide-circle-alert',
@@ -333,16 +388,22 @@ const projectItems = computed<ProjectSidebarNavigationItem[][]>(() => [
         projectId: project.projectId,
         message: inlineThreadsError.value
       })
-      return items
+      item.children = children
+      item.defaultOpen = true
+      item.open = true
+      return item
     }
 
     for (const thread of visibleInlineThreads.value) {
-      items.push({
+      const active = activeThreadId.value === thread.id
+      children.push({
         itemKind: 'thread',
         label: thread.title,
         icon: 'i-lucide-message-square-text',
         to: toProjectThreadRoute(project.projectId, thread.id),
-        active: activeThreadId.value === thread.id,
+        active,
+        class: navigationItemClass(active),
+        ui: navigationItemUi(active),
         tooltip: {
           text: thread.title
         },
@@ -354,7 +415,7 @@ const projectItems = computed<ProjectSidebarNavigationItem[][]>(() => [
     }
 
     if (inlineThreadsHasOverflow.value) {
-      items.push({
+      children.push({
         itemKind: 'more',
         label: 'more..',
         icon: 'i-lucide-ellipsis',
@@ -368,7 +429,13 @@ const projectItems = computed<ProjectSidebarNavigationItem[][]>(() => [
       })
     }
 
-    return items
+    if (children.length) {
+      item.children = children
+      item.defaultOpen = true
+      item.open = true
+    }
+
+    return item
   })
 ])
 
@@ -377,8 +444,13 @@ const asProjectSidebarItem = (item: NavigationMenuItem) => item as ProjectSideba
 const asProjectThreadItem = (item: NavigationMenuItem) => item as ProjectThreadNavigationItem
 const asProjectThreadMoreItem = (item: NavigationMenuItem) => item as ProjectThreadMoreNavigationItem
 const asProjectThreadStatusItem = (item: NavigationMenuItem) => item as ProjectThreadStatusNavigationItem
+const asChatRootItem = (item: NavigationMenuItem) => item as ChatRootNavigationItem
 const asChatItem = (item: NavigationMenuItem) => item as ChatNavigationItem
 
+const isChatRootItem = (item: NavigationMenuItem): item is ChatRootNavigationItem =>
+  (item as ChatSidebarNavigationItem).itemKind === 'chat-root'
+const isChatItem = (item: NavigationMenuItem): item is ChatNavigationItem =>
+  (item as ChatSidebarNavigationItem).itemKind === 'chat'
 const isProjectItem = (item: NavigationMenuItem): item is ProjectNavigationItem =>
   asProjectSidebarItem(item).itemKind === 'project'
 const isThreadItem = (item: NavigationMenuItem): item is ProjectThreadNavigationItem =>
@@ -392,6 +464,54 @@ const isThreadStatusItem = (item: NavigationMenuItem): item is ProjectThreadStat
 <template>
   <div class="flex min-h-0 flex-1 flex-col gap-3">
     <div class="space-y-2">
+      <UTooltip text="Search Codori">
+        <UButton
+          v-if="props.collapsed"
+          icon="i-lucide-search"
+          color="neutral"
+          variant="outline"
+          size="xs"
+          class="w-full justify-center gap-0.5 px-1"
+          aria-label="Search Codori"
+          @click="emit('openCommandPalette')"
+        >
+          <UKbd
+            :value="isMac ? '⌘' : 'Ctrl'"
+            size="sm"
+          />
+          <UKbd
+            value="K"
+            size="sm"
+          />
+        </UButton>
+        <UButton
+          v-else
+          icon="i-lucide-search"
+          color="neutral"
+          variant="outline"
+          size="xs"
+          class="w-full justify-start"
+          aria-label="Search Codori"
+          @click="emit('openCommandPalette')"
+        >
+          <span class="min-w-0 flex-1 truncate text-left">
+            Search
+          </span>
+          <template #trailing>
+            <span class="flex items-center gap-1">
+              <UKbd
+                :value="isMac ? 'meta' : 'ctrl'"
+                size="sm"
+              />
+              <UKbd
+                value="K"
+                size="sm"
+              />
+            </span>
+          </template>
+        </UButton>
+      </UTooltip>
+
       <UTooltip text="New Chat">
         <UButton
           icon="i-lucide-message-square-plus"
@@ -415,7 +535,7 @@ const isThreadStatusItem = (item: NavigationMenuItem): item is ProjectThreadStat
         highlight
         color="primary"
         variant="link"
-        :popover="false"
+        :popover="props.collapsed"
         :tooltip="props.collapsed"
         class="w-full"
         :ui="{
@@ -425,20 +545,34 @@ const isThreadStatusItem = (item: NavigationMenuItem): item is ProjectThreadStat
           link: props.collapsed
             ? 'w-full justify-center rounded-lg px-2 py-2'
             : 'w-full rounded-lg px-3 py-2 text-sm',
-          linkLeadingIcon: props.collapsed ? 'size-4' : 'size-4 text-dimmed',
+          linkLeadingIcon: 'size-4',
           linkLabel: 'min-w-0 flex-1',
           linkTrailing: 'ms-3 shrink-0'
         }"
       >
         <template #item-label="{ item }">
           <div
-            v-if="!props.collapsed"
+            v-if="!props.collapsed && isChatRootItem(item)"
             class="min-w-0"
           >
             <div class="truncate font-medium text-highlighted">
+              {{ asChatRootItem(item).label }}
+            </div>
+          </div>
+          <div
+            v-else-if="!props.collapsed && isChatItem(item)"
+            class="min-w-0"
+          >
+            <div
+              class="truncate"
+              :class="navigationTitleClass(item)"
+            >
               {{ asChatItem(item).title || asChatItem(item).label }}
             </div>
-            <div class="truncate text-[11px] text-muted">
+            <div
+              class="truncate text-[11px]"
+              :class="navigationMetaClass(item)"
+            >
               {{ formatChatDate(asChatItem(item)) }}
             </div>
           </div>
@@ -446,7 +580,13 @@ const isThreadStatusItem = (item: NavigationMenuItem): item is ProjectThreadStat
 
         <template #item-trailing="{ item }">
           <div
-            v-if="!props.collapsed"
+            v-if="!props.collapsed && isChatRootItem(item)"
+            class="rounded-full bg-elevated px-2 py-0.5 text-[11px] font-medium text-muted"
+          >
+            {{ asChatRootItem(item).chatCount }}
+          </div>
+          <div
+            v-else-if="!props.collapsed && isChatItem(item)"
             class="flex items-center"
           >
             <UTooltip text="Delete chat">
@@ -481,65 +621,15 @@ const isThreadStatusItem = (item: NavigationMenuItem): item is ProjectThreadStat
         Projects
       </div>
       <div class="flex items-center gap-1">
-        <UTooltip text="Search Codori">
-          <UButton
-            v-if="props.collapsed"
-            icon="i-lucide-search"
-            color="neutral"
-            variant="ghost"
-            size="xs"
-            square
-            aria-label="Search Codori"
-            @click="emit('openCommandPalette')"
-          />
-          <UButton
-            v-else
-            icon="i-lucide-search"
-            color="neutral"
-            variant="outline"
-            size="xs"
-            class="min-w-32 justify-start"
-            aria-label="Search Codori"
-            @click="emit('openCommandPalette')"
-          >
-            <span class="min-w-0 flex-1 truncate text-left">
-              Search
-            </span>
-            <template #trailing>
-              <span class="flex items-center gap-1">
-                <UKbd
-                  :value="isMac ? 'meta' : 'ctrl'"
-                  size="sm"
-                />
-                <UKbd
-                  value="K"
-                  size="sm"
-                />
-              </span>
-            </template>
-          </UButton>
-        </UTooltip>
         <UTooltip text="Add project">
           <UButton
-            icon="i-lucide-plus"
-            color="neutral"
-            variant="ghost"
+            icon="i-lucide-folder-plus"
+            color="primary"
+            variant="soft"
             size="xs"
             :square="props.collapsed"
             aria-label="Add project"
             @click="addProjectOpen = true"
-          />
-        </UTooltip>
-        <UTooltip text="Refresh projects">
-          <UButton
-            icon="i-lucide-refresh-cw"
-            color="neutral"
-            variant="ghost"
-            size="xs"
-            :loading="loading"
-            :square="props.collapsed"
-            aria-label="Refresh projects"
-            @click="refreshProjects"
           />
         </UTooltip>
       </div>
@@ -571,7 +661,7 @@ const isThreadStatusItem = (item: NavigationMenuItem): item is ProjectThreadStat
           link: props.collapsed
             ? 'w-full justify-center rounded-lg px-2 py-2'
             : 'w-full rounded-lg px-3 py-2.5 text-sm',
-          linkLeadingIcon: props.collapsed ? 'size-4' : 'size-4 text-dimmed',
+          linkLeadingIcon: 'size-4',
           linkLabel: 'min-w-0 flex-1',
           linkTrailing: 'ms-3 shrink-0'
         }"
@@ -581,10 +671,16 @@ const isThreadStatusItem = (item: NavigationMenuItem): item is ProjectThreadStat
             v-if="!props.collapsed && isProjectItem(item)"
             class="min-w-0"
           >
-            <div class="truncate font-medium text-highlighted">
+            <div
+              class="truncate"
+              :class="navigationTitleClass(item)"
+            >
               {{ asProjectItem(item).projectId }}
             </div>
-            <div class="truncate text-[11px] text-muted">
+            <div
+              class="truncate text-[11px]"
+              :class="navigationMetaClass(item)"
+            >
               {{ asProjectItem(item).projectPath }}
             </div>
             <div
@@ -598,7 +694,10 @@ const isThreadStatusItem = (item: NavigationMenuItem): item is ProjectThreadStat
             v-else-if="!props.collapsed && isThreadItem(item)"
             class="min-w-0 ps-2"
           >
-            <div class="truncate text-xs font-medium text-highlighted">
+            <div
+              class="truncate text-xs"
+              :class="navigationInlineTitleClass(item)"
+            >
               {{ asProjectThreadItem(item).title }}
             </div>
           </div>

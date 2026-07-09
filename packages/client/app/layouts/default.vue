@@ -117,15 +117,15 @@ const sidebarUi = computed(() =>
       </template>
 
       <template #footer>
-        <div class="flex items-center justify-between gap-2">
+        <div class="flex w-full items-center gap-2">
           <span
             v-if="!sidebarCollapsed"
-            class="truncate text-xs text-muted"
+            class="min-w-0 flex-1 truncate text-xs text-muted"
           >
             Dashboard
           </span>
           <UDashboardSidebarCollapse
-            class="relative z-20 -me-4 shrink-0"
+            class="relative z-20 ms-auto shrink-0"
           />
         </div>
       </template>
