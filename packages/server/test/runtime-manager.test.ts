@@ -4,7 +4,7 @@ import os from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { resolveConfig } from '../src/config.js'
-import { createRuntimeManager } from '../src/process-manager.js'
+import { createRuntimeManager, resolveCodexCommand } from '../src/process-manager.js'
 import { RuntimeStore } from '../src/runtime-store.js'
 
 const runningManagers: Array<ReturnType<typeof createRuntimeManager>> = []
@@ -139,6 +139,30 @@ const waitForCondition = async (condition: () => boolean, timeoutMs = 1_000) => 
 }
 
 describe('RuntimeManager', () => {
+  it('resolves the bundled Codex CLI through the current Node runtime', () => {
+    const command = resolveCodexCommand(4765, undefined)
+
+    expect(command.command).toBe(process.execPath)
+    expect(command.args[0].replaceAll('\\', '/')).toMatch(/\/@openai\/codex\/bin\/codex\.js$/u)
+    expect(existsSync(command.args[0])).toBe(true)
+    expect(command.args.slice(1)).toEqual([
+      'app-server',
+      '--listen',
+      'ws://127.0.0.1:4765'
+    ])
+  })
+
+  it('preserves an explicit Codex binary override', () => {
+    expect(resolveCodexCommand(4766, '/opt/codex/bin/codex')).toEqual({
+      command: '/opt/codex/bin/codex',
+      args: [
+        'app-server',
+        '--listen',
+        'ws://127.0.0.1:4766'
+      ]
+    })
+  })
+
   it('starts once and reuses the existing process', async () => {
     const fixture = createFixture()
     const manager = createRuntimeManager({

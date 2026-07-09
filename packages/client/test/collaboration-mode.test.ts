@@ -13,7 +13,7 @@ describe('collaboration mode helpers', () => {
         name: 'Plan',
         mode: 'plan',
         model: null,
-        reasoning_effort: 'medium'
+        reasoning_effort: 'ultra'
       }, {
         name: 'Default',
         mode: 'default',
@@ -23,7 +23,7 @@ describe('collaboration mode helpers', () => {
       name: 'Plan',
       mode: 'plan',
       model: null,
-      reasoning_effort: 'medium'
+      reasoning_effort: 'ultra'
     }, {
       name: 'Default',
       mode: 'default',

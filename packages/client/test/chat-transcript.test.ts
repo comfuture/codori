@@ -37,13 +37,17 @@ const makeTurn = (input: Pick<Turn, 'id' | 'items' | 'status' | 'error'> & Parti
 
 const makeThread = (input: Pick<Thread, 'id' | 'preview' | 'cwd' | 'createdAt' | 'updatedAt' | 'name' | 'turns'>): Thread => ({
   id: input.id,
+  extra: null,
   sessionId: input.id,
   forkedFromId: null,
+  parentThreadId: null,
   preview: input.preview,
   ephemeral: false,
+  historyMode: 'legacy',
   modelProvider: 'openai',
   createdAt: input.createdAt,
   updatedAt: input.updatedAt,
+  recencyAt: input.updatedAt,
   status: { type: 'idle' },
   path: null,
   cwd: input.cwd,
@@ -413,6 +417,7 @@ describe('chat transcript stability', () => {
     expect(itemToMessages({
       type: 'userMessage',
       id: 'user-image-1',
+      clientId: null,
       content: [{
         type: 'image',
         url: 'data:image/png;base64,abc123'
@@ -447,6 +452,7 @@ describe('chat transcript stability', () => {
         items: [{
           type: 'userMessage',
           id: 'turn-1',
+          clientId: null,
           content: [{
             type: 'text',
             text: "changes against 'main'",
@@ -459,6 +465,7 @@ describe('chat transcript stability', () => {
         }, {
           type: 'userMessage',
           id: 'user-2',
+          clientId: null,
           content: [{
             type: 'text',
             text: 'Full review instructions',
@@ -804,6 +811,8 @@ describe('chat transcript stability', () => {
       server: 'filesystem',
       tool: 'read_file',
       arguments: { path: '/tmp/demo.txt' },
+      appContext: null,
+      pluginId: null,
       result: null,
       error: null,
       status: 'inProgress',

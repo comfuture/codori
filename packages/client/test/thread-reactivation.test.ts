@@ -193,8 +193,7 @@ describe('thread reactivation policy', () => {
     await expect(resumeThreadStreamAfterReactivation(client, {
       threadId: 'thread-1',
       cwd: '/tmp/project',
-      approvalPolicy: 'never',
-      persistExtendedHistory: true
+      approvalPolicy: 'never'
     })).resolves.toEqual({
       resumeResponse,
       readResponse
@@ -208,8 +207,7 @@ describe('thread reactivation policy', () => {
     expect(client.request).toHaveBeenNthCalledWith(1, 'thread/resume', {
       threadId: 'thread-1',
       cwd: '/tmp/project',
-      approvalPolicy: 'never',
-      persistExtendedHistory: true
+      approvalPolicy: 'never'
     })
     expect(client.request).toHaveBeenNthCalledWith(2, 'thread/read', {
       threadId: 'thread-1',

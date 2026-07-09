@@ -39,16 +39,20 @@ import {
 } from '../shared/account-rate-limits'
 import {
   buildTurnOverrides,
+  canSubmitToLoadPromptControls,
   coercePromptSelection,
-  ensureModelOption,
   formatCompactTokenCount,
+  isPromptControlsReady,
+  isPromptSelectionValid,
   normalizeConfigDefaults,
   normalizeModelList,
   normalizeThreadTokenUsage,
   resolveContextWindowState,
+  resolveSelectedServiceTier,
   shouldShowContextWindowIndicator,
   resolveEffortOptions
 } from '../shared/chat-prompt-controls'
+import { useChatSession } from '../app/composables/useChatSession'
 import {
   pruneExpandedSubagentThreadId,
   resolveExpandedSubagentPanel,
@@ -366,6 +370,7 @@ describe('client package', () => {
     expect(itemToMessages({
       type: 'userMessage',
       id: 'user-1',
+      clientId: null,
       content: [{
         type: 'text',
         text: 'Please inspect this screenshot.',
@@ -400,6 +405,8 @@ describe('client package', () => {
       server: 'filesystem',
       tool: 'read_file',
       arguments: { path: '/tmp/demo.txt' },
+      appContext: null,
+      pluginId: null,
       result: null,
       error: null,
       status: 'inProgress',
@@ -418,6 +425,8 @@ describe('client package', () => {
             server: 'filesystem',
             tool: 'read_file',
             arguments: { path: '/tmp/demo.txt' },
+            appContext: null,
+            pluginId: null,
             result: null,
             error: null,
             status: 'inProgress',
@@ -772,27 +781,74 @@ describe('client package', () => {
   it('normalizes model metadata from app-server responses', () => {
     expect(normalizeModelList({
       data: [{
-        id: 'model-1',
-        model: 'gpt-5.4',
-        displayName: 'GPT-5.4',
+        id: 'gpt-5.6-sol',
+        model: 'gpt-5.6-sol',
+        displayName: 'GPT-5.6-Sol',
         hidden: false,
         isDefault: true,
-        defaultReasoningEffort: 'medium',
+        defaultReasoningEffort: 'low',
         supportedReasoningEfforts: [
           { reasoningEffort: 'low' },
           { reasoningEffort: 'medium' },
-          { reasoningEffort: 'high' }
-        ]
+          { reasoningEffort: 'high' },
+          { reasoningEffort: 'xhigh' },
+          { reasoningEffort: 'max' },
+          { reasoningEffort: 'ultra' }
+        ],
+        serviceTiers: [{
+          id: 'priority',
+          name: 'Fast',
+          description: '1.5x speed, increased usage'
+        }],
+        defaultServiceTier: null
       }]
     })).toEqual([{
-      id: 'model-1',
-      model: 'gpt-5.4',
-      displayName: 'GPT-5.4',
+      id: 'gpt-5.6-sol',
+      model: 'gpt-5.6-sol',
+      displayName: 'GPT-5.6-Sol',
       hidden: false,
       isDefault: true,
-      defaultReasoningEffort: 'medium',
-      supportedReasoningEfforts: ['low', 'medium', 'high']
+      defaultReasoningEffort: 'low',
+      supportedReasoningEfforts: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
+      serviceTiers: [{
+        id: 'priority',
+        name: 'Fast',
+        description: '1.5x speed, increased usage'
+      }],
+      defaultServiceTier: null
     }])
+  })
+
+  it('does not synthesize models when the app-server catalog is unavailable', () => {
+    expect(normalizeModelList({ data: [] })).toEqual([])
+    expect(normalizeModelList({ data: [{ invalid: true }] })).toEqual([])
+
+    const session = useChatSession('model-catalog-unavailable-test')
+    expect(session.promptControlsLoaded.value).toBe(false)
+    expect(session.promptControlsError.value).toBeNull()
+    expect(session.availableModels.value).toEqual([])
+    expect(session.selectedModel.value).toBe('')
+    expect(session.selectedServiceTier.value).toBeNull()
+    expect(isPromptControlsReady(false, [], '', 'medium', null)).toBe(false)
+    expect(canSubmitToLoadPromptControls(true, '', false, null)).toBe(true)
+    expect(canSubmitToLoadPromptControls(true, '', true, null)).toBe(false)
+    expect(canSubmitToLoadPromptControls(true, '', false, 'Models are unavailable')).toBe(false)
+    expect(canSubmitToLoadPromptControls(false, '', false, null)).toBe(false)
+  })
+
+  it('keeps the complete 5.6 model family returned by app-server selectable', () => {
+    const modelIds = ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']
+    expect(normalizeModelList({
+      data: modelIds.map(model => ({
+        model,
+        displayName: model,
+        hidden: false,
+        isDefault: model === 'gpt-5.6-sol',
+        defaultReasoningEffort: 'medium',
+        supportedReasoningEfforts: [{ reasoningEffort: 'medium' }],
+        serviceTiers: []
+      }))
+    }).map(model => model.model)).toEqual(modelIds)
   })
 
   it('derives initial selector defaults from config and keeps selectable high effort values', () => {
@@ -800,7 +856,8 @@ describe('client package', () => {
       config: {
         model: 'gpt-5.4-mini',
         model_context_window: '272000',
-        model_reasoning_effort: 'high'
+        model_reasoning_effort: 'high',
+        service_tier: 'priority'
       }
     })
 
@@ -822,6 +879,7 @@ describe('client package', () => {
     expect(defaults).toEqual({
       model: 'gpt-5.4-mini',
       effort: 'high',
+      serviceTier: 'priority',
       contextWindow: 272000
     })
     expect(coercePromptSelection(models, defaults.model, defaults.effort)).toEqual({
@@ -840,13 +898,15 @@ describe('client package', () => {
         profiles: {
           work: {
             model: null,
-            model_reasoning_effort: 'high'
+            model_reasoning_effort: 'high',
+            service_tier: 'default'
           }
         }
       }
     })).toEqual({
       model: 'gpt-5.4',
       effort: 'high',
+      serviceTier: null,
       contextWindow: 128000
     })
   })
@@ -885,36 +945,83 @@ describe('client package', () => {
     })
   })
 
-  it('keeps the active thread model visible when it is missing from the fetched list', () => {
+  it('preserves new reasoning efforts while keeping low hidden from the selector', () => {
     const models = normalizeModelList({
       data: [{
-        model: 'gpt-5.4',
-        displayName: 'GPT-5.4',
+        model: 'gpt-5.6-sol',
+        displayName: 'GPT-5.6-Sol',
         hidden: false,
         isDefault: true,
-        defaultReasoningEffort: 'medium',
+        defaultReasoningEffort: 'low',
         supportedReasoningEfforts: [
-          { reasoningEffort: 'medium' }
+          { reasoningEffort: 'low' },
+          { reasoningEffort: 'medium' },
+          { reasoningEffort: 'high' },
+          { reasoningEffort: 'xhigh' },
+          { reasoningEffort: 'max' },
+          { reasoningEffort: 'ultra' }
         ]
       }]
     })
 
-    expect(ensureModelOption(models, 'gpt-5.5-preview', 'high')[0]).toEqual({
-      id: 'gpt-5.5-preview',
-      model: 'gpt-5.5-preview',
-      displayName: 'gpt-5.5-preview',
-      hidden: false,
-      isDefault: false,
-      defaultReasoningEffort: 'high',
-      supportedReasoningEfforts: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh']
+    expect(resolveEffortOptions(models, 'gpt-5.6-sol')).toEqual(['medium', 'high', 'xhigh', 'max', 'ultra'])
+    expect(coercePromptSelection(models, 'gpt-5.6-sol', 'low')).toEqual({
+      model: 'gpt-5.6-sol',
+      effort: 'medium'
     })
   })
 
-  it('builds turn overrides and context summaries for the footer controls', () => {
-    expect(buildTurnOverrides('gpt-5.4', 'high')).toEqual({
-      model: 'gpt-5.4',
+  it('keeps model and service-tier selection constrained to the app-server catalog', () => {
+    const models = normalizeModelList({
+      data: [{
+        model: 'gpt-5.6-sol',
+        displayName: 'GPT-5.6-Sol',
+        hidden: false,
+        isDefault: true,
+        defaultReasoningEffort: 'medium',
+        supportedReasoningEfforts: [
+          { reasoningEffort: 'medium' },
+          { reasoningEffort: 'high' }
+        ],
+        serviceTiers: [{
+          id: 'priority',
+          name: 'Fast',
+          description: '1.5x speed, increased usage'
+        }],
+        defaultServiceTier: null
+      }, {
+        model: 'gpt-5.4-mini',
+        displayName: 'GPT-5.4-Mini',
+        hidden: false,
+        isDefault: false,
+        defaultReasoningEffort: 'medium',
+        supportedReasoningEfforts: [{ reasoningEffort: 'medium' }],
+        serviceTiers: [],
+        defaultServiceTier: null
+      }]
+    })
+
+    expect(coercePromptSelection(models, 'gpt-5.5-preview', 'high')).toEqual({
+      model: 'gpt-5.6-sol',
       effort: 'high'
     })
+    expect(resolveSelectedServiceTier(models, 'gpt-5.6-sol', 'priority')).toBe('priority')
+    expect(resolveSelectedServiceTier(models, 'gpt-5.6-sol', 'fast')).toBe('priority')
+    expect(resolveSelectedServiceTier(models, 'gpt-5.6-sol', 'default')).toBeNull()
+    expect(resolveSelectedServiceTier(models, 'gpt-5.6-sol', null)).toBeNull()
+    expect(resolveSelectedServiceTier(models, 'gpt-5.4-mini', 'priority')).toBeNull()
+    expect(isPromptSelectionValid(models, 'gpt-5.6-sol', 'medium', 'priority')).toBe(true)
+    expect(isPromptControlsReady(true, models, 'gpt-5.6-sol', 'medium', 'priority')).toBe(true)
+    expect(isPromptSelectionValid(models, 'gpt-5.5-preview', 'high', null)).toBe(false)
+  })
+
+  it('builds turn overrides and context summaries for the footer controls', () => {
+    expect(buildTurnOverrides('gpt-5.4', 'high', 'priority')).toEqual({
+      model: 'gpt-5.4',
+      effort: 'high',
+      serviceTier: 'priority'
+    })
+    expect(buildTurnOverrides('gpt-5.4', 'high', null).serviceTier).toBeNull()
     expect(resolveContextWindowState({
       totalTokens: 28000,
       totalInputTokens: 24000,
