@@ -21,6 +21,8 @@ import { toChatRoute, toChatsRoute, toProjectRoute, toProjectThreadRoute } from 
 
 const INLINE_THREAD_ROW_LIMIT = 5
 const INLINE_THREAD_ROWS_WITH_MORE = INLINE_THREAD_ROW_LIMIT - 1
+const CHAT_ROOT_NAVIGATION_VALUE = 'chat-root'
+const projectNavigationValue = (projectId: string) => `project:${projectId}`
 
 const props = defineProps<{
   collapsed?: boolean
@@ -134,6 +136,20 @@ const activeThreadId = computed(() => {
   const param = route.params.threadId
   return typeof param === 'string' ? param : null
 })
+const openChatNavigationValues = ref<string[]>([])
+const openProjectNavigationValues = ref<string[]>([])
+
+watch(activeChatId, (chatId) => {
+  if (chatId && !openChatNavigationValues.value.includes(CHAT_ROOT_NAVIGATION_VALUE)) {
+    openChatNavigationValues.value = [...openChatNavigationValues.value, CHAT_ROOT_NAVIGATION_VALUE]
+  }
+}, { immediate: true })
+
+watch([activeProjectId, activeThreadId], ([projectId]) => {
+  openProjectNavigationValues.value = projectId
+    ? [projectNavigationValue(projectId)]
+    : []
+}, { immediate: true })
 
 const ACTIVE_NAVIGATION_ITEM_CLASS = 'font-semibold before:bg-primary/5'
 const ACTIVE_NAVIGATION_ITEM_UI = {
@@ -296,6 +312,7 @@ const chatItems = computed<ChatSidebarNavigationItem[][]>(() => {
     const active = activeChatId.value === chat.chatId
     return {
       itemKind: 'chat' as const,
+      value: `chat:${chat.chatId}`,
       label: formatChatTitle(chat),
       icon: 'i-lucide-message-square',
       to: toChatRoute(chat.chatId),
@@ -314,11 +331,10 @@ const chatItems = computed<ChatSidebarNavigationItem[][]>(() => {
 
   return [[{
     itemKind: 'chat-root',
+    value: CHAT_ROOT_NAVIGATION_VALUE,
     label: 'Projectless Chats',
     icon: 'i-lucide-messages-square',
     chatCount: children.length,
-    defaultOpen: activeChatId.value !== null,
-    open: activeChatId.value !== null,
     children,
     tooltip: {
       text: 'Projectless Chats'
@@ -342,6 +358,7 @@ const projectItems = computed<ProjectSidebarNavigationItem[][]>(() => [
     const children: ProjectSidebarNavigationItem[] = []
     const item: ProjectNavigationItem = {
       itemKind: 'project',
+      value: projectNavigationValue(project.projectId),
       label: project.projectId,
       icon: 'i-lucide-folder-git-2',
       to: toProjectRoute(project.projectId),
@@ -374,8 +391,6 @@ const projectItems = computed<ProjectSidebarNavigationItem[][]>(() => [
         message: 'Loading threads...'
       })
       item.children = children
-      item.defaultOpen = true
-      item.open = true
       return item
     }
 
@@ -389,8 +404,6 @@ const projectItems = computed<ProjectSidebarNavigationItem[][]>(() => [
         message: inlineThreadsError.value
       })
       item.children = children
-      item.defaultOpen = true
-      item.open = true
       return item
     }
 
@@ -431,8 +444,6 @@ const projectItems = computed<ProjectSidebarNavigationItem[][]>(() => [
 
     if (children.length) {
       item.children = children
-      item.defaultOpen = true
-      item.open = true
     }
 
     return item
@@ -529,6 +540,7 @@ const isThreadStatusItem = (item: NavigationMenuItem): item is ProjectThreadStat
 
       <UNavigationMenu
         v-if="chats.length"
+        v-model="openChatNavigationValues"
         :items="chatItems"
         orientation="vertical"
         :collapsed="props.collapsed"
@@ -581,9 +593,15 @@ const isThreadStatusItem = (item: NavigationMenuItem): item is ProjectThreadStat
         <template #item-trailing="{ item }">
           <div
             v-if="!props.collapsed && isChatRootItem(item)"
-            class="rounded-full bg-elevated px-2 py-0.5 text-[11px] font-medium text-muted"
+            class="flex items-center gap-1 text-muted"
           >
-            {{ asChatRootItem(item).chatCount }}
+            <span class="rounded-full bg-elevated px-2 py-0.5 text-[11px] font-medium">
+              {{ asChatRootItem(item).chatCount }}
+            </span>
+            <UIcon
+              name="i-lucide-chevron-down"
+              class="size-3.5 shrink-0 transition-transform group-data-[state=open]:rotate-180"
+            />
           </div>
           <div
             v-else-if="!props.collapsed && isChatItem(item)"
@@ -645,6 +663,7 @@ const isThreadStatusItem = (item: NavigationMenuItem): item is ProjectThreadStat
 
     <div class="min-h-0 flex-1 overflow-y-auto">
       <UNavigationMenu
+        v-model="openProjectNavigationValues"
         :items="projectItems"
         orientation="vertical"
         :collapsed="props.collapsed"

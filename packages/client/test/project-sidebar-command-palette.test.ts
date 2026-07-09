@@ -130,6 +130,10 @@ const NavigationMenuStub = defineComponent({
     items: {
       type: Array,
       default: () => []
+    },
+    modelValue: {
+      type: [Array, String],
+      default: undefined
     }
   },
   setup(props, { slots }) {
@@ -155,7 +159,10 @@ const NavigationMenuStub = defineComponent({
           })
         })
 
-    return () => h('nav', { class: 'navigation-menu-stub' }, flattenNavigationItems(props.items as unknown[]).map(({ item, depth }) => {
+    return () => h('nav', {
+      class: 'navigation-menu-stub',
+      'data-model-value': JSON.stringify(props.modelValue)
+    }, flattenNavigationItems(props.items as unknown[]).map(({ item, depth }) => {
       const children = [
         h('span', { class: 'navigation-menu-icon' }, String(item.icon ?? '')),
         slots['item-label']?.({ item }) ?? h('span', String(item.label ?? '')),
@@ -170,6 +177,7 @@ const NavigationMenuStub = defineComponent({
         'data-kind': String(item.itemKind ?? ''),
         'data-label': String(item.label ?? ''),
         'data-to': String(item.to ?? ''),
+        'data-value': String(item.value ?? ''),
         'data-depth': String(depth),
         'data-active': item.active ? 'true' : 'false',
         onClick: (event: MouseEvent) => {
@@ -407,6 +415,7 @@ describe('project sidebar command palette trigger', () => {
     const activeChat = wrapper.get('[data-to="/chats/chat-a"]')
     const inactiveChat = wrapper.get('[data-to="/chats/chat-b"]')
     expect(chatRoot.attributes('data-depth')).toBe('0')
+    expect(chatRoot.attributes('data-value')).toBe('chat-root')
     expect(chatRoot.text()).toContain('Projectless Chats')
     expect(chatRoot.text()).toContain('2')
     expect(activeChat.attributes('data-depth')).toBe('1')
@@ -417,6 +426,27 @@ describe('project sidebar command palette trigger', () => {
     expect(inactiveChat.attributes('data-depth')).toBe('1')
     expect(inactiveChat.attributes('data-active')).toBe('false')
     expect(inactiveChat.classes()).not.toContain('before:bg-primary/5')
+    expect(wrapper.get('.navigation-menu-stub').attributes('data-model-value')).toBe('["chat-root"]')
+  })
+
+  it('opens the projectless chat group after an in-app route transition', async () => {
+    mockChats.value = [makeChat({
+      chatId: 'chat-a',
+      title: 'Chat A'
+    })]
+
+    const wrapper = mountSidebar({
+      collapsed: false
+    })
+    await waitForSidebar()
+    expect(wrapper.get('.navigation-menu-stub').attributes('data-model-value')).toBe('[]')
+
+    mockRoute.params = {
+      chatId: 'chat-a'
+    }
+    await waitForSidebar()
+
+    expect(wrapper.get('.navigation-menu-stub').attributes('data-model-value')).toBe('["chat-root"]')
   })
 })
 
@@ -480,6 +510,7 @@ describe('project sidebar inline threads', () => {
     const activeProject = wrapper.get('[data-kind="project"][data-to="/projects/codori"]')
     const inactiveProject = wrapper.get('[data-kind="project"][data-to="/projects/other"]')
     expect(activeProject.attributes('data-depth')).toBe('0')
+    expect(activeProject.attributes('data-value')).toBe('project:codori')
     expect(activeProject.attributes('data-active')).toBe('true')
     expect(activeProject.classes()).toContain('before:bg-primary/5')
     expect(activeProject.classes()).not.toContain('ring-1')
@@ -487,6 +518,7 @@ describe('project sidebar inline threads', () => {
     expect(inactiveProject.attributes('data-depth')).toBe('0')
     expect(inactiveProject.attributes('data-active')).toBe('false')
     expect(inactiveProject.classes()).not.toContain('before:bg-primary/5')
+    expect(wrapper.get('.navigation-menu-stub').attributes('data-model-value')).toBe('["project:codori"]')
     expect(mockGetClient).toHaveBeenCalledTimes(1)
     expect(mockGetClient).toHaveBeenCalledWith('codori')
     expect(mockRpcRequest).toHaveBeenCalledWith('thread/list', {
@@ -543,6 +575,24 @@ describe('project sidebar inline threads', () => {
     expect(inactiveThread.attributes('data-depth')).toBe('1')
     expect(inactiveThread.attributes('data-active')).toBe('false')
     expect(inactiveThread.classes()).not.toContain('before:bg-primary/5')
+  })
+
+  it('opens the next active project group after an in-app route transition', async () => {
+    mockRpcRequest.mockResolvedValue(makeThreadListResponse(2))
+
+    const wrapper = mountSidebar({
+      collapsed: false
+    })
+    await waitForSidebar()
+    expect(wrapper.get('.navigation-menu-stub').attributes('data-model-value')).toBe('["project:codori"]')
+
+    mockRoute.params = {
+      projectId: 'other',
+      threadId: 'thread-2'
+    }
+    await waitForSidebar()
+
+    expect(wrapper.get('.navigation-menu-stub').attributes('data-model-value')).toBe('["project:other"]')
   })
 
   it('keeps selected project inline rows synced with shared thread summaries', async () => {
