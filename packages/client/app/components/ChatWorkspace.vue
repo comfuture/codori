@@ -71,6 +71,7 @@ import { useProjects } from '../composables/useProjects'
 import { useRpc } from '../composables/useRpc'
 import { useChatSubmitGuard } from '../composables/useChatSubmitGuard'
 import { useWorkspaceGitBranch } from '../composables/useWorkspaceGitBranch'
+import { useWorkspaceTerminalSurface } from '../composables/useWorkspaceTerminalSurface'
 import { sortSidebarProjects } from '../utils/project-sidebar-order'
 import {
   promoteThreadSummaries,
@@ -462,7 +463,7 @@ const fileAutocompleteLoading = ref(false)
 const fileAutocompleteError = ref<string | null>(null)
 const fileAutocompleteResults = ref<NormalizedFuzzyFileSearchMatch[]>([])
 const usageStatusModalOpen = ref(false)
-const terminalOpen = ref(false)
+const { open: terminalOpen } = useWorkspaceTerminalSurface(workspaceScope)
 const promptControlsPopoverOpen = ref(false)
 const isWorkflowBusy = computed(() =>
   status.value === 'submitted'
@@ -5382,7 +5383,7 @@ watch(
                   />
 
                   <UTooltip
-                    v-if="workspaceId && selectedProject?.projectPath"
+                    v-if="workspaceKind === 'chat' && workspaceId && selectedProject?.projectPath"
                     text="Workspace terminal"
                   >
                     <UButton

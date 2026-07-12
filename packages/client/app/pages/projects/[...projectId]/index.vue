@@ -3,6 +3,7 @@ import { useRoute, useRouter } from '#imports'
 import { computed, onMounted } from 'vue'
 import { useProjects } from '../../../composables/useProjects'
 import { useThreadPanel } from '../../../composables/useThreadPanel'
+import WorkspaceTerminalToggle from '../../../components/WorkspaceTerminalToggle.vue'
 import { normalizeProjectIdParam, toProjectRoute } from '~~/shared/codori'
 
 const route = useRoute()
@@ -65,6 +66,10 @@ onMounted(() => {
                 />
               </UTooltip>
             </div>
+            <WorkspaceTerminalToggle
+              v-if="projectId"
+              :workspace="{ kind: 'project', id: projectId }"
+            />
           </template>
         </UDashboardNavbar>
       </template>
