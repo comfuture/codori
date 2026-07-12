@@ -82,6 +82,7 @@ const TreeStub = defineComponent({
   props: {
     items: { type: Array, default: () => [] },
     expanded: { type: Array, default: () => [] },
+    ui: { type: Object, default: () => ({}) },
     onToggle: { type: Function, default: undefined },
     onSelect: { type: Function, default: undefined }
   },
@@ -193,6 +194,21 @@ describe('WorkspaceFilesPanel', () => {
       line: null,
       column: null
     }
+  })
+
+  it('keeps tree rows and labels left aligned beside their icons', async () => {
+    fetchMock.mockResolvedValue(directoryResponse('', [
+      entry({ name: 'README.md', path: 'README.md' })
+    ]))
+    const wrapper = mountPanel()
+    await wrapper.get('[aria-label="Browse workspace files"]').trigger('click')
+    await flushPromises()
+    const tree = wrapper.findComponent(TreeStub)
+
+    expect(tree.props('ui')).toMatchObject({
+      link: expect.stringContaining('justify-start'),
+      linkLabel: expect.stringContaining('text-left')
+    })
   })
 
   it('loads directories lazily and opens selected files in the existing viewer', async () => {

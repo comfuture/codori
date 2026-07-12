@@ -344,8 +344,8 @@ watch(open, (nextOpen) => {
             size="sm"
             class="w-full"
             :ui="{
-              link: 'min-w-0 rounded-lg',
-              linkLabel: 'min-w-0 flex-1',
+              link: 'min-w-0 justify-start rounded-lg text-left',
+              linkLabel: 'min-w-0 flex-1 text-left',
               linkLeadingIcon: 'shrink-0'
             }"
             @update:model-value="handleSelectedNode"
@@ -355,7 +355,7 @@ watch(open, (nextOpen) => {
           >
             <template #item-label="{ item }">
               <span
-                class="flex min-w-0 items-center gap-2"
+                class="flex min-w-0 w-full items-center justify-start gap-2 text-left"
                 :class="item.status ? 'text-muted' : ''"
               >
                 <span class="min-w-0 flex-1 truncate">{{ item.label }}</span>
