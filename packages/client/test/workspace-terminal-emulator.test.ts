@@ -18,12 +18,14 @@ type Deferred<T> = {
 type TerminalRecord = {
   options: Record<string, unknown>
   open: ReturnType<typeof vi.fn>
+  onData: ReturnType<typeof vi.fn>
   dispose: ReturnType<typeof vi.fn>
 }
 
 type ProcessRecord = {
   start: ReturnType<typeof vi.fn>
   dispose: ReturnType<typeof vi.fn>
+  writeText: ReturnType<typeof vi.fn>
 }
 
 const mocks = vi.hoisted(() => ({
@@ -190,6 +192,30 @@ describe('WorkspaceTerminalEmulator interactive rendering', () => {
 
     const theme = mocks.terminals[0]?.options.theme as { brightBlack?: string }
     expect(theme.brightBlack).toMatch(/(?:45%.*transparent|rgba\([^)]*,\s*0\.45\)|\/\s*0\.45\))/)
+    expect(mocks.terminals[0]?.options.screenReaderMode).toBe(true)
+  })
+
+  it('forwards Vim modal input sequences to the PTY without rewriting control bytes', async () => {
+    mocks.loadFonts.mockResolvedValue(undefined)
+
+    mountEmulator()
+    await vi.waitFor(() => expect(mocks.processes).toHaveLength(1))
+
+    const onData = mocks.terminals[0]?.onData.mock.calls[0]?.[0] as
+      ((value: string) => void) | undefined
+    expect(onData).toBeTypeOf('function')
+
+    for (const value of ['i', 'vim-input-check', '\x1b', ':q!', '\r']) {
+      onData?.(value)
+    }
+
+    expect(mocks.processes[0]?.writeText.mock.calls).toEqual([
+      ['i'],
+      ['vim-input-check'],
+      ['\x1b'],
+      [':q!'],
+      ['\r']
+    ])
   })
 })
 
