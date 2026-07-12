@@ -161,11 +161,10 @@ watch(open, (nextOpen) => {
     <UButton
       type="button"
       color="neutral"
-      :variant="open ? 'soft' : 'ghost'"
+      :variant="open ? 'soft' : 'outline'"
       size="sm"
       icon="i-lucide-folder-tree"
-      class="size-8 shrink-0 justify-center rounded-full border border-default/70"
-      :ui="{ leadingIcon: 'size-4', base: 'px-0' }"
+      square
       :aria-expanded="open"
       aria-label="Browse workspace files"
       @click="handleOpenChange(!open)"

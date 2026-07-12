@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useRoute, useRouter } from '#imports'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import WorkspaceFilesPanel from '../../../../components/WorkspaceFilesPanel.vue'
 import { useChatSession } from '../../../../composables/useChatSession'
 import { useProjects } from '../../../../composables/useProjects'
 import { useThreadSummaries } from '../../../../composables/useThreadSummaries'
@@ -271,6 +272,11 @@ watch(
           </template>
           <template #right>
             <div class="flex items-center gap-1.5 lg:gap-2">
+              <WorkspaceFilesPanel
+                v-if="projectId"
+                :workspace="{ kind: 'project', id: projectId }"
+                :workspace-label="projectName"
+              />
               <UTooltip text="New thread">
                 <UButton
                   icon="i-lucide-plus"
