@@ -124,7 +124,7 @@ const inspectDirectoryEntry = async (input: {
     ? `${input.directoryPath}/${input.name}`
     : input.name
   const hidden = input.name.startsWith('.')
-  const ignored = IGNORED_PROJECT_DIRECTORY_NAMES.has(input.name)
+  const ignoredName = IGNORED_PROJECT_DIRECTORY_NAMES.has(input.name)
 
   let entryLstat: Awaited<ReturnType<typeof lstat>>
   try {
@@ -139,7 +139,7 @@ const inspectDirectoryEntry = async (input: {
       isSymlink: false,
       accessible: false,
       hidden,
-      ignored,
+      ignored: false,
       errorCode: toEntryErrorCode(error)
     }
   }
@@ -155,7 +155,7 @@ const inspectDirectoryEntry = async (input: {
       isSymlink,
       accessible: false,
       hidden,
-      ignored,
+      ignored: false,
       errorCode: 'UNSUPPORTED'
     }
   }
@@ -175,7 +175,7 @@ const inspectDirectoryEntry = async (input: {
         isSymlink: true,
         accessible: false,
         hidden,
-        ignored,
+        ignored: false,
         errorCode: toEntryErrorCode(error)
       }
     }
@@ -190,7 +190,7 @@ const inspectDirectoryEntry = async (input: {
         isSymlink: true,
         accessible: false,
         hidden,
-        ignored,
+        ignored: false,
         errorCode: 'FORBIDDEN'
       }
     }
@@ -209,7 +209,7 @@ const inspectDirectoryEntry = async (input: {
       isSymlink,
       accessible: false,
       hidden,
-      ignored,
+      ignored: false,
       errorCode: toEntryErrorCode(error)
     }
   }
@@ -224,7 +224,7 @@ const inspectDirectoryEntry = async (input: {
     isSymlink,
     accessible: kind === 'directory' || kind === 'file',
     hidden,
-    ignored
+    ignored: kind === 'directory' && ignoredName
   }
 }
 
