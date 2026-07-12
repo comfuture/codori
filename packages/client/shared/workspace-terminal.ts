@@ -20,6 +20,7 @@ export const TERMINAL_OUTPUT_BYTES_CAP = 4 * 1024 * 1024
 export const TERMINAL_WRITE_CHUNK_BYTES = 16 * 1024
 export const TERMINAL_CLEANUP_TIMEOUT_MS = 750
 export const TERMINAL_PERMISSION_LOOKUP_TIMEOUT_MS = 3_000
+export const WORKSPACE_TERMINAL_TERM = 'xterm-256color'
 
 export const canCreateWorkspaceTerminalSession = (sessionCount: number) =>
   Number.isInteger(sessionCount) && sessionCount >= 0 && sessionCount < TERMINAL_MAX_SESSIONS
@@ -373,6 +374,7 @@ export class WorkspaceTerminalProcess {
         tty: true,
         cwd: this.cwd,
         size: terminalSize,
+        env: { TERM: WORKSPACE_TERMINAL_TERM },
         ...(shell.permissionProfile ? { permissionProfile: shell.permissionProfile } : {}),
         disableTimeout: true,
         outputBytesCap: TERMINAL_OUTPUT_BYTES_CAP

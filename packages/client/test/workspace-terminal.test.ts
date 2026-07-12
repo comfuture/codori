@@ -381,6 +381,7 @@ describe('WorkspaceTerminalProcess', () => {
         tty: true,
         cwd: '/workspace/codori',
         size: { cols: 96, rows: 32 },
+        env: { TERM: 'xterm-256color' },
         permissionProfile: ':workspace',
         disableTimeout: true,
         outputBytesCap: TERMINAL_OUTPUT_BYTES_CAP

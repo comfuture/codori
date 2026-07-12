@@ -54,7 +54,10 @@ const createTheme = (resolveColor: (value: string, fallback: string) => string):
   magenta: resolveColor('var(--ui-primary)', 'rgb(168, 85, 247)'),
   cyan: resolveColor('var(--ui-info)', 'rgb(6, 182, 212)'),
   white: resolveColor('var(--ui-text-highlighted)', 'rgb(245, 245, 245)'),
-  brightBlack: resolveColor('var(--ui-text-muted)', 'rgb(115, 115, 115)'),
+  brightBlack: resolveColor(
+    'color-mix(in srgb, var(--ui-text-highlighted) 45%, transparent)',
+    'rgba(245, 245, 245, 0.45)'
+  ),
   brightRed: resolveColor('var(--ui-error)', 'rgb(248, 113, 113)'),
   brightGreen: resolveColor('var(--ui-success)', 'rgb(74, 222, 128)'),
   brightYellow: resolveColor('var(--ui-warning)', 'rgb(250, 204, 21)'),
