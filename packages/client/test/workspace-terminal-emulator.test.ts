@@ -178,6 +178,21 @@ beforeEach(() => {
   vi.stubGlobal('MutationObserver', MutationObserverStub)
 })
 
+describe('WorkspaceTerminalEmulator interactive rendering', () => {
+  it('renders ANSI bright black as translucent autosuggestion text', async () => {
+    mocks.loadFonts.mockResolvedValue(undefined)
+    vi.spyOn(window, 'getComputedStyle').mockImplementation(element => ({
+      color: (element as HTMLElement).style.color
+    }) as CSSStyleDeclaration)
+
+    mountEmulator()
+    await vi.waitFor(() => expect(mocks.terminals).toHaveLength(1))
+
+    const theme = mocks.terminals[0]?.options.theme as { brightBlack?: string }
+    expect(theme.brightBlack).toMatch(/(?:45%.*transparent|rgba\([^)]*,\s*0\.45\)|\/\s*0\.45\))/)
+  })
+})
+
 afterEach(() => {
   for (const wrapper of wrappers.splice(0)) {
     wrapper.unmount()
