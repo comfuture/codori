@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   TERMINAL_MAX_SESSIONS,
   canCreateWorkspaceTerminalSession,
+  createWorkspaceTerminalEmulatorKey,
   type WorkspaceTerminalEvent,
   type WorkspaceTerminalShell,
   type WorkspaceTerminalState
@@ -120,6 +121,13 @@ const updateSessionStatus = (session: TerminalSession, event: WorkspaceTerminalE
 const updateSessionShell = (session: TerminalSession, shell: WorkspaceTerminalShell) => {
   session.shell = shell.label
 }
+
+const terminalEmulatorKey = (session: TerminalSession) => createWorkspaceTerminalEmulatorKey({
+  workspace: props.workspace,
+  cwd: props.cwd,
+  sessionId: session.id,
+  generation: session.generation
+})
 
 const hideSurface = () => emit('update:open', false)
 
@@ -318,7 +326,7 @@ onBeforeUnmount(() => {
       <WorkspaceTerminalEmulator
         v-for="session in sessions"
         v-show="session.id === activeSessionId"
-        :key="`${session.id}:${session.generation}`"
+        :key="terminalEmulatorKey(session)"
         :session-id="`${session.id}-${session.generation}`"
         :workspace="workspace"
         :cwd="cwd"
