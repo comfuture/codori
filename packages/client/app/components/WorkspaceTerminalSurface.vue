@@ -25,6 +25,8 @@ type TerminalSession = {
   label: string
   state: WorkspaceTerminalState
   shell: string
+  permissionProfile: string | null
+  permissionLabel: string
   exitCode?: number
   error?: string
 }
@@ -78,7 +80,9 @@ const addSession = () => {
     generation: 0,
     label: `Terminal ${number}`,
     state: 'starting',
-    shell: 'Detecting shell'
+    shell: 'Detecting shell',
+    permissionProfile: null,
+    permissionLabel: 'Checking permissions'
   }
   sessions.value.push(session)
   activeSessionId.value = session.id
@@ -110,6 +114,8 @@ const restartActiveSession = () => {
   session.exitCode = undefined
   session.error = undefined
   session.shell = 'Detecting shell'
+  session.permissionProfile = null
+  session.permissionLabel = 'Checking permissions'
 }
 
 const updateSessionStatus = (session: TerminalSession, event: WorkspaceTerminalEvent) => {
@@ -120,6 +126,8 @@ const updateSessionStatus = (session: TerminalSession, event: WorkspaceTerminalE
 
 const updateSessionShell = (session: TerminalSession, shell: WorkspaceTerminalShell) => {
   session.shell = shell.label
+  session.permissionProfile = shell.permissionProfile
+  session.permissionLabel = shell.permissionLabel
 }
 
 const terminalEmulatorKey = (session: TerminalSession) => createWorkspaceTerminalEmulatorKey({
@@ -314,7 +322,10 @@ onBeforeUnmount(() => {
       </UBadge>
       <span class="truncate font-mono">{{ activeSession.shell }}</span>
       <span class="truncate font-mono">{{ cwd }}</span>
-      <span class="font-medium text-primary">Workspace sandbox</span>
+      <span
+        class="font-medium"
+        :class="activeSession.permissionProfile === ':danger-full-access' ? 'text-warning' : 'text-primary'"
+      >{{ activeSession.permissionLabel }}</span>
       <span v-if="activeSession.exitCode !== undefined">Exit {{ activeSession.exitCode }}</span>
       <span
         v-if="activeSession.error"

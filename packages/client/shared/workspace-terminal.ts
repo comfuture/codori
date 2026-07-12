@@ -1,4 +1,6 @@
 import type { InitializeResponse } from './generated/codex-app-server/InitializeResponse'
+import type { ConfigReadParams } from './generated/codex-app-server/v2/ConfigReadParams'
+import type { ConfigReadResponse } from './generated/codex-app-server/v2/ConfigReadResponse'
 import type { CommandExecOutputDeltaNotification } from './generated/codex-app-server/v2/CommandExecOutputDeltaNotification'
 import type { CommandExecParams } from './generated/codex-app-server/v2/CommandExecParams'
 import type { CommandExecResizeParams } from './generated/codex-app-server/v2/CommandExecResizeParams'
@@ -17,6 +19,7 @@ export const TERMINAL_MAX_SESSIONS = 4
 export const TERMINAL_OUTPUT_BYTES_CAP = 4 * 1024 * 1024
 export const TERMINAL_WRITE_CHUNK_BYTES = 16 * 1024
 export const TERMINAL_CLEANUP_TIMEOUT_MS = 750
+export const TERMINAL_PERMISSION_LOOKUP_TIMEOUT_MS = 3_000
 
 export const canCreateWorkspaceTerminalSession = (sessionCount: number) =>
   Number.isInteger(sessionCount) && sessionCount >= 0 && sessionCount < TERMINAL_MAX_SESSIONS
@@ -30,12 +33,19 @@ export type WorkspaceTerminalState =
   | 'output-limit'
   | 'error'
 
-export type WorkspaceTerminalShell = {
+export type WorkspaceTerminalPermission = {
+  permissionProfile: string | null
+  permissionLabel: string
+  hasUnrestrictedFilesystemWrite: boolean
+}
+
+export type WorkspaceTerminalShell = WorkspaceTerminalPermission & {
   label: string
   command: string[]
 }
 
 type TerminalRpcMethodMap = {
+  'config/read': { params: ConfigReadParams, response: ConfigReadResponse }
   'command/exec': { params: CommandExecParams, response: CommandExecResponse }
   'command/exec/write': { params: CommandExecWriteParams, response: CommandExecWriteResponse }
   'command/exec/resize': { params: CommandExecResizeParams, response: CommandExecResizeResponse }
@@ -117,21 +127,119 @@ export const resolveTerminalLink = (event: Pick<MouseEvent, 'ctrlKey' | 'metaKey
 }
 
 export const resolveWorkspaceTerminalShell = (
-  server: Pick<InitializeResponse, 'platformFamily' | 'platformOs'>
+  server: Pick<InitializeResponse, 'platformFamily' | 'platformOs'>,
+  permission: WorkspaceTerminalPermission
 ): WorkspaceTerminalShell => {
   if (server.platformOs === 'macos') {
-    return { label: 'zsh', command: ['/bin/zsh', '-l'] }
+    return {
+      label: 'zsh',
+      command: permission.hasUnrestrictedFilesystemWrite
+        ? ['/bin/zsh', '-l']
+        : ['/bin/zsh', '-f'],
+      ...permission
+    }
   }
 
   if (server.platformOs === 'linux' || server.platformFamily === 'unix') {
-    return { label: 'sh', command: ['/bin/sh', '-l'] }
+    return {
+      label: 'sh',
+      command: permission.hasUnrestrictedFilesystemWrite
+        ? ['/bin/sh', '-l']
+        : ['/bin/sh'],
+      ...permission
+    }
   }
 
   if (server.platformOs === 'windows' || server.platformFamily === 'windows') {
-    return { label: 'PowerShell', command: ['powershell.exe', '-NoLogo'] }
+    return {
+      label: 'PowerShell',
+      command: permission.hasUnrestrictedFilesystemWrite
+        ? ['powershell.exe', '-NoLogo']
+        : ['powershell.exe', '-NoLogo', '-NoProfile'],
+      ...permission
+    }
   }
 
   throw new Error(`No supported interactive shell is configured for ${server.platformOs || server.platformFamily}.`)
+}
+
+const normalizeBuiltInPermissionProfile = (value: unknown) => {
+  if (value === ':danger-full-access' || value === 'danger-full-access') {
+    return ':danger-full-access'
+  }
+  if (value === ':workspace' || value === 'workspace-write') {
+    return ':workspace'
+  }
+  if (value === ':read-only' || value === 'read-only') {
+    return ':read-only'
+  }
+  return typeof value === 'string' && value.length > 0 ? value : null
+}
+
+export const resolveWorkspaceTerminalPermission = (config: {
+  sandbox_mode?: unknown
+  default_permissions?: unknown
+} | null): WorkspaceTerminalPermission => {
+  const configuredProfile = normalizeBuiltInPermissionProfile(config?.default_permissions)
+    ?? normalizeBuiltInPermissionProfile(config?.sandbox_mode)
+
+  if (configuredProfile === ':danger-full-access') {
+    return {
+      permissionProfile: configuredProfile,
+      permissionLabel: 'Danger full access',
+      hasUnrestrictedFilesystemWrite: true
+    }
+  }
+
+  if (configuredProfile === ':workspace') {
+    return {
+      permissionProfile: configuredProfile,
+      permissionLabel: 'Workspace sandbox',
+      hasUnrestrictedFilesystemWrite: false
+    }
+  }
+
+  if (configuredProfile === ':read-only') {
+    return {
+      permissionProfile: configuredProfile,
+      permissionLabel: 'Read-only sandbox',
+      hasUnrestrictedFilesystemWrite: false
+    }
+  }
+
+  return {
+    permissionProfile: configuredProfile,
+    permissionLabel: configuredProfile ? `Restricted profile ${configuredProfile}` : 'Configured permissions',
+    hasUnrestrictedFilesystemWrite: false
+  }
+}
+
+const readWorkspaceTerminalPermission = async (
+  client: WorkspaceTerminalRpcClient,
+  cwd: string
+) => {
+  let timer: ReturnType<typeof setTimeout> | null = null
+  try {
+    const response = await Promise.race([
+      requestTerminalRpc(client, 'config/read', {
+        includeLayers: false,
+        cwd
+      }),
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(
+          () => reject(new Error('Timed out while reading Codex permissions.')),
+          TERMINAL_PERMISSION_LOOKUP_TIMEOUT_MS
+        )
+      })
+    ])
+    return resolveWorkspaceTerminalPermission(response.config)
+  } catch {
+    return resolveWorkspaceTerminalPermission(null)
+  } finally {
+    if (timer !== null) {
+      clearTimeout(timer)
+    }
+  }
 }
 
 export const createWorkspaceTerminalProcessId = (sessionId: string) => {
@@ -253,7 +361,8 @@ export class WorkspaceTerminalProcess {
         throw new Error('The app-server did not report its platform information.')
       }
 
-      const shell = resolveWorkspaceTerminalShell(server)
+      const permission = await readWorkspaceTerminalPermission(this.client, this.cwd)
+      const shell = resolveWorkspaceTerminalShell(server, permission)
       this.onShell(shell)
       this.lastSize = terminalSize
       this.emit({ state: 'running' })
@@ -264,7 +373,7 @@ export class WorkspaceTerminalProcess {
         tty: true,
         cwd: this.cwd,
         size: terminalSize,
-        permissionProfile: ':workspace',
+        ...(shell.permissionProfile ? { permissionProfile: shell.permissionProfile } : {}),
         disableTimeout: true,
         outputBytesCap: TERMINAL_OUTPUT_BYTES_CAP
       }).then((response) => {

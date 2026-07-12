@@ -17,6 +17,7 @@ import {
   encodeTerminalBytes,
   requiresTerminalPasteConfirmation,
   resolveTerminalLink,
+  resolveWorkspaceTerminalPermission,
   resolveWorkspaceTerminalShell,
   createWorkspaceTerminalProcessId,
   createWorkspaceTerminalEmulatorKey,
@@ -68,6 +69,12 @@ class FakeTerminalRpcClient implements WorkspaceTerminalRpcClient {
 
   holdTerminate = false
 
+  sandboxMode: unknown = 'workspace-write'
+
+  defaultPermissions: unknown = null
+
+  configReadError: Error | null = null
+
   readonly pendingTerminate = deferred<Record<string, never>>()
 
   private readonly notificationListeners = new Set<(notification: CodexRpcNotification) => void>()
@@ -99,6 +106,20 @@ class FakeTerminalRpcClient implements WorkspaceTerminalRpcClient {
 
   request<T>(method: string, params?: unknown): Promise<T> {
     this.requests.push({ method, params })
+
+    if (method === 'config/read') {
+      if (this.configReadError) {
+        return Promise.reject(this.configReadError)
+      }
+      return Promise.resolve({
+        config: {
+          sandbox_mode: this.sandboxMode,
+          default_permissions: this.defaultPermissions
+        },
+        origins: {},
+        layers: null
+      }) as Promise<T>
+    }
 
     if (method === 'command/exec') {
       return this.execResult.promise as Promise<T>
@@ -264,35 +285,98 @@ describe('workspace terminal link and shell policies', () => {
   })
 
   it('maps app-server platforms to argv-based interactive shells', () => {
-    expect(resolveWorkspaceTerminalShell({ platformFamily: 'unix', platformOs: 'macos' })).toEqual({
+    const workspacePermission = resolveWorkspaceTerminalPermission({ sandbox_mode: 'workspace-write' })
+    const unrestrictedPermission = resolveWorkspaceTerminalPermission({ sandbox_mode: 'danger-full-access' })
+
+    expect(resolveWorkspaceTerminalShell(
+      { platformFamily: 'unix', platformOs: 'macos' },
+      workspacePermission
+    )).toEqual({
       label: 'zsh',
-      command: ['/bin/zsh', '-l']
+      command: ['/bin/zsh', '-f'],
+      permissionProfile: ':workspace',
+      permissionLabel: 'Workspace sandbox',
+      hasUnrestrictedFilesystemWrite: false
     })
-    expect(resolveWorkspaceTerminalShell({ platformFamily: 'unix', platformOs: 'linux' })).toEqual({
+    expect(resolveWorkspaceTerminalShell(
+      { platformFamily: 'unix', platformOs: 'macos' },
+      unrestrictedPermission
+    )).toEqual({
+      label: 'zsh',
+      command: ['/bin/zsh', '-l'],
+      permissionProfile: ':danger-full-access',
+      permissionLabel: 'Danger full access',
+      hasUnrestrictedFilesystemWrite: true
+    })
+    expect(resolveWorkspaceTerminalShell(
+      { platformFamily: 'unix', platformOs: 'linux' },
+      workspacePermission
+    )).toEqual({
       label: 'sh',
-      command: ['/bin/sh', '-l']
+      command: ['/bin/sh'],
+      permissionProfile: ':workspace',
+      permissionLabel: 'Workspace sandbox',
+      hasUnrestrictedFilesystemWrite: false
     })
-    expect(resolveWorkspaceTerminalShell({ platformFamily: 'windows', platformOs: 'windows' })).toEqual({
+    expect(resolveWorkspaceTerminalShell(
+      { platformFamily: 'windows', platformOs: 'windows' },
+      workspacePermission
+    )).toEqual({
       label: 'PowerShell',
-      command: ['powershell.exe', '-NoLogo']
+      command: ['powershell.exe', '-NoLogo', '-NoProfile'],
+      permissionProfile: ':workspace',
+      permissionLabel: 'Workspace sandbox',
+      hasUnrestrictedFilesystemWrite: false
     })
-    expect(() => resolveWorkspaceTerminalShell({ platformFamily: 'unknown', platformOs: 'plan9' }))
+    expect(() => resolveWorkspaceTerminalShell(
+      { platformFamily: 'unknown', platformOs: 'plan9' },
+      workspacePermission
+    ))
       .toThrow('No supported interactive shell is configured for plan9.')
+  })
+
+  it('uses the effective default permission before the legacy sandbox mode', () => {
+    expect(resolveWorkspaceTerminalPermission({
+      sandbox_mode: 'danger-full-access',
+      default_permissions: ':workspace'
+    })).toEqual({
+      permissionProfile: ':workspace',
+      permissionLabel: 'Workspace sandbox',
+      hasUnrestrictedFilesystemWrite: false
+    })
+    expect(resolveWorkspaceTerminalPermission({
+      sandbox_mode: 'workspace-write',
+      default_permissions: ':danger-full-access'
+    })).toEqual({
+      permissionProfile: ':danger-full-access',
+      permissionLabel: 'Danger full access',
+      hasUnrestrictedFilesystemWrite: true
+    })
   })
 })
 
 describe('WorkspaceTerminalProcess', () => {
-  it('starts a sandboxed PTY with the workspace cwd and explicit process ownership', async () => {
+  it('starts a no-rc PTY when Codex is limited to the workspace', async () => {
     const { client, events, process, shells } = createProcess()
 
     await process.start({ cols: 96, rows: 32 })
 
-    expect(shells).toEqual([{ label: 'zsh', command: ['/bin/zsh', '-l'] }])
+    expect(client.requestsFor('config/read')).toEqual([{
+      method: 'config/read',
+      params: { includeLayers: false, cwd: '/workspace/codori' }
+    }])
+    expect(shells).toEqual([{
+      label: 'zsh',
+      command: ['/bin/zsh', '-f'],
+      permissionProfile: ':workspace',
+      permissionLabel: 'Workspace sandbox',
+      hasUnrestrictedFilesystemWrite: false
+    }])
     expect(events).toEqual([{ state: 'starting' }, { state: 'running' }])
     expect(client.requestsFor('command/exec')).toEqual([{
       method: 'command/exec',
       params: {
-        command: ['/bin/zsh', '-l'],
+        command: ['/bin/zsh', '-f'],
         processId: 'terminal-process-1',
         tty: true,
         cwd: '/workspace/codori',
@@ -302,6 +386,43 @@ describe('WorkspaceTerminalProcess', () => {
         outputBytesCap: TERMINAL_OUTPUT_BYTES_CAP
       }
     }])
+  })
+
+  it('starts a full login shell when Codex has unrestricted filesystem access', async () => {
+    const { client, events, process, shells } = createProcess()
+    client.sandboxMode = 'danger-full-access'
+
+    await process.start({ cols: 96, rows: 32 })
+
+    expect(shells).toEqual([{
+      label: 'zsh',
+      command: ['/bin/zsh', '-l'],
+      permissionProfile: ':danger-full-access',
+      permissionLabel: 'Danger full access',
+      hasUnrestrictedFilesystemWrite: true
+    }])
+    expect(events).toEqual([{ state: 'starting' }, { state: 'running' }])
+    expect(client.requestsFor('command/exec')[0]?.params).toMatchObject({
+      command: ['/bin/zsh', '-l'],
+      permissionProfile: ':danger-full-access'
+    })
+  })
+
+  it('falls back to configured permissions and a no-rc shell when permission lookup fails', async () => {
+    const { client, events, process, shells } = createProcess()
+    client.configReadError = new Error('config unavailable')
+
+    await process.start({ cols: 80, rows: 24 })
+
+    expect(shells).toEqual([{
+      label: 'zsh',
+      command: ['/bin/zsh', '-f'],
+      permissionProfile: null,
+      permissionLabel: 'Configured permissions',
+      hasUnrestrictedFilesystemWrite: false
+    }])
+    expect(events).toEqual([{ state: 'starting' }, { state: 'running' }])
+    expect(client.requestsFor('command/exec')[0]?.params).not.toHaveProperty('permissionProfile')
   })
 
   it('falls back to safe initial dimensions before starting a PTY', async () => {
