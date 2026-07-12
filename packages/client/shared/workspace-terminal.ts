@@ -63,17 +63,23 @@ const requestTerminalRpc = async <Method extends keyof TerminalRpcMethodMap>(
   params: TerminalRpcMethodMap[Method]['params']
 ) => await client.request<TerminalRpcMethodMap[Method]['response']>(method, params)
 
+const TERMINAL_BINARY_STRING_CHUNK_BYTES = 32 * 1024
+
 export const encodeTerminalBytes = (bytes: Uint8Array) => {
   let binary = ''
-  for (let index = 0; index < bytes.length; index += 1) {
-    binary += String.fromCharCode(bytes[index] ?? 0)
+  for (let offset = 0; offset < bytes.length; offset += TERMINAL_BINARY_STRING_CHUNK_BYTES) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + TERMINAL_BINARY_STRING_CHUNK_BYTES))
   }
   return btoa(binary)
 }
 
 export const decodeTerminalBytes = (base64: string) => {
   const binary = atob(base64)
-  return Uint8Array.from(binary, character => character.charCodeAt(0))
+  const bytes = new Uint8Array(binary.length)
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index)
+  }
+  return bytes
 }
 
 export const encodeTerminalBinaryInput = (value: string) =>
@@ -132,6 +138,28 @@ export const createWorkspaceTerminalProcessId = (sessionId: string) => {
   const randomId = globalThis.crypto?.randomUUID?.()
     ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
   return `codori-terminal-${sessionId}-${randomId}`
+}
+
+export const createWorkspaceTerminalEmulatorKey = (options: {
+  workspace: { kind: 'project' | 'chat', id: string }
+  cwd: string
+  sessionId: string
+  generation: number
+}) => JSON.stringify([
+  options.workspace.kind,
+  options.workspace.id,
+  options.cwd,
+  options.sessionId,
+  options.generation
+])
+
+export const sanitizeWorkspaceTerminalSize = (size: { cols: number, rows: number }) => {
+  const cols = Math.floor(size.cols)
+  const rows = Math.floor(size.rows)
+  return {
+    cols: Number.isFinite(cols) && cols > 0 ? cols : 80,
+    rows: Number.isFinite(rows) && rows > 0 ? rows : 24
+  }
 }
 
 const asOutputDelta = (notification: CodexRpcNotification) =>
@@ -209,6 +237,7 @@ export class WorkspaceTerminalProcess {
       return
     }
 
+    const terminalSize = sanitizeWorkspaceTerminalSize(size)
     this.releaseNotification = this.client.subscribe(notification => this.handleNotification(notification))
     this.releaseConnectionState = this.client.subscribeConnectionState(state => this.handleConnectionState(state))
     this.emit({ state: 'starting' })
@@ -226,7 +255,7 @@ export class WorkspaceTerminalProcess {
 
       const shell = resolveWorkspaceTerminalShell(server)
       this.onShell(shell)
-      this.lastSize = { ...size }
+      this.lastSize = terminalSize
       this.emit({ state: 'running' })
 
       void requestTerminalRpc(this.client, 'command/exec', {
@@ -234,7 +263,7 @@ export class WorkspaceTerminalProcess {
         processId: this.processId,
         tty: true,
         cwd: this.cwd,
-        size,
+        size: terminalSize,
         permissionProfile: ':workspace',
         disableTimeout: true,
         outputBytesCap: TERMINAL_OUTPUT_BYTES_CAP

@@ -19,6 +19,8 @@ import {
   resolveTerminalLink,
   resolveWorkspaceTerminalShell,
   createWorkspaceTerminalProcessId,
+  createWorkspaceTerminalEmulatorKey,
+  sanitizeWorkspaceTerminalSize,
   type WorkspaceTerminalEvent,
   type WorkspaceTerminalRpcClient,
   type WorkspaceTerminalShell
@@ -193,6 +195,9 @@ describe('workspace terminal byte helpers', () => {
     expect(decodeTerminalBytes(encodeTerminalBytes(utf8))).toEqual(utf8)
     expect(new TextDecoder().decode(decodeTerminalBytes(encodeTerminalBytes(utf8)))).toBe('Codori 한글 🙂')
     expect(encodeTerminalBinaryInput('\x00\x80\xff\u0101')).toEqual(Uint8Array.of(0, 128, 255, 1))
+
+    const everyByte = Uint8Array.from({ length: 256 }, (_, index) => index)
+    expect(decodeTerminalBytes(encodeTerminalBytes(everyByte))).toEqual(everyByte)
   })
 
   it('chunks bytes without changing their order and rejects invalid chunk sizes', () => {
@@ -220,6 +225,31 @@ describe('workspace terminal byte helpers', () => {
     expect(canCreateWorkspaceTerminalSession(TERMINAL_MAX_SESSIONS)).toBe(false)
     expect(canCreateWorkspaceTerminalSession(-1)).toBe(false)
     expect(createWorkspaceTerminalProcessId('session')).not.toBe(createWorkspaceTerminalProcessId('session'))
+  })
+
+  it('normalizes initial PTY geometry and isolates emulator keys by workspace', () => {
+    expect(sanitizeWorkspaceTerminalSize({ cols: 120.9, rows: 40.7 })).toEqual({ cols: 120, rows: 40 })
+    expect(sanitizeWorkspaceTerminalSize({ cols: 0, rows: -2 })).toEqual({ cols: 80, rows: 24 })
+    expect(sanitizeWorkspaceTerminalSize({ cols: Number.NaN, rows: Number.POSITIVE_INFINITY })).toEqual({ cols: 80, rows: 24 })
+
+    const projectKey = createWorkspaceTerminalEmulatorKey({
+      workspace: { kind: 'project', id: 'codori' },
+      cwd: '/project/codori',
+      sessionId: 'terminal-1',
+      generation: 0
+    })
+    expect(createWorkspaceTerminalEmulatorKey({
+      workspace: { kind: 'chat', id: 'codori' },
+      cwd: '/project/codori',
+      sessionId: 'terminal-1',
+      generation: 0
+    })).not.toBe(projectKey)
+    expect(createWorkspaceTerminalEmulatorKey({
+      workspace: { kind: 'project', id: 'codori' },
+      cwd: '/project/other',
+      sessionId: 'terminal-1',
+      generation: 0
+    })).not.toBe(projectKey)
   })
 })
 
@@ -272,6 +302,16 @@ describe('WorkspaceTerminalProcess', () => {
         outputBytesCap: TERMINAL_OUTPUT_BYTES_CAP
       }
     }])
+  })
+
+  it('falls back to safe initial dimensions before starting a PTY', async () => {
+    const { client, process } = createProcess()
+
+    await process.start({ cols: 0, rows: Number.NaN })
+
+    expect(client.requestsFor('command/exec')[0]?.params).toMatchObject({
+      size: { cols: 80, rows: 24 }
+    })
   })
 
   it('routes byte output by process id without decoding split UTF-8 chunks', async () => {

@@ -38,45 +38,50 @@ let resizeTimer: ReturnType<typeof setTimeout> | null = null
 let fitFrame: number | null = null
 let removePasteListener: (() => void) | null = null
 
-const resolveCssColor = (value: string, fallback: string) => {
+const createTheme = (resolveColor: (value: string, fallback: string) => string): ITheme => ({
+  background: resolveColor('var(--ui-bg)', 'rgb(10, 10, 10)'),
+  foreground: resolveColor('var(--ui-text-highlighted)', 'rgb(245, 245, 245)'),
+  cursor: resolveColor('var(--ui-primary)', 'rgb(34, 197, 94)'),
+  cursorAccent: resolveColor('var(--ui-bg)', 'rgb(10, 10, 10)'),
+  selectionBackground: resolveColor('color-mix(in srgb, var(--ui-primary) 28%, transparent)', 'rgba(34, 197, 94, 0.28)'),
+  black: resolveColor('var(--ui-text-dimmed)', 'rgb(82, 82, 82)'),
+  red: resolveColor('var(--ui-error)', 'rgb(239, 68, 68)'),
+  green: resolveColor('var(--ui-success)', 'rgb(34, 197, 94)'),
+  yellow: resolveColor('var(--ui-warning)', 'rgb(234, 179, 8)'),
+  blue: resolveColor('var(--ui-info)', 'rgb(59, 130, 246)'),
+  magenta: resolveColor('var(--ui-primary)', 'rgb(168, 85, 247)'),
+  cyan: resolveColor('var(--ui-info)', 'rgb(6, 182, 212)'),
+  white: resolveColor('var(--ui-text-highlighted)', 'rgb(245, 245, 245)'),
+  brightBlack: resolveColor('var(--ui-text-muted)', 'rgb(115, 115, 115)'),
+  brightRed: resolveColor('var(--ui-error)', 'rgb(248, 113, 113)'),
+  brightGreen: resolveColor('var(--ui-success)', 'rgb(74, 222, 128)'),
+  brightYellow: resolveColor('var(--ui-warning)', 'rgb(250, 204, 21)'),
+  brightBlue: resolveColor('var(--ui-info)', 'rgb(96, 165, 250)'),
+  brightMagenta: resolveColor('var(--ui-primary)', 'rgb(192, 132, 252)'),
+  brightCyan: resolveColor('var(--ui-info)', 'rgb(34, 211, 238)'),
+  brightWhite: resolveColor('var(--ui-text)', 'rgb(255, 255, 255)')
+})
+
+const resolveTheme = () => {
   const element = host.value
   if (!element) {
-    return fallback
+    return createTheme((_value, fallback) => fallback)
   }
 
   const probe = document.createElement('span')
-  probe.style.color = value
   probe.style.position = 'absolute'
   probe.style.visibility = 'hidden'
   element.append(probe)
-  const color = getComputedStyle(probe).color
-  probe.remove()
-  return color || fallback
-}
 
-const resolveTheme = (): ITheme => ({
-  background: resolveCssColor('var(--ui-bg)', 'rgb(10, 10, 10)'),
-  foreground: resolveCssColor('var(--ui-text-highlighted)', 'rgb(245, 245, 245)'),
-  cursor: resolveCssColor('var(--ui-primary)', 'rgb(34, 197, 94)'),
-  cursorAccent: resolveCssColor('var(--ui-bg)', 'rgb(10, 10, 10)'),
-  selectionBackground: resolveCssColor('color-mix(in srgb, var(--ui-primary) 28%, transparent)', 'rgba(34, 197, 94, 0.28)'),
-  black: resolveCssColor('var(--ui-text-dimmed)', 'rgb(82, 82, 82)'),
-  red: resolveCssColor('var(--ui-error)', 'rgb(239, 68, 68)'),
-  green: resolveCssColor('var(--ui-success)', 'rgb(34, 197, 94)'),
-  yellow: resolveCssColor('var(--ui-warning)', 'rgb(234, 179, 8)'),
-  blue: resolveCssColor('var(--ui-info)', 'rgb(59, 130, 246)'),
-  magenta: resolveCssColor('var(--ui-primary)', 'rgb(168, 85, 247)'),
-  cyan: resolveCssColor('var(--ui-info)', 'rgb(6, 182, 212)'),
-  white: resolveCssColor('var(--ui-text-highlighted)', 'rgb(245, 245, 245)'),
-  brightBlack: resolveCssColor('var(--ui-text-muted)', 'rgb(115, 115, 115)'),
-  brightRed: resolveCssColor('var(--ui-error)', 'rgb(248, 113, 113)'),
-  brightGreen: resolveCssColor('var(--ui-success)', 'rgb(74, 222, 128)'),
-  brightYellow: resolveCssColor('var(--ui-warning)', 'rgb(250, 204, 21)'),
-  brightBlue: resolveCssColor('var(--ui-info)', 'rgb(96, 165, 250)'),
-  brightMagenta: resolveCssColor('var(--ui-primary)', 'rgb(192, 132, 252)'),
-  brightCyan: resolveCssColor('var(--ui-info)', 'rgb(34, 211, 238)'),
-  brightWhite: resolveCssColor('var(--ui-text)', 'rgb(255, 255, 255)')
-})
+  try {
+    return createTheme((value, fallback) => {
+      probe.style.color = value
+      return getComputedStyle(probe).color || fallback
+    })
+  } finally {
+    probe.remove()
+  }
+}
 
 const scheduleFit = () => {
   if (!props.active || !host.value || !terminal || !fitAddon) {
