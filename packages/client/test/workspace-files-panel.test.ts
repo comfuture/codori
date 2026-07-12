@@ -5,7 +5,6 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { defineComponent, h, nextTick, type VNode } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import WorkspaceFilesPanel from '../app/components/WorkspaceFilesPanel.vue'
-import { useLocalFileViewer } from '../app/composables/useLocalFileViewer'
 import { useState } from '#imports'
 import type { WorkspaceFileTreeNode } from '../app/composables/useWorkspaceFiles'
 import type { WorkspaceLocalFileScope } from '../shared/local-files'
@@ -33,18 +32,43 @@ const ButtonStub = defineComponent({
   }
 })
 
-const SlideoverStub = defineComponent({
+const ModalStub = defineComponent({
   props: {
     open: { type: Boolean, default: false }
   },
   setup(props, { slots }) {
     return () => props.open
-      ? h('div', { class: 'slideover-stub' }, [
+      ? h('div', { class: 'modal-stub' }, [
           slots.actions?.(),
           slots.body?.(),
           slots.footer?.()
         ])
       : null
+  }
+})
+
+const LocalFilePreviewStub = defineComponent({
+  name: 'LocalFilePreview',
+  props: {
+    path: { type: String, required: true }
+  },
+  setup(props) {
+    return () => h('div', {
+      'data-preview-path': props.path
+    })
+  }
+})
+
+const IconStub = defineComponent({
+  inheritAttrs: false,
+  props: {
+    name: { type: String, required: true }
+  },
+  setup(props, { attrs }) {
+    return () => h('span', {
+      ...attrs,
+      'data-icon': props.name
+    })
   }
 })
 
@@ -139,14 +163,16 @@ const mountPanel = (workspace: WorkspaceLocalFileScope = { kind: 'project', id: 
       stubs: {
         UTooltip: PassThroughStub,
         UButton: ButtonStub,
-        USlideover: SlideoverStub,
+        UModal: ModalStub,
         UCheckbox: CheckboxStub,
         UBreadcrumb: BreadcrumbStub,
         UScrollArea: PassThroughStub,
         USkeleton: PassThroughStub,
         UTree: TreeStub,
         UAlert: AlertStub,
-        UBadge: PassThroughStub
+        UBadge: PassThroughStub,
+        UIcon: IconStub,
+        LocalFilePreview: LocalFilePreviewStub
       }
     }
   })
@@ -185,15 +211,6 @@ describe('WorkspaceFilesPanel', () => {
       value: { writeText: clipboardWriteMock }
     })
     useState<Record<string, unknown>>('codori-workspace-files', () => ({})).value = {}
-    const { state } = useLocalFileViewer()
-    state.value = {
-      open: false,
-      workspace: null,
-      projectId: null,
-      path: null,
-      line: null,
-      column: null
-    }
   })
 
   it('keeps tree rows and labels left aligned beside their icons', async () => {
@@ -211,7 +228,7 @@ describe('WorkspaceFilesPanel', () => {
     })
   })
 
-  it('loads directories lazily and opens selected files in the existing viewer', async () => {
+  it('loads directories lazily and previews selected files without closing the explorer', async () => {
     fetchMock.mockImplementation((url: string) => {
       const parsed = new URL(url, 'http://localhost')
       const path = parsed.searchParams.get('path') ?? ''
@@ -237,20 +254,25 @@ describe('WorkspaceFilesPanel', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(2)
     expect(new URL(fetchMock.mock.calls[1]?.[0], 'http://localhost').searchParams.get('path')).toBe('src')
-    const slideover = wrapper.findComponent(SlideoverStub)
     await wrapper.get('[data-tree-path="src/app.ts"]').trigger('click')
     await flushPromises()
 
-    const { state } = useLocalFileViewer()
-    expect(state.value.open).toBe(false)
-    slideover.vm.$emit('after:leave')
+    expect(wrapper.find('.modal-stub').exists()).toBe(true)
+    expect(wrapper.get('[data-preview-path="src/app.ts"]').attributes('data-preview-path')).toBe('src/app.ts')
+  })
+
+  it('shows an empty preview prompt until a file is selected', async () => {
+    fetchMock.mockResolvedValue(directoryResponse('', [
+      entry({ name: 'README.md', path: 'README.md' })
+    ]))
+
+    const wrapper = mountPanel()
+    await wrapper.get('[aria-label="Browse workspace files"]').trigger('click')
     await flushPromises()
-    expect(state.value).toMatchObject({
-      open: true,
-      workspace: { kind: 'project', id: 'demo' },
-      path: 'src/app.ts'
-    })
-    expect(wrapper.find('.slideover-stub').exists()).toBe(false)
+
+    expect(wrapper.text()).toContain('Select a file from the tree to preview it.')
+    expect(wrapper.find('[data-preview-path]').exists()).toBe(false)
+    expect(wrapper.get('[data-icon="i-lucide-file-search-2"]').classes()).toContain('text-muted/45')
   })
 
   it('refreshes the active directory and copies its relative path', async () => {
@@ -293,8 +315,6 @@ describe('WorkspaceFilesPanel', () => {
     await wrapper.get('[aria-label="Browse workspace files"]').trigger('click')
     await flushPromises()
     await wrapper.get('[data-tree-path="README.md"]').trigger('click')
-    await wrapper.get('[aria-label="Browse workspace files"]').trigger('click')
-    await flushPromises()
     await wrapper.get('[aria-label="Copy relative path"]').trigger('click')
     await flushPromises()
 
