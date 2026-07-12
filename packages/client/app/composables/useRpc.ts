@@ -8,13 +8,7 @@ const clients = new Map<string, CodexRpcClient>()
 export const useRpc = () => {
   const runtimeConfig = useRuntimeConfig()
 
-  const getWorkspaceClient = (workspace: { kind: 'project', id: string } | { kind: 'chat', id: string }) => {
-    const cacheKey = `${workspace.kind}:${workspace.id}`
-    const existing = clients.get(cacheKey)
-    if (existing) {
-      return existing
-    }
-
+  const createWorkspaceClient = (workspace: { kind: 'project', id: string } | { kind: 'chat', id: string }) => {
     const wsBase = resolveWsBase(
       String(runtimeConfig.public.serverWsBase ?? ''),
       String(runtimeConfig.public.serverBase ?? '')
@@ -26,7 +20,17 @@ export const useRpc = () => {
       requestPath,
       wsBase
     ).toString()
-    const client = new CodexRpcClient(url)
+    return new CodexRpcClient(url)
+  }
+
+  const getWorkspaceClient = (workspace: { kind: 'project', id: string } | { kind: 'chat', id: string }) => {
+    const cacheKey = `${workspace.kind}:${workspace.id}`
+    const existing = clients.get(cacheKey)
+    if (existing) {
+      return existing
+    }
+
+    const client = createWorkspaceClient(workspace)
     clients.set(cacheKey, client)
     return client
   }
@@ -40,6 +44,7 @@ export const useRpc = () => {
   return {
     getClient,
     getChatClient,
-    getWorkspaceClient
+    getWorkspaceClient,
+    createWorkspaceClient
   }
 }
