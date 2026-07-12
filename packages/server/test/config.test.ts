@@ -31,6 +31,9 @@ describe('resolveConfig', () => {
       timeoutMs: 30 * 60 * 1000,
       sweepIntervalMs: 60 * 1000
     })
+    expect(config.realtimeVoice).toEqual({
+      enabled: false
+    })
   })
 
   it('uses overrides ahead of file config', () => {
@@ -103,6 +106,21 @@ describe('resolveConfig', () => {
     })
   })
 
+  it('reads experimental realtime voice config and lets cli enable it', () => {
+    const homeDir = createHome()
+    const codoriDir = join(homeDir, '.codori')
+    mkdirSync(codoriDir, { recursive: true })
+    writeFileSync(join(codoriDir, 'config.json'), JSON.stringify({
+      root: '/tmp/from-file',
+      realtimeVoice: {
+        enabled: false
+      }
+    }))
+
+    expect(resolveConfig({}, homeDir).realtimeVoice.enabled).toBe(false)
+    expect(resolveConfig({ realtimeVoiceEnabled: true }, homeDir).realtimeVoice.enabled).toBe(true)
+  })
+
   it('validates idle shutdown overrides the same way as file config', () => {
     const homeDir = createHome()
 
@@ -114,5 +132,9 @@ describe('resolveConfig', () => {
       root: '/tmp/from-cli',
       idleShutdownEnabled: 'yes' as unknown as boolean
     }, homeDir)).toThrow(/idleShutdown\.enabled/)
+    expect(() => resolveConfig({
+      root: '/tmp/from-cli',
+      realtimeVoiceEnabled: 'yes' as unknown as boolean
+    }, homeDir)).toThrow(/realtimeVoice\.enabled/)
   })
 })

@@ -29,6 +29,15 @@ describe('cli service commands', () => {
     expect(stdout.read()).toContain('npx @codori/server install-service')
     expect(stdout.read()).toContain('codori install-service')
     expect(CLI_USAGE).toContain('npx @codori/server <command>')
+    expect(CLI_USAGE).toContain('--experimental-realtime-voice')
+  })
+
+  it('rejects the runtime-only realtime flag for installed service commands', async () => {
+    await expect(runCli([
+      'install-service',
+      '--experimental-realtime-voice',
+      '--yes'
+    ])).rejects.toThrow(/realtimeVoice\.enabled in ~\/\.codori\/config\.json/)
   })
 
   it('treats setup-service as an alias for install-service', async () => {

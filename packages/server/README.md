@@ -21,6 +21,8 @@ The server serves the dashboard UI, REST API, and websocket proxy from the same 
 
 `@codori/server` includes the Codex CLI runtime it uses to start app-server. A separate global `codex` installation is not required. Set `CODORI_CODEX_BIN` to an executable path to opt into a custom runtime.
 
+Experimental realtime voice is disabled by default. For a direct launch, opt in with `--experimental-realtime-voice`. For an installed service, set `realtimeVoice.enabled` to `true` in `~/.codori/config.json` and restart the service. This enables `realtime_conversation` only for the managed app-server process and does not edit `~/.codex/config.toml`.
+
 ## Service Installation
 
 Use the npm package invocation as the canonical entrypoint:

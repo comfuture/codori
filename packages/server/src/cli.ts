@@ -22,6 +22,7 @@ type CliOptionValues = {
   scope?: string
   yes?: boolean
   help?: boolean
+  'experimental-realtime-voice'?: boolean
 }
 
 const printJson = (value: unknown) => {
@@ -67,6 +68,9 @@ const optionConfig = {
   yes: {
     type: 'boolean' as const
   },
+  'experimental-realtime-voice': {
+    type: 'boolean' as const
+  },
   help: {
     type: 'boolean' as const,
     short: 'h'
@@ -107,6 +111,7 @@ export const CLI_USAGE = [
   '  --port <port>',
   '  --scope <user|system>',
   '  --yes',
+  '  --experimental-realtime-voice',
   '  --json',
   '  --help',
   '',
@@ -206,6 +211,12 @@ export const runCli = async (
     || command === 'restart-service'
     || command === 'uninstall-service'
   ) {
+    if (values['experimental-realtime-voice']) {
+      throw new CodoriError(
+        'INVALID_CONFIG',
+        'Installed services must enable experimental realtime voice with realtimeVoice.enabled in ~/.codori/config.json.'
+      )
+    }
     await executeServiceCommand(command, values, dependencies)
     return
   }
@@ -216,7 +227,8 @@ export const runCli = async (
         configOverrides: {
           root: resolveCliRoot(values.root),
           host: values.host,
-          port: coercePort(values.port)
+          port: coercePort(values.port),
+          realtimeVoiceEnabled: values['experimental-realtime-voice']
         }
       })
       const json = values.json ?? false
@@ -233,7 +245,8 @@ export const runCli = async (
         configOverrides: {
           root: resolveCliRoot(values.root),
           host: values.host,
-          port: coercePort(values.port)
+          port: coercePort(values.port),
+          realtimeVoiceEnabled: values['experimental-realtime-voice']
         }
       })
       const json = values.json ?? false
@@ -260,7 +273,8 @@ export const runCli = async (
         configOverrides: {
           root: resolveCliRoot(values.root),
           host: values.host,
-          port: coercePort(values.port)
+          port: coercePort(values.port),
+          realtimeVoiceEnabled: values['experimental-realtime-voice']
         }
       })
       const json = values.json ?? false
@@ -280,7 +294,8 @@ export const runCli = async (
         configOverrides: {
           root: resolveCliRoot(values.root),
           host: values.host,
-          port: coercePort(values.port)
+          port: coercePort(values.port),
+          realtimeVoiceEnabled: values['experimental-realtime-voice']
         }
       })
       const json = values.json ?? false
@@ -300,7 +315,8 @@ export const runCli = async (
         configOverrides: {
           root: resolveCliRoot(values.root),
           host: values.host,
-          port: coercePort(values.port)
+          port: coercePort(values.port),
+          realtimeVoiceEnabled: values['experimental-realtime-voice']
         }
       })
       const app = await startHttpServer(manager)

@@ -87,6 +87,16 @@ export type ServiceUpdateResponse = {
   serviceUpdate: ServiceUpdateStatus
 }
 
+export type ServerCapabilitiesResponse = {
+  capabilities: {
+    realtimeVoice: {
+      configured: boolean
+      experimental: true
+      feature: 'realtime_conversation'
+    }
+  }
+}
+
 export type ProjectGitBranchesResponse = {
   currentBranch: string | null
   branches: string[]

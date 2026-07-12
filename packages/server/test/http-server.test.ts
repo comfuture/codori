@@ -238,6 +238,38 @@ describe('createHttpServer', () => {
     })
   })
 
+  it('reports the configured experimental realtime voice capability', async () => {
+    const app = await createHttpServer(createManager({
+      config: {
+        root: '/tmp',
+        server: {
+          host: '127.0.0.1',
+          port: 4310
+        },
+        realtimeVoice: {
+          enabled: true
+        }
+      }
+    }))
+    startedApps.push(app)
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/capabilities'
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toEqual({
+      capabilities: {
+        realtimeVoice: {
+          configured: true,
+          experimental: true,
+          feature: 'realtime_conversation'
+        }
+      }
+    })
+  })
+
   it('clones a project through the management API', async () => {
     const app = await createHttpServer(createManager({
       cloneProject: ({ repositoryUrl, destination }) => ({

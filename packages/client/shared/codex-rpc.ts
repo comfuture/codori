@@ -62,6 +62,8 @@ type PendingRequest = {
 
 export type CodexRpcServerRequestHandler = (request: CodexRpcServerRequest) => Promise<unknown> | unknown
 
+export type CodexRpcConnectionState = 'connected' | 'disconnected'
+
 type LegacyCodexRpcNotification =
   | {
       method: 'turn/failed'
@@ -430,6 +432,7 @@ export class CodexRpcClient {
       this.initialized = false
       this.socket = null
       this.connectPromise = null
+      this.emitConnectionState('disconnected')
       const error = new Error('Codex RPC connection reconnecting.')
       for (const [requestId, pending] of this.pending.entries()) {
         pending.reject(error)

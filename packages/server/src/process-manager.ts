@@ -66,9 +66,14 @@ const require = createRequire(import.meta.url)
 
 export const resolveCodexCommand = (
   port: number,
-  codexBin = process.env.CODORI_CODEX_BIN
+  codexBin = process.env.CODORI_CODEX_BIN,
+  realtimeVoiceEnabled = false
 ): ReturnType<CommandFactory> => {
-  const args = ['app-server', '--listen', `ws://127.0.0.1:${port}`]
+  const args = ['app-server']
+  if (realtimeVoiceEnabled) {
+    args.push('--enable', 'realtime_conversation')
+  }
+  args.push('--listen', `ws://127.0.0.1:${port}`)
   if (codexBin) {
     return {
       command: codexBin,
@@ -81,8 +86,6 @@ export const resolveCodexCommand = (
     args: [require.resolve('@openai/codex/bin/codex.js'), ...args]
   }
 }
-
-const defaultCommandFactory: CommandFactory = (port) => resolveCodexCommand(port)
 
 const isProcessAlive = (pid: number) => {
   try {
@@ -176,7 +179,8 @@ export class RuntimeManager {
     this.config = options.config ?? resolveConfig(options.configOverrides, options.homeDir)
     this.store = new RuntimeStore(options.homeDir)
     this.documentsDir = options.documentsDir ?? join(options.homeDir ?? os.homedir(), 'Documents')
-    this.commandFactory = options.commandFactory ?? defaultCommandFactory
+    this.commandFactory = options.commandFactory
+      ?? ((port) => resolveCodexCommand(port, undefined, this.config.realtimeVoice.enabled))
 
     if (this.config.idleShutdown.enabled) {
       this.idleReaper = setInterval(() => {

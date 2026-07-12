@@ -150,6 +150,16 @@ describe('RuntimeManager', () => {
       '--listen',
       'ws://127.0.0.1:4765'
     ])
+
+    const enabledCommand = resolveCodexCommand(4765, undefined, true)
+    expect(enabledCommand.command).toBe(process.execPath)
+    expect(enabledCommand.args.slice(1)).toEqual([
+      'app-server',
+      '--enable',
+      'realtime_conversation',
+      '--listen',
+      'ws://127.0.0.1:4765'
+    ])
   })
 
   it('preserves an explicit Codex binary override', () => {
@@ -157,6 +167,16 @@ describe('RuntimeManager', () => {
       command: '/opt/codex/bin/codex',
       args: [
         'app-server',
+        '--listen',
+        'ws://127.0.0.1:4766'
+      ]
+    })
+    expect(resolveCodexCommand(4766, '/opt/codex/bin/codex', true)).toEqual({
+      command: '/opt/codex/bin/codex',
+      args: [
+        'app-server',
+        '--enable',
+        'realtime_conversation',
         '--listen',
         'ws://127.0.0.1:4766'
       ]
@@ -241,7 +261,12 @@ describe('RuntimeManager', () => {
     try {
       const manager = createRuntimeManager({
         homeDir: fixture.homeDir,
-        config: fixture.config
+        config: {
+          ...fixture.config,
+          realtimeVoice: {
+            enabled: true
+          }
+        }
       })
       runningManagers.push(manager)
 
@@ -255,6 +280,8 @@ describe('RuntimeManager', () => {
       expect(realpathSync(capture.cwd)).toBe(realpathSync(fixture.root))
       expect(capture.argv).toEqual([
         'app-server',
+        '--enable',
+        'realtime_conversation',
         '--listen',
         `ws://127.0.0.1:${started.port}`
       ])
