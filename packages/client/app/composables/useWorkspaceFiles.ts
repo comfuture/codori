@@ -2,6 +2,7 @@ import { useRuntimeConfig, useState } from '#imports'
 import { computed, type ComputedRef, type Ref } from 'vue'
 import type { WorkspaceLocalFileScope } from '../../shared/local-files'
 import {
+  fallbackWorkspacePathAfterRemoval,
   resolveWorkspaceDirectoryUrl,
   workspacePathBreadcrumbs,
   type WorkspaceDirectoryEntry,
@@ -118,6 +119,10 @@ export const useWorkspaceFiles = (
     ) {
       snapshot.value.selectedPath = null
     }
+    snapshot.value.currentPath = fallbackWorkspacePathAfterRemoval(
+      snapshot.value.currentPath,
+      directoryPath
+    )
   }
 
   const reconcileRemovedDirectories = (

@@ -53,6 +53,10 @@ describe('listWorkspaceDirectory', () => {
       hidden: false,
       ignored: false
     })
+    expect(listing.entries.find(entry => entry.name === 'dist')).toMatchObject({
+      kind: 'file',
+      ignored: false
+    })
   })
 
   it('reveals ignored heavy directories only when requested', async () => {

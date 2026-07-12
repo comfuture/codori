@@ -64,3 +64,19 @@ export const workspacePathBreadcrumbs = (path: string) => {
     }))
   ]
 }
+
+export const fallbackWorkspacePathAfterRemoval = (
+  currentPath: string,
+  removedDirectoryPath: string
+) => {
+  if (
+    currentPath !== removedDirectoryPath
+    && !currentPath.startsWith(`${removedDirectoryPath}/`)
+  ) {
+    return currentPath
+  }
+
+  return removedDirectoryPath.includes('/')
+    ? removedDirectoryPath.slice(0, removedDirectoryPath.lastIndexOf('/'))
+    : ''
+}

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  fallbackWorkspacePathAfterRemoval,
   resolveWorkspaceDirectoryUrl,
   workspacePathBreadcrumbs
 } from '../shared/workspace-files'
@@ -28,5 +29,11 @@ describe('workspace file helpers', () => {
       { label: 'components', path: 'src/components' },
       { label: 'tree', path: 'src/components/tree' }
     ])
+  })
+
+  it('falls back to the nearest surviving parent when a directory disappears', () => {
+    expect(fallbackWorkspacePathAfterRemoval('src/components/tree', 'src/components')).toBe('src')
+    expect(fallbackWorkspacePathAfterRemoval('src', 'src')).toBe('')
+    expect(fallbackWorkspacePathAfterRemoval('docs', 'src')).toBe('docs')
   })
 })
