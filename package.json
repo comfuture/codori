@@ -13,6 +13,13 @@
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "pnpm -r --if-present test"
   },
+  "pnpm": {
+    "peerDependencyRules": {
+      "allowedVersions": {
+        "@xterm/addon-web-fonts>@xterm/xterm": "6.0.x"
+      }
+    }
+  },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
     "@types/node": "^25.6.0",
