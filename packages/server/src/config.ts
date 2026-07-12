@@ -15,6 +15,7 @@ type PartialConfig = Partial<CodoriConfig> & {
   server?: Partial<CodoriConfig['server']>
   ports?: Partial<CodoriConfig['ports']>
   idleShutdown?: Partial<CodoriConfig['idleShutdown']>
+  realtimeVoice?: Partial<CodoriConfig['realtimeVoice']>
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -124,6 +125,10 @@ export const resolveConfig = (
       ?? DEFAULT_IDLE_SWEEP_INTERVAL_MS,
     'idleShutdown.sweepIntervalMs'
   )
+  const realtimeVoiceEnabled = ensureValidBoolean(
+    overrides.realtimeVoiceEnabled ?? fileConfig.realtimeVoice?.enabled ?? false,
+    'realtimeVoice.enabled'
+  )
 
   if (resolvedPortStart > resolvedPortEnd) {
     throw new CodoriError('INVALID_CONFIG', 'ports.start must be less than or equal to ports.end.')
@@ -145,6 +150,9 @@ export const resolveConfig = (
       enabled: idleShutdownEnabled,
       timeoutMs: idleShutdownTimeoutMs,
       sweepIntervalMs: idleShutdownSweepIntervalMs
+    },
+    realtimeVoice: {
+      enabled: realtimeVoiceEnabled
     }
   }
 }

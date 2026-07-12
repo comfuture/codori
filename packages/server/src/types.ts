@@ -13,6 +13,9 @@ export type CodoriConfig = {
     timeoutMs: number
     sweepIntervalMs: number
   }
+  realtimeVoice: {
+    enabled: boolean
+  }
 }
 
 export type ConfigOverrides = {
@@ -22,6 +25,17 @@ export type ConfigOverrides = {
   idleShutdownEnabled?: boolean
   idleShutdownTimeoutMs?: number
   idleShutdownSweepIntervalMs?: number
+  realtimeVoiceEnabled?: boolean
+}
+
+export type ServerCapabilitiesResponse = {
+  capabilities: {
+    realtimeVoice: {
+      configured: boolean
+      experimental: true
+      feature: 'realtime_conversation'
+    }
+  }
 }
 
 export type ProjectRecord = {

@@ -39,6 +39,7 @@ import type {
   ChatSessionStatusRecord,
   DeleteChatSessionResult,
   ProjectStatusRecord,
+  ServerCapabilitiesResponse,
   StartChatSessionResult,
   StartProjectResult,
   UpdateChatSessionThreadResult,
@@ -78,6 +79,9 @@ export type RuntimeManagerLike = {
     server: {
       host: string
       port: number
+    }
+    realtimeVoice?: {
+      enabled: boolean
     }
   }
 }
@@ -396,6 +400,16 @@ export const createHttpServer = async (
 
   app.get('/api/projects', async (): Promise<ProjectsResponse> => ({
     projects: await resolveValue(manager.listProjectStatuses())
+  }))
+
+  app.get('/api/capabilities', async (): Promise<ServerCapabilitiesResponse> => ({
+    capabilities: {
+      realtimeVoice: {
+        configured: manager.config?.realtimeVoice?.enabled ?? false,
+        experimental: true,
+        feature: 'realtime_conversation'
+      }
+    }
   }))
 
   app.get('/api/chats', async (): Promise<ChatsResponse> => ({

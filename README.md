@@ -60,6 +60,14 @@ Codori listening on http://127.0.0.1:4310
 
 By default this binds Codori to `127.0.0.1:4310`. `--host` and `--port` are optional. Use `--root` whenever you want to override the current directory and point Codori at another parent directory.
 
+Experimental realtime voice is disabled by default. Enable it for a directly launched Codori runtime with:
+
+```bash
+npx @codori/server --root ~/Project --experimental-realtime-voice
+```
+
+This flag only enables the upstream `realtime_conversation` feature in the Codori-managed app-server process. It does not modify `~/.codex/config.toml`.
+
 If you need different bind settings:
 
 ```bash
@@ -253,11 +261,16 @@ Example:
     "enabled": true,
     "timeoutMs": 1800000,
     "sweepIntervalMs": 60000
+  },
+  "realtimeVoice": {
+    "enabled": false
   }
 }
 ```
 
 `idleShutdown.enabled` can disable automatic cleanup entirely. When enabled, `timeoutMs` controls how long a runtime may stay inactive before Codori stops it, and `sweepIntervalMs` controls how often the server checks for idle runtimes.
+
+`realtimeVoice.enabled` is the persistent opt-in for an installed Codori service. Restart the service after changing it. Realtime voice is experimental and requires a supported ChatGPT-authenticated Codex runtime plus browser microphone access on localhost or a secure HTTPS origin. Codori uses browser-owned WebRTC signaling through app-server; it does not ask for an OpenAI API key and does not use the direct Realtime WebSocket transport.
 
 ## Project Discovery Rules
 
