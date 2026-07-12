@@ -264,6 +264,27 @@ describe('WorkspaceFilesPanel', () => {
     )).toHaveLength(2)
   })
 
+  it('reports clipboard failure when the Clipboard API is unavailable', async () => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: undefined
+    })
+    fetchMock.mockResolvedValue(directoryResponse('', [
+      entry({ name: 'README.md', path: 'README.md' })
+    ]))
+
+    const wrapper = mountPanel()
+    await wrapper.get('[aria-label="Browse workspace files"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-tree-path="README.md"]').trigger('click')
+    await wrapper.get('[aria-label="Browse workspace files"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[aria-label="Copy relative path"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Could not copy the relative path.')
+  })
+
   it('shows truncation and reloads with generated folders enabled', async () => {
     fetchMock.mockResolvedValue(directoryResponse('', [
       entry({ name: 'README.md', path: 'README.md' })
@@ -352,10 +373,99 @@ describe('WorkspaceFilesPanel', () => {
     await wrapper.get('[data-tree-path="src"]').trigger('click')
     await wrapper.get('input[type="checkbox"]').setValue(true)
     await flushPromises()
+    expect(wrapper.find('[data-tree-path="src/fresh.ts"]').exists()).toBe(true)
+    await wrapper.get('[aria-label="Copy relative path"]').trigger('click')
+    await flushPromises()
+    expect(clipboardWriteMock).toHaveBeenCalledWith('src')
     resolveOldRequest(directoryResponse('src', [entry({ name: 'stale.ts', path: 'src/stale.ts' })]))
     await flushPromises()
     expect(wrapper.find('[data-tree-path="src/stale.ts"]').exists()).toBe(false)
+    expect(wrapper.find('[data-tree-path="src/fresh.ts"]').exists()).toBe(true)
+  })
 
+  it('does not restore filter state into a workspace selected during reload', async () => {
+    let resolveFilteredRoot!: (value: ReturnType<typeof directoryResponse>) => void
+    const filteredRoot = new Promise<ReturnType<typeof directoryResponse>>((resolve) => {
+      resolveFilteredRoot = resolve
+    })
+    const snapshots = useState<Record<string, unknown>>('codori-workspace-files', () => ({}))
+    snapshots.value['chat:chat-test'] = {
+      generation: 1,
+      listings: {
+        '': directoryResponse('', [
+          entry({ name: 'src', path: 'src', kind: 'directory', size: null })
+        ]).directory
+      },
+      loadingPaths: [],
+      errors: {},
+      expandedPaths: [],
+      selectedPath: null,
+      currentPath: '',
+      showIgnored: false
+    }
+    fetchMock.mockImplementation((url: string) => {
+      const parsed = new URL(url, 'http://localhost')
+      const path = parsed.searchParams.get('path') ?? ''
+      if (parsed.pathname.includes('/projects/') && path === '' && parsed.searchParams.get('showIgnored') === 'true') {
+        return filteredRoot
+      }
+      return Promise.resolve(path === 'src'
+        ? directoryResponse('src', [])
+        : directoryResponse('', [entry({ name: 'src', path: 'src', kind: 'directory', size: null })]))
+    })
+
+    const wrapper = mountPanel()
+    await wrapper.get('[aria-label="Browse workspace files"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-tree-path="src"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('input[type="checkbox"]').setValue(true)
+    await wrapper.setProps({
+      workspace: { kind: 'chat', id: 'chat-test' },
+      workspaceLabel: 'Scratch chat'
+    })
+    resolveFilteredRoot(directoryResponse('', [
+      entry({ name: 'src', path: 'src', kind: 'directory', size: null })
+    ]))
+    await flushPromises()
+
+    expect(fetchMock.mock.calls.some(([url]) => {
+      const parsed = new URL(url, 'http://localhost')
+      return parsed.pathname.includes('/chats/chat-test/files')
+        && parsed.searchParams.get('path') === 'src'
+    })).toBe(false)
+  })
+
+  it('resets stale navigation when a filter reload fails before retry', async () => {
+    let filteredRootRequests = 0
+    fetchMock.mockImplementation((url: string) => {
+      const parsed = new URL(url, 'http://localhost')
+      const path = parsed.searchParams.get('path') ?? ''
+      if (path === '' && parsed.searchParams.get('showIgnored') === 'true') {
+        filteredRootRequests += 1
+        if (filteredRootRequests === 1) {
+          return Promise.reject(new Error('Root unavailable'))
+        }
+      }
+      return Promise.resolve(path === 'src'
+        ? directoryResponse('src', [entry({ name: 'fresh.ts', path: 'src/fresh.ts' })])
+        : directoryResponse('', [entry({ name: 'src', path: 'src', kind: 'directory', size: null })]))
+    })
+
+    const wrapper = mountPanel()
+    await wrapper.get('[aria-label="Browse workspace files"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-tree-path="src"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('input[type="checkbox"]').setValue(true)
+    await flushPromises()
+    expect(wrapper.text()).toContain('Could not load workspace files')
+    expect(wrapper.get('[aria-label="Copy relative path"]').attributes('disabled')).toBeDefined()
+
+    const retry = wrapper.findAll('button').find(button => button.text() === 'Retry')
+    await retry?.trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-tree-path="src/fresh.ts"]').exists()).toBe(false)
     await wrapper.get('[data-tree-path="src"]').trigger('click')
     await flushPromises()
     expect(wrapper.find('[data-tree-path="src/fresh.ts"]').exists()).toBe(true)

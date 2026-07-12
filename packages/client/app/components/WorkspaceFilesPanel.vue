@@ -146,8 +146,14 @@ const copyRelativePath = async () => {
     return
   }
 
+  const clipboard = typeof navigator === 'undefined' ? undefined : navigator.clipboard
+  if (!clipboard?.writeText) {
+    copyStatus.value = 'Could not copy the relative path.'
+    return
+  }
+
   try {
-    await navigator.clipboard.writeText(copyTarget.value)
+    await clipboard.writeText(copyTarget.value)
     copyStatus.value = `Copied ${copyTarget.value}`
   } catch {
     copyStatus.value = 'Could not copy the relative path.'
