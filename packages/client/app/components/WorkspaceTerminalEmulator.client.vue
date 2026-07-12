@@ -13,6 +13,7 @@ import {
   type WorkspaceTerminalEvent,
   type WorkspaceTerminalShell
 } from '~~/shared/workspace-terminal'
+import { loadWorkspaceTerminalFontFamily } from '~~/shared/workspace-terminal-font'
 
 const props = defineProps<{
   sessionId: string
@@ -37,6 +38,7 @@ let themeObserver: MutationObserver | null = null
 let resizeTimer: ReturnType<typeof setTimeout> | null = null
 let fitFrame: number | null = null
 let removePasteListener: (() => void) | null = null
+let isDisposed = false
 
 const createTheme = (resolveColor: (value: string, fallback: string) => string): ITheme => ({
   background: resolveColor('var(--ui-bg)', 'rgb(10, 10, 10)'),
@@ -139,10 +141,15 @@ onMounted(async () => {
     return
   }
 
+  const fontFamily = await loadWorkspaceTerminalFontFamily()
+  if (isDisposed || !host.value) {
+    return
+  }
+
   terminal = new Terminal({
     cursorBlink: true,
     cursorStyle: 'bar',
-    fontFamily: 'SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+    fontFamily,
     fontSize: 13,
     lineHeight: 1.2,
     scrollback: 5000,
@@ -205,6 +212,9 @@ onMounted(async () => {
   })
 
   await nextTick()
+  if (isDisposed || !terminal || !fitAddon || !process) {
+    return
+  }
   fitAddon.fit()
   await process.start({ cols: terminal.cols, rows: terminal.rows })
 })
@@ -220,6 +230,7 @@ watch(() => props.active, async (active) => {
 })
 
 onBeforeUnmount(() => {
+  isDisposed = true
   removePasteListener?.()
   resizeObserver?.disconnect()
   themeObserver?.disconnect()

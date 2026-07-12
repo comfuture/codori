@@ -2,6 +2,38 @@
 @import "@nuxt/ui";
 @import "katex/dist/katex.min.css";
 
+@font-face {
+  font-family: "MesloLGS NF";
+  src: url("/fonts/meslo-lgs-nf/MesloLGS-NF-Regular.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+}
+
+@font-face {
+  font-family: "MesloLGS NF";
+  src: url("/fonts/meslo-lgs-nf/MesloLGS-NF-Bold.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+}
+
+@font-face {
+  font-family: "MesloLGS NF";
+  src: url("/fonts/meslo-lgs-nf/MesloLGS-NF-Italic.woff2") format("woff2");
+  font-style: italic;
+  font-weight: 400;
+  font-display: block;
+}
+
+@font-face {
+  font-family: "MesloLGS NF";
+  src: url("/fonts/meslo-lgs-nf/MesloLGS-NF-BoldItalic.woff2") format("woff2");
+  font-style: italic;
+  font-weight: 700;
+  font-display: block;
+}
+
 :root {
   --app-viewport-height: 100dvh;
 }
