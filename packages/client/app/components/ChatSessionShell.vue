@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useRouter } from '#imports'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import WorkspaceFilesPanel from './WorkspaceFilesPanel.vue'
 import { useChats } from '../composables/useChats'
 import { useChatSession } from '../composables/useChatSession'
 import { useVisualSubagentPanels } from '../composables/useVisualSubagentPanels'
@@ -234,35 +235,42 @@ watch(
             </div>
           </template>
           <template #right>
-            <UTooltip
-              v-if="hasAvailableSubagents"
-              text="Subagents"
-            >
-              <UButton
-                :color="isSubagentsSurfaceOpen ? 'primary' : 'neutral'"
-                :variant="isSubagentsSurfaceOpen ? 'soft' : 'ghost'"
-                icon="i-lucide-bot"
-                size="sm"
-                class="px-2 xl:ps-2 xl:pe-2.5"
-                :aria-label="subagentsToggleLabel"
-                @click="toggleSubagentsPanel"
+            <div class="flex items-center gap-1.5 lg:gap-2">
+              <WorkspaceFilesPanel
+                v-if="chatId"
+                :workspace="{ kind: 'chat', id: chatId }"
+                :workspace-label="chatTitle"
+              />
+              <UTooltip
+                v-if="hasAvailableSubagents"
+                text="Subagents"
               >
-                <UAvatarGroup
-                  class="hidden xl:flex"
-                  size="xs"
-                  :max="4"
-                  :ui="{ base: 'ring-2 -me-2 first:me-0' }"
+                <UButton
+                  :color="isSubagentsSurfaceOpen ? 'primary' : 'neutral'"
+                  :variant="isSubagentsSurfaceOpen ? 'soft' : 'ghost'"
+                  icon="i-lucide-bot"
+                  size="sm"
+                  class="px-2 xl:ps-2 xl:pe-2.5"
+                  :aria-label="subagentsToggleLabel"
+                  @click="toggleSubagentsPanel"
                 >
-                  <UAvatar
-                    v-for="agent in subagentAvatarItems"
-                    :key="agent.threadId"
-                    :text="agent.text"
-                    :alt="agent.name"
-                    :class="agent.class"
-                  />
-                </UAvatarGroup>
-              </UButton>
-            </UTooltip>
+                  <UAvatarGroup
+                    class="hidden xl:flex"
+                    size="xs"
+                    :max="4"
+                    :ui="{ base: 'ring-2 -me-2 first:me-0' }"
+                  >
+                    <UAvatar
+                      v-for="agent in subagentAvatarItems"
+                      :key="agent.threadId"
+                      :text="agent.text"
+                      :alt="agent.name"
+                      :class="agent.class"
+                    />
+                  </UAvatarGroup>
+                </UButton>
+              </UTooltip>
+            </div>
           </template>
         </UDashboardNavbar>
       </template>

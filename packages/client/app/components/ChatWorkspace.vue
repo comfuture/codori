@@ -17,7 +17,6 @@ import ReviewStartDrawer from './ReviewStartDrawer.vue'
 import PendingUserRequestDrawer from './PendingUserRequestDrawer.vue'
 import UsageStatusModal from './UsageStatusModal.vue'
 import WorkspaceBranchControl from './WorkspaceBranchControl.vue'
-import WorkspaceFilesPanel from './WorkspaceFilesPanel.vue'
 import WorkspaceTerminalSurface from './WorkspaceTerminalSurface.vue'
 import {
   reconcileOptimisticUserMessage,
@@ -5258,12 +5257,6 @@ watch(
                     :ui="{ leadingIcon: 'size-4', base: 'px-0' }"
                     aria-label="Attach image"
                     @click="openFilePicker"
-                  />
-
-                  <WorkspaceFilesPanel
-                    v-if="workspaceId"
-                    :workspace="workspaceScope"
-                    :workspace-label="projectTitle"
                   />
 
                   <UPopover

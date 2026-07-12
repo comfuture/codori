@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useRoute, useRouter } from '#imports'
 import { computed, onMounted } from 'vue'
+import WorkspaceFilesPanel from '../../../components/WorkspaceFilesPanel.vue'
 import { useProjects } from '../../../composables/useProjects'
 import { useThreadPanel } from '../../../composables/useThreadPanel'
 import WorkspaceTerminalToggle from '../../../components/WorkspaceTerminalToggle.vue'
@@ -47,6 +48,11 @@ onMounted(() => {
         >
           <template #right>
             <div class="flex items-center gap-2">
+              <WorkspaceFilesPanel
+                v-if="projectId"
+                :workspace="{ kind: 'project', id: projectId }"
+                :workspace-label="projectName"
+              />
               <UTooltip text="New thread">
                 <UButton
                   icon="i-lucide-plus"
