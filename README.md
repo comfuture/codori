@@ -292,6 +292,9 @@ The client dashboard provides:
 - a main chat workspace
 - a new thread action
 - a previous threads panel for resume
+- a read-only workspace file explorer for projects and projectless chats
+
+The file explorer loads one directory at a time, hides common generated folders by default, and opens supported text and image files in the existing preview. All browser requests use workspace-relative paths; the server canonicalizes each target and rejects traversal and symlink escapes outside the active workspace root.
 
 When you open a stopped project and start chatting, Codori ensures the shared app-server is running and then connects the UI through the Codori WebSocket proxy.
 
@@ -303,6 +306,7 @@ When you open a stopped project and start chatting, Codori ensures the shared ap
 - Allocates a free TCP port from a configured safe range.
 - Stores runtime metadata under `~/.codori/run/`.
 - Provides a Nuxt UI dashboard for project selection, chat, and thread resume.
+- Provides bounded, read-only workspace file navigation and local file preview.
 - Proxies browser WebSocket traffic for each project or chat workspace to the shared app-server.
 - Serves the built dashboard bundle from the same origin as the management API.
 
@@ -316,6 +320,7 @@ Codori v1 does not provide:
 - SSO
 - multi-root project indexing
 - a separate Codori-owned thread database
+- file create, edit, rename, move, or delete operations
 
 If you want to access Codori from another machine, you must provide your own private network path with something like Tailscale or Cloudflare Tunnel.
 

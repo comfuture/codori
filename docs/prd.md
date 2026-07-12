@@ -274,6 +274,18 @@ Returns:
 - same runtime envelope used by list/detail responses
 - includes workspace-specific `startedAt`, `lastActivityAt`, `activeSessionCount`, and `idleDeadlineAt` when that workspace is active
 
+### `GET /api/projects/:projectId/files` and `GET /api/chats/:chatId/files`
+
+Behavior:
+
+- Accept a normalized workspace-root-relative `path`; an empty path selects the workspace root.
+- Return direct children only, with directories before files, stable name ordering, metadata, symlink/accessibility state, and explicit truncation metadata.
+- Canonicalize the workspace and target on every request, rejecting absolute paths, traversal, missing directories, and symlink escapes.
+- Enforce a fixed entry bound and load nested directories only when the client expands them.
+- Hide common heavy generated folders such as `.git`, `node_modules`, `.nuxt`, `.output`, `dist`, `build`, and `coverage` unless `showIgnored=true`; useful dotfiles remain available.
+
+The matching `/local-file` project/chat routes accept both existing absolute transcript-link paths and workspace-relative explorer paths. Both forms are canonicalized against the active workspace before preview.
+
 ### `WS /api/projects/:projectId/rpc`
 
 Behavior:
@@ -302,12 +314,15 @@ Layout:
 - Use Nuxt UI dashboard primitives as the main shell.
 - Left sidebar shows projects, recent project threads for the selected project, and projectless chats.
 - Main panel shows the selected project chat screen.
+- The composer toolbar includes a workspace-files trigger for active project and projectless-chat workspaces.
 - Top navbar includes:
   - `New thread`
   - `Previous threads`
 - Previous threads open in:
   - right-side panel on desktop
   - drawer/slideover on smaller screens
+- Workspace files open in a responsive Nuxt UI slideover with an accessible lazy tree, breadcrumbs, manual refresh, relative-path copy, and a generated-folder toggle.
+- Selecting a supported file reuses the existing fullscreen local-file viewer; the explorer never exposes create, edit, rename, move, or delete actions.
 
 Required states:
 
@@ -320,6 +335,7 @@ Required states:
 - thread empty state
 - chat streaming
 - chat failure
+- workspace directory loading, empty, permission/error, inaccessible symlink, disappeared entry, and truncated states
 
 Required messaging:
 
