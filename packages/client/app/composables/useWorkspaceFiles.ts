@@ -306,20 +306,72 @@ export const useWorkspaceFiles = (
 
   const refreshCurrentDirectory = () => loadDirectory(snapshot.value.currentPath, { force: true })
 
+  const directoryAncestors = (path: string) => {
+    const segments = path ? path.split('/') : []
+    return segments.map((_, index) => segments.slice(0, index + 1).join('/'))
+  }
+
+  const parentDirectoryPath = (path: string) =>
+    path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : ''
+
   const setShowIgnored = async (showIgnored: boolean) => {
-    if (snapshot.value.showIgnored === showIgnored) {
+    const key = scopeKey.value
+    const targetSnapshot = ensureSnapshot(key)
+    if (targetSnapshot.showIgnored === showIgnored) {
       return
     }
 
-    snapshot.value.showIgnored = showIgnored
-    snapshot.value.generation += 1
-    snapshot.value.listings = {}
-    snapshot.value.loadingPaths = []
-    snapshot.value.errors = {}
-    snapshot.value.expandedPaths = []
-    snapshot.value.selectedPath = null
-    snapshot.value.currentPath = ''
+    const generation = targetSnapshot.generation + 1
+    const preservedExpandedPaths = [...targetSnapshot.expandedPaths]
+    const preservedCurrentPath = targetSnapshot.currentPath
+    const preservedSelectedPath = targetSnapshot.selectedPath
+
+    targetSnapshot.showIgnored = showIgnored
+    targetSnapshot.generation = generation
+    targetSnapshot.listings = {}
+    targetSnapshot.loadingPaths = []
+    targetSnapshot.errors = {}
     await loadDirectory('', { force: true })
+    if (scopeKey.value !== key || targetSnapshot.generation !== generation) {
+      return
+    }
+    if (!targetSnapshot.listings['']) {
+      targetSnapshot.expandedPaths = []
+      targetSnapshot.selectedPath = null
+      targetSnapshot.currentPath = ''
+      return
+    }
+
+    const pathsToReload = Array.from(new Set([
+      ...preservedExpandedPaths,
+      ...directoryAncestors(preservedCurrentPath),
+      ...directoryAncestors(parentDirectoryPath(preservedSelectedPath ?? ''))
+    ])).sort((left, right) => {
+      const depthDifference = left.split('/').length - right.split('/').length
+      return depthDifference || (left < right ? -1 : left > right ? 1 : 0)
+    })
+
+    for (const path of pathsToReload) {
+      if (scopeKey.value !== key || targetSnapshot.generation !== generation) {
+        return
+      }
+
+      const parentPath = parentDirectoryPath(path)
+      const entry = targetSnapshot.listings[parentPath]?.entries.find(item => item.path === path)
+      if (!entry || entry.kind !== 'directory' || !entry.accessible) {
+        removeDescendantState(path)
+        continue
+      }
+
+      await loadDirectory(path, { force: true })
+      if (scopeKey.value !== key || targetSnapshot.generation !== generation) {
+        return
+      }
+    }
+
+    if (targetSnapshot.selectedPath && !selectedEntry.value) {
+      targetSnapshot.selectedPath = null
+    }
   }
 
   return {

@@ -52,7 +52,7 @@ const hasBinaryContent = (buffer: Buffer) => {
 }
 
 const readFileWithinLimit = async (fileHandle: Awaited<ReturnType<typeof open>>) => {
-  const buffer = Buffer.allocUnsafe(MAX_LOCAL_FILE_VIEW_BYTES + 1)
+  const buffer = Buffer.alloc(MAX_LOCAL_FILE_VIEW_BYTES + 1)
   let offset = 0
 
   while (offset < buffer.length) {
@@ -157,7 +157,7 @@ export const readProjectLocalFile = async (
 
   const fileHandle = await open(
     resolvedTargetPath,
-    fsConstants.O_RDONLY | fsConstants.O_NONBLOCK
+    fsConstants.O_RDONLY | (fsConstants.O_NONBLOCK || 0)
   ).catch(() => null)
   if (!fileHandle) {
     throw new LocalFileViewError('NOT_FOUND', 'Local file not found.')
