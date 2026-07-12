@@ -24,8 +24,7 @@ const {
   loadDirectory,
   selectEntry,
   navigateTo,
-  refreshCurrentDirectory,
-  setShowIgnored
+  refreshCurrentDirectory
 } = useWorkspaceFiles(workspace)
 const open = ref(false)
 const copyStatus = ref<string | null>(null)
@@ -174,7 +173,6 @@ watch(open, (nextOpen) => {
   <UModal
     :open="open"
     title="Workspace files"
-    :description="`Read-only files rooted at ${workspaceLabel}.`"
     fullscreen
     dismissible
     :ui="{
@@ -184,37 +182,10 @@ watch(open, (nextOpen) => {
     }"
     @update:open="handleOpenChange"
   >
-    <template #actions>
-      <UTooltip text="Refresh current folder">
-        <UButton
-          icon="i-lucide-refresh-cw"
-          color="neutral"
-          variant="ghost"
-          size="xs"
-          square
-          :loading="snapshot.loadingPaths.includes(snapshot.currentPath)"
-          aria-label="Refresh current folder"
-          @click="refreshCurrentDirectory"
-        />
-      </UTooltip>
-      <UTooltip text="Copy relative path">
-        <UButton
-          icon="i-lucide-copy"
-          color="neutral"
-          variant="ghost"
-          size="xs"
-          square
-          :disabled="!copyTarget"
-          aria-label="Copy relative path"
-          @click="copyRelativePath"
-        />
-      </UTooltip>
-    </template>
-
     <template #body>
       <div class="grid h-full min-h-0 grid-rows-[minmax(14rem,42%)_minmax(0,1fr)] bg-default md:grid-cols-[minmax(18rem,26rem)_minmax(0,1fr)] md:grid-rows-1">
         <aside class="flex min-h-0 flex-col border-b border-default bg-default md:border-r md:border-b-0">
-          <div class="space-y-3 border-b border-default bg-elevated/20 px-4 py-3">
+          <div class="border-b border-default bg-elevated/20 px-4 py-3">
             <UBreadcrumb
               :items="breadcrumbItems"
               class="min-w-0 overflow-x-auto"
@@ -231,24 +202,6 @@ watch(open, (nextOpen) => {
                 </button>
               </template>
             </UBreadcrumb>
-
-            <div class="flex items-center justify-between gap-3">
-              <UCheckbox
-                :model-value="snapshot.showIgnored"
-                label="Show generated folders"
-                size="sm"
-                @update:model-value="(value: boolean | 'indeterminate') => setShowIgnored(Boolean(value))"
-              />
-              <span class="text-xs text-muted">Read only</span>
-            </div>
-
-            <p
-              v-if="copyStatus"
-              class="text-xs text-muted"
-              role="status"
-            >
-              {{ copyStatus }}
-            </p>
           </div>
 
           <UScrollArea class="min-h-0 flex-1 px-2 py-3">
@@ -358,8 +311,43 @@ watch(open, (nextOpen) => {
             </UTree>
           </UScrollArea>
 
-          <div class="border-t border-default px-4 py-3 text-xs leading-5 text-muted">
-            Read-only workspace files. File changes are not available here.
+          <div
+            class="flex min-h-12 items-center gap-2 border-t border-default bg-elevated/20 px-2 py-2"
+            role="group"
+            aria-label="File tree actions"
+          >
+            <p
+              class="min-w-0 flex-1 truncate px-2 text-xs text-muted"
+              :role="copyStatus ? 'status' : undefined"
+            >
+              {{ copyStatus ?? (copyTarget || 'Workspace root') }}
+            </p>
+            <div class="flex shrink-0 items-center gap-1">
+              <UTooltip text="Refresh current folder">
+                <UButton
+                  icon="i-lucide-refresh-cw"
+                  color="neutral"
+                  variant="ghost"
+                  size="xs"
+                  square
+                  :loading="snapshot.loadingPaths.includes(snapshot.currentPath)"
+                  aria-label="Refresh current folder"
+                  @click="refreshCurrentDirectory"
+                />
+              </UTooltip>
+              <UTooltip text="Copy relative path">
+                <UButton
+                  icon="i-lucide-copy"
+                  color="neutral"
+                  variant="ghost"
+                  size="xs"
+                  square
+                  :disabled="!copyTarget"
+                  aria-label="Copy relative path"
+                  @click="copyRelativePath"
+                />
+              </UTooltip>
+            </div>
           </div>
         </aside>
 

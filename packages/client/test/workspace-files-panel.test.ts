@@ -2,11 +2,14 @@
 // @vitest-environment jsdom
 
 import { flushPromises, mount } from '@vue/test-utils'
-import { defineComponent, h, nextTick, type VNode } from 'vue'
+import { defineComponent, h, nextTick, ref, type VNode } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import WorkspaceFilesPanel from '../app/components/WorkspaceFilesPanel.vue'
 import { useState } from '#imports'
-import type { WorkspaceFileTreeNode } from '../app/composables/useWorkspaceFiles'
+import {
+  useWorkspaceFiles,
+  type WorkspaceFileTreeNode
+} from '../app/composables/useWorkspaceFiles'
 import type { WorkspaceLocalFileScope } from '../shared/local-files'
 
 const fetchMock = vi.fn()
@@ -34,7 +37,8 @@ const ButtonStub = defineComponent({
 
 const ModalStub = defineComponent({
   props: {
-    open: { type: Boolean, default: false }
+    open: { type: Boolean, default: false },
+    description: { type: String, default: undefined }
   },
   setup(props, { slots }) {
     return () => props.open
@@ -69,24 +73,6 @@ const IconStub = defineComponent({
       ...attrs,
       'data-icon': props.name
     })
-  }
-})
-
-const CheckboxStub = defineComponent({
-  props: {
-    modelValue: { type: Boolean, default: false },
-    label: { type: String, default: '' }
-  },
-  emits: ['update:modelValue'],
-  setup(props, { emit }) {
-    return () => h('label', [
-      h('input', {
-        type: 'checkbox',
-        checked: props.modelValue,
-        onChange: () => emit('update:modelValue', !props.modelValue)
-      }),
-      props.label
-    ])
   }
 })
 
@@ -164,7 +150,6 @@ const mountPanel = (workspace: WorkspaceLocalFileScope = { kind: 'project', id: 
         UTooltip: PassThroughStub,
         UButton: ButtonStub,
         UModal: ModalStub,
-        UCheckbox: CheckboxStub,
         UBreadcrumb: BreadcrumbStub,
         UScrollArea: PassThroughStub,
         USkeleton: PassThroughStub,
@@ -273,6 +258,7 @@ describe('WorkspaceFilesPanel', () => {
     expect(wrapper.text()).toContain('Select a file from the tree to preview it.')
     expect(wrapper.find('[data-preview-path]').exists()).toBe(false)
     expect(wrapper.get('[data-icon="i-lucide-file-search-2"]').classes()).toContain('text-muted/45')
+    expect(wrapper.findComponent(ModalStub).props('description')).toBeUndefined()
   })
 
   it('refreshes the active directory and copies its relative path', async () => {
@@ -290,12 +276,16 @@ describe('WorkspaceFilesPanel', () => {
     await wrapper.get('[data-tree-path="src"]').trigger('click')
     await flushPromises()
 
-    await wrapper.get('[aria-label="Copy relative path"]').trigger('click')
+    const treeActions = wrapper.get('[aria-label="File tree actions"]')
+    expect(treeActions.find('[aria-label="Refresh current folder"]').exists()).toBe(true)
+    expect(treeActions.find('[aria-label="Copy relative path"]').exists()).toBe(true)
+
+    await treeActions.get('[aria-label="Copy relative path"]').trigger('click')
     await flushPromises()
     expect(clipboardWriteMock).toHaveBeenCalledWith('src')
     expect(wrapper.text()).toContain('Copied src')
 
-    await wrapper.get('[aria-label="Refresh current folder"]').trigger('click')
+    await treeActions.get('[aria-label="Refresh current folder"]').trigger('click')
     await flushPromises()
     expect(fetchMock.mock.calls.filter(([url]) =>
       new URL(url, 'http://localhost').searchParams.get('path') === 'src'
@@ -321,7 +311,7 @@ describe('WorkspaceFilesPanel', () => {
     expect(wrapper.text()).toContain('Could not copy the relative path.')
   })
 
-  it('shows truncation and reloads with generated folders enabled', async () => {
+  it('shows truncation without exposing generated-folder controls', async () => {
     fetchMock.mockResolvedValue(directoryResponse('', [
       entry({ name: 'README.md', path: 'README.md' })
     ], true))
@@ -330,12 +320,11 @@ describe('WorkspaceFilesPanel', () => {
     await wrapper.get('[aria-label="Browse workspace files"]').trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('This directory is limited to 200 entries.')
-
-    await wrapper.get('input[type="checkbox"]').setValue(true)
-    await flushPromises()
-    const secondUrl = new URL(fetchMock.mock.calls[1]?.[0], 'http://localhost')
-    expect(secondUrl.pathname).toBe('/api/chats/chat-test/files')
-    expect(secondUrl.searchParams.get('showIgnored')).toBe('true')
+    expect(wrapper.text()).not.toContain('Show generated folders')
+    expect(wrapper.find('input[type="checkbox"]').exists()).toBe(false)
+    const initialUrl = new URL(fetchMock.mock.calls[0]?.[0], 'http://localhost')
+    expect(initialUrl.pathname).toBe('/api/chats/chat-test/files')
+    expect(initialUrl.searchParams.has('showIgnored')).toBe(false)
   })
 
   it('keeps root errors visible and recoverable', async () => {
@@ -403,20 +392,20 @@ describe('WorkspaceFilesPanel', () => {
       ]))
     })
 
-    const wrapper = mountPanel()
-    await wrapper.get('[aria-label="Browse workspace files"]').trigger('click')
-    await flushPromises()
-    await wrapper.get('[data-tree-path="src"]').trigger('click')
-    await wrapper.get('input[type="checkbox"]').setValue(true)
-    await flushPromises()
-    expect(wrapper.find('[data-tree-path="src/fresh.ts"]').exists()).toBe(true)
-    await wrapper.get('[aria-label="Copy relative path"]').trigger('click')
-    await flushPromises()
-    expect(clipboardWriteMock).toHaveBeenCalledWith('src')
+    const files = useWorkspaceFiles(ref<WorkspaceLocalFileScope>({ kind: 'project', id: 'demo' }))
+    await files.loadDirectory('')
+    const src = files.snapshot.value.listings['']?.entries[0]
+    expect(src).toBeDefined()
+    files.selectEntry(src!)
+    files.snapshot.value.expandedPaths = ['src']
+    const pendingOldRequest = files.loadDirectory('src')
+    await files.setShowIgnored(true)
+
+    expect(files.snapshot.value.listings.src?.entries.map(item => item.path)).toEqual(['src/fresh.ts'])
     resolveOldRequest(directoryResponse('src', [entry({ name: 'stale.ts', path: 'src/stale.ts' })]))
+    await pendingOldRequest
     await flushPromises()
-    expect(wrapper.find('[data-tree-path="src/stale.ts"]').exists()).toBe(false)
-    expect(wrapper.find('[data-tree-path="src/fresh.ts"]').exists()).toBe(true)
+    expect(files.snapshot.value.listings.src?.entries.map(item => item.path)).toEqual(['src/fresh.ts'])
   })
 
   it('does not restore filter state into a workspace selected during reload', async () => {
@@ -424,21 +413,6 @@ describe('WorkspaceFilesPanel', () => {
     const filteredRoot = new Promise<ReturnType<typeof directoryResponse>>((resolve) => {
       resolveFilteredRoot = resolve
     })
-    const snapshots = useState<Record<string, unknown>>('codori-workspace-files', () => ({}))
-    snapshots.value['chat:chat-test'] = {
-      generation: 1,
-      listings: {
-        '': directoryResponse('', [
-          entry({ name: 'src', path: 'src', kind: 'directory', size: null })
-        ]).directory
-      },
-      loadingPaths: [],
-      errors: {},
-      expandedPaths: [],
-      selectedPath: null,
-      currentPath: '',
-      showIgnored: false
-    }
     fetchMock.mockImplementation((url: string) => {
       const parsed = new URL(url, 'http://localhost')
       const path = parsed.searchParams.get('path') ?? ''
@@ -450,19 +424,20 @@ describe('WorkspaceFilesPanel', () => {
         : directoryResponse('', [entry({ name: 'src', path: 'src', kind: 'directory', size: null })]))
     })
 
-    const wrapper = mountPanel()
-    await wrapper.get('[aria-label="Browse workspace files"]').trigger('click')
-    await flushPromises()
-    await wrapper.get('[data-tree-path="src"]').trigger('click')
-    await flushPromises()
-    await wrapper.get('input[type="checkbox"]').setValue(true)
-    await wrapper.setProps({
-      workspace: { kind: 'chat', id: 'chat-test' },
-      workspaceLabel: 'Scratch chat'
-    })
+    const workspace = ref<WorkspaceLocalFileScope>({ kind: 'project', id: 'demo' })
+    const files = useWorkspaceFiles(workspace)
+    await files.loadDirectory('')
+    const src = files.snapshot.value.listings['']?.entries[0]
+    expect(src).toBeDefined()
+    files.selectEntry(src!)
+    files.snapshot.value.expandedPaths = ['src']
+    await files.loadDirectory('src')
+    const filterReload = files.setShowIgnored(true)
+    workspace.value = { kind: 'chat', id: 'chat-test' }
     resolveFilteredRoot(directoryResponse('', [
       entry({ name: 'src', path: 'src', kind: 'directory', size: null })
     ]))
+    await filterReload
     await flushPromises()
 
     expect(fetchMock.mock.calls.some(([url]) => {
@@ -488,23 +463,26 @@ describe('WorkspaceFilesPanel', () => {
         : directoryResponse('', [entry({ name: 'src', path: 'src', kind: 'directory', size: null })]))
     })
 
-    const wrapper = mountPanel()
-    await wrapper.get('[aria-label="Browse workspace files"]').trigger('click')
-    await flushPromises()
-    await wrapper.get('[data-tree-path="src"]').trigger('click')
-    await flushPromises()
-    await wrapper.get('input[type="checkbox"]').setValue(true)
-    await flushPromises()
-    expect(wrapper.text()).toContain('Could not load workspace files')
-    expect(wrapper.get('[aria-label="Copy relative path"]').attributes('disabled')).toBeDefined()
+    const files = useWorkspaceFiles(ref<WorkspaceLocalFileScope>({ kind: 'project', id: 'demo' }))
+    await files.loadDirectory('')
+    const src = files.snapshot.value.listings['']?.entries[0]
+    expect(src).toBeDefined()
+    files.selectEntry(src!)
+    files.snapshot.value.expandedPaths = ['src']
+    await files.loadDirectory('src')
 
-    const retry = wrapper.findAll('button').find(button => button.text() === 'Retry')
-    await retry?.trigger('click')
-    await flushPromises()
-    expect(wrapper.find('[data-tree-path="src/fresh.ts"]').exists()).toBe(false)
-    await wrapper.get('[data-tree-path="src"]').trigger('click')
-    await flushPromises()
-    expect(wrapper.find('[data-tree-path="src/fresh.ts"]').exists()).toBe(true)
+    await files.setShowIgnored(true)
+    expect(files.rootError.value).toBe('Root unavailable')
+    expect(files.snapshot.value.currentPath).toBe('')
+    expect(files.snapshot.value.selectedPath).toBeNull()
+
+    await files.loadDirectory('', { force: true })
+    expect(files.snapshot.value.listings.src).toBeUndefined()
+    const restoredSrc = files.snapshot.value.listings['']?.entries[0]
+    expect(restoredSrc).toBeDefined()
+    files.selectEntry(restoredSrc!)
+    await files.loadDirectory('src')
+    expect(files.snapshot.value.listings.src?.entries.map(item => item.path)).toEqual(['src/fresh.ts'])
   })
 
   it('does not leak stale directory results across workspace switches', async () => {
