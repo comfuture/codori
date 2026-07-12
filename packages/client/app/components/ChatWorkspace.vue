@@ -4487,7 +4487,7 @@ watch(activeThreadId, (threadId) => {
       await refreshRealtimeVoiceCapability(threadId)
     }
   })()
-})
+}, { immediate: true })
 
 watch(() => props.threadId ?? null, (threadId) => {
   refreshWorkspaceGitBranchesInBackground('thread/load')
