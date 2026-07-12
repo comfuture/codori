@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   CodexRpcClient,
   notificationRequestId,
@@ -9,7 +9,39 @@ import {
   type CodexRpcNotification
 } from '../shared/codex-rpc'
 
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
+
 describe('Codex RPC payload parsing', () => {
+  it('rejects a connection closed before initialization', async () => {
+    class ConnectingWebSocket extends EventTarget {
+      static readonly CONNECTING = 0
+
+      static readonly OPEN = 1
+
+      readyState = ConnectingWebSocket.CONNECTING
+
+      close() {
+        this.readyState = 3
+        this.dispatchEvent(new Event('close'))
+      }
+
+      send() {}
+    }
+
+    vi.stubGlobal('WebSocket', ConnectingWebSocket)
+    const client = new CodexRpcClient('ws://example.test')
+    const states: string[] = []
+    client.subscribeConnectionState(state => states.push(state))
+
+    const connection = client.connect()
+    client.close()
+
+    await expect(connection).rejects.toThrow('closed before initialization')
+    expect(states).toEqual(['idle', 'connecting', 'disconnected'])
+  })
+
   it('accepts string ids for server-initiated requests', async () => {
     const client = new CodexRpcClient('ws://example.test')
     const parsePayload = (client as unknown as {

@@ -73,6 +73,7 @@ type LegacyCodexRpcNotification =
     }
 
 export type CodexRpcNotification = ServerNotification | LegacyCodexRpcNotification
+export type CodexRpcConnectionState = 'idle' | 'connecting' | 'connected' | 'disconnected'
 
 const isObjectRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -273,13 +274,21 @@ export class CodexRpcClient {
 
   private connectPromise: Promise<void> | null = null
 
+  private rejectConnect: ((error: Error) => void) | null = null
+
   private initialized = false
+
+  private initializeResponse: InitializeResponse | null = null
+
+  private connectionState: CodexRpcConnectionState = 'idle'
 
   private nextRequestId = 1
 
   private pending = new Map<JsonRpcId, PendingRequest>()
 
   private listeners = new Set<(notification: CodexRpcNotification) => void>()
+
+  private connectionListeners = new Set<(state: CodexRpcConnectionState) => void>()
 
   private serverRequestHandler: CodexRpcServerRequestHandler | null = null
 
@@ -291,6 +300,14 @@ export class CodexRpcClient {
     this.listeners.add(listener)
     return () => {
       this.listeners.delete(listener)
+    }
+  }
+
+  subscribeConnectionState(listener: (state: CodexRpcConnectionState) => void) {
+    this.connectionListeners.add(listener)
+    listener(this.connectionState)
+    return () => {
+      this.connectionListeners.delete(listener)
     }
   }
 
@@ -308,6 +325,10 @@ export class CodexRpcClient {
     return this.initialized && this.socket?.readyState === WebSocket.OPEN
   }
 
+  getInitializeResponse() {
+    return this.initializeResponse
+  }
+
   async connect() {
     if (this.initialized && this.socket?.readyState === WebSocket.OPEN) {
       return
@@ -317,7 +338,10 @@ export class CodexRpcClient {
       return await this.connectPromise
     }
 
+    this.setConnectionState('connecting')
+
     this.connectPromise = new Promise<void>((resolve, reject) => {
+      this.rejectConnect = reject
       const socket = new WebSocket(this.url)
       this.socket = socket
 
@@ -328,6 +352,8 @@ export class CodexRpcClient {
 
       const handleError = () => {
         cleanup()
+        this.rejectConnect = null
+        this.setConnectionState('disconnected')
         reject(new Error(`Failed to connect to ${this.url}`))
       }
 
@@ -335,7 +361,7 @@ export class CodexRpcClient {
         cleanup()
 
         try {
-          await this.sendRequestNow<InitializeResponse>('initialize', {
+          this.initializeResponse = await this.sendRequestNow<InitializeResponse>('initialize', {
             clientInfo: {
               name: '@codori/client',
               title: 'Codori Client',
@@ -343,13 +369,20 @@ export class CodexRpcClient {
             },
             capabilities: {
               experimentalApi: true,
+              requestAttestation: false,
               optOutNotificationMethods: null
             }
           })
           this.sendNotificationNow('initialized')
           this.initialized = true
+          this.rejectConnect = null
+          this.setConnectionState('connected')
           resolve()
         } catch (error) {
+          this.initializeResponse = null
+          this.rejectConnect = null
+          this.setConnectionState('disconnected')
+          socket.close()
           reject(asError(error))
         }
       }
@@ -365,9 +398,13 @@ export class CodexRpcClient {
         }
 
         this.initialized = false
+        this.initializeResponse = null
         this.socket = null
         this.connectPromise = null
+        this.setConnectionState('disconnected')
         const error = new Error('Codex RPC connection closed.')
+        this.rejectConnect?.(error)
+        this.rejectConnect = null
         for (const [requestId, pending] of this.pending.entries()) {
           pending.reject(error)
           this.pending.delete(requestId)
@@ -406,7 +443,23 @@ export class CodexRpcClient {
 
   close() {
     if (this.socket?.readyState === WebSocket.OPEN || this.socket?.readyState === WebSocket.CONNECTING) {
+      if (!this.initialized) {
+        const error = new Error('Codex RPC connection closed before initialization.')
+        this.rejectConnect?.(error)
+        this.rejectConnect = null
+      }
       this.socket.close()
+    }
+  }
+
+  private setConnectionState(state: CodexRpcConnectionState) {
+    if (this.connectionState === state) {
+      return
+    }
+
+    this.connectionState = state
+    for (const listener of this.connectionListeners) {
+      listener(state)
     }
   }
 
