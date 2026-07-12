@@ -1,4 +1,4 @@
-const editableSelector = 'input, textarea, select, [contenteditable=""], [contenteditable="true"]'
+const editableSelector = 'input, textarea, select, [contenteditable=""], [contenteditable="true"], [data-codori-shortcuts="ignore"]'
 
 export const isMacLikePlatform = (platform: string | null | undefined) =>
   /Mac|iPhone|iPad|iPod/i.test(platform ?? '')

@@ -330,6 +330,25 @@ describe('global command palette', () => {
     expect(wrapper.text()).not.toContain('New Chat')
   })
 
+  it('does not open from the terminal shortcut boundary', async () => {
+    const wrapper = mountPalette()
+    const terminal = document.createElement('div')
+    const canvas = document.createElement('canvas')
+    terminal.dataset.codoriShortcuts = 'ignore'
+    terminal.append(canvas)
+    document.body.append(terminal)
+
+    canvas.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'k',
+      metaKey: true,
+      bubbles: true,
+      cancelable: true
+    }))
+    await nextTick()
+
+    expect(wrapper.text()).not.toContain('New Chat')
+  })
+
   it('routes and closes after selecting an action, chat, or project', async () => {
     mockProjectsLoaded.value = true
     mockChatsLoaded.value = true
