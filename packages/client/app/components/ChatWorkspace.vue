@@ -17,6 +17,7 @@ import ReviewStartDrawer from './ReviewStartDrawer.vue'
 import PendingUserRequestDrawer from './PendingUserRequestDrawer.vue'
 import UsageStatusModal from './UsageStatusModal.vue'
 import WorkspaceBranchControl from './WorkspaceBranchControl.vue'
+import WorkspaceTerminalSurface from './WorkspaceTerminalSurface.vue'
 import {
   reconcileOptimisticUserMessage,
   removeChatMessage,
@@ -461,6 +462,7 @@ const fileAutocompleteLoading = ref(false)
 const fileAutocompleteError = ref<string | null>(null)
 const fileAutocompleteResults = ref<NormalizedFuzzyFileSearchMatch[]>([])
 const usageStatusModalOpen = ref(false)
+const terminalOpen = ref(false)
 const promptControlsPopoverOpen = ref(false)
 const isWorkflowBusy = computed(() =>
   status.value === 'submitted'
@@ -5378,6 +5380,24 @@ watch(
                     @switch-branch="(branch) => void switchWorkspaceGitBranch(branch)"
                     @create-branch="(branch) => void createWorkspaceGitBranch(branch)"
                   />
+
+                  <UTooltip
+                    v-if="workspaceId && selectedProject?.projectPath"
+                    text="Workspace terminal"
+                  >
+                    <UButton
+                      type="button"
+                      :color="terminalOpen ? 'primary' : 'neutral'"
+                      :variant="terminalOpen ? 'soft' : 'ghost'"
+                      size="sm"
+                      icon="i-lucide-square-terminal"
+                      class="size-8 shrink-0 justify-center rounded-full border border-default/70"
+                      :ui="{ leadingIcon: 'size-4', base: 'px-0' }"
+                      :aria-pressed="terminalOpen"
+                      aria-label="Toggle workspace terminal"
+                      @click="terminalOpen = !terminalOpen"
+                    />
+                  </UTooltip>
                 </div>
 
                 <div class="ml-auto flex shrink-0 items-center">
@@ -5494,6 +5514,13 @@ watch(
         </div>
       </div>
     </div>
+
+    <WorkspaceTerminalSurface
+      v-if="workspaceId && selectedProject?.projectPath"
+      v-model:open="terminalOpen"
+      :workspace="workspaceScope"
+      :cwd="selectedProject.projectPath"
+    />
   </section>
 
   <PendingUserRequestDrawer
