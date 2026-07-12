@@ -5,6 +5,7 @@ import { useChatSession } from '../../../../composables/useChatSession'
 import { useProjects } from '../../../../composables/useProjects'
 import { useThreadSummaries } from '../../../../composables/useThreadSummaries'
 import { useThreadPanel } from '../../../../composables/useThreadPanel'
+import WorkspaceTerminalToggle from '../../../../components/WorkspaceTerminalToggle.vue'
 import { useVisualSubagentPanels } from '../../../../composables/useVisualSubagentPanels'
 import { normalizeProjectIdParam, toProjectRoute } from '~~/shared/codori'
 import {
@@ -318,6 +319,10 @@ watch(
                 </UButton>
               </UTooltip>
             </div>
+            <WorkspaceTerminalToggle
+              v-if="projectId"
+              :workspace="{ kind: 'project', id: projectId }"
+            />
           </template>
         </UDashboardNavbar>
       </template>
