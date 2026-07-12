@@ -612,6 +612,7 @@ describe('client package', () => {
     expect(shouldApplyNotificationWithoutTurnId('thread/goal/updated')).toBe(true)
     expect(shouldApplyNotificationWithoutTurnId('thread/goal/cleared')).toBe(true)
     expect(shouldApplyNotificationWithoutTurnId('serverRequest/resolved')).toBe(true)
+    expect(shouldApplyNotificationWithoutTurnId('turn/started')).toBe(true)
     expect(shouldApplyNotificationWithoutTurnId('item/agentMessage/delta')).toBe(false)
   })
 

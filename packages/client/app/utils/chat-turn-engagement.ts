@@ -63,6 +63,7 @@ export const shouldApplyThreadAgnosticNotification = (method: string) =>
 
 export const shouldApplyNotificationWithoutTurnId = (method: string) =>
   shouldApplyThreadAgnosticNotification(method)
+  || method === 'turn/started'
   || method === 'thread/name/updated'
   || method === 'thread/goal/updated'
   || method === 'thread/goal/cleared'

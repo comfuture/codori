@@ -53,6 +53,8 @@ export type RealtimeCapability = {
 type RealtimeTrack = {
   enabled: boolean
   stop: () => void
+  addEventListener?: (type: 'ended', listener: () => void) => void
+  removeEventListener?: (type: 'ended', listener: () => void) => void
 }
 
 type RealtimeMediaStream = {
@@ -214,14 +216,17 @@ export const useRealtimeConversation = (options: ControllerOptions) => {
   )
 
   let generationCounter = 0
+  let capabilityProbeCounter = 0
   let transcriptCounter = 0
   let activeGeneration: number | null = null
   let mediaStream: RealtimeMediaStream | null = null
+  let microphoneTrack: RealtimeTrack | null = null
   let peerConnection: RealtimePeerConnection | null = null
   let dataChannel: RealtimeDataChannel | null = null
   let audioElement: RealtimeAudioElement | null = null
   let releaseNotifications: (() => void) | null = null
   let releaseConnection: (() => void) | null = null
+  let releaseMicrophoneEnded: (() => void) | null = null
   let connectionTimer: ReturnType<typeof globalThis.setTimeout> | null = null
   let startPromise: Promise<void> | null = null
   let teardownPromise: Promise<void> | null = null
@@ -350,6 +355,8 @@ export const useRealtimeConversation = (options: ControllerOptions) => {
       releaseNotifications = null
       releaseConnection?.()
       releaseConnection = null
+      releaseMicrophoneEnded?.()
+      releaseMicrophoneEnded = null
       microphoneEnabled.value = false
 
       for (const track of mediaStream?.getTracks() ?? []) {
@@ -357,6 +364,7 @@ export const useRealtimeConversation = (options: ControllerOptions) => {
         track.stop()
       }
       mediaStream = null
+      microphoneTrack = null
 
       dataChannel?.close()
       dataChannel = null
@@ -495,17 +503,21 @@ export const useRealtimeConversation = (options: ControllerOptions) => {
   }
 
   const refreshCapability = async (threadId: string, configured: boolean) => {
+    const probeGeneration = ++capabilityProbeCounter
     capability.value = {
       status: 'checking',
       message: 'Checking realtime voice support.'
     }
 
     if (!configured || !environment.isSecureContext() || !environment.supportsRealtime()) {
-      capability.value = resolveRealtimeCapability({
+      const resolved = resolveRealtimeCapability({
         configured,
         secureContext: environment.isSecureContext(),
         browserSupported: environment.supportsRealtime()
       })
+      if (probeGeneration === capabilityProbeCounter) {
+        capability.value = resolved
+      }
       return capability.value
     }
 
@@ -514,19 +526,25 @@ export const useRealtimeConversation = (options: ControllerOptions) => {
         'experimentalFeature/list',
         { threadId, limit: 100 }
       )
-      capability.value = resolveRealtimeCapability({
+      const resolved = resolveRealtimeCapability({
         configured,
         secureContext: true,
         browserSupported: true,
         response
       })
+      if (probeGeneration === capabilityProbeCounter) {
+        capability.value = resolved
+      }
     } catch (caughtError) {
-      capability.value = resolveRealtimeCapability({
+      const resolved = resolveRealtimeCapability({
         configured,
         secureContext: true,
         browserSupported: true,
         error: caughtError
       })
+      if (probeGeneration === capabilityProbeCounter) {
+        capability.value = resolved
+      }
     }
 
     return capability.value
@@ -587,11 +605,20 @@ export const useRealtimeConversation = (options: ControllerOptions) => {
           return
         }
 
-        const microphoneTrack = mediaStream.getAudioTracks()[0]
+        microphoneTrack = mediaStream.getAudioTracks()[0] ?? null
         if (!microphoneTrack) {
           throw new Error('No microphone audio track is available.')
         }
         microphoneTrack.enabled = false
+        const handleMicrophoneEnded = () => {
+          if (isCurrent(candidateGeneration, threadId)) {
+            void fail(candidateGeneration, 'Microphone access ended or the input device was removed.')
+          }
+        }
+        microphoneTrack.addEventListener?.('ended', handleMicrophoneEnded)
+        releaseMicrophoneEnded = () => {
+          microphoneTrack?.removeEventListener?.('ended', handleMicrophoneEnded)
+        }
 
         state.value = 'creating-offer'
         peerConnection = environment.createPeerConnection()
@@ -691,7 +718,7 @@ export const useRealtimeConversation = (options: ControllerOptions) => {
   }
 
   const setMicrophoneEnabled = (enabled: boolean) => {
-    const track = mediaStream?.getAudioTracks()[0]
+    const track = microphoneTrack
     if (!track || state.value !== 'connected') {
       if (enabled) {
         throw new Error('Realtime voice is not connected yet.')

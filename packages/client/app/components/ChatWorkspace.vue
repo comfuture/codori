@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useRouter, useRuntimeConfig } from '#imports'
+import { $fetch } from 'ofetch'
 import {
   computed,
   nextTick,
@@ -16,6 +17,7 @@ import PlanImplementationPromptDrawer from './PlanImplementationPromptDrawer.vue
 import ReviewStartDrawer from './ReviewStartDrawer.vue'
 import PendingUserRequestDrawer from './PendingUserRequestDrawer.vue'
 import UsageStatusModal from './UsageStatusModal.vue'
+import VoiceComposerControls from './VoiceComposerControls.vue'
 import WorkspaceBranchControl from './WorkspaceBranchControl.vue'
 import WorkspaceTerminalSurface from './WorkspaceTerminalSurface.vue'
 import {
@@ -72,6 +74,7 @@ import { useRpc } from '../composables/useRpc'
 import { useChatSubmitGuard } from '../composables/useChatSubmitGuard'
 import { useWorkspaceGitBranch } from '../composables/useWorkspaceGitBranch'
 import { useWorkspaceTerminalSurface } from '../composables/useWorkspaceTerminalSurface'
+import { useRealtimeConversation } from '../composables/useRealtimeConversation'
 import { sortSidebarProjects } from '../utils/project-sidebar-order'
 import {
   promoteThreadSummaries,
@@ -153,7 +156,13 @@ import {
   shouldShowContextWindowIndicator,
   visibleModelOptions
 } from '~~/shared/chat-prompt-controls'
-import { toChatRoute, toProjectRoute, toProjectThreadRoute } from '~~/shared/codori'
+import {
+  toChatRoute,
+  toProjectRoute,
+  toProjectThreadRoute,
+  type ServerCapabilitiesResponse
+} from '~~/shared/codori'
+import { resolveApiUrl, shouldUseServerProxy } from '~~/shared/network'
 import {
   filterSlashCommands,
   findActiveSlashCommand,
@@ -335,6 +344,104 @@ const {
   planImplementationPromptTurnId,
   planImplementationPromptThreadId
 } = session
+const realtimeRpcClient = {
+  request: async <T>(method: string, params?: unknown) =>
+    await getRuntimeClient().request<T>(method, params),
+  subscribe: (listener: Parameters<ReturnType<typeof getRuntimeClient>['subscribe']>[0]) =>
+    getRuntimeClient().subscribe(listener),
+  subscribeConnection: (listener: Parameters<ReturnType<typeof getRuntimeClient>['subscribeConnection']>[0]) =>
+    getRuntimeClient().subscribeConnection(listener),
+  isConnected: () => getRuntimeClient().isConnected()
+}
+const realtimeVoice = useRealtimeConversation({ client: realtimeRpcClient })
+const {
+  capability: realtimeVoiceCapability,
+  state: realtimeVoiceState,
+  activity: realtimeVoiceActivity,
+  latestUserTranscript: realtimeVoiceLatestUserTranscript,
+  error: realtimeVoiceError,
+  outputMuted: realtimeVoiceOutputMuted,
+  autoplayBlocked: realtimeVoiceAutoplayBlocked,
+  microphoneEnabled: realtimeVoiceMicrophoneEnabled
+} = realtimeVoice
+let realtimeVoiceCapabilityRequest = 0
+let releaseRealtimeVoicePageListeners: (() => void) | null = null
+
+const realtimeVoiceCapabilitiesUrl = () => {
+  const configuredBase = String(runtimeConfig.public.serverBase ?? '')
+  return shouldUseServerProxy(configuredBase)
+    ? '/api/codori/capabilities'
+    : resolveApiUrl('/capabilities', configuredBase)
+}
+
+const refreshRealtimeVoiceCapability = async (threadId: string) => {
+  const request = ++realtimeVoiceCapabilityRequest
+  realtimeVoiceCapability.value = {
+    status: 'checking',
+    message: 'Checking realtime voice support.'
+  }
+
+  try {
+    const response = await $fetch<ServerCapabilitiesResponse>(realtimeVoiceCapabilitiesUrl())
+    if (request !== realtimeVoiceCapabilityRequest || activeThreadId.value !== threadId) {
+      return
+    }
+
+    const configured = response.capabilities.realtimeVoice.configured
+    if (configured) {
+      await ensureProjectRuntime()
+      if (request !== realtimeVoiceCapabilityRequest || activeThreadId.value !== threadId) {
+        return
+      }
+    }
+    await realtimeVoice.refreshCapability(threadId, configured)
+  } catch (caughtError) {
+    if (request !== realtimeVoiceCapabilityRequest || activeThreadId.value !== threadId) {
+      return
+    }
+    realtimeVoiceCapability.value = {
+      status: 'failed',
+      message: `Could not load Codori voice capability: ${caughtError instanceof Error ? caughtError.message : String(caughtError)}`
+    }
+  }
+}
+
+const connectRealtimeVoice = async () => {
+  const threadId = activeThreadId.value
+  if (!threadId) {
+    return
+  }
+
+  try {
+    await ensureProjectRuntime()
+    await ensureObservedThreadSubscription()
+    if (realtimeVoiceCapability.value.status !== 'available') {
+      await refreshRealtimeVoiceCapability(threadId)
+    }
+    await realtimeVoice.connect(threadId)
+  } catch (caughtError) {
+    if (realtimeVoiceState.value !== 'error') {
+      realtimeVoiceCapability.value = {
+        status: 'failed',
+        message: caughtError instanceof Error ? caughtError.message : String(caughtError)
+      }
+    }
+  }
+}
+
+const pressRealtimeVoice = () => {
+  realtimeVoice.setMicrophoneEnabled(true)
+}
+
+const releaseRealtimeVoice = () => {
+  realtimeVoice.setMicrophoneEnabled(false)
+}
+
+const toggleRealtimeVoiceOutput = () =>
+  realtimeVoice.setOutputMuted(
+    realtimeVoiceAutoplayBlocked.value ? false : !realtimeVoiceOutputMuted.value
+  )
+
 const {
   pendingRequest,
   hasPendingRequest,
@@ -4248,6 +4355,16 @@ onMounted(() => {
   void scheduleScrollToBottom('auto')
 
   if (import.meta.client) {
+    const stopRealtimeVoiceForPageExit = () => {
+      void realtimeVoice.dispose()
+    }
+    window.addEventListener('pagehide', stopRealtimeVoiceForPageExit)
+    window.addEventListener('beforeunload', stopRealtimeVoiceForPageExit)
+    releaseRealtimeVoicePageListeners = () => {
+      window.removeEventListener('pagehide', stopRealtimeVoiceForPageExit)
+      window.removeEventListener('beforeunload', stopRealtimeVoiceForPageExit)
+    }
+
     const handleWorkspaceVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
         refreshWorkspaceGitBranchesFromEnvironment('window/visible')
@@ -4336,6 +4453,9 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  releaseRealtimeVoicePageListeners?.()
+  releaseRealtimeVoicePageListeners = null
+  void realtimeVoice.dispose()
   releaseServerRequestHandler?.()
   releaseServerRequestHandler = null
   releaseSkillNotificationSubscription?.()
@@ -4353,6 +4473,20 @@ onBeforeUnmount(() => {
     window.cancelAnimationFrame(scrollToBottomFrame)
     scrollToBottomFrame = null
   }
+})
+
+watch(activeThreadId, (threadId) => {
+  realtimeVoiceCapabilityRequest += 1
+  realtimeVoiceCapability.value = {
+    status: 'checking',
+    message: threadId ? 'Checking realtime voice support.' : 'Open a thread to use realtime voice.'
+  }
+  void (async () => {
+    await realtimeVoice.stopForThreadChange(threadId)
+    if (threadId && activeThreadId.value === threadId) {
+      await refreshRealtimeVoiceCapability(threadId)
+    }
+  })()
 })
 
 watch(() => props.threadId ?? null, (threadId) => {
@@ -5257,6 +5391,23 @@ watch(
                     :ui="{ leadingIcon: 'size-4', base: 'px-0' }"
                     aria-label="Attach image"
                     @click="openFilePicker"
+                  />
+
+                  <VoiceComposerControls
+                    v-if="activeThreadId"
+                    :capability="realtimeVoiceCapability"
+                    :session-state="realtimeVoiceState"
+                    :activity="realtimeVoiceActivity"
+                    :microphone-enabled="realtimeVoiceMicrophoneEnabled"
+                    :output-muted="realtimeVoiceOutputMuted"
+                    :autoplay-blocked="realtimeVoiceAutoplayBlocked"
+                    :latest-user-transcript="realtimeVoiceLatestUserTranscript"
+                    :error="realtimeVoiceError"
+                    @connect="void connectRealtimeVoice()"
+                    @press="pressRealtimeVoice"
+                    @release="releaseRealtimeVoice"
+                    @toggle-output="void toggleRealtimeVoiceOutput()"
+                    @stop="void realtimeVoice.stop()"
                   />
 
                   <UPopover

@@ -22,6 +22,21 @@ const enabledFeatureResponse = {
 class FakeTrack {
   enabled = true
   stop = vi.fn()
+  readonly endedListeners = new Set<() => void>()
+
+  addEventListener(_type: 'ended', listener: () => void) {
+    this.endedListeners.add(listener)
+  }
+
+  removeEventListener(_type: 'ended', listener: () => void) {
+    this.endedListeners.delete(listener)
+  }
+
+  end() {
+    for (const listener of this.endedListeners) {
+      listener()
+    }
+  }
 }
 
 class FakeStream {
@@ -216,6 +231,7 @@ describe('realtime conversation controller', () => {
         }
       }
     })
+    expect(fixture.rpc.requests.some(request => request.method === 'turn/start')).toBe(false)
     expect(fixture.peer.addTrack).toHaveBeenCalledWith(fixture.stream.track, fixture.stream)
     expect(fixture.peer.createDataChannel).toHaveBeenCalledWith('oai-events')
     expect(fixture.peer.remoteDescription).toEqual({ type: 'answer', sdp: 'answer-sdp' })
@@ -375,6 +391,19 @@ describe('realtime conversation controller', () => {
     expect(fixture.controller.error.value).toMatch(/Microphone permission was denied/)
     expect(fixture.rpc.notificationListeners.size).toBe(0)
     expect(fixture.rpc.connectionListeners.size).toBe(0)
+  })
+
+  it('fails safely when microphone permission or the input device is lost', async () => {
+    const fixture = createFixture()
+    await connectFixture(fixture)
+
+    fixture.stream.track.end()
+    await vi.waitFor(() => {
+      expect(fixture.controller.state.value).toBe('error')
+    })
+
+    expect(fixture.controller.error.value).toMatch(/Microphone access ended/)
+    expect(fixture.stream.track.stop).toHaveBeenCalledTimes(1)
   })
 
   it('ignores old-generation notifications after a thread switch', async () => {
