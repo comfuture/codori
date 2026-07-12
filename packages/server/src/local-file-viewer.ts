@@ -1,7 +1,9 @@
-import { basename, relative, resolve } from 'node:path'
-import { readFile, realpath, stat } from 'node:fs/promises'
+import { basename, isAbsolute, relative, resolve } from 'node:path'
+import { constants as fsConstants } from 'node:fs'
+import { open, realpath } from 'node:fs/promises'
 import { lookup as lookupMimeType } from 'mime-types'
 import { isPathInsideDirectory } from './attachment-store.js'
+import { normalizeWorkspaceRelativePath, WorkspaceDirectoryError } from './workspace-file-explorer.js'
 
 export const MAX_LOCAL_FILE_VIEW_BYTES = 1024 * 1024
 
@@ -47,6 +49,26 @@ const hasBinaryContent = (buffer: Buffer) => {
   }
 
   return false
+}
+
+const readFileWithinLimit = async (fileHandle: Awaited<ReturnType<typeof open>>) => {
+  const buffer = Buffer.allocUnsafe(MAX_LOCAL_FILE_VIEW_BYTES + 1)
+  let offset = 0
+
+  while (offset < buffer.length) {
+    const { bytesRead } = await fileHandle.read(
+      buffer,
+      offset,
+      buffer.length - offset,
+      null
+    )
+    if (bytesRead === 0) {
+      break
+    }
+    offset += bytesRead
+  }
+
+  return buffer.subarray(0, offset)
 }
 
 const SUPPORTED_IMAGE_MEDIA_TYPES = new Set([
@@ -105,7 +127,22 @@ export const readProjectLocalFile = async (
   requestedPath: string
 ): Promise<LocalFileReadResult> => {
   const resolvedProjectRoot = await realpath(resolve(projectRoot))
-  const resolvedRequestPath = resolve(requestedPath)
+  let resolvedRequestPath: string
+  if (isAbsolute(requestedPath)) {
+    resolvedRequestPath = resolve(requestedPath)
+  } else {
+    try {
+      const relativePath = normalizeWorkspaceRelativePath(requestedPath)
+      resolvedRequestPath = relativePath
+        ? resolve(resolvedProjectRoot, ...relativePath.split('/'))
+        : resolvedProjectRoot
+    } catch (error) {
+      if (error instanceof WorkspaceDirectoryError) {
+        throw new LocalFileViewError('FORBIDDEN', 'Local file access is limited to the active project root.')
+      }
+      throw error
+    }
+  }
 
   let resolvedTargetPath: string
   try {
@@ -118,23 +155,39 @@ export const readProjectLocalFile = async (
     throw new LocalFileViewError('FORBIDDEN', 'Local file access is limited to the active project root.')
   }
 
-  const fileStat = await stat(resolvedTargetPath).catch(() => null)
-  if (!fileStat) {
+  const fileHandle = await open(
+    resolvedTargetPath,
+    fsConstants.O_RDONLY | fsConstants.O_NONBLOCK
+  ).catch(() => null)
+  if (!fileHandle) {
     throw new LocalFileViewError('NOT_FOUND', 'Local file not found.')
   }
 
-  if (!fileStat.isFile()) {
-    throw new LocalFileViewError('NOT_A_FILE', 'Only regular files can be previewed.')
-  }
+  let fileStat: Awaited<ReturnType<typeof fileHandle.stat>>
+  let buffer: Buffer
+  try {
+    fileStat = await fileHandle.stat()
+    if (!fileStat.isFile()) {
+      throw new LocalFileViewError('NOT_A_FILE', 'Only regular files can be previewed.')
+    }
 
-  if (fileStat.size > MAX_LOCAL_FILE_VIEW_BYTES) {
-    throw new LocalFileViewError(
-      'TOO_LARGE',
-      `Local file preview is limited to ${Math.floor(MAX_LOCAL_FILE_VIEW_BYTES / 1024)} KB.`
-    )
-  }
+    if (fileStat.size > MAX_LOCAL_FILE_VIEW_BYTES) {
+      throw new LocalFileViewError(
+        'TOO_LARGE',
+        `Local file preview is limited to ${Math.floor(MAX_LOCAL_FILE_VIEW_BYTES / 1024)} KB.`
+      )
+    }
 
-  const buffer = await readFile(resolvedTargetPath)
+    buffer = await readFileWithinLimit(fileHandle)
+    if (buffer.length > MAX_LOCAL_FILE_VIEW_BYTES) {
+      throw new LocalFileViewError(
+        'TOO_LARGE',
+        `Local file preview is limited to ${Math.floor(MAX_LOCAL_FILE_VIEW_BYTES / 1024)} KB.`
+      )
+    }
+  } finally {
+    await fileHandle.close()
+  }
   const baseFile = {
     path: resolvedTargetPath,
     relativePath: relative(resolvedProjectRoot, resolvedTargetPath),

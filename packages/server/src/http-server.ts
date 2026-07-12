@@ -26,6 +26,11 @@ import { createGitBranch, listGitBranches, switchGitBranch } from './git.js'
 import { LocalFileViewError, readProjectLocalFile, type LocalFileReadResult } from './local-file-viewer.js'
 import { createRuntimeManager } from './process-manager.js'
 import {
+  listWorkspaceDirectory,
+  WorkspaceDirectoryError,
+  type WorkspaceDirectoryListing
+} from './workspace-file-explorer.js'
+import {
   createServiceUpdateController,
   type ServiceUpdateController,
   type ServiceUpdateStatus
@@ -118,6 +123,10 @@ type ProjectGitBranchMutationRequest = {
 
 type ProjectLocalFileResponse = {
   file: LocalFileReadResult
+}
+
+type WorkspaceDirectoryResponse = {
+  directory: WorkspaceDirectoryListing
 }
 
 export type HttpServerOptions = {
@@ -849,6 +858,42 @@ export const createHttpServer = async (
     }
   )
 
+  app.get<{ Params: { chatId: string }, Querystring: { path?: string, showIgnored?: string } }>(
+    '/api/chats/:chatId/files',
+    async (request, reply): Promise<WorkspaceDirectoryResponse | { error: { code: string, message: string } }> => {
+      if (!manager.getChatStatus) {
+        throw new CodoriError('INVALID_CONFIG', 'Chat lookup is not available.')
+      }
+
+      const chatId = getChatIdFromRequest(request.params.chatId)
+      const requestedPath = typeof request.query.path === 'string'
+        ? request.query.path
+        : ''
+      const chat = await resolveValue(manager.getChatStatus(chatId))
+      await touchChatActivity(manager, chatId)
+
+      try {
+        const directory = await listWorkspaceDirectory(chat.chatPath, requestedPath, {
+          showIgnored: request.query.showIgnored === 'true'
+        })
+        reply.header('cache-control', 'no-store')
+        return { directory }
+      } catch (error) {
+        if (error instanceof WorkspaceDirectoryError) {
+          reply.status(error.code === 'NOT_FOUND' || error.code === 'NOT_A_DIRECTORY' ? 404 : 403)
+          return {
+            error: {
+              code: error.code,
+              message: error.message
+            }
+          }
+        }
+
+        throw error
+      }
+    }
+  )
+
   app.get<{ Params: { chatId: string }, Querystring: { path?: string } }>(
     '/api/chats/:chatId/local-file',
     async (request, reply): Promise<ProjectLocalFileResponse | { error: { code: string, message: string } }> => {
@@ -1208,6 +1253,38 @@ export const createHttpServer = async (
       reply.header('content-disposition', `inline; filename="${basename(resolvedPath).replace(/"/g, '')}"`)
 
       return await readFile(resolvedPath)
+    }
+  )
+
+  app.get<{ Params: { projectId: string }, Querystring: { path?: string, showIgnored?: string } }>(
+    '/api/projects/:projectId/files',
+    async (request, reply): Promise<WorkspaceDirectoryResponse | { error: { code: string, message: string } }> => {
+      const projectId = getProjectIdFromRequest(request.params.projectId)
+      const requestedPath = typeof request.query.path === 'string'
+        ? request.query.path
+        : ''
+      const project = await resolveValue(manager.getProjectStatus(projectId))
+      await touchProjectActivity(manager, projectId)
+
+      try {
+        const directory = await listWorkspaceDirectory(project.projectPath, requestedPath, {
+          showIgnored: request.query.showIgnored === 'true'
+        })
+        reply.header('cache-control', 'no-store')
+        return { directory }
+      } catch (error) {
+        if (error instanceof WorkspaceDirectoryError) {
+          reply.status(error.code === 'NOT_FOUND' || error.code === 'NOT_A_DIRECTORY' ? 404 : 403)
+          return {
+            error: {
+              code: error.code,
+              message: error.message
+            }
+          }
+        }
+
+        throw error
+      }
     }
   )
 

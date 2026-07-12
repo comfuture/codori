@@ -9,6 +9,7 @@ import WebSocket, { WebSocketServer } from 'ws'
 import { resolveProjectAttachmentsDir } from '../src/attachment-store.js'
 import { CodoriError } from '../src/errors.js'
 import { createHttpServer, startHttpServer, type RuntimeManagerLike } from '../src/http-server.js'
+import { MAX_LOCAL_FILE_VIEW_BYTES } from '../src/local-file-viewer.js'
 import type { ServiceUpdateController } from '../src/service-update.js'
 import type {
   ChatSessionStatusRecord,
@@ -1401,5 +1402,157 @@ describe('createHttpServer', () => {
         message: 'Binary files are not supported by the local file viewer.'
       }
     })
+  })
+
+  it('rejects oversized local files without reading beyond the preview bound', async () => {
+    const projectPath = mkdtempSync(join(os.tmpdir(), 'codori-local-file-'))
+    tempDirs.push(projectPath)
+    writeFileSync(join(projectPath, 'large.txt'), Buffer.alloc(MAX_LOCAL_FILE_VIEW_BYTES + 1, 0x61))
+    const app = await createHttpServer(createManager({
+      getProjectStatus: () => ({
+        ...createProjectRecord(),
+        projectPath
+      })
+    }))
+    startedApps.push(app)
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/projects/demo/local-file?path=large.txt'
+    })
+
+    expect(response.statusCode).toBe(415)
+    expect(response.json()).toMatchObject({
+      error: { code: 'TOO_LARGE' }
+    })
+  })
+
+  it('rejects named pipes without blocking the preview worker', async () => {
+    if (process.platform === 'win32') {
+      return
+    }
+
+    const projectPath = mkdtempSync(join(os.tmpdir(), 'codori-local-file-'))
+    tempDirs.push(projectPath)
+    execFileSync('mkfifo', [join(projectPath, 'preview.pipe')])
+    const app = await createHttpServer(createManager({
+      getProjectStatus: () => ({
+        ...createProjectRecord(),
+        projectPath
+      })
+    }))
+    startedApps.push(app)
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/projects/demo/local-file?path=preview.pipe'
+    })
+
+    expect(response.statusCode).toBe(404)
+    expect(response.json()).toMatchObject({
+      error: { code: 'NOT_A_FILE' }
+    })
+  })
+
+  it('lists bounded root-relative project directories without exposing absolute paths', async () => {
+    const projectPath = mkdtempSync(join(os.tmpdir(), 'codori-project-files-'))
+    tempDirs.push(projectPath)
+    mkdirSync(join(projectPath, 'src'))
+    mkdirSync(join(projectPath, 'node_modules'))
+    writeFileSync(join(projectPath, 'README.md'), '# Demo\n', 'utf8')
+
+    const app = await createHttpServer(createManager({
+      getProjectStatus: () => ({
+        ...createProjectRecord(),
+        projectPath
+      })
+    }))
+    startedApps.push(app)
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/projects/demo/files'
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.headers['cache-control']).toBe('no-store')
+    expect(response.json()).toMatchObject({
+      directory: {
+        path: '',
+        truncated: false,
+        limit: 200,
+        entries: [
+          { name: 'src', path: 'src', kind: 'directory' },
+          { name: 'README.md', path: 'README.md', kind: 'file' }
+        ]
+      }
+    })
+    expect(JSON.stringify(response.json())).not.toContain(projectPath)
+  })
+
+  it('provides matching nested directory listing and relative preview routes for chats', async () => {
+    const chatPath = mkdtempSync(join(os.tmpdir(), 'codori-chat-files-'))
+    tempDirs.push(chatPath)
+    mkdirSync(join(chatPath, 'notes'))
+    writeFileSync(join(chatPath, 'notes', 'today.md'), '# Today\n', 'utf8')
+
+    const app = await createHttpServer(createManager({
+      getChatStatus: () => ({
+        ...createChatRecord(),
+        chatPath
+      })
+    }))
+    startedApps.push(app)
+
+    const listingResponse = await app.inject({
+      method: 'GET',
+      url: '/api/chats/chat-test/files?path=notes'
+    })
+    expect(listingResponse.statusCode).toBe(200)
+    expect(listingResponse.json()).toMatchObject({
+      directory: {
+        path: 'notes',
+        entries: [
+          { name: 'today.md', path: 'notes/today.md', kind: 'file' }
+        ]
+      }
+    })
+
+    const previewResponse = await app.inject({
+      method: 'GET',
+      url: '/api/chats/chat-test/local-file?path=notes%2Ftoday.md'
+    })
+    expect(previewResponse.statusCode).toBe(200)
+    expect(previewResponse.json()).toMatchObject({
+      file: {
+        kind: 'text',
+        relativePath: 'notes/today.md',
+        text: '# Today\n'
+      }
+    })
+  })
+
+  it('rejects traversal and absolute injection in project directory routes', async () => {
+    const projectPath = mkdtempSync(join(os.tmpdir(), 'codori-project-files-'))
+    tempDirs.push(projectPath)
+    const app = await createHttpServer(createManager({
+      getProjectStatus: () => ({
+        ...createProjectRecord(),
+        projectPath
+      })
+    }))
+    startedApps.push(app)
+
+    for (const path of ['../outside', '/tmp/outside']) {
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/projects/demo/files?path=${encodeURIComponent(path)}`
+      })
+
+      expect(response.statusCode).toBe(403)
+      expect(response.json()).toMatchObject({
+        error: { code: 'FORBIDDEN' }
+      })
+    }
   })
 })
