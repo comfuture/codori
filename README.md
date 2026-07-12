@@ -272,6 +272,14 @@ Example:
 
 `realtimeVoice.enabled` is the persistent opt-in for an installed Codori service. Restart the service after changing it. Realtime voice is experimental and requires a supported ChatGPT-authenticated Codex runtime plus browser microphone access on localhost or a secure HTTPS origin. Codori uses browser-owned WebRTC signaling through app-server; it does not ask for an OpenAI API key and does not use the direct Realtime WebSocket transport.
 
+### Push-to-talk voice sessions
+
+After enabling realtime voice, open an existing thread and use the microphone action in the composer. The first activation requests microphone permission and prepares the WebRTC session. Once it is ready, hold the microphone action with a pointer, touch, <kbd>Space</kbd>, or <kbd>Enter</kbd> while that button is focused; releasing immediately mutes input while keeping the session ready for a follow-up. The adjacent controls mute remote speech or stop and release the entire voice session.
+
+The voice status surface shows live/final transcripts and whether Codex is listening, transcribing, delegating, working, or speaking. Spoken requests use app-server's automatic handoff into the active thread, so its existing turn, tool, approval, and final-response UI remains authoritative. Codori does not resubmit the recognized text as a second turn.
+
+Browser autoplay policy may require an explicit unmute/play gesture before remote speech is audible. Losing focus, hiding the page, releasing/cancelling the pointer, switching threads, disconnecting RPC, or leaving the page disables capture or tears down the owned session. Voice controls are app-scoped: there are no global hotkeys or background listening. Plain HTTP is supported only on localhost; private remote use requires a secure HTTPS origin supplied outside Codori.
+
 ## Project Discovery Rules
 
 Given a root directory such as `~/Project`, Codori treats any descendant directory with a direct `.git` child as a project.
