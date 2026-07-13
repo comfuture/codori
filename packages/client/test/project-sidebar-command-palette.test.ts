@@ -21,7 +21,6 @@ const mockRefreshChats = vi.fn()
 const mockStartProject = vi.fn()
 const mockGetClient = vi.fn()
 const mockRpcRequest = vi.fn()
-const mockOpenPanel = vi.fn()
 const mockProjects = ref<ProjectRecord[]>([])
 const mockChats = ref<ChatSessionRecord[]>([])
 const mockProjectsLoaded = ref(true)
@@ -52,12 +51,6 @@ vi.mock('../app/composables/useProjects', () => ({
 vi.mock('../app/composables/useRpc', () => ({
   useRpc: () => ({
     getClient: mockGetClient
-  })
-}))
-
-vi.mock('../app/composables/useThreadPanel', () => ({
-  useThreadPanel: () => ({
-    openPanel: mockOpenPanel
   })
 }))
 
@@ -181,6 +174,10 @@ const NavigationMenuStub = defineComponent({
         'data-depth': String(depth),
         'data-active': item.active ? 'true' : 'false',
         onClick: (event: MouseEvent) => {
+          const onClick = item.onClick
+          if (typeof onClick === 'function') {
+            onClick(event)
+          }
           const onSelect = item.onSelect
           if (typeof onSelect === 'function') {
             event.preventDefault()
@@ -247,9 +244,10 @@ const makeChat = (input: Partial<ChatSessionRecord> & Pick<ChatSessionRecord, 'c
 
 const makeThreadListResponse = (
   count: number,
-  nextCursor: string | null = null
+  nextCursor: string | null = null,
+  startIndex = 1
 ) => ({
-  data: Array.from({ length: count }, (_, index) => makeThread(index + 1)),
+  data: Array.from({ length: count }, (_, index) => makeThread(startIndex + index)),
   nextCursor,
   backwardsCursor: null
 }) as unknown as ThreadListResponse
@@ -327,7 +325,6 @@ describe('project sidebar command palette trigger', () => {
     mockStartProject.mockReset()
     mockGetClient.mockReset()
     mockRpcRequest.mockReset()
-    mockOpenPanel.mockReset()
     mockProjects.value = []
     mockChats.value = []
     mockProjectsLoaded.value = true
@@ -464,7 +461,6 @@ describe('project sidebar inline threads', () => {
     mockStartProject.mockReset()
     mockGetClient.mockReset()
     mockRpcRequest.mockReset()
-    mockOpenPanel.mockReset()
     mockProjects.value = [
       makeProject({
         projectId: 'codori',
@@ -529,8 +525,10 @@ describe('project sidebar inline threads', () => {
     })
   })
 
-  it('uses the fifth inline row for more.. when additional threads exist', async () => {
-    mockRpcRequest.mockResolvedValue(makeThreadListResponse(5, 'next-page'))
+  it('appends cursor pages from an icon-free muted Show more row', async () => {
+    mockRpcRequest
+      .mockResolvedValueOnce(makeThreadListResponse(5, 'next-page'))
+      .mockResolvedValueOnce(makeThreadListResponse(3, null, 5))
 
     const wrapper = mountSidebar({
       collapsed: false
@@ -538,14 +536,54 @@ describe('project sidebar inline threads', () => {
     await waitForSidebar()
 
     expect(wrapper.text()).toContain('Thread 1')
-    expect(wrapper.text()).toContain('Thread 4')
-    expect(wrapper.text()).not.toContain('Thread 5')
-    expect(wrapper.text()).toContain('more..')
-    expect(wrapper.findAll('[data-kind="thread"]')).toHaveLength(4)
+    expect(wrapper.text()).toContain('Thread 5')
+    expect(wrapper.text()).toContain('Show more')
+    expect(wrapper.text()).not.toContain('more..')
+    expect(wrapper.findAll('[data-kind="thread"]')).toHaveLength(5)
 
-    await wrapper.get('[data-kind="more"]').trigger('click')
+    const showMore = wrapper.get('[data-kind="more"]')
+    expect(showMore.attributes('data-label')).toBe('Show more')
+    expect(showMore.find('.navigation-menu-icon').text()).toBe('')
+    expect(showMore.find('.text-muted').exists()).toBe(true)
 
-    expect(mockOpenPanel).toHaveBeenCalledTimes(1)
+    await showMore.trigger('click')
+    await waitForSidebar()
+
+    expect(mockRpcRequest).toHaveBeenNthCalledWith(2, 'thread/list', {
+      cursor: 'next-page',
+      limit: 5,
+      sortKey: 'updated_at',
+      sortDirection: 'desc',
+      cwd: '/repo/codori'
+    })
+    expect(wrapper.findAll('[data-kind="thread"]')).toHaveLength(7)
+    expect(wrapper.text()).toContain('Thread 6')
+    expect(wrapper.text()).toContain('Thread 7')
+    expect(wrapper.find('[data-kind="more"]').exists()).toBe(false)
+  })
+
+  it('ignores repeated Show more selection while the next page is pending', async () => {
+    const nextPage = createDeferred<ThreadListResponse>()
+    mockRpcRequest
+      .mockResolvedValueOnce(makeThreadListResponse(5, 'next-page'))
+      .mockReturnValueOnce(nextPage.promise)
+
+    const wrapper = mountSidebar({
+      collapsed: false
+    })
+    await waitForSidebar()
+
+    const showMore = wrapper.get('[data-kind="more"]')
+    await showMore.trigger('click')
+    await showMore.trigger('click')
+
+    expect(mockRpcRequest).toHaveBeenCalledTimes(2)
+    expect(wrapper.findAll('[data-kind="thread"]')).toHaveLength(5)
+
+    nextPage.resolve(makeThreadListResponse(1, null, 6))
+    await waitForSidebar()
+
+    expect(wrapper.findAll('[data-kind="thread"]')).toHaveLength(6)
   })
 
   it('emphasizes the active inline thread row', async () => {
