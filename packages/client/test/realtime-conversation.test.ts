@@ -140,15 +140,16 @@ const createFixture = (input?: { playError?: Error, permissionError?: Error }) =
     audio.play.mockRejectedValue(input.playError)
   }
   const timers = new Set<() => void>()
+  const getUserMedia = vi.fn(async () => {
+    if (input?.permissionError) {
+      throw input.permissionError
+    }
+    return stream
+  })
   const environment: RealtimeBrowserEnvironment = {
     isSecureContext: () => true,
     supportsRealtime: () => true,
-    getUserMedia: async () => {
-      if (input?.permissionError) {
-        throw input.permissionError
-      }
-      return stream
-    },
+    getUserMedia,
     createPeerConnection: () => peer as unknown as ReturnType<RealtimeBrowserEnvironment['createPeerConnection']>,
     createAudioElement: () => audio,
     setTimeout: handler => {
@@ -162,7 +163,7 @@ const createFixture = (input?: { playError?: Error, permissionError?: Error }) =
     environment
   })
 
-  return { rpc, stream, peer, audio, timers, controller }
+  return { rpc, stream, peer, audio, timers, getUserMedia, controller }
 }
 
 const connectFixture = async (fixture: ReturnType<typeof createFixture>, threadId = 'thread-1') => {
@@ -215,6 +216,18 @@ describe('realtime capability normalization', () => {
 })
 
 describe('realtime conversation controller', () => {
+  it('requests microphone permission only when connect is invoked', async () => {
+    const fixture = createFixture()
+
+    await fixture.controller.refreshCapability('thread-1', true)
+    expect(fixture.getUserMedia).not.toHaveBeenCalled()
+
+    await fixture.controller.connect('thread-1')
+    expect(fixture.getUserMedia).toHaveBeenCalledOnce()
+
+    await fixture.controller.stop()
+  })
+
   it('negotiates browser-owned WebRTC with the exact app-server payload', async () => {
     const fixture = createFixture()
 
