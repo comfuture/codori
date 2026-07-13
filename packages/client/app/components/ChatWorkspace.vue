@@ -407,16 +407,15 @@ const refreshRealtimeVoiceCapability = async (threadId: string) => {
 }
 
 const connectRealtimeVoice = async () => {
-  const threadId = activeThreadId.value
-  if (!threadId) {
-    return
-  }
-
   try {
+    const threadId = activeThreadId.value ?? (await ensurePendingLiveStream()).threadId
     await ensureProjectRuntime()
     await ensureObservedThreadSubscription()
     if (realtimeVoiceCapability.value.status !== 'available') {
       await refreshRealtimeVoiceCapability(threadId)
+    }
+    if (realtimeVoiceCapability.value.status !== 'available') {
+      return
     }
     await realtimeVoice.connect(threadId)
   } catch (caughtError) {
@@ -4479,7 +4478,7 @@ watch(activeThreadId, (threadId) => {
   realtimeVoiceCapabilityRequest += 1
   realtimeVoiceCapability.value = {
     status: 'checking',
-    message: threadId ? 'Checking realtime voice support.' : 'Open a thread to use realtime voice.'
+    message: threadId ? 'Checking realtime voice support.' : 'Start voice session'
   }
   void (async () => {
     await realtimeVoice.stopForThreadChange(threadId)
@@ -5394,7 +5393,6 @@ watch(
                   />
 
                   <VoiceComposerControls
-                    v-if="activeThreadId"
                     :capability="realtimeVoiceCapability"
                     :session-state="realtimeVoiceState"
                     :activity="realtimeVoiceActivity"

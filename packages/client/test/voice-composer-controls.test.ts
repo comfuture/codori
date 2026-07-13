@@ -16,7 +16,13 @@ const ButtonStub = defineComponent({
 })
 
 const TooltipStub = defineComponent({
-  template: '<div><slot /></div>'
+  props: {
+    text: {
+      type: String,
+      required: true
+    }
+  },
+  template: '<div class="tooltip-stub" :data-tooltip="text"><slot /></div>'
 })
 
 type VoiceProps = {
@@ -146,6 +152,9 @@ describe('VoiceComposerControls', () => {
     const wrapper = mountControls({ sessionState: 'idle' })
     const microphone = wrapper.get('button[aria-label="Start voice session"]')
 
+    expect(wrapper.find('[aria-live="polite"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('Microphone permission required')
+
     await dispatchPointer(microphone.element, 'pointerdown', { pointerId: 3 })
     expect(wrapper.emitted('connect')).toHaveLength(1)
     expect(wrapper.emitted('press')).toBeUndefined()
@@ -221,8 +230,12 @@ describe('VoiceComposerControls', () => {
       sessionState: 'idle'
     })
 
-    expect(wrapper.get('button').attributes('disabled')).toBeDefined()
-    expect(wrapper.get('[aria-live="polite"]').text()).toContain('disabled in Codori')
+    const unavailableMicrophone = wrapper.get('button')
+    expect(unavailableMicrophone.attributes('disabled')).toBeDefined()
+    expect(unavailableMicrophone.attributes('color')).toBe('error')
+    expect(unavailableMicrophone.attributes('icon')).toBe('i-lucide-mic-off')
+    expect(wrapper.get('[data-tooltip]').attributes('data-tooltip')).toContain('disabled in Codori')
+    expect(wrapper.find('[aria-live="polite"]').exists()).toBe(false)
 
     await wrapper.setProps({
       capability: {
@@ -230,14 +243,17 @@ describe('VoiceComposerControls', () => {
         message: 'Voice requires localhost or a secure HTTPS connection.'
       }
     })
-    expect(wrapper.get('[aria-live="polite"]').text()).toContain('secure HTTPS')
+    expect(wrapper.get('[data-tooltip]').attributes('data-tooltip')).toContain('secure HTTPS')
 
     await wrapper.setProps({
       capability: baseProps.capability,
       sessionState: 'error',
       error: 'Microphone permission was denied'
     })
-    expect(wrapper.get('[aria-live="polite"]').text()).toContain('permission was denied')
+    expect(wrapper.get('button').attributes('disabled')).toBeUndefined()
+    expect(wrapper.get('button').attributes('color')).toBe('error')
+    expect(wrapper.get('[data-tooltip]').attributes('data-tooltip')).toContain('permission was denied')
+    expect(wrapper.find('[aria-live="polite"]').exists()).toBe(false)
     wrapper.unmount()
   })
 })

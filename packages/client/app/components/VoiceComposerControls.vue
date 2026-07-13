@@ -40,10 +40,19 @@ const sessionActive = computed(() =>
   || props.sessionState === 'stopping'
 )
 
+const capabilityUnavailable = computed(() =>
+  props.capability.status === 'disabled'
+  || props.capability.status === 'unsupported'
+  || props.capability.status === 'insecure-context'
+  || props.capability.status === 'failed'
+)
+
 const microphoneDisabled = computed(() =>
-  props.capability.status !== 'available'
+  capabilityUnavailable.value
   || props.sessionState === 'stopping'
 )
+
+const showStatus = computed(() => sessionActive.value || props.sessionState === 'connected')
 
 const statusLabel = computed(() => {
   if (props.sessionState === 'error') {
@@ -65,9 +74,6 @@ const statusLabel = computed(() => {
     return 'Voice session stopped'
   }
   if (props.sessionState !== 'connected') {
-    if (props.sessionState === 'idle' && props.capability.status === 'available') {
-      return 'Microphone permission required — start voice session'
-    }
     return props.capability.message
   }
 
@@ -88,7 +94,10 @@ const statusLabel = computed(() => {
 })
 
 const microphoneLabel = computed(() => {
-  if (props.capability.status !== 'available') {
+  if (props.sessionState === 'error') {
+    return props.error || 'Voice session error'
+  }
+  if (capabilityUnavailable.value) {
     return props.capability.message
   }
   if (props.sessionState === 'connected') {
@@ -101,7 +110,25 @@ const microphoneLabel = computed(() => {
 })
 
 const microphoneIcon = computed(() =>
-  props.microphoneEnabled ? 'i-lucide-audio-lines' : 'i-lucide-mic'
+  capabilityUnavailable.value || props.sessionState === 'error'
+    ? 'i-lucide-mic-off'
+    : props.microphoneEnabled
+      ? 'i-lucide-audio-lines'
+      : 'i-lucide-mic'
+)
+
+const microphoneColor = computed(() =>
+  capabilityUnavailable.value || props.sessionState === 'error'
+    ? 'error'
+    : props.microphoneEnabled
+      ? 'primary'
+      : 'neutral'
+)
+
+const microphoneVariant = computed(() =>
+  capabilityUnavailable.value || props.sessionState === 'error' || props.microphoneEnabled
+    ? 'soft'
+    : 'ghost'
 )
 
 const beginTransmission = () => {
@@ -244,25 +271,32 @@ onBeforeUnmount(() => {
 <template>
   <div class="flex min-w-0 flex-wrap items-center gap-2">
     <UTooltip :text="microphoneLabel">
-      <UButton
-        type="button"
-        :color="microphoneEnabled ? 'primary' : 'neutral'"
-        :variant="microphoneEnabled ? 'soft' : 'ghost'"
-        size="sm"
-        :icon="microphoneIcon"
-        :disabled="microphoneDisabled"
-        :aria-label="microphoneLabel"
-        :aria-pressed="microphoneEnabled"
-        class="size-11 shrink-0 touch-none justify-center rounded-full border border-default/70 md:size-8"
-        :ui="{ leadingIcon: 'size-4', base: 'px-0' }"
-        @pointerdown="handlePointerDown"
-        @pointerup="handlePointerRelease"
-        @pointercancel="handlePointerRelease"
-        @pointerleave="handlePointerRelease"
-        @lostpointercapture="handlePointerRelease"
-        @keydown="handleKeyDown"
-        @click="handleClick"
-      />
+      <span
+        class="inline-flex shrink-0 rounded-full"
+        :tabindex="capabilityUnavailable ? 0 : undefined"
+        :aria-label="capabilityUnavailable ? microphoneLabel : undefined"
+        :aria-disabled="capabilityUnavailable ? 'true' : undefined"
+      >
+        <UButton
+          type="button"
+          :color="microphoneColor"
+          :variant="microphoneVariant"
+          size="sm"
+          :icon="microphoneIcon"
+          :disabled="microphoneDisabled"
+          :aria-label="microphoneLabel"
+          :aria-pressed="microphoneEnabled"
+          class="size-11 shrink-0 touch-none justify-center rounded-full border border-default/70 md:size-8"
+          :ui="{ leadingIcon: 'size-4', base: 'px-0' }"
+          @pointerdown="handlePointerDown"
+          @pointerup="handlePointerRelease"
+          @pointercancel="handlePointerRelease"
+          @pointerleave="handlePointerRelease"
+          @lostpointercapture="handlePointerRelease"
+          @keydown="handleKeyDown"
+          @click="handleClick"
+        />
+      </span>
     </UTooltip>
 
     <UTooltip
@@ -301,6 +335,7 @@ onBeforeUnmount(() => {
     </UTooltip>
 
     <div
+      v-if="showStatus"
       class="min-w-32 max-w-full text-xs leading-5 text-toned"
       aria-live="polite"
       aria-atomic="true"
