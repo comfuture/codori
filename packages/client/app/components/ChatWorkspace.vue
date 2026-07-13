@@ -576,7 +576,7 @@ const isWorkflowBusy = computed(() =>
   || status.value === 'streaming'
   || isUploading.value
 )
-const canLoadPromptControlsOnSubmit = computed(() =>
+const canLoadDraftPromptControls = computed(() =>
   canSubmitToLoadPromptControls(
     isChatSessionWorkspace.value,
     workspaceScope.value.id,
@@ -589,7 +589,7 @@ const hasDraftContent = computed(() =>
   || attachments.value.length > 0
 )
 const isComposerDisabled = computed(() =>
-  (!hasValidPromptControlSelection.value && !canLoadPromptControlsOnSubmit.value)
+  (!hasValidPromptControlSelection.value && !canLoadDraftPromptControls.value)
   || isUploading.value
   || interruptRequested.value
   || hasPendingRequest.value
@@ -1244,6 +1244,28 @@ const loadPromptControls = async (options?: { force?: boolean }) => {
 
 const retryPromptControls = () => {
   void loadPromptControls({ force: true }).catch(() => {})
+}
+
+const updatePromptControlsPopoverOpen = (open: boolean) => {
+  if (!open) {
+    promptControlsPopoverOpen.value = false
+    return
+  }
+
+  if (hasValidPromptControlSelection.value) {
+    promptControlsPopoverOpen.value = true
+    return
+  }
+
+  if (!canLoadDraftPromptControls.value) {
+    return
+  }
+
+  void loadPromptControls().then(() => {
+    if (hasValidPromptControlSelection.value) {
+      promptControlsPopoverOpen.value = true
+    }
+  }).catch(() => {})
 }
 
 const ensurePromptControlsReady = async () => {
@@ -5409,15 +5431,16 @@ watch(
                   />
 
                   <UPopover
-                    v-model:open="promptControlsPopoverOpen"
+                    :open="promptControlsPopoverOpen"
                     :content="{ side: 'top', align: 'start' }"
+                    @update:open="updatePromptControlsPopoverOpen"
                   >
                     <UButton
                       type="button"
                       color="neutral"
                       variant="ghost"
                       size="sm"
-                      :disabled="!hasValidPromptControlSelection || isComposerDisabled"
+                      :disabled="isComposerDisabled"
                       :aria-expanded="promptControlsPopoverOpen"
                       :aria-label="promptControlsAriaLabel"
                       class="min-w-0 max-w-64 rounded-full border border-default/70 bg-default/70"
