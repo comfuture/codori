@@ -586,6 +586,24 @@ describe('project sidebar inline threads', () => {
     expect(wrapper.findAll('[data-kind="thread"]')).toHaveLength(6)
   })
 
+  it('keeps loaded threads and adds context when pagination fails', async () => {
+    mockRpcRequest
+      .mockResolvedValueOnce(makeThreadListResponse(5, 'next-page'))
+      .mockRejectedValueOnce(new Error('Failed to fetch'))
+
+    const wrapper = mountSidebar({
+      collapsed: false
+    })
+    await waitForSidebar()
+
+    await wrapper.get('[data-kind="more"]').trigger('click')
+    await waitForSidebar()
+
+    expect(wrapper.findAll('[data-kind="thread"]')).toHaveLength(5)
+    expect(wrapper.text()).toContain('Could not load more threads: Failed to fetch')
+    expect(wrapper.get('[data-kind="more"]').attributes('disabled')).toBeUndefined()
+  })
+
   it('emphasizes the active inline thread row', async () => {
     mockRoute.params = {
       projectId: 'codori',

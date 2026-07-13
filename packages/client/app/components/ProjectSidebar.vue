@@ -452,7 +452,7 @@ const projectItems = computed<ProjectSidebarNavigationItem[][]>(() => [
         icon: 'i-lucide-circle-alert',
         disabled: true,
         projectId: project.projectId,
-        message: inlineThreadsError.value
+        message: `Could not load more threads: ${inlineThreadsError.value}`
       })
     }
 
