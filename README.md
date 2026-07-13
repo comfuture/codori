@@ -291,7 +291,7 @@ The client dashboard provides:
 - a left sidebar with all discovered projects
 - a main chat workspace
 - a new thread action
-- a previous threads panel for resume
+- recent project threads with inline `Show more` expansion in the project tree
 - a read-only workspace file explorer for projects and projectless chats
 
 The file explorer loads one directory at a time, hides common generated folders by default, and opens supported text and image files in the existing preview. All browser requests use workspace-relative paths; the server canonicalizes each target and rejects traversal and symlink escapes outside the active workspace root.

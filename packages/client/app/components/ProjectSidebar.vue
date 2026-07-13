@@ -6,7 +6,6 @@ import { useCodoriRoute } from '../composables/useCodoriRoute'
 import { useCodoriRouter } from '../composables/useCodoriRouter'
 import { useProjects } from '../composables/useProjects'
 import { useRpc } from '../composables/useRpc'
-import { useThreadPanel } from '../composables/useThreadPanel'
 import {
   resolveProjectThreadSummaryKey,
   resolveThreadSummaryTitle,
@@ -19,8 +18,7 @@ import type { ThreadListParams } from '~~/shared/generated/codex-app-server/v2/T
 import type { ThreadListResponse } from '~~/shared/generated/codex-app-server/v2/ThreadListResponse'
 import { toChatRoute, toChatsRoute, toProjectRoute, toProjectThreadRoute } from '~~/shared/codori'
 
-const INLINE_THREAD_ROW_LIMIT = 5
-const INLINE_THREAD_ROWS_WITH_MORE = INLINE_THREAD_ROW_LIMIT - 1
+const INLINE_THREAD_PAGE_SIZE = 5
 const CHAT_ROOT_NAVIGATION_VALUE = 'chat-root'
 const projectNavigationValue = (projectId: string) => `project:${projectId}`
 
@@ -88,7 +86,7 @@ const isMac = computed(() => isMacLikePlatform(platform.value))
 const inlineThreadsProjectId = ref<string | null>(null)
 const inlineThreadsLoading = ref(false)
 const inlineThreadsError = ref<string | null>(null)
-const inlineThreadsHasMore = ref(false)
+const inlineThreadsNextCursor = ref<string | null>(null)
 let inlineThreadFetchSequence = 0
 const {
   projects,
@@ -99,7 +97,6 @@ const {
   getProject
 } = useProjects()
 const { getClient } = useRpc()
-const { openPanel } = useThreadPanel()
 const {
   chats,
   loaded: chatsLoaded,
@@ -183,10 +180,11 @@ onMounted(() => {
 })
 
 const resetInlineThreads = () => {
+  inlineThreadFetchSequence += 1
   inlineThreadsProjectId.value = null
   inlineThreadsLoading.value = false
   inlineThreadsError.value = null
-  inlineThreadsHasMore.value = false
+  inlineThreadsNextCursor.value = null
 }
 
 const waitForProjectsRefresh = async () => {
@@ -204,18 +202,28 @@ const waitForProjectsRefresh = async () => {
   })
 }
 
-const fetchInlineThreads = async () => {
+const fetchInlineThreads = async (cursor: string | null = null) => {
   const projectId = activeProjectId.value
   if (!projectId || props.collapsed) {
     resetInlineThreads()
     return
   }
 
+  if (cursor && (
+    inlineThreadsLoading.value
+    || inlineThreadsProjectId.value !== projectId
+    || inlineThreadsNextCursor.value !== cursor
+  )) {
+    return
+  }
+
   const sequence = ++inlineThreadFetchSequence
-  inlineThreadsProjectId.value = projectId
+  if (!cursor) {
+    inlineThreadsProjectId.value = projectId
+    inlineThreadsNextCursor.value = null
+  }
   inlineThreadsLoading.value = true
   inlineThreadsError.value = null
-  inlineThreadsHasMore.value = false
 
   try {
     if (!loaded.value) {
@@ -245,7 +253,8 @@ const fetchInlineThreads = async () => {
     const refreshedProject = getProject(projectId) ?? project
     const client = getClient(projectId)
     const response = await client.request<ThreadListResponse>('thread/list', {
-      limit: INLINE_THREAD_ROW_LIMIT,
+      ...(cursor ? { cursor } : {}),
+      limit: INLINE_THREAD_PAGE_SIZE,
       sortKey: 'updated_at',
       sortDirection: 'desc',
       cwd: refreshedProject.projectPath
@@ -255,12 +264,22 @@ const fetchInlineThreads = async () => {
       return
     }
 
-    inlineThreadSummariesForProject(projectId).setThreads(response.data.map(thread => ({
+    const nextThreads = response.data.map(thread => ({
       id: thread.id,
       title: resolveThreadSummaryTitle(thread),
       updatedAt: thread.updatedAt
-    })))
-    inlineThreadsHasMore.value = response.nextCursor !== null
+    }))
+    const summaries = inlineThreadSummariesForProject(projectId)
+    if (cursor) {
+      const seenThreadIds = new Set(summaries.threads.value.map(thread => thread.id))
+      summaries.setThreads([
+        ...summaries.threads.value,
+        ...nextThreads.filter(thread => !seenThreadIds.has(thread.id))
+      ])
+    } else {
+      summaries.setThreads(nextThreads)
+    }
+    inlineThreadsNextCursor.value = response.nextCursor
   } catch (caughtError) {
     if (sequence !== inlineThreadFetchSequence) {
       return
@@ -279,6 +298,15 @@ watch([
 ], () => {
   void fetchInlineThreads()
 })
+
+const loadMoreInlineThreads = () => {
+  const cursor = inlineThreadsNextCursor.value
+  if (!cursor || inlineThreadsLoading.value) {
+    return
+  }
+
+  void fetchInlineThreads(cursor)
+}
 
 const formatChatTitle = (chat: { chatId: string, title: string | null }) =>
   chat.title?.trim() || chat.chatId || 'New Chat'
@@ -342,16 +370,6 @@ const chatItems = computed<ChatSidebarNavigationItem[][]>(() => {
   }]]
 })
 
-const inlineThreadsHasOverflow = computed(() =>
-  inlineThreadsHasMore.value || inlineThreads.value.length > INLINE_THREAD_ROW_LIMIT
-)
-
-const visibleInlineThreads = computed(() =>
-  inlineThreadsHasOverflow.value
-    ? inlineThreads.value.slice(0, INLINE_THREAD_ROWS_WITH_MORE)
-    : inlineThreads.value.slice(0, INLINE_THREAD_ROW_LIMIT)
-)
-
 const projectItems = computed<ProjectSidebarNavigationItem[][]>(() => [
   sortSidebarProjects(projects.value, activeProjectId.value).map((project) => {
     const active = activeProjectId.value === project.projectId
@@ -381,7 +399,7 @@ const projectItems = computed<ProjectSidebarNavigationItem[][]>(() => [
       return item
     }
 
-    if (inlineThreadsLoading.value) {
+    if (inlineThreadsLoading.value && !inlineThreads.value.length) {
       children.push({
         itemKind: 'thread-status',
         label: 'Loading threads...',
@@ -394,7 +412,7 @@ const projectItems = computed<ProjectSidebarNavigationItem[][]>(() => [
       return item
     }
 
-    if (inlineThreadsError.value) {
+    if (inlineThreadsError.value && !inlineThreads.value.length) {
       children.push({
         itemKind: 'thread-status',
         label: 'Threads unavailable',
@@ -407,7 +425,7 @@ const projectItems = computed<ProjectSidebarNavigationItem[][]>(() => [
       return item
     }
 
-    for (const thread of visibleInlineThreads.value) {
+    for (const thread of inlineThreads.value) {
       const active = activeThreadId.value === thread.id
       children.push({
         itemKind: 'thread',
@@ -427,18 +445,27 @@ const projectItems = computed<ProjectSidebarNavigationItem[][]>(() => [
       })
     }
 
-    if (inlineThreadsHasOverflow.value) {
+    if (inlineThreadsError.value) {
+      children.push({
+        itemKind: 'thread-status',
+        label: 'Could not load more threads',
+        icon: 'i-lucide-circle-alert',
+        disabled: true,
+        projectId: project.projectId,
+        message: inlineThreadsError.value
+      })
+    }
+
+    if (inlineThreadsNextCursor.value) {
       children.push({
         itemKind: 'more',
-        label: 'more..',
-        icon: 'i-lucide-ellipsis',
+        label: 'Show more',
         projectId: project.projectId,
+        disabled: inlineThreadsLoading.value,
         tooltip: {
-          text: 'Open all threads'
+          text: 'Load more threads'
         },
-        onSelect: () => {
-          openPanel()
-        }
+        onClick: loadMoreInlineThreads
       })
     }
 

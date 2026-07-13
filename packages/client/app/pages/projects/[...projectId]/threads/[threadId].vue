@@ -5,7 +5,6 @@ import WorkspaceFilesPanel from '../../../../components/WorkspaceFilesPanel.vue'
 import { useChatSession } from '../../../../composables/useChatSession'
 import { useProjects } from '../../../../composables/useProjects'
 import { useThreadSummaries } from '../../../../composables/useThreadSummaries'
-import { useThreadPanel } from '../../../../composables/useThreadPanel'
 import WorkspaceTerminalToggle from '../../../../components/WorkspaceTerminalToggle.vue'
 import { useVisualSubagentPanels } from '../../../../composables/useVisualSubagentPanels'
 import { normalizeProjectIdParam, toProjectRoute } from '~~/shared/codori'
@@ -19,7 +18,6 @@ import {
 
 const route = useRoute()
 const router = useRouter()
-const { togglePanel } = useThreadPanel()
 const {
   loaded,
   refreshProjects,
@@ -286,15 +284,6 @@ watch(
                   @click="onNewThread"
                 />
               </UTooltip>
-              <UTooltip text="Previous threads">
-                <UButton
-                  icon="i-lucide-history"
-                  color="neutral"
-                  variant="outline"
-                  square
-                  @click="togglePanel"
-                />
-              </UTooltip>
               <UTooltip
                 v-if="hasAvailableSubagents"
                 text="Subagents"
@@ -458,7 +447,5 @@ watch(
         />
       </template>
     </UModal>
-
-    <ThreadPanel :project-id="projectId" />
   </div>
 </template>

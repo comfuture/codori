@@ -3,13 +3,11 @@ import { useRoute, useRouter } from '#imports'
 import { computed, onMounted } from 'vue'
 import WorkspaceFilesPanel from '../../../components/WorkspaceFilesPanel.vue'
 import { useProjects } from '../../../composables/useProjects'
-import { useThreadPanel } from '../../../composables/useThreadPanel'
 import WorkspaceTerminalToggle from '../../../components/WorkspaceTerminalToggle.vue'
 import { normalizeProjectIdParam, toProjectRoute } from '~~/shared/codori'
 
 const route = useRoute()
 const router = useRouter()
-const { togglePanel } = useThreadPanel()
 const {
   loaded,
   refreshProjects,
@@ -62,15 +60,6 @@ onMounted(() => {
                   @click="onNewThread"
                 />
               </UTooltip>
-              <UTooltip text="Previous threads">
-                <UButton
-                  icon="i-lucide-history"
-                  color="neutral"
-                  variant="outline"
-                  square
-                  @click="togglePanel"
-                />
-              </UTooltip>
             </div>
             <WorkspaceTerminalToggle
               v-if="projectId"
@@ -87,7 +76,5 @@ onMounted(() => {
         />
       </template>
     </UDashboardPanel>
-
-    <ThreadPanel :project-id="projectId" />
   </div>
 </template>

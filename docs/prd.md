@@ -317,10 +317,8 @@ Layout:
 - The composer toolbar includes a workspace-files trigger for active project and projectless-chat workspaces.
 - Top navbar includes:
   - `New thread`
-  - `Previous threads`
-- Previous threads open in:
-  - right-side panel on desktop
-  - drawer/slideover on smaller screens
+- The selected project shows its five most recent threads directly in the left sidebar.
+- When more threads exist, an inline `Show more` action loads the next page into the project tree.
 - Workspace files open in a responsive Nuxt UI slideover with an accessible lazy tree, breadcrumbs, manual refresh, relative-path copy, and a generated-folder toggle.
 - Selecting a supported file reuses the existing fullscreen local-file viewer; the explorer never exposes create, edit, rename, move, or delete actions.
 
@@ -360,7 +358,7 @@ New thread flow:
 
 Resume flow:
 
-1. User opens previous threads.
+1. User expands the selected project's thread list in the sidebar when needed.
 2. Client requests thread summaries from the selected project through the proxied RPC.
 3. User selects a thread.
 4. Client resumes and reads thread state.
@@ -413,7 +411,7 @@ Modules:
 - browser RPC client
 - chat session composable
 - transcript components
-- previous-thread panel/drawer
+- inline project-thread pagination
 
 ## 14. Failure Modes
 
@@ -452,7 +450,7 @@ Automated coverage must include:
 - REST status envelopes
 - WebSocket proxy message pass-through
 - project sidebar rendering
-- previous-thread panel rendering
+- inline project-thread pagination rendering
 - new thread and resumed thread routing logic
 
 Before every commit:
@@ -507,7 +505,7 @@ pnpm test
 - project sidebar
 - project status UI
 - navbar actions
-- previous-thread panel shell
+- inline project-thread navigation
 
 ### Commit 6
 
@@ -536,7 +534,7 @@ pnpm test
 - [ ] Implement WebSocket proxy
 - [ ] Implement client dashboard shell
 - [ ] Implement project sidebar and runtime controls
-- [ ] Implement previous-thread panel/drawer
+- [ ] Implement inline project-thread pagination
 - [ ] Implement browser RPC client
 - [ ] Implement thread list/read/start/resume flows
 - [ ] Implement streaming chat transcript
