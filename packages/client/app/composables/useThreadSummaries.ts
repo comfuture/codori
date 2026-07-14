@@ -81,6 +81,10 @@ export const normalizeThreadSummaryStatus = (value: unknown): ThreadSummaryStatu
   }
 }
 
+// Codex app-server defines ThreadStatus.active as an authoritative running
+// snapshot. Live turn events reinforce this state in ProjectSidebar so a
+// terminal turn notification can stop the indicator even if an idle status
+// notification is missed.
 export const isThreadSummaryRunning = (status: ThreadSummaryStatus) => status.type === 'active'
 
 export const normalizeThreadTitleCandidate = (value: string | null | undefined) => {

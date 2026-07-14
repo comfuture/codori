@@ -48,6 +48,7 @@ describe('Codex thread discovery compatibility', () => {
       }
     }))).toEqual({
       threadId: 'thread-active',
+      turnId: null,
       running: true,
       source: 'threadStatus'
     })
@@ -62,6 +63,7 @@ describe('Codex thread discovery compatibility', () => {
       }
     }))).toEqual({
       threadId: 'thread-idle',
+      turnId: null,
       running: false,
       source: 'threadStatus'
     })
@@ -80,6 +82,7 @@ describe('Codex thread discovery compatibility', () => {
       })
       expect(normalizeThreadRunningState(input)).toEqual({
         threadId: 'thread-child',
+        turnId: null,
         running: false,
         source: 'threadStatus'
       })
@@ -102,6 +105,7 @@ describe('Codex thread discovery compatibility', () => {
     })
     expect(normalizeThreadRunningState(active)).toEqual({
       threadId: 'thread-child',
+      turnId: null,
       running: true,
       source: 'threadStatus'
     })
@@ -120,26 +124,39 @@ describe('Codex thread discovery compatibility', () => {
     expect(normalizeThreadRunningState(futureStatus)).toBeNull()
   })
 
-  it('uses turn lifecycle notifications only as explicitly labeled fallbacks', () => {
+  it('uses correlated turn lifecycle notifications as direct running evidence', () => {
     expect(normalizeThreadRunningState(notification({
       method: 'turn/started',
       params: { threadId: 'thread-child', turn: { id: 'turn-1' } }
     }))).toEqual({
       threadId: 'thread-child',
+      turnId: 'turn-1',
       running: true,
-      source: 'turnLifecycleFallback'
+      source: 'turnLifecycle'
     })
 
-    for (const method of ['turn/completed', 'turn/failed'] as const) {
-      expect(normalizeThreadRunningState(notification({
-        method,
-        params: { threadId: 'thread-child' }
-      }))).toEqual({
+    expect(normalizeThreadRunningState(notification({
+      method: 'turn/completed',
+      params: {
         threadId: 'thread-child',
-        running: false,
-        source: 'turnLifecycleFallback'
-      })
-    }
+        turn: { id: 'turn-1', status: 'completed' }
+      }
+    }))).toEqual({
+      threadId: 'thread-child',
+      turnId: 'turn-1',
+      running: false,
+      source: 'turnLifecycle'
+    })
+
+    expect(normalizeThreadRunningState(notification({
+      method: 'turn/failed',
+      params: { threadId: 'thread-child', turnId: 'legacy-turn' }
+    }))).toEqual({
+      threadId: 'thread-child',
+      turnId: 'legacy-turn',
+      running: false,
+      source: 'turnLifecycle'
+    })
   })
 
   it.each(['started', 'interacted', 'interrupted'])(

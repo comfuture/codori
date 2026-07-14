@@ -173,8 +173,14 @@ const NavigationMenuStub = defineComponent({
       class: 'navigation-menu-stub',
       'data-model-value': JSON.stringify(props.modelValue)
     }, flattenNavigationItems(props.items as unknown[]).map(({ item, depth }) => {
+      const itemUi = item.ui && typeof item.ui === 'object'
+        ? item.ui as Record<string, unknown>
+        : null
       const children = [
-        h('span', { class: 'navigation-menu-icon' }, String(item.icon ?? '')),
+        h('span', {
+          class: ['navigation-menu-icon', itemUi?.linkLeadingIcon],
+          'data-icon': String(item.icon ?? '')
+        }, String(item.icon ?? '')),
         slots['item-label']?.({ item }) ?? h('span', String(item.label ?? '')),
         slots['item-trailing']?.({ item })
       ]
@@ -867,6 +873,8 @@ describe('project sidebar inline threads', () => {
 
     const thread = wrapper.get('[data-kind="thread"][data-to="/projects/codori/threads/spawned-thread"]')
     expect(thread.text()).toContain('Spawned worker')
+    expect(thread.get('.navigation-menu-icon').attributes('data-icon')).toBe('i-lucide-loader-circle')
+    expect(thread.get('.navigation-menu-icon').classes()).toContain('animate-spin')
     expect(thread.get('[role="status"]').attributes('aria-label')).toBe('Thread running')
     expect(mockRouterPush).not.toHaveBeenCalled()
   })
@@ -907,6 +915,8 @@ describe('project sidebar inline threads', () => {
     expect(mockRpcRequest.mock.calls.filter(([method]) => method === 'thread/read')).toHaveLength(1)
     expect(wrapper.get('[data-to="/projects/codori/threads/status-thread"] [role="status"]')
       .attributes('aria-label')).toBe('Thread running, waiting for input')
+    expect(wrapper.get('[data-to="/projects/codori/threads/status-thread"] .navigation-menu-icon')
+      .classes()).toContain('animate-spin')
 
     emitRpcNotification({
       method: 'thread/status/changed',
@@ -918,6 +928,156 @@ describe('project sidebar inline threads', () => {
     await waitForSidebar()
 
     expect(wrapper.find('[data-to="/projects/codori/threads/status-thread"] [role="status"]').exists()).toBe(false)
+    expect(wrapper.get('[data-to="/projects/codori/threads/status-thread"] .navigation-menu-icon')
+      .attributes('data-icon')).toBe('i-lucide-message-square-text')
+  })
+
+  it('starts and stops the spinner from correlated turn lifecycle evidence', async () => {
+    mockRpcRequest.mockResolvedValue(makeThreadListResponse(1))
+    const wrapper = mountSidebar({ collapsed: false })
+    await waitForSidebar()
+
+    const threadSelector = '[data-to="/projects/codori/threads/thread-1"]'
+    expect(wrapper.get(`${threadSelector} .navigation-menu-icon`).attributes('data-icon'))
+      .toBe('i-lucide-message-square-text')
+
+    emitRpcNotification({
+      method: 'turn/started',
+      params: {
+        threadId: 'thread-1',
+        turn: { id: 'turn-current', status: 'inProgress', items: [], error: null }
+      }
+    } as unknown as CodexRpcNotification)
+    await waitForSidebar()
+
+    expect(wrapper.get(`${threadSelector} .navigation-menu-icon`).attributes('data-icon'))
+      .toBe('i-lucide-loader-circle')
+    expect(wrapper.get(`${threadSelector} .navigation-menu-icon`).classes()).toContain('animate-spin')
+    expect(wrapper.get(`${threadSelector} [role="status"]`).attributes('aria-label'))
+      .toBe('Thread running')
+
+    emitRpcNotification({
+      method: 'turn/completed',
+      params: {
+        threadId: 'thread-1',
+        turn: { id: 'turn-current', status: 'completed', items: [], error: null }
+      }
+    } as unknown as CodexRpcNotification)
+    await waitForSidebar()
+
+    expect(wrapper.get(`${threadSelector} .navigation-menu-icon`).attributes('data-icon'))
+      .toBe('i-lucide-message-square-text')
+    expect(wrapper.get(`${threadSelector} .navigation-menu-icon`).classes()).not.toContain('animate-spin')
+    expect(wrapper.find(`${threadSelector} [role="status"]`).exists()).toBe(false)
+  })
+
+  it('stops an active snapshot spinner when its terminal turn event arrives', async () => {
+    mockRpcRequest.mockResolvedValue({
+      ...makeThreadListResponse(1),
+      data: [{
+        ...makeThread(1),
+        status: { type: 'active', activeFlags: [] }
+      }]
+    } as unknown as ThreadListResponse)
+    const wrapper = mountSidebar({ collapsed: false })
+    await waitForSidebar()
+
+    const threadSelector = '[data-to="/projects/codori/threads/thread-1"]'
+    expect(wrapper.get(`${threadSelector} .navigation-menu-icon`).attributes('data-icon'))
+      .toBe('i-lucide-loader-circle')
+
+    emitRpcNotification({
+      method: 'turn/completed',
+      params: {
+        threadId: 'thread-1',
+        turn: { id: 'already-running-turn', status: 'completed', items: [], error: null }
+      }
+    } as unknown as CodexRpcNotification)
+    await waitForSidebar()
+
+    expect(wrapper.get(`${threadSelector} .navigation-menu-icon`).attributes('data-icon'))
+      .toBe('i-lucide-message-square-text')
+    expect(wrapper.find(`${threadSelector} [role="status"]`).exists()).toBe(false)
+  })
+
+  it('keeps live turn evidence over an older delayed idle list response', async () => {
+    useThreadSummaries(resolveProjectThreadSummaryKey('codori')).setThreads([{
+      id: 'cached-active-thread',
+      title: 'Cached active thread',
+      updatedAt: 2_000,
+      status: { type: 'active', activeFlags: ['waitingOnApproval'] }
+    }])
+    const initialList = createDeferred<ThreadListResponse>()
+    mockRpcRequest.mockReturnValueOnce(initialList.promise)
+    const wrapper = mountSidebar({ collapsed: false })
+    await waitForSidebar()
+
+    emitRpcNotification({
+      method: 'turn/started',
+      params: {
+        threadId: 'cached-active-thread',
+        turn: { id: 'turn-current', status: 'inProgress', items: [], error: null }
+      }
+    } as unknown as CodexRpcNotification)
+
+    initialList.resolve({
+      data: [{
+        ...makeThread(1),
+        id: 'cached-active-thread',
+        name: 'Stale idle thread',
+        status: { type: 'idle' }
+      }],
+      nextCursor: null,
+      backwardsCursor: null
+    } as unknown as ThreadListResponse)
+    await waitForSidebar()
+
+    const thread = wrapper.get('[data-to="/projects/codori/threads/cached-active-thread"]')
+    expect(thread.get('.navigation-menu-icon').attributes('data-icon')).toBe('i-lucide-loader-circle')
+    expect(thread.get('.navigation-menu-icon').classes()).toContain('animate-spin')
+    expect(thread.get('[role="status"]').attributes('aria-label'))
+      .toBe('Thread running, waiting for approval')
+  })
+
+  it('does not let a stale turn completion stop a newer turn spinner', async () => {
+    mockRpcRequest.mockResolvedValue(makeThreadListResponse(1))
+    const wrapper = mountSidebar({ collapsed: false })
+    await waitForSidebar()
+
+    for (const turnId of ['turn-old', 'turn-new']) {
+      emitRpcNotification({
+        method: 'turn/started',
+        params: {
+          threadId: 'thread-1',
+          turn: { id: turnId, status: 'inProgress', items: [], error: null }
+        }
+      } as unknown as CodexRpcNotification)
+    }
+
+    emitRpcNotification({
+      method: 'turn/completed',
+      params: {
+        threadId: 'thread-1',
+        turn: { id: 'turn-old', status: 'interrupted', items: [], error: null }
+      }
+    } as unknown as CodexRpcNotification)
+    await waitForSidebar()
+
+    const icon = wrapper.get('[data-to="/projects/codori/threads/thread-1"] .navigation-menu-icon')
+    expect(icon.attributes('data-icon')).toBe('i-lucide-loader-circle')
+    expect(icon.classes()).toContain('animate-spin')
+
+    emitRpcNotification({
+      method: 'turn/completed',
+      params: {
+        threadId: 'thread-1',
+        turn: { id: 'turn-new', status: 'failed', items: [], error: { message: 'failed' } }
+      }
+    } as unknown as CodexRpcNotification)
+    await waitForSidebar()
+
+    expect(wrapper.get('[data-to="/projects/codori/threads/thread-1"] .navigation-menu-icon')
+      .attributes('data-icon')).toBe('i-lucide-message-square-text')
   })
 
   it('keeps a newer thread/started status when an older list request resolves later', async () => {

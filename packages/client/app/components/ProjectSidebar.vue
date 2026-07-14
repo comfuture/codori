@@ -124,6 +124,7 @@ let releaseInlineThreadConnectionSubscription: (() => void) | null = null
 const liveInlineThreadIds = new Set<string>()
 const suppressedInlineThreadIds = new Set<string>()
 const inlineThreadHydrations = new Map<string, Promise<void>>()
+const inlineThreadActiveTurnIds = new Map<string, string>()
 const {
   projects,
   loaded,
@@ -207,6 +208,18 @@ const navigationItemClass = (active: boolean) =>
   active ? ACTIVE_NAVIGATION_ITEM_CLASS : undefined
 const navigationItemUi = (active: boolean) =>
   active ? ACTIVE_NAVIGATION_ITEM_UI : undefined
+const navigationThreadItemUi = (active: boolean, running: boolean) => {
+  if (!running) {
+    return navigationItemUi(active)
+  }
+
+  return {
+    linkLeadingIcon: [
+      active ? ACTIVE_NAVIGATION_ITEM_UI.linkLeadingIcon : '',
+      'animate-spin text-success group-data-[state=open]:text-success motion-reduce:animate-none'
+    ].filter(Boolean).join(' ')
+  }
+}
 
 const isActiveNavigationItem = (item: NavigationMenuItem) => item.active === true
 const navigationTitleClass = (item: NavigationMenuItem) =>
@@ -226,6 +239,7 @@ const releaseInlineThreadSubscriptions = () => {
   liveInlineThreadIds.clear()
   suppressedInlineThreadIds.clear()
   inlineThreadHydrations.clear()
+  inlineThreadActiveTurnIds.clear()
 }
 
 const isCurrentInlineThreadSubscription = (projectId: string, sequence: number) =>
@@ -311,6 +325,7 @@ const applyInlineThreadNotification = (
   ) {
     suppressedInlineThreadIds.add(lifecycleThreadId)
     liveInlineThreadIds.delete(lifecycleThreadId)
+    inlineThreadActiveTurnIds.delete(lifecycleThreadId)
     summaries.removeThreadSummary(lifecycleThreadId)
     return
   }
@@ -397,26 +412,54 @@ const applyInlineThreadNotification = (
   }
 
   const runningState = normalizeThreadRunningState(notification)
-  if (runningState?.source === 'turnLifecycleFallback') {
+  if (runningState?.source === 'threadStatus' && !runningState.running) {
+    inlineThreadActiveTurnIds.delete(runningState.threadId)
+  }
+  if (runningState?.source === 'turnLifecycle') {
     const existingThread = summaries.threads.value.find(thread => thread.id === runningState.threadId)
-    if (!existingThread || existingThread.status.type === 'unknown') {
-      const statusRevision = summaries.getStatusRevision()
+    const activeTurnId = inlineThreadActiveTurnIds.get(runningState.threadId)
+
+    if (
+      !runningState.running
+      && activeTurnId
+      && runningState.turnId
+      && activeTurnId !== runningState.turnId
+    ) {
+      return
+    }
+
+    const statusRevision = summaries.getStatusRevision()
+    if (runningState.running) {
+      if (runningState.turnId) {
+        inlineThreadActiveTurnIds.set(runningState.threadId, runningState.turnId)
+      }
       summaries.updateThreadSummaryStatus(
         runningState.threadId,
-        runningState.running
-          ? { type: 'active', activeFlags: [] }
-          : { type: 'idle' }
+        existingThread?.status.type === 'active'
+          ? existingThread.status
+          : { type: 'active', activeFlags: [] }
       )
-      if (!existingThread) {
-        void hydrateInlineThread(
-          client,
-          projectId,
-          projectPath,
-          runningState.threadId,
-          subscriptionSequence,
-          statusRevision
-        )
-      }
+    } else {
+      inlineThreadActiveTurnIds.delete(runningState.threadId)
+      summaries.updateThreadSummaryStatus(
+        runningState.threadId,
+        { type: 'idle' }
+      )
+    }
+
+    // The app-server contract defines turn/started as actual execution start
+    // and turn/completed as its terminal event. Hydration provides metadata;
+    // the revision above keeps this live lifecycle evidence from being replaced
+    // by an older thread/read response.
+    if (!existingThread) {
+      void hydrateInlineThread(
+        client,
+        projectId,
+        projectPath,
+        runningState.threadId,
+        subscriptionSequence,
+        statusRevision
+      )
     }
   }
 }
@@ -737,14 +780,15 @@ const projectItems = computed<ProjectSidebarNavigationItem[][]>(() => [
 
     for (const thread of inlineThreads.value) {
       const active = activeThreadId.value === thread.id
+      const running = isThreadSummaryRunning(thread.status)
       children.push({
         itemKind: 'thread',
         label: thread.title,
-        icon: 'i-lucide-message-square-text',
+        icon: running ? 'i-lucide-loader-circle' : 'i-lucide-message-square-text',
         to: toProjectThreadRoute(project.projectId, thread.id),
         active,
         class: navigationItemClass(active),
-        ui: navigationItemUi(active),
+        ui: navigationThreadItemUi(active, running),
         tooltip: {
           text: thread.title
         },
@@ -752,7 +796,7 @@ const projectItems = computed<ProjectSidebarNavigationItem[][]>(() => [
         threadId: thread.id,
         title: thread.title,
         updatedAt: thread.updatedAt,
-        running: isThreadSummaryRunning(thread.status),
+        running,
         statusLabel: threadStatusLabel(thread)
       })
     }
@@ -1085,9 +1129,9 @@ const isThreadStatusItem = (item: NavigationMenuItem): item is ProjectThreadStat
             role="status"
             :aria-label="asProjectThreadItem(item).statusLabel ?? 'Thread running'"
             :title="asProjectThreadItem(item).statusLabel ?? 'Thread running'"
-            class="flex size-4 items-center justify-center"
+            class="sr-only"
           >
-            <span class="size-1.5 animate-pulse rounded-full bg-success" />
+            {{ asProjectThreadItem(item).statusLabel ?? 'Thread running' }}
           </span>
         </template>
       </UNavigationMenu>
