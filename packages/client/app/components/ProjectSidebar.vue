@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { NavigationMenuItem } from '@nuxt/ui'
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useChats } from '../composables/useChats'
 import { useCodoriRoute } from '../composables/useCodoriRoute'
 import { useCodoriRouter } from '../composables/useCodoriRouter'
@@ -10,15 +10,42 @@ import {
   resolveProjectThreadSummaryKey,
   resolveThreadSummaryTitle,
   useThreadSummaries,
+  isThreadSummaryRunning,
   type ThreadSummary
 } from '../composables/useThreadSummaries'
+import {
+  areThreadWorkspacePathsEqual,
+  extractThreadDiscoveryHints,
+  normalizeThreadRunningState
+} from '../utils/codex-thread-discovery'
 import { isMacLikePlatform } from '../utils/global-command-palette-shortcut'
 import { sortSidebarProjects } from '../utils/project-sidebar-order'
 import type { ThreadListParams } from '~~/shared/generated/codex-app-server/v2/ThreadListParams'
 import type { ThreadListResponse } from '~~/shared/generated/codex-app-server/v2/ThreadListResponse'
+import type { ThreadReadParams } from '~~/shared/generated/codex-app-server/v2/ThreadReadParams'
+import type { ThreadReadResponse } from '~~/shared/generated/codex-app-server/v2/ThreadReadResponse'
+import type { ThreadSourceKind } from '~~/shared/generated/codex-app-server/v2/ThreadSourceKind'
+import type { CodexRpcClient, CodexRpcConnectionState, CodexRpcNotification } from '~~/shared/codex-rpc'
+import {
+  notificationThreadId,
+  notificationThreadName,
+  notificationThreadUpdatedAt
+} from '~~/shared/codex-rpc'
 import { toChatRoute, toChatsRoute, toProjectRoute, toProjectThreadRoute } from '~~/shared/codori'
 
 const INLINE_THREAD_PAGE_SIZE = 5
+const INLINE_THREAD_SOURCE_KINDS: ThreadSourceKind[] = [
+  'cli',
+  'vscode',
+  'exec',
+  'appServer',
+  'subAgent',
+  'subAgentReview',
+  'subAgentCompact',
+  'subAgentThreadSpawn',
+  'subAgentOther',
+  'unknown'
+]
 const CHAT_ROOT_NAVIGATION_VALUE = 'chat-root'
 const projectNavigationValue = (projectId: string) => `project:${projectId}`
 
@@ -41,6 +68,8 @@ type ProjectThreadNavigationItem = NavigationMenuItem & {
   threadId: string
   title: string
   updatedAt: number
+  running: boolean
+  statusLabel: string | null
 }
 
 type ProjectThreadMoreNavigationItem = NavigationMenuItem & {
@@ -88,6 +117,13 @@ const inlineThreadsLoading = ref(false)
 const inlineThreadsError = ref<string | null>(null)
 const inlineThreadsNextCursor = ref<string | null>(null)
 let inlineThreadFetchSequence = 0
+let inlineThreadSubscriptionSequence = 0
+let inlineThreadSubscriptionKey: string | null = null
+let releaseInlineThreadNotificationSubscription: (() => void) | null = null
+let releaseInlineThreadConnectionSubscription: (() => void) | null = null
+const liveInlineThreadIds = new Set<string>()
+const suppressedInlineThreadIds = new Set<string>()
+const inlineThreadHydrations = new Map<string, Promise<void>>()
 const {
   projects,
   loaded,
@@ -117,6 +153,20 @@ const inlineThreads = computed<ThreadSummary[]>(() => {
 
   return inlineThreadSummariesForProject(inlineThreadsProjectId.value).threads.value
 })
+
+const threadStatusLabel = (thread: ThreadSummary) => {
+  if (thread.status.type !== 'active') {
+    return null
+  }
+
+  if (thread.status.activeFlags.includes('waitingOnApproval')) {
+    return 'Thread running, waiting for approval'
+  }
+  if (thread.status.activeFlags.includes('waitingOnUserInput')) {
+    return 'Thread running, waiting for input'
+  }
+  return 'Thread running'
+}
 
 const activeProjectId = computed(() => {
   const param = route.params.projectId
@@ -166,6 +216,251 @@ const navigationMetaClass = (item: NavigationMenuItem) =>
 const navigationInlineTitleClass = (item: NavigationMenuItem) =>
   isActiveNavigationItem(item) ? 'font-semibold text-highlighted' : 'font-medium text-highlighted'
 
+const releaseInlineThreadSubscriptions = () => {
+  inlineThreadSubscriptionSequence += 1
+  inlineThreadSubscriptionKey = null
+  releaseInlineThreadNotificationSubscription?.()
+  releaseInlineThreadNotificationSubscription = null
+  releaseInlineThreadConnectionSubscription?.()
+  releaseInlineThreadConnectionSubscription = null
+  liveInlineThreadIds.clear()
+  suppressedInlineThreadIds.clear()
+  inlineThreadHydrations.clear()
+}
+
+const isCurrentInlineThreadSubscription = (projectId: string, sequence: number) =>
+  inlineThreadSubscriptionSequence === sequence
+  && inlineThreadSubscriptionKey === projectId
+  && activeProjectId.value === projectId
+  && !props.collapsed
+
+const hydrateInlineThread = (
+  client: CodexRpcClient,
+  projectId: string,
+  projectPath: string,
+  threadId: string,
+  subscriptionSequence: number,
+  statusRevision = inlineThreadSummariesForProject(projectId).getStatusRevision()
+) => {
+  const hydrationKey = `${projectId}:${threadId}`
+  const existingHydration = inlineThreadHydrations.get(hydrationKey)
+  if (existingHydration) {
+    return existingHydration
+  }
+
+  const hydration = (async () => {
+    try {
+      const response = await client.request<ThreadReadResponse>('thread/read', {
+        threadId,
+        includeTurns: false
+      } satisfies ThreadReadParams)
+
+      if (!isCurrentInlineThreadSubscription(projectId, subscriptionSequence)) {
+        return
+      }
+      if (suppressedInlineThreadIds.has(threadId)) {
+        return
+      }
+      const summaries = inlineThreadSummariesForProject(projectId)
+      const hasKnownParent = typeof response.thread.parentThreadId === 'string'
+        && summaries.threads.value.some(thread => thread.id === response.thread.parentThreadId)
+      if (
+        typeof response.thread.cwd !== 'string'
+        || (!areThreadWorkspacePathsEqual(response.thread.cwd, projectPath) && !hasKnownParent)
+      ) {
+        return
+      }
+
+      liveInlineThreadIds.add(threadId)
+      summaries.syncThreadSummary(response.thread, {
+        statusRevision
+      })
+    } catch {
+      // Discovery is opportunistic. A thread can disappear between the lifecycle
+      // notification and thread/read, and unrelated-project ids are filtered after hydration.
+    }
+  })()
+
+  inlineThreadHydrations.set(hydrationKey, hydration)
+  void hydration.finally(() => {
+    if (inlineThreadHydrations.get(hydrationKey) === hydration) {
+      inlineThreadHydrations.delete(hydrationKey)
+    }
+  })
+  return hydration
+}
+
+const applyInlineThreadNotification = (
+  notification: CodexRpcNotification,
+  client: CodexRpcClient,
+  projectId: string,
+  projectPath: string,
+  subscriptionSequence: number
+) => {
+  if (!isCurrentInlineThreadSubscription(projectId, subscriptionSequence)) {
+    return
+  }
+
+  const summaries = inlineThreadSummariesForProject(projectId)
+  const hints = extractThreadDiscoveryHints(notification)
+  const lifecycleThreadId = notificationThreadId(notification)
+
+  if (
+    lifecycleThreadId
+    && (notification.method === 'thread/archived' || notification.method === 'thread/deleted')
+  ) {
+    suppressedInlineThreadIds.add(lifecycleThreadId)
+    liveInlineThreadIds.delete(lifecycleThreadId)
+    summaries.removeThreadSummary(lifecycleThreadId)
+    return
+  }
+  if (lifecycleThreadId && notification.method === 'thread/unarchived') {
+    suppressedInlineThreadIds.delete(lifecycleThreadId)
+    void hydrateInlineThread(client, projectId, projectPath, lifecycleThreadId, subscriptionSequence)
+    return
+  }
+
+  if (hints.thread) {
+    const thread = hints.thread
+    const hasKnownParent = typeof thread.parentThreadId === 'string'
+      && summaries.threads.value.some(summary => summary.id === thread.parentThreadId)
+    if (
+      typeof thread.cwd === 'string'
+      && !areThreadWorkspacePathsEqual(thread.cwd, projectPath)
+      && !hasKnownParent
+    ) {
+      return
+    }
+    if (typeof thread.cwd === 'string' && typeof thread.updatedAt === 'number') {
+      liveInlineThreadIds.add(thread.id)
+      const statusRevision = summaries.getStatusRevision()
+      if (thread.status !== undefined) {
+        summaries.updateThreadSummaryStatus(thread.id, thread.status)
+      }
+      summaries.syncThreadSummary({
+        id: thread.id,
+        name: thread.name ?? null,
+        preview: thread.preview ?? '',
+        updatedAt: thread.updatedAt,
+        status: thread.status
+      }, {
+        statusRevision
+      })
+    } else {
+      void hydrateInlineThread(
+        client,
+        projectId,
+        projectPath,
+        thread.id,
+        subscriptionSequence
+      )
+    }
+  }
+
+  if (hints.statusUpdate) {
+    const statusRevision = summaries.getStatusRevision()
+    if (hints.statusUpdate.status) {
+      summaries.updateThreadSummaryStatus(hints.statusUpdate.threadId, hints.statusUpdate.status)
+    }
+    if (!summaries.threads.value.some(thread => thread.id === hints.statusUpdate?.threadId)) {
+      void hydrateInlineThread(
+        client,
+        projectId,
+        projectPath,
+        hints.statusUpdate.threadId,
+        subscriptionSequence,
+        statusRevision
+      )
+    }
+  }
+
+  for (const threadId of hints.referencedThreadIds) {
+    if (!summaries.threads.value.some(thread => thread.id === threadId)) {
+      void hydrateInlineThread(client, projectId, projectPath, threadId, subscriptionSequence)
+    }
+  }
+
+  if (notification.method === 'thread/name/updated') {
+    const threadId = notificationThreadId(notification)
+    const threadName = notificationThreadName(notification)
+    if (threadId && threadName) {
+      if (summaries.threads.value.some(thread => thread.id === threadId)) {
+        summaries.updateThreadSummaryTitle(
+          threadId,
+          threadName,
+          notificationThreadUpdatedAt(notification)
+        )
+      } else {
+        void hydrateInlineThread(client, projectId, projectPath, threadId, subscriptionSequence)
+      }
+    }
+  }
+
+  const runningState = normalizeThreadRunningState(notification)
+  if (runningState?.source === 'turnLifecycleFallback') {
+    const existingThread = summaries.threads.value.find(thread => thread.id === runningState.threadId)
+    if (!existingThread || existingThread.status.type === 'unknown') {
+      const statusRevision = summaries.getStatusRevision()
+      summaries.updateThreadSummaryStatus(
+        runningState.threadId,
+        runningState.running
+          ? { type: 'active', activeFlags: [] }
+          : { type: 'idle' }
+      )
+      if (!existingThread) {
+        void hydrateInlineThread(
+          client,
+          projectId,
+          projectPath,
+          runningState.threadId,
+          subscriptionSequence,
+          statusRevision
+        )
+      }
+    }
+  }
+}
+
+const ensureInlineThreadSubscription = (
+  client: CodexRpcClient,
+  projectId: string,
+  projectPath: string
+) => {
+  if (inlineThreadSubscriptionKey === projectId) {
+    return
+  }
+
+  releaseInlineThreadSubscriptions()
+  inlineThreadSubscriptionKey = projectId
+  const subscriptionSequence = inlineThreadSubscriptionSequence
+  releaseInlineThreadNotificationSubscription = client.subscribe((notification) => {
+    applyInlineThreadNotification(
+      notification,
+      client,
+      projectId,
+      projectPath,
+      subscriptionSequence
+    )
+  })
+
+  let reconnectPending = false
+  const connectionClient = client as CodexRpcClient & {
+    subscribeConnectionState?: (listener: (state: CodexRpcConnectionState) => void) => () => void
+  }
+  if (typeof connectionClient.subscribeConnectionState === 'function') {
+    releaseInlineThreadConnectionSubscription = connectionClient.subscribeConnectionState((state) => {
+      if (state === 'disconnected') {
+        reconnectPending = true
+        return
+      }
+      if (state === 'connected' && reconnectPending) {
+        reconnectPending = false
+        void fetchInlineThreads()
+      }
+    })
+  }
+}
+
 onMounted(() => {
   if (typeof navigator !== 'undefined') {
     platform.value = navigator.platform
@@ -180,12 +475,17 @@ onMounted(() => {
 })
 
 const resetInlineThreads = () => {
+  releaseInlineThreadSubscriptions()
   inlineThreadFetchSequence += 1
   inlineThreadsProjectId.value = null
   inlineThreadsLoading.value = false
   inlineThreadsError.value = null
   inlineThreadsNextCursor.value = null
 }
+
+onBeforeUnmount(() => {
+  releaseInlineThreadSubscriptions()
+})
 
 const waitForProjectsRefresh = async () => {
   if (loaded.value || !loading.value) {
@@ -252,11 +552,14 @@ const fetchInlineThreads = async (cursor: string | null = null) => {
 
     const refreshedProject = getProject(projectId) ?? project
     const client = getClient(projectId)
+    ensureInlineThreadSubscription(client, projectId, refreshedProject.projectPath)
+    const statusRevision = inlineThreadSummariesForProject(projectId).getStatusRevision()
     const response = await client.request<ThreadListResponse>('thread/list', {
       ...(cursor ? { cursor } : {}),
       limit: INLINE_THREAD_PAGE_SIZE,
       sortKey: 'updated_at',
       sortDirection: 'desc',
+      sourceKinds: INLINE_THREAD_SOURCE_KINDS,
       cwd: refreshedProject.projectPath
     } satisfies ThreadListParams)
 
@@ -267,7 +570,8 @@ const fetchInlineThreads = async (cursor: string | null = null) => {
     const nextThreads = response.data.map(thread => ({
       id: thread.id,
       title: resolveThreadSummaryTitle(thread),
-      updatedAt: thread.updatedAt
+      updatedAt: thread.updatedAt,
+      status: thread.status
     }))
     const summaries = inlineThreadSummariesForProject(projectId)
     if (cursor) {
@@ -275,9 +579,15 @@ const fetchInlineThreads = async (cursor: string | null = null) => {
       summaries.setThreads([
         ...summaries.threads.value,
         ...nextThreads.filter(thread => !seenThreadIds.has(thread.id))
-      ])
+      ], { statusRevision })
     } else {
-      summaries.setThreads(nextThreads)
+      const seenThreadIds = new Set(nextThreads.map(thread => thread.id))
+      summaries.setThreads([
+        ...nextThreads,
+        ...summaries.threads.value.filter(thread =>
+          liveInlineThreadIds.has(thread.id) && !seenThreadIds.has(thread.id)
+        )
+      ], { statusRevision })
     }
     inlineThreadsNextCursor.value = response.nextCursor
   } catch (caughtError) {
@@ -441,7 +751,9 @@ const projectItems = computed<ProjectSidebarNavigationItem[][]>(() => [
         projectId: project.projectId,
         threadId: thread.id,
         title: thread.title,
-        updatedAt: thread.updatedAt
+        updatedAt: thread.updatedAt,
+        running: isThreadSummaryRunning(thread.status),
+        statusLabel: threadStatusLabel(thread)
       })
     }
 
@@ -766,6 +1078,17 @@ const isThreadStatusItem = (item: NavigationMenuItem): item is ProjectThreadStat
               {{ asProjectThreadStatusItem(item).message }}
             </div>
           </div>
+        </template>
+        <template #item-trailing="{ item }">
+          <span
+            v-if="!props.collapsed && isThreadItem(item) && asProjectThreadItem(item).running"
+            role="status"
+            :aria-label="asProjectThreadItem(item).statusLabel ?? 'Thread running'"
+            :title="asProjectThreadItem(item).statusLabel ?? 'Thread running'"
+            class="flex size-4 items-center justify-center"
+          >
+            <span class="size-1.5 animate-pulse rounded-full bg-success" />
+          </span>
         </template>
       </UNavigationMenu>
     </div>
