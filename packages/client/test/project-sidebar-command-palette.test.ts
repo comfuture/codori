@@ -11,6 +11,20 @@ import {
 } from '../app/composables/useThreadSummaries'
 import type { ChatSessionRecord, ProjectRecord } from '../shared/codori'
 import type { ThreadListResponse } from '../shared/generated/codex-app-server/v2/ThreadListResponse'
+import type { CodexRpcNotification } from '../shared/codex-rpc'
+
+const INLINE_THREAD_SOURCE_KINDS = [
+  'cli',
+  'vscode',
+  'exec',
+  'appServer',
+  'subAgent',
+  'subAgentReview',
+  'subAgentCompact',
+  'subAgentThreadSpawn',
+  'subAgentOther',
+  'unknown'
+]
 
 const mockRoute = reactive({
   params: {} as Record<string, unknown>
@@ -21,6 +35,9 @@ const mockRefreshChats = vi.fn()
 const mockStartProject = vi.fn()
 const mockGetClient = vi.fn()
 const mockRpcRequest = vi.fn()
+const mockRpcSubscribe = vi.fn()
+const mockRpcConnectionSubscribe = vi.fn()
+const mockRpcSubscribers = new Set<(notification: CodexRpcNotification) => void>()
 const mockProjects = ref<ProjectRecord[]>([])
 const mockChats = ref<ChatSessionRecord[]>([])
 const mockProjectsLoaded = ref(true)
@@ -217,8 +234,33 @@ const makeThread = (index: number) => ({
   id: `thread-${index}`,
   name: `Thread ${index}`,
   preview: null,
-  updatedAt: 1_000 - index
+  updatedAt: 1_000 - index,
+  status: { type: 'idle' as const }
 })
+
+const makeThreadReadResponse = (input: {
+  id: string
+  cwd?: string
+  status?: unknown
+  updatedAt?: number
+  name?: string | null
+}) => ({
+  thread: {
+    id: input.id,
+    cwd: input.cwd ?? '/repo/codori',
+    name: input.name ?? input.id,
+    preview: '',
+    updatedAt: input.updatedAt ?? 2_000,
+    status: input.status ?? { type: 'idle' },
+    turns: []
+  }
+})
+
+const emitRpcNotification = (notification: CodexRpcNotification) => {
+  for (const subscriber of mockRpcSubscribers) {
+    subscriber(notification)
+  }
+}
 
 const makeChat = (input: Partial<ChatSessionRecord> & Pick<ChatSessionRecord, 'chatId'>): ChatSessionRecord => {
   const { chatId, ...rest } = input
@@ -279,6 +321,27 @@ const resetThreadSummaries = () => {
 
 const mountedWrappers: Array<{ unmount: () => void }> = []
 
+const resetRpcClientMocks = () => {
+  mockRpcSubscribers.clear()
+  mockRpcSubscribe.mockReset()
+  mockRpcSubscribe.mockImplementation((subscriber: (notification: CodexRpcNotification) => void) => {
+    mockRpcSubscribers.add(subscriber)
+    return () => {
+      mockRpcSubscribers.delete(subscriber)
+    }
+  })
+  mockRpcConnectionSubscribe.mockReset()
+  mockRpcConnectionSubscribe.mockImplementation((subscriber: (state: string) => void) => {
+    subscriber('idle')
+    return vi.fn()
+  })
+  mockGetClient.mockReturnValue({
+    request: mockRpcRequest,
+    subscribe: mockRpcSubscribe,
+    subscribeConnectionState: mockRpcConnectionSubscribe
+  })
+}
+
 const mountSidebar = (props: Record<string, unknown> = {}) => {
   const wrapper = mount(ProjectSidebar, {
     props,
@@ -329,9 +392,7 @@ describe('project sidebar command palette trigger', () => {
     mockChats.value = []
     mockProjectsLoaded.value = true
     mockProjectsLoading.value = false
-    mockGetClient.mockReturnValue({
-      request: mockRpcRequest
-    })
+    resetRpcClientMocks()
     mockRpcRequest.mockResolvedValue(makeThreadListResponse(0))
     platformSpy = vi.spyOn(window.navigator, 'platform', 'get').mockReturnValue('MacIntel')
   })
@@ -474,9 +535,7 @@ describe('project sidebar inline threads', () => {
     mockChats.value = []
     mockProjectsLoaded.value = true
     mockProjectsLoading.value = false
-    mockGetClient.mockReturnValue({
-      request: mockRpcRequest
-    })
+    resetRpcClientMocks()
     platformSpy = vi.spyOn(window.navigator, 'platform', 'get').mockReturnValue('MacIntel')
   })
 
@@ -521,6 +580,7 @@ describe('project sidebar inline threads', () => {
       limit: 5,
       sortKey: 'updated_at',
       sortDirection: 'desc',
+      sourceKinds: INLINE_THREAD_SOURCE_KINDS,
       cwd: '/repo/codori'
     })
   })
@@ -554,6 +614,7 @@ describe('project sidebar inline threads', () => {
       limit: 5,
       sortKey: 'updated_at',
       sortDirection: 'desc',
+      sourceKinds: INLINE_THREAD_SOURCE_KINDS,
       cwd: '/repo/codori'
     })
     expect(wrapper.findAll('[data-kind="thread"]')).toHaveLength(7)
@@ -726,6 +787,7 @@ describe('project sidebar inline threads', () => {
       limit: 5,
       sortKey: 'updated_at',
       sortDirection: 'desc',
+      sourceKinds: INLINE_THREAD_SOURCE_KINDS,
       cwd: '/repo/codori'
     })
     expect(wrapper.text()).toContain('Thread 1')
@@ -781,6 +843,242 @@ describe('project sidebar inline threads', () => {
 
     expect(mockGetClient).not.toHaveBeenCalledWith('codori')
     expect(mockGetClient).toHaveBeenCalledWith('other')
+  })
+
+  it('adds a matching thread/started notification and renders its active status without navigating', async () => {
+    mockRpcRequest.mockResolvedValue(makeThreadListResponse(0))
+    const wrapper = mountSidebar({ collapsed: false })
+    await waitForSidebar()
+
+    emitRpcNotification({
+      method: 'thread/started',
+      params: {
+        thread: {
+          id: 'spawned-thread',
+          cwd: '/repo/codori',
+          name: 'Spawned worker',
+          preview: '',
+          updatedAt: 2_000,
+          status: { type: 'active', activeFlags: [] }
+        }
+      }
+    } as unknown as CodexRpcNotification)
+    await waitForSidebar()
+
+    const thread = wrapper.get('[data-kind="thread"][data-to="/projects/codori/threads/spawned-thread"]')
+    expect(thread.text()).toContain('Spawned worker')
+    expect(thread.get('[role="status"]').attributes('aria-label')).toBe('Thread running')
+    expect(mockRouterPush).not.toHaveBeenCalled()
+  })
+
+  it('hydrates an unknown status thread once and follows authoritative active-to-idle transitions', async () => {
+    mockRpcRequest.mockImplementation((method: string) => {
+      if (method === 'thread/read') {
+        return Promise.resolve(makeThreadReadResponse({
+          id: 'status-thread',
+          status: { type: 'idle' }
+        }))
+      }
+      return Promise.resolve(makeThreadListResponse(0))
+    })
+    const wrapper = mountSidebar({ collapsed: false })
+    await waitForSidebar()
+
+    emitRpcNotification({
+      method: 'thread/status/changed',
+      params: {
+        threadId: 'status-thread',
+        status: { type: 'active', activeFlags: ['waitingOnUserInput'] }
+      }
+    } as CodexRpcNotification)
+    emitRpcNotification({
+      method: 'thread/status/changed',
+      params: {
+        threadId: 'status-thread',
+        status: { type: 'active', activeFlags: ['waitingOnUserInput'] }
+      }
+    } as CodexRpcNotification)
+    await waitForSidebar()
+
+    expect(mockRpcRequest).toHaveBeenCalledWith('thread/read', {
+      threadId: 'status-thread',
+      includeTurns: false
+    })
+    expect(mockRpcRequest.mock.calls.filter(([method]) => method === 'thread/read')).toHaveLength(1)
+    expect(wrapper.get('[data-to="/projects/codori/threads/status-thread"] [role="status"]')
+      .attributes('aria-label')).toBe('Thread running, waiting for input')
+
+    emitRpcNotification({
+      method: 'thread/status/changed',
+      params: {
+        threadId: 'status-thread',
+        status: { type: 'idle' }
+      }
+    } as CodexRpcNotification)
+    await waitForSidebar()
+
+    expect(wrapper.find('[data-to="/projects/codori/threads/status-thread"] [role="status"]').exists()).toBe(false)
+  })
+
+  it('keeps a newer thread/started status when an older list request resolves later', async () => {
+    const initialList = createDeferred<ThreadListResponse>()
+    mockRpcRequest.mockReturnValueOnce(initialList.promise)
+    const wrapper = mountSidebar({ collapsed: false })
+    await waitForSidebar()
+
+    emitRpcNotification({
+      method: 'thread/started',
+      params: {
+        thread: {
+          id: 'race-thread',
+          cwd: '/repo/codori',
+          name: 'Live worker',
+          preview: '',
+          updatedAt: 2_000,
+          status: { type: 'active', activeFlags: [] }
+        }
+      }
+    } as unknown as CodexRpcNotification)
+    await waitForSidebar()
+
+    initialList.resolve({
+      data: [{
+        ...makeThread(1),
+        id: 'race-thread',
+        name: 'Stale worker',
+        status: { type: 'idle' }
+      }],
+      nextCursor: null,
+      backwardsCursor: null
+    } as unknown as ThreadListResponse)
+    await waitForSidebar()
+
+    expect(wrapper.get('[data-to="/projects/codori/threads/race-thread"] [role="status"]')
+      .attributes('aria-label')).toBe('Thread running')
+  })
+
+  it('hydrates a valid thread id even when a future status variant is unknown', async () => {
+    mockRpcRequest.mockImplementation((method: string) => {
+      if (method === 'thread/read') {
+        return Promise.resolve(makeThreadReadResponse({ id: 'future-status-thread' }))
+      }
+      return Promise.resolve(makeThreadListResponse(0))
+    })
+    const wrapper = mountSidebar({ collapsed: false })
+    await waitForSidebar()
+
+    emitRpcNotification({
+      method: 'thread/status/changed',
+      params: {
+        threadId: 'future-status-thread',
+        status: { type: 'futureStatus', busy: true }
+      }
+    } as unknown as CodexRpcNotification)
+    await waitForSidebar()
+
+    expect(wrapper.find('[data-to="/projects/codori/threads/future-status-thread"]').exists()).toBe(true)
+  })
+
+  it('uses cross-thread interaction as discovery without inferring that the recipient is running', async () => {
+    mockRpcRequest.mockImplementation((method: string) => {
+      if (method === 'thread/read') {
+        return Promise.resolve(makeThreadReadResponse({ id: 'message-target' }))
+      }
+      return Promise.resolve(makeThreadListResponse(0))
+    })
+    const wrapper = mountSidebar({ collapsed: false })
+    await waitForSidebar()
+
+    emitRpcNotification({
+      method: 'item/completed',
+      params: {
+        threadId: 'parent-thread',
+        turnId: 'parent-turn',
+        item: {
+          type: 'subAgentActivity',
+          id: 'message-activity',
+          kind: 'interacted',
+          agentThreadId: 'message-target',
+          agentPath: '/root/worker'
+        },
+        completedAtMs: 2_000
+      }
+    } as unknown as CodexRpcNotification)
+    await waitForSidebar()
+
+    expect(wrapper.find('[data-to="/projects/codori/threads/message-target"]').exists()).toBe(true)
+    expect(wrapper.find('[data-to="/projects/codori/threads/message-target"] [role="status"]').exists()).toBe(false)
+  })
+
+  it('filters hydrated threads by cwd and releases the notification subscription on unmount', async () => {
+    mockRpcRequest.mockImplementation((method: string) => {
+      if (method === 'thread/read') {
+        return Promise.resolve(makeThreadReadResponse({
+          id: 'other-project-thread',
+          cwd: '/repo/other',
+          status: { type: 'active', activeFlags: [] }
+        }))
+      }
+      return Promise.resolve(makeThreadListResponse(0))
+    })
+    const wrapper = mountSidebar({ collapsed: false })
+    await waitForSidebar()
+
+    emitRpcNotification({
+      method: 'thread/status/changed',
+      params: {
+        threadId: 'other-project-thread',
+        status: { type: 'active', activeFlags: [] }
+      }
+    } as CodexRpcNotification)
+    await waitForSidebar()
+
+    expect(wrapper.find('[data-to="/projects/codori/threads/other-project-thread"]').exists()).toBe(false)
+    expect(mockRpcSubscribers.size).toBe(1)
+
+    wrapper.unmount()
+    expect(mockRpcSubscribers.size).toBe(0)
+  })
+
+  it('removes archived threads and hydrates them again after unarchive', async () => {
+    mockRpcRequest.mockImplementation((method: string) => {
+      if (method === 'thread/read') {
+        return Promise.resolve(makeThreadReadResponse({ id: 'lifecycle-thread' }))
+      }
+      return Promise.resolve(makeThreadListResponse(0))
+    })
+    const wrapper = mountSidebar({ collapsed: false })
+    await waitForSidebar()
+
+    emitRpcNotification({
+      method: 'thread/started',
+      params: {
+        thread: {
+          id: 'lifecycle-thread',
+          cwd: '/repo/codori',
+          name: 'Lifecycle worker',
+          preview: '',
+          updatedAt: 2_000,
+          status: { type: 'idle' }
+        }
+      }
+    } as unknown as CodexRpcNotification)
+    await waitForSidebar()
+    expect(wrapper.find('[data-to="/projects/codori/threads/lifecycle-thread"]').exists()).toBe(true)
+
+    emitRpcNotification({
+      method: 'thread/archived',
+      params: { threadId: 'lifecycle-thread' }
+    } as CodexRpcNotification)
+    await waitForSidebar()
+    expect(wrapper.find('[data-to="/projects/codori/threads/lifecycle-thread"]').exists()).toBe(false)
+
+    emitRpcNotification({
+      method: 'thread/unarchived',
+      params: { threadId: 'lifecycle-thread' }
+    } as CodexRpcNotification)
+    await waitForSidebar()
+    expect(wrapper.find('[data-to="/projects/codori/threads/lifecycle-thread"]').exists()).toBe(true)
   })
 
   it('keeps collapsed sidebar project-only and does not fetch inline threads', async () => {

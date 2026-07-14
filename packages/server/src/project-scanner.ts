@@ -1,4 +1,4 @@
-import { readdirSync } from 'node:fs'
+import { readdirSync, realpathSync } from 'node:fs'
 import { join, relative, resolve, sep } from 'node:path'
 import type { ProjectRecord } from './types.js'
 
@@ -16,7 +16,8 @@ const toProjectId = (root: string, path: string) =>
   relative(root, path).split(sep).join('/')
 
 export const scanProjects = (rootDirectory: string): ProjectRecord[] => {
-  const root = resolve(rootDirectory)
+  const resolvedRoot = resolve(rootDirectory)
+  const root = realpathSync(resolvedRoot)
   const projects: ProjectRecord[] = []
   const queue = [root]
 
