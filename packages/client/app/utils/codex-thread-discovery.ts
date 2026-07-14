@@ -140,12 +140,18 @@ const referencedThreadIds = (notification: CodexRpcNotification) => {
   if (
     item.type !== 'collabAgentToolCall'
     || !referencedCollabTools.has(String(item.tool))
-    || !Array.isArray(item.receiverThreadIds)
   ) {
     return []
   }
 
-  return [...new Set(item.receiverThreadIds
+  const receiverThreadIds = Array.isArray(item.receiverThreadIds)
+    ? item.receiverThreadIds
+    : []
+  const agentStateThreadIds = isObjectRecord(item.agentsStates)
+    ? Object.keys(item.agentsStates)
+    : []
+
+  return [...new Set([...receiverThreadIds, ...agentStateThreadIds]
     .map(asNonEmptyString)
     .filter((threadId): threadId is string => threadId !== null))]
 }
