@@ -194,18 +194,40 @@ describe('Codex thread discovery compatibility', () => {
             type: 'collabAgentToolCall',
             id: `collab-${tool}`,
             tool,
-            receiverThreadIds: ['thread-child', '', 'thread-child', 'thread-peer']
+            receiverThreadIds: ['thread-child', '', 'thread-child', 'thread-peer'],
+            agentsStates: {
+              'thread-child': { status: 'running', message: null },
+              'thread-state-only': { status: 'completed', message: null },
+              '': { status: 'failed', message: null }
+            }
           }
         }
       })
 
       expect(extractThreadDiscoveryHints(input).referencedThreadIds).toEqual([
         'thread-child',
-        'thread-peer'
+        'thread-peer',
+        'thread-state-only'
       ])
       expect(normalizeThreadRunningState(input)).toBeNull()
     }
   )
+
+  it('accepts agent state ids when a legacy receiver list is missing', () => {
+    expect(extractThreadDiscoveryHints(notification({
+      method: 'item/completed',
+      params: {
+        item: {
+          type: 'collabAgentToolCall',
+          tool: 'sendInput',
+          receiverThreadIds: null,
+          agentsStates: {
+            'thread-state-only': { status: 'running', message: null }
+          }
+        }
+      }
+    })).referencedThreadIds).toEqual(['thread-state-only'])
+  })
 
   it('ignores unrelated or malformed collaboration items', () => {
     expect(extractThreadDiscoveryHints(notification({

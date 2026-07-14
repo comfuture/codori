@@ -1170,6 +1170,43 @@ describe('project sidebar inline threads', () => {
     expect(wrapper.find('[data-to="/projects/codori/threads/message-target"] [role="status"]').exists()).toBe(false)
   })
 
+  it('hydrates legacy collaboration targets found only in agent states', async () => {
+    mockRpcRequest.mockImplementation((method: string, params?: { threadId?: string }) => {
+      if (method === 'thread/read') {
+        return Promise.resolve(makeThreadReadResponse({ id: params?.threadId ?? 'missing-thread' }))
+      }
+      return Promise.resolve(makeThreadListResponse(0))
+    })
+    const wrapper = mountSidebar({ collapsed: false })
+    await waitForSidebar()
+
+    emitRpcNotification({
+      method: 'item/completed',
+      params: {
+        threadId: 'parent-thread',
+        turnId: 'parent-turn',
+        item: {
+          type: 'collabAgentToolCall',
+          id: 'legacy-message-activity',
+          tool: 'sendInput',
+          receiverThreadIds: [],
+          agentsStates: {
+            'legacy-message-target': { status: 'running', message: null }
+          }
+        }
+      }
+    } as unknown as CodexRpcNotification)
+    await waitForSidebar()
+
+    expect(mockRpcRequest).toHaveBeenCalledWith('thread/read', {
+      threadId: 'legacy-message-target',
+      includeTurns: false
+    })
+    expect(wrapper.find('[data-to="/projects/codori/threads/legacy-message-target"]').exists()).toBe(true)
+    expect(wrapper.find('[data-to="/projects/codori/threads/legacy-message-target"] [role="status"]').exists())
+      .toBe(false)
+  })
+
   it('filters hydrated threads by cwd and releases the notification subscription on unmount', async () => {
     mockRpcRequest.mockImplementation((method: string) => {
       if (method === 'thread/read') {
