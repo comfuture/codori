@@ -17,8 +17,9 @@ export type ThreadDiscoveryHints = {
 
 export type ThreadRunningState = {
   threadId: string
+  turnId: string | null
   running: boolean
-  source: 'threadStatus' | 'turnLifecycleFallback'
+  source: 'threadStatus' | 'turnLifecycle'
 }
 
 const referencedCollabTools = new Set([
@@ -50,6 +51,20 @@ const isObjectRecord = (value: unknown): value is Record<string, unknown> =>
 
 const asNonEmptyString = (value: unknown) =>
   typeof value === 'string' && value.trim().length > 0 ? value : null
+
+const notificationTurnId = (notification: CodexRpcNotification) => {
+  if (!isObjectRecord(notification.params)) {
+    return null
+  }
+
+  const directTurnId = asNonEmptyString(notification.params.turnId)
+  if (directTurnId) {
+    return directTurnId
+  }
+
+  const turn = notification.params.turn
+  return isObjectRecord(turn) ? asNonEmptyString(turn.id) : null
+}
 
 const asThreadStatus = (value: unknown): ThreadStatus | null => {
   if (!isObjectRecord(value)) {
@@ -150,6 +165,7 @@ export const normalizeThreadRunningState = (
   if (statusUpdate?.status) {
     return {
       threadId: statusUpdate.threadId,
+      turnId: null,
       running: statusUpdate.status.type === 'active',
       source: 'threadStatus'
     }
@@ -160,6 +176,7 @@ export const normalizeThreadRunningState = (
   if (startedThread && startedStatus) {
     return {
       threadId: startedThread.id,
+      turnId: null,
       running: startedStatus.type === 'active',
       source: 'threadStatus'
     }
@@ -175,8 +192,9 @@ export const normalizeThreadRunningState = (
     if (threadId) {
       return {
         threadId,
+        turnId: notificationTurnId(notification),
         running: notification.method === 'turn/started',
-        source: 'turnLifecycleFallback'
+        source: 'turnLifecycle'
       }
     }
   }
