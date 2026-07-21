@@ -30,11 +30,16 @@ import {
   shouldApplyNotificationToCurrentTurn,
   shouldSubmitViaTurnSteer,
   shouldAwaitThreadHydration,
+  shouldSkipAutoRedirectThreadHydration,
   shouldRetrySteerWithTurnStart,
   shouldIgnoreNotificationAfterInterrupt,
   shouldApplyNotificationWithoutTurnId
 } from '../utils/chat-turn-engagement'
 import { isFocusWithinContainer } from '../utils/slash-prompt-focus'
+import {
+  resolveRealtimeVoiceHandoffAction,
+  shouldHandoffRealtimeVoiceConnect
+} from '../utils/realtime-voice-handoff'
 import {
   hasPromptSubmissionContent,
   resolvePromptControlsReadinessError,
@@ -328,6 +333,7 @@ const {
   threadTitle,
   pendingThreadId,
   autoRedirectThreadId,
+  pendingRealtimeVoiceConnectThreadId,
   loadVersion,
   promptControlsLoaded,
   promptControlsLoading,
@@ -409,6 +415,16 @@ const refreshRealtimeVoiceCapability = async (threadId: string) => {
 const connectRealtimeVoice = async () => {
   try {
     const threadId = activeThreadId.value ?? (await ensurePendingLiveStream()).threadId
+    if (shouldHandoffRealtimeVoiceConnect({
+      workspaceKind,
+      routeThreadId: routeThreadId.value,
+      pendingThreadId: pendingThreadId.value,
+      autoRedirectThreadId: autoRedirectThreadId.value,
+      threadId
+    })) {
+      pendingRealtimeVoiceConnectThreadId.value = threadId
+      return
+    }
     await ensureProjectRuntime()
     await ensureObservedThreadSubscription()
     if (realtimeVoiceCapability.value.status !== 'available') {
@@ -3180,6 +3196,7 @@ const resetDraftThread = () => {
   threadTitle.value = null
   pendingThreadId.value = null
   autoRedirectThreadId.value = null
+  pendingRealtimeVoiceConnectThreadId.value = null
   messages.value = []
   subagentPanels.value = []
   threadGoals.value = {}
@@ -4510,6 +4527,28 @@ watch(activeThreadId, (threadId) => {
   })()
 }, { immediate: true })
 
+watch([
+  pendingRealtimeVoiceConnectThreadId,
+  () => props.threadId ?? null,
+  activeThreadId,
+  () => realtimeVoiceCapability.value.status
+], ([voiceThreadId, routeThreadId, threadId, capabilityStatus]) => {
+  const action = resolveRealtimeVoiceHandoffAction({
+    pendingThreadId: voiceThreadId,
+    routeThreadId,
+    activeThreadId: threadId,
+    capabilityStatus
+  })
+  if (action === 'wait') {
+    return
+  }
+
+  pendingRealtimeVoiceConnectThreadId.value = null
+  if (action === 'connect') {
+    void connectRealtimeVoice()
+  }
+}, { immediate: true })
+
 watch(() => props.threadId ?? null, (threadId) => {
   refreshWorkspaceGitBranchesInBackground('thread/load')
 
@@ -4528,11 +4567,11 @@ watch(() => props.threadId ?? null, (threadId) => {
     return
   }
 
-  if (
-    autoRedirectThreadId.value === threadId
-    && activeThreadId.value === threadId
-    && isBusy.value
-  ) {
+  if (shouldSkipAutoRedirectThreadHydration({
+    autoRedirectThreadId: autoRedirectThreadId.value,
+    activeThreadId: activeThreadId.value,
+    routeThreadId: threadId
+  })) {
     autoRedirectThreadId.value = null
     pendingThreadId.value = null
     return
