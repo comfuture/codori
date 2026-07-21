@@ -10,6 +10,7 @@ import {
   shouldApplyNotificationWithoutTurnId,
   shouldSubmitViaTurnSteer,
   shouldAwaitThreadHydration,
+  shouldSkipAutoRedirectThreadHydration,
   shouldRetrySteerWithTurnStart,
   shouldIgnoreNotificationAfterInterrupt
 } from '../app/utils/chat-turn-engagement'
@@ -555,6 +556,26 @@ describe('client package', () => {
     expect(shouldAwaitThreadHydration({
       hasPendingThreadHydration: false,
       routeThreadId: 'thread-1'
+    })).toBe(false)
+  })
+
+  it('does not hydrate a newly allocated voice thread during its automatic route transition', () => {
+    expect(shouldSkipAutoRedirectThreadHydration({
+      autoRedirectThreadId: 'thread-voice',
+      activeThreadId: 'thread-voice',
+      routeThreadId: 'thread-voice'
+    })).toBe(true)
+
+    expect(shouldSkipAutoRedirectThreadHydration({
+      autoRedirectThreadId: null,
+      activeThreadId: 'thread-voice',
+      routeThreadId: 'thread-voice'
+    })).toBe(false)
+
+    expect(shouldSkipAutoRedirectThreadHydration({
+      autoRedirectThreadId: 'thread-new',
+      activeThreadId: 'thread-new',
+      routeThreadId: 'thread-resumed'
     })).toBe(false)
   })
 

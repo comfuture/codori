@@ -44,6 +44,15 @@ export const shouldAwaitThreadHydration = (input: {
   input.hasPendingThreadHydration
   && input.routeThreadId !== null
 
+export const shouldSkipAutoRedirectThreadHydration = (input: {
+  autoRedirectThreadId: string | null
+  activeThreadId: string | null
+  routeThreadId: string | null
+}) =>
+  input.routeThreadId !== null
+  && input.autoRedirectThreadId === input.routeThreadId
+  && input.activeThreadId === input.routeThreadId
+
 export const shouldRetrySteerWithTurnStart = (message: string) =>
   /no active turn to steer|active turn is no longer available/i.test(message)
 
