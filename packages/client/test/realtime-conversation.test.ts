@@ -131,26 +131,44 @@ class FakeRpcClient {
   }
 }
 
-const createFixture = (input?: { playError?: Error, permissionError?: Error }) => {
+const deferred = <T>() => {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise
+  })
+  return { promise, resolve }
+}
+
+const createFixture = (input?: {
+  playError?: Error
+  permissionError?: Error
+  streams?: FakeStream[]
+  peers?: FakePeerConnection[]
+  getUserMedia?: () => Promise<FakeStream>
+}) => {
   const rpc = new FakeRpcClient()
-  const stream = new FakeStream()
-  const peer = new FakePeerConnection()
+  const streams = input?.streams ?? [new FakeStream()]
+  const peers = input?.peers ?? [new FakePeerConnection()]
+  const stream = streams[0]!
+  const peer = peers[0]!
   const audio = new FakeAudioElement()
   if (input?.playError) {
     audio.play.mockRejectedValue(input.playError)
   }
   const timers = new Set<() => void>()
-  const getUserMedia = vi.fn(async () => {
+  const getUserMedia = vi.fn(input?.getUserMedia ?? (async () => {
     if (input?.permissionError) {
       throw input.permissionError
     }
     return stream
-  })
+  }))
+  let peerIndex = 0
   const environment: RealtimeBrowserEnvironment = {
     isSecureContext: () => true,
     supportsRealtime: () => true,
     getUserMedia,
-    createPeerConnection: () => peer as unknown as ReturnType<RealtimeBrowserEnvironment['createPeerConnection']>,
+    createPeerConnection: () =>
+      (peers[peerIndex++] ?? peers.at(-1)!) as unknown as ReturnType<RealtimeBrowserEnvironment['createPeerConnection']>,
     createAudioElement: () => audio,
     setTimeout: handler => {
       timers.add(handler)
@@ -163,7 +181,7 @@ const createFixture = (input?: { playError?: Error, permissionError?: Error }) =
     environment
   })
 
-  return { rpc, stream, peer, audio, timers, getUserMedia, controller }
+  return { rpc, stream, streams, peer, peers, audio, timers, getUserMedia, controller }
 }
 
 const connectFixture = async (fixture: ReturnType<typeof createFixture>, threadId = 'thread-1') => {
@@ -329,6 +347,68 @@ describe('realtime conversation controller', () => {
     await fixture.controller.connect('thread-1')
 
     expect(fixture.rpc.requests.filter(request => request.method === 'thread/realtime/start')).toHaveLength(1)
+  })
+
+  it('does not let a stale permission request replace the active media stream', async () => {
+    const stalePermission = deferred<FakeStream>()
+    const staleStream = new FakeStream()
+    const activeStream = new FakeStream()
+    let permissionRequest = 0
+    const fixture = createFixture({
+      streams: [staleStream, activeStream],
+      getUserMedia: async () => ++permissionRequest === 1
+        ? await stalePermission.promise
+        : activeStream
+    })
+    await fixture.controller.refreshCapability('thread-1', true)
+
+    const staleConnect = fixture.controller.connect('thread-1')
+    await vi.waitFor(() => expect(fixture.getUserMedia).toHaveBeenCalledTimes(1))
+    const activeConnect = fixture.controller.connect('thread-2')
+    await vi.waitFor(() => expect(fixture.getUserMedia).toHaveBeenCalledTimes(2))
+    await activeConnect
+
+    stalePermission.resolve(staleStream)
+    await staleConnect
+
+    expect(staleStream.track.stop).toHaveBeenCalledTimes(1)
+    expect(activeStream.track.stop).not.toHaveBeenCalled()
+
+    await fixture.controller.stop()
+
+    expect(activeStream.track.stop).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not let a stale offer mutate the active peer connection', async () => {
+    const staleOffer = deferred<{ type: 'offer', sdp: string }>()
+    const stalePeer = new FakePeerConnection()
+    const activePeer = new FakePeerConnection()
+    stalePeer.createOffer.mockImplementation(async () => await staleOffer.promise)
+    const streams = [new FakeStream(), new FakeStream()]
+    let permissionRequest = 0
+    const fixture = createFixture({
+      streams,
+      peers: [stalePeer, activePeer],
+      getUserMedia: async () => streams[permissionRequest++]!
+    })
+    await fixture.controller.refreshCapability('thread-1', true)
+
+    const staleConnect = fixture.controller.connect('thread-1')
+    await vi.waitFor(() => expect(stalePeer.createOffer).toHaveBeenCalledOnce())
+    const activeConnect = fixture.controller.connect('thread-2')
+    await activeConnect
+
+    staleOffer.resolve({ type: 'offer', sdp: 'stale-offer-sdp' })
+    await staleConnect
+
+    expect(stalePeer.setLocalDescription).not.toHaveBeenCalled()
+    expect(activePeer.setLocalDescription).toHaveBeenCalledOnce()
+    expect(activePeer.setLocalDescription).toHaveBeenCalledWith({
+      type: 'offer',
+      sdp: 'offer-sdp'
+    })
+
+    await fixture.controller.stop()
   })
 
   it('tears down after an asynchronous realtime error', async () => {

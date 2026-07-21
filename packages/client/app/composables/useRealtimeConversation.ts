@@ -595,15 +595,16 @@ export const useRealtimeConversation = (options: ControllerOptions) => {
         audioElement.autoplay = true
         audioElement.muted = outputMuted.value
 
-        mediaStream = await environment.getUserMedia()
+        const candidateMediaStream = await environment.getUserMedia()
         if (!isCurrent(candidateGeneration, threadId)) {
-          for (const track of mediaStream.getTracks()) {
+          for (const track of candidateMediaStream.getTracks()) {
             track.stop()
           }
           return
         }
+        mediaStream = candidateMediaStream
 
-        microphoneTrack = mediaStream.getAudioTracks()[0] ?? null
+        microphoneTrack = candidateMediaStream.getAudioTracks()[0] ?? null
         if (!microphoneTrack) {
           throw new Error('No microphone audio track is available.')
         }
@@ -619,10 +620,13 @@ export const useRealtimeConversation = (options: ControllerOptions) => {
         }
 
         state.value = 'creating-offer'
-        peerConnection = environment.createPeerConnection()
-        peerConnectionState.value = peerConnection.connectionState
-        peerConnection.ontrack = (event) => {
-          if (!isCurrent(candidateGeneration, threadId) || !audioElement) {
+        const candidatePeerConnection = environment.createPeerConnection()
+        peerConnection = candidatePeerConnection
+        peerConnectionState.value = candidatePeerConnection.connectionState
+        candidatePeerConnection.ontrack = (event) => {
+          if (!isCurrent(candidateGeneration, threadId)
+            || peerConnection !== candidatePeerConnection
+            || !audioElement) {
             return
           }
           const stream = event.streams[0]
@@ -641,32 +645,38 @@ export const useRealtimeConversation = (options: ControllerOptions) => {
             }
           })
         }
-        peerConnection.onconnectionstatechange = () => {
-          if (!isCurrent(candidateGeneration, threadId) || !peerConnection) {
+        candidatePeerConnection.onconnectionstatechange = () => {
+          if (!isCurrent(candidateGeneration, threadId)
+            || peerConnection !== candidatePeerConnection) {
             return
           }
-          peerConnectionState.value = peerConnection.connectionState
-          if (peerConnection.connectionState === 'failed'
-            || peerConnection.connectionState === 'disconnected'
-            || peerConnection.connectionState === 'closed') {
+          peerConnectionState.value = candidatePeerConnection.connectionState
+          if (candidatePeerConnection.connectionState === 'failed'
+            || candidatePeerConnection.connectionState === 'disconnected'
+            || candidatePeerConnection.connectionState === 'closed') {
             void fail(
               candidateGeneration,
-              `The WebRTC connection ${peerConnection.connectionState}.`
+              `The WebRTC connection ${candidatePeerConnection.connectionState}.`
             )
             return
           }
           maybeMarkConnected(candidateGeneration)
         }
 
-        peerConnection.addTrack(microphoneTrack, mediaStream)
-        dataChannel = peerConnection.createDataChannel('oai-events')
-        const offer = await peerConnection.createOffer()
-        await peerConnection.setLocalDescription(offer)
-        if (!isCurrent(candidateGeneration, threadId)) {
+        candidatePeerConnection.addTrack(microphoneTrack, candidateMediaStream)
+        dataChannel = candidatePeerConnection.createDataChannel('oai-events')
+        const offer = await candidatePeerConnection.createOffer()
+        if (!isCurrent(candidateGeneration, threadId)
+          || peerConnection !== candidatePeerConnection) {
+          return
+        }
+        await candidatePeerConnection.setLocalDescription(offer)
+        if (!isCurrent(candidateGeneration, threadId)
+          || peerConnection !== candidatePeerConnection) {
           return
         }
 
-        const sdp = peerConnection.localDescription?.sdp ?? offer.sdp
+        const sdp = candidatePeerConnection.localDescription?.sdp ?? offer.sdp
         if (!sdp) {
           throw new Error('The browser did not create an SDP offer.')
         }
