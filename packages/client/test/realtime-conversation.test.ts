@@ -172,7 +172,7 @@ const connectFixture = async (fixture: ReturnType<typeof createFixture>, threadI
   fixture.rpc.emit('thread/realtime/started', {
     threadId,
     realtimeSessionId: null,
-    version: 'v1'
+    version: 'v3'
   })
   fixture.rpc.emit('thread/realtime/sdp', {
     threadId,
@@ -228,7 +228,7 @@ describe('realtime conversation controller', () => {
     await fixture.controller.stop()
   })
 
-  it('negotiates browser-owned WebRTC with the exact app-server payload', async () => {
+  it('negotiates browser-owned V3 WebRTC with the exact app-server payload', async () => {
     const fixture = createFixture()
 
     await connectFixture(fixture)
@@ -238,6 +238,7 @@ describe('realtime conversation controller', () => {
       params: {
         threadId: 'thread-1',
         outputModality: 'audio',
+        version: 'v3',
         transport: {
           type: 'webrtc',
           sdp: 'offer-sdp'
