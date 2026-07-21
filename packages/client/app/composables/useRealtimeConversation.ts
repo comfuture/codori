@@ -210,9 +210,7 @@ export const useRealtimeConversation = (options: ControllerOptions) => {
   const remoteAudioActive = ref(false)
   const peerConnectionState = ref<RTCPeerConnectionState | null>(null)
   const latestUserTranscript = computed(() =>
-    [...transcripts.value]
-      .reverse()
-      .find(segment => segment.role === 'user' && segment.final)?.text ?? null
+    transcripts.value.findLast(segment => segment.role === 'user' && segment.final)?.text ?? null
   )
 
   let generationCounter = 0
