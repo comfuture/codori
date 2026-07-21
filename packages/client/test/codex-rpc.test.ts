@@ -42,6 +42,22 @@ describe('Codex RPC payload parsing', () => {
     expect(states).toEqual(['idle', 'connecting', 'disconnected'])
   })
 
+  it('publishes connection changes until the lifecycle subscriber leaves', () => {
+    const client = new CodexRpcClient('ws://example.test')
+    const states: string[] = []
+    const unsubscribe = client.subscribeConnectionState(state => states.push(state))
+    const setConnectionState = (client as unknown as {
+      setConnectionState: (state: 'connected' | 'disconnected') => void
+    }).setConnectionState.bind(client)
+
+    setConnectionState('connected')
+    setConnectionState('disconnected')
+    unsubscribe()
+    setConnectionState('connected')
+
+    expect(states).toEqual(['idle', 'connected', 'disconnected'])
+  })
+
   it('accepts string ids for server-initiated requests', async () => {
     const client = new CodexRpcClient('ws://example.test')
     const parsePayload = (client as unknown as {

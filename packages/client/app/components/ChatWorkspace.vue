@@ -355,8 +355,8 @@ const realtimeRpcClient = {
     await getRuntimeClient().request<T>(method, params),
   subscribe: (listener: Parameters<ReturnType<typeof getRuntimeClient>['subscribe']>[0]) =>
     getRuntimeClient().subscribe(listener),
-  subscribeConnection: (listener: Parameters<ReturnType<typeof getRuntimeClient>['subscribeConnection']>[0]) =>
-    getRuntimeClient().subscribeConnection(listener),
+  subscribeConnectionState: (listener: Parameters<ReturnType<typeof getRuntimeClient>['subscribeConnectionState']>[0]) =>
+    getRuntimeClient().subscribeConnectionState(listener),
   isConnected: () => getRuntimeClient().isConnected()
 }
 const realtimeVoice = useRealtimeConversation({ client: realtimeRpcClient })

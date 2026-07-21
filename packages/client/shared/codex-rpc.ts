@@ -62,8 +62,6 @@ type PendingRequest = {
 
 export type CodexRpcServerRequestHandler = (request: CodexRpcServerRequest) => Promise<unknown> | unknown
 
-export type CodexRpcConnectionState = 'connected' | 'disconnected'
-
 type LegacyCodexRpcNotification =
   | {
       method: 'turn/failed'
