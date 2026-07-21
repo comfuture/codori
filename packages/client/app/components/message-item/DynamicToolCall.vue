@@ -9,9 +9,16 @@ const props = defineProps<{
 }>()
 
 const inputSummary = computed(() =>
-  props.item.contentItems?.map((entry) =>
-    entry.type === 'inputText' ? entry.text : `[image] ${entry.imageUrl}`
-  ).join('\n\n') ?? ''
+  props.item.contentItems?.map((entry) => {
+    switch (entry.type) {
+      case 'inputText':
+        return entry.text
+      case 'inputImage':
+        return `[image] ${entry.imageUrl}`
+      case 'inputAudio':
+        return `[audio] ${entry.audioUrl}`
+    }
+  }).join('\n\n') ?? ''
 )
 
 const normalizeToolName = (value: string) =>
