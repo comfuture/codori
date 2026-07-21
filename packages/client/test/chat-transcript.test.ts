@@ -53,6 +53,7 @@ const makeThread = (input: Pick<Thread, 'id' | 'preview' | 'cwd' | 'createdAt' |
   cwd: input.cwd,
   cliVersion: '0.0.0-test',
   source: 'appServer',
+  canAcceptDirectInput: null,
   threadSource: null,
   agentNickname: null,
   agentRole: null,
@@ -437,6 +438,41 @@ describe('chat transcript stability', () => {
     }])
   })
 
+  it('hydrates remote and local audio inputs as playable audio attachments', () => {
+    expect(itemToMessages({
+      type: 'userMessage',
+      id: 'user-audio-1',
+      clientId: null,
+      content: [{
+        type: 'audio',
+        url: 'data:audio/mpeg;base64,abc123'
+      }, {
+        type: 'localAudio',
+        path: '/tmp/voice-note.webm'
+      }]
+    })).toEqual<ChatMessage[]>([{
+      id: 'user-audio-1',
+      role: 'user',
+      parts: [{
+        type: 'attachment',
+        attachment: {
+          kind: 'audio',
+          name: 'audio',
+          mediaType: 'audio/mpeg',
+          url: 'data:audio/mpeg;base64,abc123'
+        }
+      }, {
+        type: 'attachment',
+        attachment: {
+          kind: 'audio',
+          name: 'voice-note.webm',
+          mediaType: 'audio/*',
+          localPath: '/tmp/voice-note.webm'
+        }
+      }]
+    }])
+  })
+
   it('hides the synthetic review bootstrap user message when hydrating a thread', () => {
     expect(threadToMessages(makeThread({
       id: 'thread-1',
@@ -659,7 +695,8 @@ describe('chat transcript stability', () => {
           type: 'webSearch',
           id: 'search-1',
           query: 'codori',
-          action: null
+          action: null,
+          results: null
         }]
       }), makeTurn({
         id: 'turn-2',
@@ -669,7 +706,8 @@ describe('chat transcript stability', () => {
           type: 'webSearch',
           id: 'search-2',
           query: 'codex app server',
-          action: null
+          action: null,
+          results: null
         }]
       })]
     }))).toEqual<ChatMessage[]>([{
@@ -684,7 +722,8 @@ describe('chat transcript stability', () => {
             type: 'webSearch',
             id: 'search-1',
             query: 'codori',
-            action: null
+            action: null,
+            results: null
           },
           status: 'inProgress'
         }
@@ -701,7 +740,8 @@ describe('chat transcript stability', () => {
             type: 'webSearch',
             id: 'search-2',
             query: 'codex app server',
-            action: null
+            action: null,
+            results: null
           },
           status: 'completed'
         }
@@ -727,7 +767,8 @@ describe('chat transcript stability', () => {
       type: 'webSearch',
       id: 'search-1',
       query: 'openai codex tool grouping',
-      action: null
+      action: null,
+      results: null
     })
     const assistant: ChatMessage = {
       id: 'assistant-1',
@@ -777,7 +818,8 @@ describe('chat transcript stability', () => {
       type: 'webSearch',
       id: 'search-1',
       query: 'openai codex compaction',
-      action: null
+      action: null,
+      results: null
     })
     const assistant: ChatMessage = {
       id: 'assistant-1',
@@ -822,7 +864,8 @@ describe('chat transcript stability', () => {
       type: 'webSearch',
       id: 'search-1',
       query: 'codori',
-      action: null
+      action: null,
+      results: null
     })
     const assistant: ChatMessage = {
       id: 'assistant-1',
@@ -916,13 +959,15 @@ describe('chat transcript stability', () => {
         type: 'webSearch',
         id: 'search-1',
         query: 'codori',
-        action: null
+        action: null,
+        results: null
       }),
       ...itemToMessages({
         type: 'webSearch',
         id: 'search-2',
         query: 'openai codex',
-        action: null
+        action: null,
+        results: null
       }),
       user
     ])).toEqual([
@@ -930,13 +975,15 @@ describe('chat transcript stability', () => {
         type: 'webSearch',
         id: 'search-1',
         query: 'codori',
-        action: null
+        action: null,
+        results: null
       }),
       ...itemToMessages({
         type: 'webSearch',
         id: 'search-2',
         query: 'openai codex',
-        action: null
+        action: null,
+        results: null
       }),
       user
     ])

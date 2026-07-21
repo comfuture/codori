@@ -93,7 +93,8 @@ describe('MessagePartToolGroup', () => {
                 type: 'webSearch',
                 id: 'search-1',
                 query: 'openai codex grouping',
-                action: null
+                action: null,
+                results: null
               },
               status: 'completed'
             }

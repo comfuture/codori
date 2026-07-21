@@ -128,7 +128,7 @@ export type ChatPart =
   | {
       type: 'attachment'
       attachment: {
-        kind: 'image'
+        kind: 'image' | 'audio'
         name: string
         mediaType: string
         url?: string | null
@@ -347,12 +347,12 @@ const flattenSubagentAgentStates = (
 
 const streamingState = (pending?: boolean) => pending ? 'streaming' : 'done'
 
-const attachmentNameFromPath = (path: string) =>
-  path.split(/[\\/]/).pop() || 'image'
+const attachmentNameFromPath = (path: string, fallback: 'image' | 'audio') =>
+  path.split(/[\\/]/).pop() || fallback
 
-const attachmentMediaTypeFromUrl = (url: string) => {
+const attachmentMediaTypeFromUrl = (url: string, fallback: string) => {
   const match = /^data:([^;,]+)[;,]/i.exec(url)
-  return match?.[1] || 'image/*'
+  return match?.[1] || fallback
 }
 
 const normalizeReviewOutputText = (text: string) =>
@@ -435,24 +435,26 @@ const userInputToParts = (input: UserInput): ChatPart[] => {
     return []
   }
 
-  if (input.type === 'image') {
+  if (input.type === 'image' || input.type === 'audio') {
+    const kind = input.type
     return [{
       type: 'attachment',
       attachment: {
-        kind: 'image',
-        name: 'image',
-        mediaType: attachmentMediaTypeFromUrl(input.url),
+        kind,
+        name: kind,
+        mediaType: attachmentMediaTypeFromUrl(input.url, `${kind}/*`),
         url: input.url
       }
     }]
   }
 
+  const kind = input.type === 'localAudio' ? 'audio' : 'image'
   return [{
     type: 'attachment',
     attachment: {
-      kind: 'image',
-      name: attachmentNameFromPath(input.path),
-      mediaType: 'image/*',
+      kind,
+      name: attachmentNameFromPath(input.path, kind),
+      mediaType: `${kind}/*`,
       localPath: input.path
     }
   }]
