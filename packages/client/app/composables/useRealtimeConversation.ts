@@ -449,7 +449,7 @@ export const useRealtimeConversation = (options: ControllerOptions) => {
     switch (notification.method) {
       case 'thread/realtime/started': {
         const started = notification.params as ThreadRealtimeStartedNotification
-        if (started.version !== 'v1') {
+        if (started.version !== 'v3') {
           void fail(candidateGeneration, `Unsupported realtime protocol version: ${started.version}`)
           return
         }
@@ -681,6 +681,7 @@ export const useRealtimeConversation = (options: ControllerOptions) => {
         const params: ThreadRealtimeStartParams = {
           threadId,
           outputModality: 'audio',
+          version: 'v3',
           transport: {
             type: 'webrtc',
             sdp
