@@ -334,6 +334,7 @@ const {
   pendingThreadId,
   autoRedirectThreadId,
   pendingRealtimeVoiceConnectThreadId,
+  pendingRealtimeVoiceMicrophoneActivation,
   loadVersion,
   promptControlsLoaded,
   promptControlsLoading,
@@ -413,6 +414,7 @@ const refreshRealtimeVoiceCapability = async (threadId: string) => {
 }
 
 const connectRealtimeVoice = async () => {
+  pendingRealtimeVoiceMicrophoneActivation.value = true
   try {
     const threadId = activeThreadId.value ?? (await ensurePendingLiveStream()).threadId
     if (shouldHandoffRealtimeVoiceConnect({
@@ -431,10 +433,16 @@ const connectRealtimeVoice = async () => {
       await refreshRealtimeVoiceCapability(threadId)
     }
     if (realtimeVoiceCapability.value.status !== 'available') {
+      pendingRealtimeVoiceMicrophoneActivation.value = false
       return
     }
     await realtimeVoice.connect(threadId)
+    if (realtimeVoiceState.value === 'connected') {
+      pendingRealtimeVoiceMicrophoneActivation.value = false
+      realtimeVoice.setMicrophoneEnabled(true)
+    }
   } catch (caughtError) {
+    pendingRealtimeVoiceMicrophoneActivation.value = false
     if (realtimeVoiceState.value !== 'error') {
       realtimeVoiceCapability.value = {
         status: 'failed',
@@ -444,12 +452,12 @@ const connectRealtimeVoice = async () => {
   }
 }
 
-const pressRealtimeVoice = () => {
-  realtimeVoice.setMicrophoneEnabled(true)
-}
+const toggleRealtimeVoiceMicrophone = () =>
+  realtimeVoice.setMicrophoneEnabled(!realtimeVoiceMicrophoneEnabled.value)
 
-const releaseRealtimeVoice = () => {
-  realtimeVoice.setMicrophoneEnabled(false)
+const stopRealtimeVoice = () => {
+  pendingRealtimeVoiceMicrophoneActivation.value = false
+  return realtimeVoice.stop()
 }
 
 const toggleRealtimeVoiceOutput = () =>
@@ -3197,6 +3205,7 @@ const resetDraftThread = () => {
   pendingThreadId.value = null
   autoRedirectThreadId.value = null
   pendingRealtimeVoiceConnectThreadId.value = null
+  pendingRealtimeVoiceMicrophoneActivation.value = false
   messages.value = []
   subagentPanels.value = []
   threadGoals.value = {}
@@ -4546,8 +4555,22 @@ watch([
   pendingRealtimeVoiceConnectThreadId.value = null
   if (action === 'connect') {
     void connectRealtimeVoice()
+  } else if (action === 'clear') {
+    pendingRealtimeVoiceMicrophoneActivation.value = false
   }
 }, { immediate: true })
+
+watch(realtimeVoiceState, (voiceState) => {
+  if (voiceState === 'connected' && pendingRealtimeVoiceMicrophoneActivation.value) {
+    pendingRealtimeVoiceMicrophoneActivation.value = false
+    realtimeVoice.setMicrophoneEnabled(true)
+    return
+  }
+
+  if (voiceState === 'closed' || voiceState === 'error' || voiceState === 'idle') {
+    pendingRealtimeVoiceMicrophoneActivation.value = false
+  }
+})
 
 watch(() => props.threadId ?? null, (threadId) => {
   refreshWorkspaceGitBranchesInBackground('thread/load')
@@ -5463,10 +5486,9 @@ watch(
                     :latest-user-transcript="realtimeVoiceLatestUserTranscript"
                     :error="realtimeVoiceError"
                     @connect="void connectRealtimeVoice()"
-                    @press="pressRealtimeVoice"
-                    @release="releaseRealtimeVoice"
+                    @toggle-microphone="toggleRealtimeVoiceMicrophone"
                     @toggle-output="void toggleRealtimeVoiceOutput()"
-                    @stop="void realtimeVoice.stop()"
+                    @stop="void stopRealtimeVoice()"
                   />
 
                   <UPopover

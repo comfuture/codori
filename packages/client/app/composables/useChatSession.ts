@@ -51,6 +51,7 @@ export type ChatSession = {
   pendingThreadId: Ref<string | null>
   autoRedirectThreadId: Ref<string | null>
   pendingRealtimeVoiceConnectThreadId: Ref<string | null>
+  pendingRealtimeVoiceMicrophoneActivation: Ref<boolean>
   loadVersion: Ref<number>
   promptControlsLoaded: Ref<boolean>
   promptControlsLoading: Ref<boolean>
@@ -91,6 +92,7 @@ const createSession = (): ChatSession => {
     pendingThreadId: ref(null) as Ref<string | null>,
     autoRedirectThreadId: ref(null) as Ref<string | null>,
     pendingRealtimeVoiceConnectThreadId: ref(null) as Ref<string | null>,
+    pendingRealtimeVoiceMicrophoneActivation: ref(false),
     loadVersion: ref(0),
     promptControlsLoaded: ref(false),
     promptControlsLoading: ref(false),

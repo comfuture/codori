@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
+import { computed } from 'vue'
 import type {
   RealtimeActivity,
   RealtimeCapability,
@@ -19,18 +19,10 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   connect: []
-  press: []
-  release: []
+  'toggle-microphone': []
   'toggle-output': []
   stop: []
 }>()
-
-let activePointerId: number | null = null
-let activePointerTarget: HTMLElement | null = null
-let activeKey: ' ' | 'Enter' | null = null
-let pendingPressAfterConnect = false
-let suppressNextClick = false
-let transmissionRequested = false
 
 const sessionActive = computed(() =>
   props.sessionState === 'requesting-permission'
@@ -49,6 +41,9 @@ const capabilityUnavailable = computed(() =>
 
 const microphoneDisabled = computed(() =>
   capabilityUnavailable.value
+  || props.sessionState === 'requesting-permission'
+  || props.sessionState === 'creating-offer'
+  || props.sessionState === 'starting'
   || props.sessionState === 'stopping'
 )
 
@@ -79,7 +74,7 @@ const statusLabel = computed(() => {
 
   switch (props.activity) {
     case 'listening':
-      return 'Listening — release to mute'
+      return 'Listening'
     case 'transcribing':
       return 'Transcribing your request'
     case 'delegating':
@@ -89,6 +84,9 @@ const statusLabel = computed(() => {
     case 'speaking':
       return props.outputMuted ? 'Codex is speaking — output muted' : 'Codex is speaking'
     default:
+      if (props.microphoneEnabled) {
+        return props.outputMuted ? 'Voice active — output muted' : 'Voice active'
+      }
       return props.outputMuted ? 'Voice ready — microphone and output muted' : 'Voice ready — microphone muted'
   }
 })
@@ -101,20 +99,18 @@ const microphoneLabel = computed(() => {
     return props.capability.message
   }
   if (props.sessionState === 'connected') {
-    return props.microphoneEnabled ? 'Release to mute microphone' : 'Hold to talk'
+    return props.microphoneEnabled ? 'Deactivate microphone' : 'Activate microphone'
   }
   if (sessionActive.value) {
     return 'Voice session is connecting'
   }
-  return 'Start voice session'
+  return 'Start voice session and activate microphone'
 })
 
 const microphoneIcon = computed(() =>
   capabilityUnavailable.value || props.sessionState === 'error'
     ? 'i-lucide-mic-off'
-    : props.microphoneEnabled
-      ? 'i-lucide-audio-lines'
-      : 'i-lucide-mic'
+    : 'i-lucide-audio-lines'
 )
 
 const microphoneColor = computed(() =>
@@ -131,141 +127,16 @@ const microphoneVariant = computed(() =>
     : 'ghost'
 )
 
-const beginTransmission = () => {
-  transmissionRequested = true
-  emit('press')
-}
-
-const releaseTransmission = () => {
-  pendingPressAfterConnect = false
-  if (transmissionRequested || props.microphoneEnabled) {
-    transmissionRequested = false
-    emit('release')
-  }
-}
-
-const clearPointer = (event?: PointerEvent) => {
-  if (event && activePointerId !== event.pointerId) {
-    return
-  }
-  const pointerId = activePointerId
-  const pointerTarget = activePointerTarget
-  activePointerId = null
-  activePointerTarget = null
-  if (pointerId !== null && pointerTarget?.hasPointerCapture?.(pointerId)) {
-    pointerTarget.releasePointerCapture(pointerId)
-  }
-  releaseTransmission()
-}
-
-const handlePointerDown = (event: PointerEvent) => {
-  if (microphoneDisabled.value || activePointerId !== null || (event.button !== 0 && event.pointerType !== 'touch')) {
-    return
-  }
-  event.preventDefault()
-  activePointerId = event.pointerId
-  activePointerTarget = event.currentTarget as HTMLElement
-  suppressNextClick = true
-  activePointerTarget.setPointerCapture?.(event.pointerId)
-  if (props.sessionState === 'connected') {
-    beginTransmission()
-  } else {
-    pendingPressAfterConnect = true
-    emit('connect')
-  }
-}
-
-const handlePointerRelease = (event: PointerEvent) => {
-  if (activePointerId !== event.pointerId) {
-    return
-  }
-  event.preventDefault()
-  clearPointer(event)
-}
-
-const handleKeyDown = (event: KeyboardEvent) => {
-  if ((event.key !== ' ' && event.key !== 'Enter') || event.repeat || activeKey !== null || microphoneDisabled.value) {
-    return
-  }
-  event.preventDefault()
-  activeKey = event.key
-  suppressNextClick = true
-  if (props.sessionState === 'connected') {
-    beginTransmission()
-  } else {
-    pendingPressAfterConnect = true
-    emit('connect')
-  }
-}
-
-const handleWindowKeyUp = (event: KeyboardEvent) => {
-  if (activeKey !== event.key) {
-    return
-  }
-  event.preventDefault()
-  activeKey = null
-  releaseTransmission()
-}
-
-const handleClick = (event: MouseEvent) => {
-  if (suppressNextClick) {
-    suppressNextClick = false
-    return
-  }
-  if (event.detail !== 0 || microphoneDisabled.value) {
+const handleClick = () => {
+  if (microphoneDisabled.value) {
     return
   }
   if (props.sessionState !== 'connected') {
     emit('connect')
     return
   }
-  if (props.microphoneEnabled) {
-    transmissionRequested = false
-    emit('release')
-  } else {
-    beginTransmission()
-  }
+  emit('toggle-microphone')
 }
-
-const releaseForLostFocus = () => {
-  if (activePointerId !== null) {
-    clearPointer()
-  }
-  activeKey = null
-  releaseTransmission()
-}
-
-const handleVisibilityChange = () => {
-  if (document.visibilityState === 'hidden') {
-    releaseForLostFocus()
-  }
-}
-
-watch(() => props.sessionState, (nextState) => {
-  if (nextState === 'connected' && pendingPressAfterConnect && (activePointerId !== null || activeKey !== null)) {
-    pendingPressAfterConnect = false
-    beginTransmission()
-    return
-  }
-  if (nextState === 'closed' || nextState === 'error' || nextState === 'idle') {
-    releaseForLostFocus()
-  }
-})
-
-onMounted(() => {
-  window.addEventListener('keyup', handleWindowKeyUp)
-  window.addEventListener('blur', releaseForLostFocus)
-  window.addEventListener('pagehide', releaseForLostFocus)
-  document.addEventListener('visibilitychange', handleVisibilityChange)
-})
-
-onBeforeUnmount(() => {
-  releaseForLostFocus()
-  window.removeEventListener('keyup', handleWindowKeyUp)
-  window.removeEventListener('blur', releaseForLostFocus)
-  window.removeEventListener('pagehide', releaseForLostFocus)
-  document.removeEventListener('visibilitychange', handleVisibilityChange)
-})
 </script>
 
 <template>
@@ -286,14 +157,8 @@ onBeforeUnmount(() => {
           :disabled="microphoneDisabled"
           :aria-label="microphoneLabel"
           :aria-pressed="microphoneEnabled"
-          class="size-11 shrink-0 touch-none justify-center rounded-full border border-default/70 md:size-8"
+          class="size-11 shrink-0 justify-center rounded-full border border-default/70 md:size-8"
           :ui="{ leadingIcon: 'size-4', base: 'px-0' }"
-          @pointerdown="handlePointerDown"
-          @pointerup="handlePointerRelease"
-          @pointercancel="handlePointerRelease"
-          @pointerleave="handlePointerRelease"
-          @lostpointercapture="handlePointerRelease"
-          @keydown="handleKeyDown"
           @click="handleClick"
         />
       </span>
