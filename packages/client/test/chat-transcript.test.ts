@@ -3,6 +3,7 @@ import type { Thread } from '../shared/generated/codex-app-server/v2/Thread'
 import type { Turn } from '../shared/generated/codex-app-server/v2/Turn'
 import {
   ITEM_PART,
+  REALTIME_DELEGATION_PART,
   TOOL_GROUP_PART,
   asAgentMessageItem,
   findLatestCompletedPlanTurnId,
@@ -11,6 +12,7 @@ import {
   hasAssistantTextMessageWithText,
   hasAssistantTextMessageWithTextInLatestTurn,
   itemToMessages,
+  parseRealtimeDelegation,
   removeSyntheticReviewOutputMessages,
   removeSyntheticReviewOutputMessagesInLatestTurn,
   threadToMessages,
@@ -63,6 +65,58 @@ const makeThread = (input: Pick<Thread, 'id' | 'preview' | 'cwd' | 'createdAt' |
 })
 
 describe('chat transcript stability', () => {
+  it('maps realtime handoffs to a dedicated system presentation', () => {
+    expect(itemToMessages({
+      type: 'userMessage',
+      id: 'voice-handoff-1',
+      clientId: null,
+      content: [{
+        type: 'text',
+        text: [
+          '<realtime_delegation>',
+          '  <input>Fix &lt;this&gt; &amp; verify it</input>',
+          '  <transcript_delta>user: hello\\nassistant: hi</transcript_delta>',
+          '</realtime_delegation>'
+        ].join('\n'),
+        text_elements: []
+      }]
+    })).toEqual<ChatMessage[]>([{
+      id: 'voice-handoff-1',
+      role: 'system',
+      parts: [{
+        type: REALTIME_DELEGATION_PART,
+        data: {
+          input: 'Fix <this> & verify it',
+          transcriptDelta: 'user: hello\\nassistant: hi',
+          source: 'handoff'
+        }
+      }]
+    }])
+  })
+
+  it('parses transcript-tail and legacy realtime delegation shapes', () => {
+    expect(parseRealtimeDelegation([
+      '<realtime_delegation>',
+      '  <source>transcript_tail_flush</source>',
+      '  <input>Continue from voice</input>',
+      '  <transcript_delta>user: one</transcript_delta>',
+      '</realtime_delegation>'
+    ].join('\n'))).toEqual({
+      input: 'Continue from voice',
+      transcriptDelta: 'user: one',
+      source: 'transcript_tail_flush'
+    })
+
+    expect(parseRealtimeDelegation(
+      '<realtime_delegation>Run tests <transcript_delta>user: Run tests</transcript_delta></realtime_delegation>'
+    )).toEqual({
+      input: 'Run tests',
+      transcriptDelta: 'user: Run tests',
+      source: 'handoff'
+    })
+    expect(parseRealtimeDelegation('Ordinary typed message')).toBeNull()
+  })
+
   it('replaces a streamed text message with the completed server payload', () => {
     const streamedMessages = upsertStreamingMessage([], {
       id: 'agent-1',

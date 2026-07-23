@@ -7,7 +7,14 @@ import type { UserInput } from './generated/codex-app-server/v2/UserInput'
 
 export const EVENT_PART = 'data-thread-event' as const
 export const ITEM_PART = 'data-thread-item' as const
+export const REALTIME_DELEGATION_PART = 'data-realtime-delegation' as const
 export const TOOL_GROUP_PART = 'data-tool-call-group' as const
+
+export type RealtimeDelegationData = {
+  input: string
+  transcriptDelta: string | null
+  source: 'handoff' | 'transcript_tail_flush'
+}
 
 export type ThreadEventData =
   | {
@@ -140,6 +147,10 @@ export type ChatPart =
       summary: string[]
       content: string[]
       state?: 'done' | 'streaming'
+    }
+  | {
+      type: typeof REALTIME_DELEGATION_PART
+      data: RealtimeDelegationData
     }
   | {
       type: typeof EVENT_PART
@@ -381,8 +392,11 @@ const isTurnBoundaryMessage = (message: ChatMessage) =>
   || (
     message.role === 'system'
     && message.parts.some(part =>
-      part.type === EVENT_PART
-      && part.data.kind === 'turn.started'
+      part.type === REALTIME_DELEGATION_PART
+      || (
+        part.type === EVENT_PART
+        && part.data.kind === 'turn.started'
+      )
     )
   )
 
@@ -418,10 +432,59 @@ export const removeSyntheticReviewOutputMessagesInLatestTurn = (messages: ChatMe
   )
 }
 
+const decodeRealtimeXmlText = (text: string) =>
+  text
+    .replaceAll('&lt;', '<')
+    .replaceAll('&gt;', '>')
+    .replaceAll('&amp;', '&')
+
+const realtimeElementText = (body: string, element: string) => {
+  const match = new RegExp(`<${element}>\\s*([\\s\\S]*?)\\s*</${element}>`, 'u').exec(body)
+  return match?.[1] ? decodeRealtimeXmlText(match[1].trim()) : null
+}
+
+export const parseRealtimeDelegation = (text: string): RealtimeDelegationData | null => {
+  const wrapper = /^\s*<realtime_delegation>\s*([\s\S]*?)\s*<\/realtime_delegation>\s*$/u.exec(text)
+  if (!wrapper?.[1]) {
+    return null
+  }
+
+  const body = wrapper[1]
+  const transcriptDelta = realtimeElementText(body, 'transcript_delta')
+  const explicitInput = realtimeElementText(body, 'input')
+  const source = realtimeElementText(body, 'source') === 'transcript_tail_flush'
+    ? 'transcript_tail_flush'
+    : 'handoff'
+  const fallbackInput = decodeRealtimeXmlText(
+    body
+      .replace(/<source>\s*[\s\S]*?\s*<\/source>/u, '')
+      .replace(/<transcript_delta>\s*[\s\S]*?\s*<\/transcript_delta>/u, '')
+      .trim()
+  )
+  const delegationInput = explicitInput ?? fallbackInput
+  if (!delegationInput) {
+    return null
+  }
+
+  return {
+    input: delegationInput,
+    transcriptDelta,
+    source
+  }
+}
+
 const userInputToParts = (input: UserInput): ChatPart[] => {
   if (input.type === 'text') {
     if (!input.text.trim()) {
       return []
+    }
+
+    const realtimeDelegation = parseRealtimeDelegation(input.text)
+    if (realtimeDelegation) {
+      return [{
+        type: REALTIME_DELEGATION_PART,
+        data: realtimeDelegation
+      }]
     }
 
     return [{
@@ -488,12 +551,16 @@ export const itemToMessages = (
   options: ItemToMessagesOptions = {}
 ): ChatMessage[] => {
   switch (item.type) {
-    case 'userMessage':
+    case 'userMessage': {
+      const parts = item.content.flatMap(userInputToParts)
       return [{
         id: item.id,
-        role: 'user',
-        parts: item.content.flatMap(userInputToParts)
+        role: parts.length > 0 && parts.every(part => part.type === REALTIME_DELEGATION_PART)
+          ? 'system'
+          : 'user',
+        parts
       }]
+    }
     case 'agentMessage':
       return [{
         id: item.id,
