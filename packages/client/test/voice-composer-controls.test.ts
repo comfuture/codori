@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 /* eslint-disable vue/one-component-per-file */
 import { mount } from '@vue/test-utils'
-import { defineComponent, nextTick } from 'vue'
-import { afterEach, describe, expect, it } from 'vitest'
+import { defineComponent } from 'vue'
+import { describe, expect, it } from 'vitest'
 import VoiceComposerControls from '../app/components/VoiceComposerControls.vue'
 import type {
   RealtimeActivity,
@@ -64,146 +64,57 @@ const mountControls = (props: Partial<VoiceProps> = {}) =>
     }
   })
 
-const dispatchPointer = async (
-  element: Element,
-  type: string,
-  input: { pointerId: number, pointerType?: string, button?: number }
-) => {
-  const event = new MouseEvent(type, {
-    bubbles: true,
-    cancelable: true,
-    button: input.button ?? 0
-  })
-  Object.defineProperty(event, 'pointerId', { value: input.pointerId })
-  Object.defineProperty(event, 'pointerType', { value: input.pointerType ?? 'mouse' })
-  element.dispatchEvent(event)
-  await nextTick()
-}
-
-const dispatchScreenReaderClick = async (element: Element) => {
-  element.dispatchEvent(new MouseEvent('click', {
-    bubbles: true,
-    cancelable: true,
-    detail: 0
-  }))
-  await nextTick()
-}
-
-afterEach(() => {
-  Object.defineProperty(document, 'visibilityState', {
-    configurable: true,
-    value: 'visible'
-  })
-})
-
 describe('VoiceComposerControls', () => {
-  it('exposes accessible ready and transcript status', async () => {
+  it('exposes accessible toggle state with a stable audio-lines icon', async () => {
     const wrapper = mountControls({
       latestUserTranscript: 'Run the focused tests'
     })
 
-    const microphone = wrapper.get('button[aria-label="Hold to talk"]')
+    const microphone = wrapper.get('button[aria-label="Activate microphone"]')
     expect(microphone.attributes('aria-pressed')).toBe('false')
+    expect(microphone.attributes('icon')).toBe('i-lucide-audio-lines')
+    expect(microphone.attributes('color')).toBe('neutral')
+    expect(microphone.attributes('variant')).toBe('ghost')
     expect(wrapper.get('[aria-live="polite"]').text()).toContain('Voice ready')
     expect(wrapper.get('[aria-live="polite"]').text()).toContain('Heard: Run the focused tests')
 
-    await wrapper.setProps({ activity: 'delegating' })
-    expect(wrapper.get('[aria-live="polite"]').text()).toContain('Delegating to Codex')
-    wrapper.unmount()
-  })
-
-  it('holds to transmit and releases on pointer completion without a click toggle', async () => {
-    const wrapper = mountControls()
-    const microphone = wrapper.get('button[aria-label="Hold to talk"]')
-
-    await dispatchPointer(microphone.element, 'pointerdown', {
-      pointerId: 7,
-      pointerType: 'mouse',
-      button: 0
+    await wrapper.setProps({
+      activity: 'listening',
+      microphoneEnabled: true
     })
-    await dispatchPointer(microphone.element, 'pointerup', {
-      pointerId: 7,
-      pointerType: 'mouse',
-      button: 0
-    })
-    microphone.element.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }))
-    await nextTick()
-
-    expect(wrapper.emitted('press')).toHaveLength(1)
-    expect(wrapper.emitted('release')).toHaveLength(1)
+    const activeMicrophone = wrapper.get('button[aria-label="Deactivate microphone"]')
+    expect(activeMicrophone.attributes('aria-pressed')).toBe('true')
+    expect(activeMicrophone.attributes('icon')).toBe('i-lucide-audio-lines')
+    expect(activeMicrophone.attributes('color')).toBe('primary')
+    expect(activeMicrophone.attributes('variant')).toBe('soft')
+    expect(wrapper.get('[aria-live="polite"]').text()).toContain('Listening')
     wrapper.unmount()
   })
 
-  it('cancels transmission for pointer cancel and lost capture', async () => {
+  it('toggles the connected microphone with each click', async () => {
     const wrapper = mountControls()
-    const microphone = wrapper.get('button[aria-label="Hold to talk"]')
+    await wrapper.get('button[aria-label="Activate microphone"]').trigger('click')
+    expect(wrapper.emitted('toggle-microphone')).toHaveLength(1)
 
-    await dispatchPointer(microphone.element, 'pointerdown', { pointerId: 1, pointerType: 'touch' })
-    await dispatchPointer(microphone.element, 'pointercancel', { pointerId: 1, pointerType: 'touch' })
-    await dispatchPointer(microphone.element, 'pointerdown', { pointerId: 2 })
-    await dispatchPointer(microphone.element, 'lostpointercapture', { pointerId: 2 })
-
-    expect(wrapper.emitted('press')).toHaveLength(2)
-    expect(wrapper.emitted('release')).toHaveLength(2)
+    await wrapper.setProps({ microphoneEnabled: true })
+    await wrapper.get('button[aria-label="Deactivate microphone"]').trigger('click')
+    expect(wrapper.emitted('toggle-microphone')).toHaveLength(2)
     wrapper.unmount()
   })
 
-  it('keeps a held first gesture pending until the session connects', async () => {
+  it('starts a voice session from idle and disables repeat clicks while connecting', async () => {
     const wrapper = mountControls({ sessionState: 'idle' })
-    const microphone = wrapper.get('button[aria-label="Start voice session"]')
+    const microphone = wrapper.get('button[aria-label="Start voice session and activate microphone"]')
 
     expect(wrapper.find('[aria-live="polite"]').exists()).toBe(false)
-    expect(wrapper.text()).not.toContain('Microphone permission required')
-
-    await dispatchPointer(microphone.element, 'pointerdown', { pointerId: 3 })
+    await microphone.trigger('click')
     expect(wrapper.emitted('connect')).toHaveLength(1)
-    expect(wrapper.emitted('press')).toBeUndefined()
 
-    await wrapper.setProps({ sessionState: 'connected' })
-    await nextTick()
-    expect(wrapper.emitted('press')).toHaveLength(1)
-
-    await dispatchPointer(microphone.element, 'pointerup', { pointerId: 3 })
-    expect(wrapper.emitted('release')).toHaveLength(1)
-    wrapper.unmount()
-  })
-
-  it('uses focused Space and Enter only while releasing through the window', async () => {
-    const wrapper = mountControls()
-    const microphone = wrapper.get('button[aria-label="Hold to talk"]')
-
-    await microphone.trigger('keydown', { key: ' ', repeat: false })
-    window.dispatchEvent(new KeyboardEvent('keyup', { key: ' ' }))
-    await nextTick()
-    await microphone.trigger('keydown', { key: 'Enter', repeat: false })
-    await microphone.trigger('keydown', { key: 'Enter', repeat: true })
-    window.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter' }))
-    await nextTick()
-
-    expect(wrapper.emitted('press')).toHaveLength(2)
-    expect(wrapper.emitted('release')).toHaveLength(2)
-    wrapper.unmount()
-  })
-
-  it('supports screen-reader click toggling and focus/visibility safety release', async () => {
-    const wrapper = mountControls()
-    const microphone = wrapper.get('button[aria-label="Hold to talk"]')
-
-    await dispatchScreenReaderClick(microphone.element)
-    expect(wrapper.emitted('press')).toHaveLength(1)
-
-    window.dispatchEvent(new Event('blur'))
-    await nextTick()
-    expect(wrapper.emitted('release')).toHaveLength(1)
-
-    await dispatchScreenReaderClick(microphone.element)
-    Object.defineProperty(document, 'visibilityState', {
-      configurable: true,
-      value: 'hidden'
-    })
-    document.dispatchEvent(new Event('visibilitychange'))
-    await nextTick()
-    expect(wrapper.emitted('release')).toHaveLength(2)
+    await wrapper.setProps({ sessionState: 'starting' })
+    const connectingMicrophone = wrapper.get('button[aria-label="Voice session is connecting"]')
+    expect(connectingMicrophone.attributes('disabled')).toBeDefined()
+    await connectingMicrophone.trigger('click')
+    expect(wrapper.emitted('connect')).toHaveLength(1)
     wrapper.unmount()
   })
 
