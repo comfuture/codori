@@ -1,11 +1,19 @@
 import { defineComponent, h, type PropType } from 'vue'
 import { UChatReasoning } from '#components'
-import { EVENT_PART, ITEM_PART, TOOL_GROUP_PART, type ChatMessage, type ChatPart } from '~~/shared/codex-chat'
+import {
+  EVENT_PART,
+  ITEM_PART,
+  REALTIME_DELEGATION_PART,
+  TOOL_GROUP_PART,
+  type ChatMessage,
+  type ChatPart
+} from '~~/shared/codex-chat'
 import type { WorkspaceAttachmentScope } from '~~/shared/chat-attachments'
 import MessagePartAttachment from './message-part/Attachment.vue'
 import MessagePartEvent from './message-part/Event.vue'
 import MessagePartItem from './message-part/Item'
 import MessagePartPlan from './message-part/Plan.vue'
+import MessagePartRealtimeDelegation from './message-part/RealtimeDelegation.vue'
 import MessagePartText from './message-part/Text.vue'
 import MessagePartToolGroup from './message-part/ToolGroup.vue'
 
@@ -64,6 +72,10 @@ export default defineComponent({
           return h(MessagePartAttachment, {
             projectId: props.projectId,
             workspace: props.workspace,
+            part: props.part
+          })
+        case REALTIME_DELEGATION_PART:
+          return h(MessagePartRealtimeDelegation, {
             part: props.part
           })
         case EVENT_PART:
