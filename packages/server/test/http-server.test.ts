@@ -854,11 +854,19 @@ describe('createHttpServer', () => {
     const client = new WebSocket(
       `ws://127.0.0.1:${serverAddress.port}/api/projects/demo/rpc`
     )
+    const prettyPrintedRequest = JSON.stringify({
+      id: 'pretty',
+      method: 'test/pretty',
+      params: {
+        enabled: true
+      }
+    }, null, 2)
+    const compactRequest = JSON.stringify(JSON.parse(prettyPrintedRequest))
     await new Promise<void>((resolvePromise, reject) => {
-      client.once('open', () => client.send('ping'))
+      client.once('open', () => client.send(prettyPrintedRequest))
       client.once('message', (message: WebSocket.RawData) => {
         try {
-          expect(rawDataToString(message)).toBe('unix:ping')
+          expect(rawDataToString(message)).toBe(`unix:${compactRequest}`)
           resolvePromise()
         } catch (error) {
           reject(error instanceof Error ? error : new Error(String(error)))
@@ -867,7 +875,7 @@ describe('createHttpServer', () => {
       client.once('error', reject)
     })
 
-    expect(receivedLines).toEqual(['ping'])
+    expect(receivedLines).toEqual([compactRequest])
     const clientClosed = new Promise<void>((resolvePromise) => {
       client.once('close', () => resolvePromise())
     })
