@@ -5,14 +5,17 @@
 Codori is a self-hosted remote coding control plane for Codex app-server.
 
 - `@codori/server` discovers local Git projects under a configured root directory.
-- It manages one shared Codex app-server process for project and projectless chat workspaces.
+- It selects one shared Codex app-server backend for project and projectless
+  chat workspaces, preferring the first-party remote-control daemon and
+  managing a fallback process only when required.
 - `@codori/client` provides a browser UI for browsing projects, activating/stopping project workspaces, listing prior Codex threads, starting new threads, and resuming prior threads.
 - Codori does not provide a private network tunnel. Users must expose the service through their own network layer such as Tailscale or Cloudflare Tunnel.
 
 ## 2. Goals
 
 - Provide a single server process that can enumerate local projects from one root directory.
-- Ensure one Codex app-server process can cover multiple logical project/chat workspaces through explicit `cwd` handling.
+- Ensure one selected Codex app-server backend can cover multiple logical
+  project/chat workspaces through explicit `cwd` handling.
 - Expose predictable CLI and HTTP management surfaces for logical project workspace runtime control.
 - Provide a Nuxt UI dashboard for project selection and per-project Codex chat.
 - Reuse only the useful, stable parts of Corazon instead of importing Corazon wholesale.
@@ -104,9 +107,32 @@ Discovery constraints:
 - Project ids must be stable across server restarts.
 - Returned project list must be sorted lexicographically by project id.
 
-## 7. Runtime Process Management
+## 7. Runtime Backend Management
 
-One Codori server instance can have at most one active Codex app-server process. Discovered projects and projectless chats are logical workspaces that share that process.
+One Codori server instance can have at most one selected Codex app-server
+backend. Discovered projects and projectless chats are logical workspaces that
+share it.
+
+Preferred daemon selection:
+
+- On Unix platforms, resolve
+  `$CODEX_HOME/app-server-control/app-server-control.sock`, defaulting
+  `CODEX_HOME` to `~/.codex`.
+- Verify readiness with a bounded Unix WebSocket connection and `initialize`;
+  never infer readiness from the socket file alone.
+- If the default socket is not ready, invoke
+  `codex remote-control start --json` once across concurrent callers and probe
+  the returned socket.
+- When realtime voice is configured, also require the daemon to advertise the
+  feature and successfully answer V3 voice discovery.
+- Use the managed fallback for unsupported, inaccessible, unready, incompatible,
+  or malformed daemon paths.
+- Never persist a daemon PID, kill/reap/restart the daemon, or replace an
+  already-running incompatible daemon.
+- Keep one backend for the lifetime of a browser bridge. A daemon disconnect
+  closes that bridge and invalidates the selection for the next connection.
+
+Managed fallback start command:
 
 Start command:
 
@@ -117,7 +143,8 @@ codex app-server --listen ws://127.0.0.1:{PORT_NUMBER}
 Start behavior:
 
 - Resolve project directory from project id.
-- Check for an existing shared runtime PID file.
+- Select or reuse the first-party daemon when it passes the readiness probe.
+- Otherwise check for an existing managed fallback PID file.
 - If the shared PID file exists and the process is alive, return its stored port and do not spawn another process.
 - If the shared PID file exists and the process is dead, remove the stale PID file and continue.
 - Select the first available TCP port in the configured safe range.
@@ -141,7 +168,7 @@ PID/runtime file requirements:
 }
 ```
 
-Idle lifecycle behavior:
+Managed fallback idle lifecycle behavior:
 
 - Codori updates `lastActivityAt` when it starts or reuses the shared runtime.
 - Proxied WebSocket traffic counts as activity.
@@ -152,9 +179,11 @@ Idle lifecycle behavior:
 Stop behavior:
 
 - Project and chat stop commands deactivate that logical workspace.
-- Stopping one workspace does not terminate the shared app-server while other workspaces may still use it.
-- Stopping the final active workspace terminates the shared app-server immediately unless a proxied WebSocket session is still open; in that case, Codori terminates the runtime when the final session closes.
-- Idle cleanup and server reset also terminate the shared process when applicable.
+- Stopping one workspace does not terminate the selected backend while other workspaces may still use it.
+- Stopping the final active workspace terminates the managed fallback
+  immediately unless a proxied WebSocket session is still open; for a
+  first-party daemon, Codori only releases its local reference.
+- Idle cleanup and server reset terminate only a managed fallback.
 - Return a stable stopped status for the requested workspace.
 
 Status behavior:
@@ -162,6 +191,10 @@ Status behavior:
 - `running`: the workspace has been activated and the shared app-server process is alive
 - `stopped`: the workspace is not active, or the shared runtime is absent/dead
 - `error`: malformed runtime metadata or spawn/runtime failure detected by Codori
+
+`GET /api/runtime/backend` reports a typed, browser-safe backend kind,
+transport, readiness, version, and fallback reason. It never returns the daemon
+socket path.
 
 ## 8. CLI Contract
 
@@ -241,7 +274,13 @@ Returns:
 
 - all discovered projects
 - status summary for each project
-- current port when running
+- current port for a running managed fallback; `null` for a daemon-backed workspace
+
+### `GET /api/runtime/backend`
+
+Returns the safe selected-backend summary. `codex-daemon` uses
+`unix-socket`; `codori-managed` uses `tcp-websocket`. The response contains no
+socket path or process-control action.
 
 ### `GET /api/projects/:projectId`
 
@@ -257,8 +296,8 @@ Returns:
 
 - resolved project metadata
 - runtime status
-- active shared runtime port
-- whether the shared process was newly started or already running
+- active managed fallback port, or `null` for a daemon-backed workspace
+- whether the selected backend was newly started or already available
 
 ### `POST /api/projects/:projectId/stop`
 
@@ -292,13 +331,14 @@ Behavior:
 
 - Resolve target project.
 - Ensure the shared app-server is running; if not, start it first.
-- Open a WebSocket client connection from Codori server to the shared app-server.
+- Open a WebSocket client connection from Codori server to the selected Unix
+  socket or managed TCP app-server.
 - Proxy frames transparently in both directions.
 - Close both ends cleanly if either side disconnects.
 
 Protocol notes:
 
-- The shared app-server is JSON-RPC over WebSocket.
+- Both backend transports carry the same app-server JSON-RPC over WebSocket.
 - The browser client should treat Codori as the single origin and should not connect directly to the app-server port.
 
 ## 10. Client UX Requirements
@@ -397,6 +437,7 @@ Modules:
 - runtime registry
 - port allocator
 - process manager
+- remote-control daemon selector and readiness probe
 - CLI command handlers
 - Fastify app
 - WebSocket proxy
@@ -424,6 +465,9 @@ Must handle:
 - malformed PID file
 - stale PID file
 - app-server spawn failure
+- remote-control command unavailable or unsupported
+- Unix socket access denied or handshake failure
+- existing daemon missing the configured realtime capabilities
 - WebSocket bridge failure
 - RPC initialization failure
 - thread list/read/start/resume failure

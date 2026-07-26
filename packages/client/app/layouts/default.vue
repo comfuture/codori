@@ -122,6 +122,7 @@ const sidebarUi = computed(() =>
 
       <template #footer>
         <div class="flex w-full items-center gap-2">
+          <RuntimeBackendStatusButton />
           <SystemNotificationButton :collapsed="sidebarCollapsed" />
           <span
             v-if="!sidebarCollapsed"

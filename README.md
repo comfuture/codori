@@ -10,7 +10,7 @@ It is designed for people who keep many Git repositories under one parent direct
 
 - discover projects
 - open the right project in a browser dashboard
-- start a shared Codex app-server runtime only when needed
+- connect to the first-party Codex remote-control daemon, or start a compatible fallback only when needed
 - continue previous Codex threads in that same project context
 
 Codori is intentionally small. It manages project runtimes and gives you a UI. It does not try to become your VPN, ingress proxy, auth platform, or deployment layer.
@@ -18,8 +18,8 @@ Codori is intentionally small. It manages project runtimes and gives you a UI. I
 Codori follows a few hard constraints:
 
 - Project-first: one root directory, many Git repositories, one control plane.
-- Thin management layer: Codori manages Codex app-server processes but does not replace them.
-- Safe runtime model: one Codori server gets one shared app-server process, tracked by PID/runtime files, while each project or chat stays a logical workspace.
+- Thin management layer: Codori reuses the first-party Codex remote-control daemon when it is ready and manages an app-server fallback only when necessary.
+- Safe runtime model: one Codori server selects one shared app-server backend, while each project or chat stays a logical workspace.
 - Bring-your-own network: private access is your responsibility.
 - Keep the surface area focused: Codori solves project discovery, runtime control, and Codex access without trying to absorb adjacent infrastructure concerns.
 
@@ -27,7 +27,7 @@ Codori follows a few hard constraints:
 
 - Node.js 22+
 
-The server package includes a matching Codex CLI runtime, so a separate host-global `codex` installation is not required. Set `CODORI_CODEX_BIN` to an executable path only when you intentionally want to override the bundled runtime.
+The server package includes a matching Codex CLI runtime, so a separate host-global `codex` installation is not required. Codori first asks that runtime for its Unix-socket remote-control daemon and otherwise starts the existing managed TCP fallback. Set `CODORI_CODEX_BIN` to an executable path only when you intentionally want to override the bundled runtime.
 
 ## Usage
 
@@ -36,7 +36,7 @@ The normal flow is simple:
 1. Run the Codori server on the machine that already has your projects and local tooling.
 2. Open the Codori UI from that same server origin locally or through your own private network path.
 3. Pick a project from the sidebar and start coding.
-4. Let Codori start the shared runtime only when chat or thread access actually needs it.
+4. Let Codori select the shared backend only when chat or thread access actually needs it.
 
 Start the Codori management server:
 
@@ -66,7 +66,11 @@ Experimental realtime voice is disabled by default. Enable it for a directly lau
 npx @codori/server --root ~/Project --experimental-realtime-voice
 ```
 
-This flag only enables the upstream `realtime_conversation` feature in the Codori-managed app-server process. It does not modify `~/.codex/config.toml`.
+This flag requires the selected backend to expose the upstream
+`realtime_conversation` feature and V3 voice discovery. Codori asks a newly
+started remote-control daemon to enable that feature; if an existing daemon is
+incompatible, Codori leaves it untouched and uses the managed app-server
+fallback instead. The flag does not modify `~/.codex/config.toml`.
 
 If you need different bind settings:
 
@@ -321,11 +325,33 @@ Codori ignores common heavy directories during recursive scanning such as `node_
 
 ## Runtime Model
 
-- Each Codori server instance starts at most one active Codex app-server process.
-- Projects and projectless chats are logical workspaces. Codori keeps their activity and WebSocket session counts separate while proxying them to the shared app-server.
-- If a PID/runtime file points to a live shared process, Codori reuses it instead of spawning another app-server.
-- Codori records `startedAt` and `lastActivityAt` for the shared runtime under `~/.codori/run/`.
-- The shared runtime is stopped automatically after the configured inactivity timeout when no workspace has an active proxied WebSocket session.
+- Each Codori server instance selects at most one active Codex app-server backend.
+- On macOS and Linux, Codori first probes
+  `$CODEX_HOME/app-server-control/app-server-control.sock`, where `CODEX_HOME`
+  defaults to `~/.codex`. The probe performs a bounded WebSocket connection and
+  app-server `initialize`; the presence of a socket file alone is not enough.
+- If the socket is not ready, Codori runs the bundled
+  `codex remote-control start --json` once for concurrent requests and probes
+  the socket returned by that command. Unsupported commands, permissions,
+  handshake failures, and incompatible realtime capabilities safely fall back
+  to the Codori-managed TCP app-server.
+- Codori never owns, records the PID of, reaps, restarts, or stops the
+  first-party daemon. A daemon disconnect closes the current browser bridge;
+  the next connection selects a backend again instead of migrating an active
+  JSON-RPC session.
+- The fallback preserves the existing PID/runtime-file and idle-shutdown
+  lifecycle under `~/.codori/run/`. Projects and projectless chats remain
+  logical workspaces sharing the selected backend.
+- The sidebar runtime indicator and `GET /api/runtime/backend` report only a
+  safe backend kind, transport, readiness, version, and fallback reason. The
+  daemon socket path is never exposed to the browser.
+
+The daemon path is Unix-only. The Codori service user must have permission to
+traverse `CODEX_HOME` and open the socket. Containerized Codori deployments
+must mount the same Codex state directory at the effective `CODEX_HOME` and use
+compatible UID/GID permissions; otherwise Codori uses the managed fallback.
+Codori does not relay or translate the remote-control protocol across a
+container or network boundary.
 
 ### Server avatar RPC extension
 
@@ -340,10 +366,13 @@ animation frames are validated, custom paths must remain within their pet
 directory, and built-in downloads are restricted to the Codex pet CDN. Invalid
 or missing selections use a small built-in fallback avatar rather than breaking
 the RPC connection.
-- Stopping the final active workspace stops the shared runtime immediately unless a proxied WebSocket session is still open; if one is open, Codori stops the runtime when that final session closes.
-- Workspaces with an active proxied WebSocket session keep the shared runtime from being reaped as idle.
-- If a PID/runtime file is stale, Codori cleans it up and starts a fresh runtime.
-- Runtime metadata is stored under `~/.codori/run/`.
+- Stopping the final active workspace stops the managed fallback immediately
+  unless a proxied WebSocket session is still open. It only releases Codori's
+  reference to a first-party daemon.
+- Workspaces with an active proxied WebSocket session keep the managed fallback
+  from being reaped as idle.
+- If a fallback PID/runtime file is stale, Codori cleans it up and starts a
+  fresh managed runtime.
 
 This keeps the browser UI stateless with respect to process ownership while preserving workspace context through explicit Codex app-server `cwd` parameters.
 
@@ -365,9 +394,10 @@ When you open a stopped project and start chatting, Codori ensures the shared ap
 
 - Scans a configured root directory and finds descendant directories that contain a direct `.git` child.
 - Exposes CLI commands to list, start, stop, and inspect logical project workspace runtimes.
-- Starts one shared Codex app-server process on demand.
-- Allocates a free TCP port from a configured safe range.
-- Stores runtime metadata under `~/.codori/run/`.
+- Prefers the first-party Codex remote-control daemon over a managed fallback.
+- Starts at most one managed app-server fallback on demand and allocates it a
+  free TCP port from a configured safe range.
+- Stores metadata only for the managed fallback under `~/.codori/run/`.
 - Provides a Nuxt UI dashboard for project selection, chat, and thread resume.
 - Provides bounded, read-only workspace file navigation and local file preview.
 - Proxies browser WebSocket traffic for each project or chat workspace to the shared app-server.
