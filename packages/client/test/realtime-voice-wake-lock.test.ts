@@ -51,7 +51,9 @@ describe('realtime voice wake lock', () => {
     expect(fixture.request).not.toHaveBeenCalled()
     state.value = 'starting'
     await nextTick()
-    expect(fixture.request).toHaveBeenCalledWith('screen')
+    await vi.waitFor(() => {
+      expect(fixture.request).toHaveBeenCalledWith('screen')
+    })
 
     state.value = 'connected'
     await nextTick()
@@ -59,7 +61,9 @@ describe('realtime voice wake lock', () => {
 
     state.value = 'closed'
     await nextTick()
-    expect(fixture.release).toHaveBeenCalledTimes(1)
+    await vi.waitFor(() => {
+      expect(fixture.release).toHaveBeenCalledTimes(1)
+    })
 
     scope.stop()
   })
@@ -99,14 +103,58 @@ describe('realtime voice wake lock', () => {
 
     state.value = 'starting'
     await nextTick()
+    await vi.waitFor(() => {
+      expect(fixture.request).toHaveBeenCalledTimes(1)
+    })
     state.value = 'closed'
     await nextTick()
-    expect(fixture.release).toHaveBeenCalledTimes(1)
+    expect(fixture.release).not.toHaveBeenCalled()
 
     pendingRequest.resolve()
     await pendingRequest.promise
-    await Promise.resolve()
-    expect(fixture.release).toHaveBeenCalledTimes(2)
+    await vi.waitFor(() => {
+      expect(fixture.release).toHaveBeenCalledTimes(1)
+    })
+
+    scope.stop()
+  })
+
+  it('serializes stop and restart behind an older pending request', async () => {
+    const state = ref<RealtimeSessionState>('idle')
+    const firstRequest = deferred()
+    const fixture = createFixture({
+      request: () => firstRequest.promise
+    })
+    const scope = effectScope()
+    scope.run(() => useRealtimeVoiceWakeLock(state, fixture.createWakeLock))
+
+    state.value = 'starting'
+    await nextTick()
+    await vi.waitFor(() => {
+      expect(fixture.request).toHaveBeenCalledTimes(1)
+    })
+    state.value = 'closed'
+    await nextTick()
+    state.value = 'starting'
+    await nextTick()
+
+    expect(fixture.request).toHaveBeenCalledTimes(1)
+    expect(fixture.release).not.toHaveBeenCalled()
+
+    fixture.active.value = true
+    firstRequest.resolve()
+    await firstRequest.promise
+    await vi.waitFor(() => {
+      expect(fixture.active.value).toBe(true)
+    })
+    expect(fixture.request).toHaveBeenCalledTimes(1)
+    expect(fixture.release).not.toHaveBeenCalled()
+
+    state.value = 'closed'
+    await nextTick()
+    await vi.waitFor(() => {
+      expect(fixture.release).toHaveBeenCalledTimes(1)
+    })
 
     scope.stop()
   })
