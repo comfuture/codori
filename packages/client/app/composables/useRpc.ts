@@ -3,12 +3,32 @@ import { encodeChatIdSegment, encodeProjectIdSegment } from '~~/shared/codori'
 import { CodexRpcClient } from '~~/shared/codex-rpc'
 import { resolveWsBase } from '~~/shared/network'
 
-const clients = new Map<string, CodexRpcClient>()
+export type RpcWorkspace = { kind: 'project', id: string } | { kind: 'chat', id: string }
+
+export type RpcWorkspaceClient = {
+  workspace: RpcWorkspace
+  client: CodexRpcClient
+}
+
+const clients = new Map<string, RpcWorkspaceClient>()
+const clientObservers = new Set<(entry: RpcWorkspaceClient) => void>()
+
+export const listRpcWorkspaceClients = () => [...clients.values()]
+
+export const observeRpcWorkspaceClients = (observer: (entry: RpcWorkspaceClient) => void) => {
+  clientObservers.add(observer)
+  for (const entry of clients.values()) {
+    observer(entry)
+  }
+  return () => {
+    clientObservers.delete(observer)
+  }
+}
 
 export const useRpc = () => {
   const runtimeConfig = useRuntimeConfig()
 
-  const createWorkspaceClient = (workspace: { kind: 'project', id: string } | { kind: 'chat', id: string }) => {
+  const createWorkspaceClient = (workspace: RpcWorkspace) => {
     const wsBase = resolveWsBase(
       String(runtimeConfig.public.serverWsBase ?? ''),
       String(runtimeConfig.public.serverBase ?? '')
@@ -23,15 +43,19 @@ export const useRpc = () => {
     return new CodexRpcClient(url)
   }
 
-  const getWorkspaceClient = (workspace: { kind: 'project', id: string } | { kind: 'chat', id: string }) => {
+  const getWorkspaceClient = (workspace: RpcWorkspace) => {
     const cacheKey = `${workspace.kind}:${workspace.id}`
     const existing = clients.get(cacheKey)
     if (existing) {
-      return existing
+      return existing.client
     }
 
     const client = createWorkspaceClient(workspace)
-    clients.set(cacheKey, client)
+    const entry = { workspace, client }
+    clients.set(cacheKey, entry)
+    for (const observer of clientObservers) {
+      observer(entry)
+    }
     return client
   }
 

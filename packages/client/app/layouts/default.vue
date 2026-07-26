@@ -122,6 +122,7 @@ const sidebarUi = computed(() =>
 
       <template #footer>
         <div class="flex w-full items-center gap-2">
+          <SystemNotificationButton :collapsed="sidebarCollapsed" />
           <span
             v-if="!sidebarCollapsed"
             class="min-w-0 flex-1 truncate text-xs text-muted"
@@ -136,6 +137,7 @@ const sidebarUi = computed(() =>
     </UDashboardSidebar>
 
     <GlobalCommandPalette v-model:open="commandPaletteOpen" />
+    <ActivityNotifications />
 
     <NuxtPage />
   </UDashboardGroup>
