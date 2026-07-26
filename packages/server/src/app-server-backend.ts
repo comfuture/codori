@@ -179,7 +179,11 @@ export const probeDaemonSocket = async (
               name: 'codori',
               version: '0.0.0'
             },
-            capabilities: null
+            capabilities: {
+              experimentalApi: true,
+              requestAttestation: false,
+              optOutNotificationMethods: null
+            }
           }
         }))
       },
