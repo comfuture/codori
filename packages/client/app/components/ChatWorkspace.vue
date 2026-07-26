@@ -82,6 +82,7 @@ import { useWorkspaceGitBranch } from '../composables/useWorkspaceGitBranch'
 import { useWorkspaceTerminalSurface } from '../composables/useWorkspaceTerminalSurface'
 import {
   isRealtimeVoiceActiveElsewhere,
+  promoteSharedRealtimeConversation,
   useSharedRealtimeConversation
 } from '../composables/useSharedRealtimeConversation'
 import { sortSidebarProjects } from '../utils/project-sidebar-order'
@@ -2851,6 +2852,7 @@ const promoteDraftChatSession = (chatId: string) => {
 
   const nextWorkspaceSessionKey = `chat:${chatId}`
   promoteChatSession(workspaceSessionKey, nextWorkspaceSessionKey)
+  promoteSharedRealtimeConversation(workspaceSessionKey, nextWorkspaceSessionKey)
   promoteThreadSummaries(workspaceSessionKey, nextWorkspaceSessionKey)
   promotePendingUserRequestSessions(workspaceSessionKey, nextWorkspaceSessionKey)
 }
