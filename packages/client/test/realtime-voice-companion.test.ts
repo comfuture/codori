@@ -54,7 +54,11 @@ const avatar: ServerAvatarMetadata = {
 
 const UPopoverStub = defineComponent({
   props: {
-    open: Boolean
+    open: Boolean,
+    ui: {
+      type: Object,
+      default: () => ({})
+    }
   },
   setup(props, { slots }) {
     return () => h('div', { 'data-testid': 'popover-stub' }, [
@@ -191,6 +195,24 @@ describe('RealtimeVoiceCompanion', () => {
     expect(wrapper.get('[data-testid="realtime-transcript-assistant"]').text())
       .toContain('It is still streaming.')
     expect(wrapper.get('[aria-live="polite"]').text()).toBe('Codex: It is ready.')
+  })
+
+  it('uses one popover surface for matching border, fill, and corner radius', () => {
+    const wrapper = mountCompanion([
+      transcript(1, 'assistant', 'One consistent surface')
+    ])
+    const popover = wrapper.findComponent(UPopoverStub)
+    const bubble = wrapper.get('[data-testid="realtime-voice-bubble"]')
+
+    expect(popover.props('ui')).toEqual({
+      content: 'rounded-xl bg-elevated/95 shadow-xl ring ring-default backdrop-blur'
+    })
+    expect(bubble.classes()).not.toContain('rounded-xl')
+    expect(bubble.classes()).not.toContain('border')
+    expect(bubble.classes()).not.toContain('bg-elevated/95')
+    expect(bubble.classes()).not.toContain('shadow-xl')
+
+    wrapper.unmount()
   })
 
   it('announces the segment that finalizes during overlapping speech', async () => {

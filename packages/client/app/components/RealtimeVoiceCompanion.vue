@@ -168,6 +168,9 @@ onBeforeUnmount(() => {
     <UPopover
       :open="bubbleOpen && entries.length > 0"
       :content="{ side: 'top', align: 'end', sideOffset: 10 }"
+      :ui="{
+        content: 'rounded-xl bg-elevated/95 shadow-xl ring ring-default backdrop-blur'
+      }"
       @update:open="updateBubbleOpen"
     >
       <span class="block drop-shadow-lg">
@@ -182,7 +185,7 @@ onBeforeUnmount(() => {
       <template #content>
         <div
           data-testid="realtime-voice-bubble"
-          class="pointer-events-none w-[min(20rem,calc(100vw-2rem))] space-y-3 rounded-xl border border-default bg-elevated/95 p-3 shadow-xl backdrop-blur"
+          class="pointer-events-none w-[min(20rem,calc(100vw-2rem))] space-y-3 p-3"
         >
           <div
             v-for="entry in entries"
