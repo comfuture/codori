@@ -4,12 +4,13 @@ import { rm } from 'node:fs/promises'
 import { createServer as createNetServer } from 'node:net'
 import os from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import WebSocket, { WebSocketServer } from 'ws'
 import { resolveProjectAttachmentsDir } from '../src/attachment-store.js'
 import { CodoriError } from '../src/errors.js'
 import { createHttpServer, startHttpServer, type RuntimeManagerLike } from '../src/http-server.js'
 import { MAX_LOCAL_FILE_VIEW_BYTES } from '../src/local-file-viewer.js'
+import type { ServerAvatarResolver } from '../src/server-avatar.js'
 import type { ServiceUpdateController } from '../src/service-update.js'
 import type {
   ChatSessionStatusRecord,
@@ -763,6 +764,188 @@ describe('createHttpServer', () => {
       })
       client.once('error', reject)
     })
+  })
+
+  it('handles Codori avatar RPC locally without leaking internal requests', async () => {
+    const backend = new WebSocketServer({
+      host: '127.0.0.1',
+      port: 0
+    })
+    startedSocketServers.push(backend)
+    await new Promise<void>((resolvePromise) => {
+      backend.once('listening', resolvePromise)
+    })
+    const address = backend.address()
+    if (!address || typeof address === 'string') {
+      throw new Error('Failed to get test server address.')
+    }
+
+    const backendMethods: string[] = []
+    backend.on('connection', (socket: WebSocket) => {
+      socket.on('message', (message: WebSocket.RawData) => {
+        const payload = JSON.parse(rawDataToString(message)) as {
+          id?: string | number
+          method?: string
+          params?: { watchId?: string }
+        }
+        if (payload.method) {
+          backendMethods.push(payload.method)
+        }
+        if (payload.method === 'initialize') {
+          socket.send(JSON.stringify({
+            id: payload.id,
+            result: {
+              codexHome: '/tmp/codori-avatar-home',
+              userAgent: 'codex-test'
+            }
+          }))
+          return
+        }
+        if (payload.method === 'config/read') {
+          socket.send(JSON.stringify({
+            id: payload.id,
+            result: {
+              config: {
+                desktop: {
+                  'selected-avatar-id': 'codex'
+                }
+              }
+            }
+          }))
+          return
+        }
+        if (payload.method === 'fs/watch' || payload.method === 'fs/unwatch') {
+          socket.send(JSON.stringify({
+            id: payload.id,
+            result: {}
+          }))
+        }
+      })
+    })
+
+    const avatarBytes = Buffer.from('avatar-sprite')
+    const invalidate = vi.fn()
+    const avatarResolver = {
+      serverId: () => 'server-test',
+      invalidate,
+      resolve: async () => ({
+        metadata: {
+          serverId: 'server-test',
+          serverLabel: 'test-host',
+          avatarId: 'builtin:codex',
+          source: 'builtin',
+          displayName: 'Codex',
+          description: 'The original Codex companion',
+          revision: 'revision-test',
+          mimeType: 'image/webp',
+          frame: {
+            width: 192,
+            height: 208,
+            columns: 8,
+            rows: 9,
+            frameCount: 72
+          },
+          animations: {
+            idle: {
+              frames: [{ spriteIndex: 0, durationMs: 1000 }],
+              loopStart: 0,
+              fallback: 'idle'
+            }
+          }
+        },
+        bytes: avatarBytes,
+        watchPath: null
+      })
+    } as unknown as ServerAvatarResolver
+    const app = await createHttpServer(createManager({
+      startProject: () => ({
+        ...createProjectRecord(),
+        port: address.port,
+        reusedExisting: true
+      } satisfies StartProjectResult)
+    }), {
+      avatarResolver
+    })
+    startedApps.push(app)
+    await app.listen({ host: '127.0.0.1', port: 0 })
+    const serverAddress = app.addresses()[0]
+    const client = new WebSocket(
+      `ws://127.0.0.1:${serverAddress.port}/api/projects/demo/rpc`
+    )
+    const pending = new Map<string | number, {
+      resolve: (payload: Record<string, unknown>) => void
+      reject: (error: Error) => void
+    }>()
+    client.on('message', (message: WebSocket.RawData) => {
+      const payload = JSON.parse(rawDataToString(message)) as Record<string, unknown>
+      const id = payload.id
+      if ((typeof id === 'string' || typeof id === 'number') && pending.has(id)) {
+        pending.get(id)!.resolve(payload)
+        pending.delete(id)
+      }
+    })
+    await new Promise<void>((resolvePromise, reject) => {
+      client.once('open', resolvePromise)
+      client.once('error', reject)
+    })
+    const request = (
+      id: string | number,
+      method: string,
+      params?: unknown
+    ) => new Promise<Record<string, unknown>>((resolvePromise, reject) => {
+      const timer = setTimeout(() => {
+        pending.delete(id)
+        reject(new Error(`Timed out waiting for ${method}.`))
+      }, 2000)
+      pending.set(id, {
+        resolve: (payload) => {
+          clearTimeout(timer)
+          resolvePromise(payload)
+        },
+        reject
+      })
+      client.send(JSON.stringify({ id, method, ...(params === undefined ? {} : { params }) }))
+    })
+
+    expect(await request(1, 'initialize', {})).toMatchObject({
+      result: {
+        codexHome: '/tmp/codori-avatar-home'
+      }
+    })
+    client.send(JSON.stringify({ method: 'initialized' }))
+
+    expect(await request(2, 'codori/avatar/read')).toMatchObject({
+      result: {
+        avatar: {
+          serverId: 'server-test',
+          avatarId: 'builtin:codex',
+          revision: 'revision-test'
+        }
+      }
+    })
+    expect(await request(3, 'codori/avatar/sprites', {
+      avatarId: 'builtin:codex',
+      revision: 'revision-test'
+    })).toEqual({
+      id: 3,
+      result: {
+        avatarId: 'builtin:codex',
+        revision: 'revision-test',
+        mimeType: 'image/webp',
+        data: avatarBytes.toString('base64')
+      }
+    })
+    expect(await request(4, 'codori/avatar/unknown')).toMatchObject({
+      error: {
+        code: -32601
+      }
+    })
+    expect(backendMethods).toContain('config/read')
+    expect(backendMethods).not.toContain('codori/avatar/read')
+    expect(backendMethods).not.toContain('codori/avatar/sprites')
+    expect(backendMethods).not.toContain('codori/avatar/unknown')
+    expect(invalidate).not.toHaveBeenCalled()
+    client.close()
   })
 
   it('bridges project and chat websocket routes to the same runtime port', async () => {

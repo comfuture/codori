@@ -1,5 +1,4 @@
 import { readFile, stat } from 'node:fs/promises'
-import net from 'node:net'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, isAbsolute, join, resolve } from 'node:path'
@@ -22,6 +21,7 @@ import {
   resolveProjectAttachmentsDir
 } from './attachment-store.js'
 import { CodoriError } from './errors.js'
+import { bridgeCodexRpcWebSocket } from './codori-rpc-bridge.js'
 import { createGitBranch, listGitBranches, switchGitBranch } from './git.js'
 import { LocalFileViewError, readProjectLocalFile, type LocalFileReadResult } from './local-file-viewer.js'
 import { createRuntimeManager } from './process-manager.js'
@@ -35,6 +35,7 @@ import {
   type ServiceUpdateController,
   type ServiceUpdateStatus
 } from './service-update.js'
+import { ServerAvatarResolver } from './server-avatar.js'
 import type {
   ChatSessionStatusRecord,
   DeleteChatSessionResult,
@@ -137,6 +138,7 @@ export type HttpServerOptions = {
   clientBundleDir?: string | null
   attachmentsRootDir?: string | null
   serviceUpdateController?: ServiceUpdateController | null
+  avatarResolver?: ServerAvatarResolver
 }
 
 const isCodoriError = (error: unknown): error is CodoriError =>
@@ -297,46 +299,6 @@ const touchChatActivityInBackground = (
   void task.catch(() => {})
 }
 
-const wait = async (ms: number) =>
-  new Promise<void>((resolvePromise) => {
-    setTimeout(resolvePromise, ms)
-  })
-
-const canConnectToPort = (port: number, host = '127.0.0.1', timeoutMs = 200) =>
-  new Promise<boolean>((resolvePromise) => {
-    const socket = net.createConnection({ host, port })
-    let settled = false
-
-    const settle = (value: boolean) => {
-      if (settled) {
-        return
-      }
-
-      settled = true
-      socket.removeAllListeners()
-      socket.destroy()
-      resolvePromise(value)
-    }
-
-    socket.once('connect', () => settle(true))
-    socket.once('error', () => settle(false))
-    socket.setTimeout(timeoutMs, () => settle(false))
-  })
-
-const waitForPortReady = async (port: number, host = '127.0.0.1', timeoutMs = 5_000) => {
-  const deadline = Date.now() + timeoutMs
-
-  while (Date.now() < deadline) {
-    if (await canConnectToPort(port, host)) {
-      return true
-    }
-
-    await wait(100)
-  }
-
-  return false
-}
-
 export const createHttpServer = async (
   manager: RuntimeManagerLike,
   options: HttpServerOptions = {}
@@ -344,6 +306,7 @@ export const createHttpServer = async (
   const app = Fastify({
     logger: false
   })
+  const avatarResolver = options.avatarResolver ?? new ServerAvatarResolver()
 
   app.addHook('onClose', async () => {
     await resolveValue(manager.dispose?.())
@@ -968,87 +931,23 @@ export const createHttpServer = async (
       }
 
       const chatId = getChatIdFromRequest(request.params.chatId)
-      const pendingClientMessages: Array<{ message: WebSocket.RawData, isBinary: boolean }> = []
       const session = manager.acquireChatSession?.(chatId) ?? null
-      let upstream: WebSocket | null = null
-      let sessionReleased = false
-
-      const releaseSession = () => {
-        if (sessionReleased) {
-          return
-        }
-
-        sessionReleased = true
-        session?.release()
-      }
-
-      const closeBoth = (code = 1011, reason = 'proxy error') => {
-        if (clientSocket.readyState === clientSocket.OPEN || clientSocket.readyState === clientSocket.CONNECTING) {
-          clientSocket.close(code, reason)
-        }
-        if (upstream && (upstream.readyState === WebSocket.OPEN || upstream.readyState === WebSocket.CONNECTING)) {
-          upstream.close(code, reason)
-        }
-      }
-
-      clientSocket.on('message', (message: WebSocket.RawData, isBinary: boolean) => {
-        touchChatActivityInBackground(manager, chatId, session)
-        if (upstream?.readyState === WebSocket.OPEN) {
-          upstream.send(message, { binary: isBinary })
-          return
-        }
-
-        pendingClientMessages.push({ message, isBinary })
-      })
-
-      clientSocket.on('error', () => {
-        closeBoth(1011, 'client websocket failed')
-      })
-
-      clientSocket.on('close', () => {
-        releaseSession()
-        if (upstream && (upstream.readyState === WebSocket.OPEN || upstream.readyState === WebSocket.CONNECTING)) {
-          upstream.close()
-        }
-      })
-
-      void (async () => {
-        const started = await resolveValue(manager.startChatSession!(chatId))
-        if (typeof started.port !== 'number') {
-          closeBoth(1011, 'runtime port unavailable')
-          return
-        }
-
-        const ready = await waitForPortReady(started.port)
-        if (!ready) {
-          closeBoth(1011, 'runtime did not become ready')
-          return
-        }
-
-        upstream = new WebSocket(`ws://127.0.0.1:${started.port}`)
-
-        upstream.once('open', () => {
-          for (const entry of pendingClientMessages.splice(0, pendingClientMessages.length)) {
-            upstream?.send(entry.message, { binary: entry.isBinary })
+      bridgeCodexRpcWebSocket({
+        clientSocket,
+        avatarResolver,
+        startRuntime: async () => {
+          const started = await resolveValue(manager.startChatSession!(chatId))
+          return {
+            port: started.port,
+            workspacePath: started.chatPath
           }
-        })
-
-        upstream.on('message', (message: WebSocket.RawData, isBinary: boolean) => {
+        },
+        touchActivity: () => {
           touchChatActivityInBackground(manager, chatId, session)
-          clientSocket.send(message, { binary: isBinary })
-        })
-
-        upstream.on('error', () => {
-          closeBoth(1011, 'upstream websocket failed')
-        })
-
-        upstream.on('close', () => {
-          if (clientSocket.readyState === clientSocket.OPEN || clientSocket.readyState === clientSocket.CONNECTING) {
-            clientSocket.close()
-          }
-        })
-      })().catch(() => {
-        closeBoth(1011, 'upstream bootstrap failed')
+        },
+        releaseSession: () => {
+          session?.release()
+        }
       })
     }
   )
@@ -1353,87 +1252,23 @@ export const createHttpServer = async (
     { websocket: true },
     async (clientSocket: WebSocket, request: FastifyRequest<{ Params: { projectId: string } }>) => {
       const projectId = getProjectIdFromRequest(request.params.projectId)
-      const pendingClientMessages: Array<{ message: WebSocket.RawData, isBinary: boolean }> = []
       const session = manager.acquireProjectSession?.(projectId) ?? null
-      let upstream: WebSocket | null = null
-      let sessionReleased = false
-
-      const releaseSession = () => {
-        if (sessionReleased) {
-          return
-        }
-
-        sessionReleased = true
-        session?.release()
-      }
-
-      const closeBoth = (code = 1011, reason = 'proxy error') => {
-        if (clientSocket.readyState === clientSocket.OPEN || clientSocket.readyState === clientSocket.CONNECTING) {
-          clientSocket.close(code, reason)
-        }
-        if (upstream && (upstream.readyState === WebSocket.OPEN || upstream.readyState === WebSocket.CONNECTING)) {
-          upstream.close(code, reason)
-        }
-      }
-
-      clientSocket.on('message', (message: WebSocket.RawData, isBinary: boolean) => {
-        touchProjectActivityInBackground(manager, projectId, session)
-        if (upstream?.readyState === WebSocket.OPEN) {
-          upstream.send(message, { binary: isBinary })
-          return
-        }
-
-        pendingClientMessages.push({ message, isBinary })
-      })
-
-      clientSocket.on('error', () => {
-        closeBoth(1011, 'client websocket failed')
-      })
-
-      clientSocket.on('close', () => {
-        releaseSession()
-        if (upstream && (upstream.readyState === WebSocket.OPEN || upstream.readyState === WebSocket.CONNECTING)) {
-          upstream.close()
-        }
-      })
-
-      void (async () => {
-        const started = await resolveValue(manager.startProject(projectId))
-        if (typeof started.port !== 'number') {
-          closeBoth(1011, 'runtime port unavailable')
-          return
-        }
-
-        const ready = await waitForPortReady(started.port)
-        if (!ready) {
-          closeBoth(1011, 'runtime did not become ready')
-          return
-        }
-
-        upstream = new WebSocket(`ws://127.0.0.1:${started.port}`)
-
-        upstream.once('open', () => {
-          for (const entry of pendingClientMessages.splice(0, pendingClientMessages.length)) {
-            upstream?.send(entry.message, { binary: entry.isBinary })
+      bridgeCodexRpcWebSocket({
+        clientSocket,
+        avatarResolver,
+        startRuntime: async () => {
+          const started = await resolveValue(manager.startProject(projectId))
+          return {
+            port: started.port,
+            workspacePath: started.projectPath
           }
-        })
-
-        upstream.on('message', (message: WebSocket.RawData, isBinary: boolean) => {
+        },
+        touchActivity: () => {
           touchProjectActivityInBackground(manager, projectId, session)
-          clientSocket.send(message, { binary: isBinary })
-        })
-
-        upstream.on('error', () => {
-          closeBoth(1011, 'upstream websocket failed')
-        })
-
-        upstream.on('close', () => {
-          if (clientSocket.readyState === clientSocket.OPEN || clientSocket.readyState === clientSocket.CONNECTING) {
-            clientSocket.close()
-          }
-        })
-      })().catch(() => {
-        closeBoth(1011, 'upstream bootstrap failed')
+        },
+        releaseSession: () => {
+          session?.release()
+        }
       })
     }
   )
