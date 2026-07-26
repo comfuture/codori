@@ -107,8 +107,8 @@ const isProcessAlive = (pid: number) => {
   try {
     process.kill(pid, 0)
     return true
-  } catch {
-    return false
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== 'ESRCH'
   }
 }
 
@@ -147,11 +147,10 @@ const terminateProcess = async (pid: number) => {
   try {
     process.kill(pid, 'SIGKILL')
   } catch {
-    return true
+    return !isProcessAlive(pid)
   }
 
-  await waitForExit(pid, CODORI_STOP_TIMEOUT_MS)
-  return true
+  return await waitForExit(pid, CODORI_STOP_TIMEOUT_MS)
 }
 
 const spawnDetached = async (command: string, args: string[], cwd: string) =>
@@ -775,7 +774,9 @@ export class RuntimeManager {
       }
 
       const stopped = await terminateProcess(loaded.record.pid)
-      this.store.removePath(loaded.path)
+      if (stopped || !isProcessAlive(loaded.record.pid)) {
+        this.store.removePath(loaded.path)
+      }
       return stopped ? 1 : 0
     }))
 
@@ -846,7 +847,18 @@ export class RuntimeManager {
       const runtimeProject = this.sharedRuntimeProject()
       const loaded = this.store.load(runtimeProject.path)
       if (loaded.kind === 'valid') {
-        await terminateProcess(loaded.record.pid)
+        const terminated = await terminateProcess(loaded.record.pid)
+        if (!terminated && isProcessAlive(loaded.record.pid)) {
+          const target = this.setActiveTarget(
+            this.managedTarget(loaded.record),
+            'managed-runtime-stop-failed'
+          )
+          this.activateWorkspace(workspace.id)
+          return {
+            target,
+            reusedExisting: true
+          }
+        }
         this.store.remove(runtimeProject.path)
       } else if (loaded.kind === 'invalid') {
         this.store.remove(runtimeProject.path)
@@ -1055,10 +1067,13 @@ export class RuntimeManager {
       return false
     }
 
-    await terminateProcess(runtime.pid)
+    const stopped = await terminateProcess(runtime.pid)
+    if (!stopped && isProcessAlive(runtime.pid)) {
+      return false
+    }
     this.store.remove(runtimeProject.path)
     this.setBackendIdle()
-    return true
+    return stopped
   }
 
   async reapIdleRuntimes() {
@@ -1098,11 +1113,14 @@ export class RuntimeManager {
 
       const now = Date.now()
       if (now - runtime.lastActivityAt >= this.config.idleShutdown.timeoutMs) {
-        await terminateProcess(runtime.pid)
+        const terminated = await terminateProcess(runtime.pid)
+        if (!terminated && isProcessAlive(runtime.pid)) {
+          return 0
+        }
         this.store.remove(runtimeProject.path)
         this.workspaceActivity.clear()
         this.setBackendIdle()
-        stopped = 1
+        stopped = terminated ? 1 : 0
       }
 
       return stopped

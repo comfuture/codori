@@ -105,6 +105,7 @@ export type RuntimeBackendFallbackReason =
   | 'daemon-start-failed'
   | 'invalid-daemon-response'
   | 'incompatible-realtime'
+  | 'managed-runtime-stop-failed'
 
 export type RuntimeBackendStatus = {
   backend: 'codex-daemon' | 'codori-managed' | null

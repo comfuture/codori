@@ -60,6 +60,7 @@ export type RuntimeBackendFallbackReason =
   | 'daemon-start-failed'
   | 'invalid-daemon-response'
   | 'incompatible-realtime'
+  | 'managed-runtime-stop-failed'
 
 export type CodexDaemonTarget = {
   kind: 'codex-daemon'

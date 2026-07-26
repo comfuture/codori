@@ -24,7 +24,8 @@ const fallbackLabels: Record<RuntimeBackendFallbackReason, string> = {
   'daemon-unready': 'The daemon did not complete its app-server handshake.',
   'daemon-start-failed': 'Codori could not ensure the Codex daemon.',
   'invalid-daemon-response': 'The daemon command returned an incompatible response.',
-  'incompatible-realtime': 'The daemon lacks the configured realtime voice capability.'
+  'incompatible-realtime': 'The daemon lacks the configured realtime voice capability.',
+  'managed-runtime-stop-failed': 'The existing managed runtime could not be stopped safely.'
 }
 
 const status = ref<RuntimeBackendStatus>(idleStatus())

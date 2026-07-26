@@ -21,6 +21,15 @@ describe('app-server backend selection', () => {
       .toBe('/Users/test/.codex')
   })
 
+  it('converts synchronous socket construction errors into fallback results', async () => {
+    await expect(probeDaemonSocket('/tmp/invalid\0socket', {
+      timeoutMs: 25
+    })).resolves.toEqual({
+      ready: false,
+      reason: 'daemon-unavailable'
+    })
+  })
+
   it('probes the daemon over its raw Unix JSONL protocol', async () => {
     const root = await mkdtemp('/tmp/codori-daemon-probe-')
     const socketPath = join(root, 'control.sock')
