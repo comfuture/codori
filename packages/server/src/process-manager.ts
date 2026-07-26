@@ -16,7 +16,12 @@ import { cloneProjectIntoRoot } from './git.js'
 import { findAvailablePort } from './ports.js'
 import { scanProjects } from './project-scanner.js'
 import { RuntimeStore } from './runtime-store.js'
+import {
+  AppServerBackendSelector,
+  type DaemonSelectionResult
+} from './app-server-backend.js'
 import type {
+  AppServerTarget,
   ChatSessionRecord,
   ChatSessionStatusRecord,
   CodoriConfig,
@@ -24,6 +29,9 @@ import type {
   DeleteChatSessionResult,
   ProjectRecord,
   ProjectStatusRecord,
+  RuntimeBackendFallbackReason,
+  RuntimeBackendStatus,
+  RuntimeBridgeTarget,
   RuntimeRecord,
   StartChatSessionResult,
   StartProjectResult,
@@ -47,6 +55,14 @@ type RuntimeManagerOptions = {
   configOverrides?: ConfigOverrides
   config?: CodoriConfig
   commandFactory?: CommandFactory
+  backendSelector?: {
+    ensure: () => Promise<DaemonSelectionResult>
+  }
+}
+
+type StartedBackend = {
+  target: AppServerTarget
+  reusedExisting: boolean
 }
 
 type WorkspaceActivityRecord = {
@@ -163,13 +179,25 @@ export class RuntimeManager {
 
   private readonly commandFactory: CommandFactory
 
+  private readonly backendSelector: NonNullable<RuntimeManagerOptions['backendSelector']>
+
   private readonly activeSessions = new Map<string, number>()
 
   private readonly workspaceActivity = new Map<string, WorkspaceActivityRecord>()
 
-  private sharedRuntimeStart: Promise<StartProjectResult> | null = null
+  private sharedRuntimeStart: Promise<StartedBackend> | null = null
 
   private sharedRuntimeStop: Promise<boolean> | null = null
+
+  private activeTarget: AppServerTarget | null = null
+
+  private backendStatus: RuntimeBackendStatus = {
+    backend: null,
+    transport: null,
+    state: 'idle',
+    version: null,
+    fallbackReason: null
+  }
 
   private idleReaper: NodeJS.Timeout | null = null
 
@@ -181,6 +209,18 @@ export class RuntimeManager {
     this.documentsDir = options.documentsDir ?? join(options.homeDir ?? os.homedir(), 'Documents')
     this.commandFactory = options.commandFactory
       ?? ((port) => resolveCodexCommand(port, undefined, this.config.realtimeVoice.enabled))
+    this.backendSelector = options.backendSelector
+      ?? (options.commandFactory
+        ? {
+            ensure: async (): Promise<DaemonSelectionResult> => ({
+              selected: false,
+              reason: 'daemon-unavailable'
+            })
+          }
+        : new AppServerBackendSelector({
+            homeDir: options.homeDir,
+            realtimeVoiceEnabled: this.config.realtimeVoice.enabled
+          }))
 
     if (this.config.idleShutdown.enabled) {
       this.idleReaper = setInterval(() => {
@@ -335,16 +375,21 @@ export class RuntimeManager {
     throw new CodoriError('PROJECT_NOT_FOUND', `Project "${projectId}" was not found under ${this.config.root}.`)
   }
 
-  private normalizeStatus(project: ProjectRecord, runtime: RuntimeRecord | null, error: string | null): ProjectStatusRecord {
+  private normalizeStatus(
+    project: ProjectRecord,
+    target: AppServerTarget | null,
+    error: string | null
+  ): ProjectStatusRecord {
     const activeSessionCount = this.getActiveSessionCount(project.id)
     const activity = this.workspaceActivity.get(project.id) ?? null
-    const running = activity !== null && runtime !== null
+    const running = activity !== null && target !== null
+    const managed = running && target.kind === 'codori-managed' ? target : null
     return {
       projectId: project.id,
       projectPath: project.path,
       status: error ? 'error' : running ? 'running' : 'stopped',
-      pid: running ? runtime.pid : null,
-      port: running ? runtime.port : null,
+      pid: managed?.pid ?? null,
+      port: managed?.port ?? null,
       startedAt: running ? activity.startedAt : null,
       lastActivityAt: running ? activity.lastActivityAt : null,
       activeSessionCount,
@@ -356,18 +401,19 @@ export class RuntimeManager {
 
   private normalizeChatStatus(
     chat: ChatSessionRecord,
-    runtime: RuntimeRecord | null,
+    target: AppServerTarget | null,
     error: string | null
   ): ChatSessionStatusRecord {
     const workspaceId = this.chatRuntimeId(chat.chatId)
     const activeSessionCount = this.getActiveSessionCount(workspaceId)
     const activity = this.workspaceActivity.get(workspaceId) ?? null
-    const running = activity !== null && runtime !== null
+    const running = activity !== null && target !== null
+    const managed = running && target.kind === 'codori-managed' ? target : null
     return {
       ...chat,
       status: error ? 'error' : running ? 'running' : 'stopped',
-      pid: running ? runtime.pid : null,
-      port: running ? runtime.port : null,
+      pid: managed?.pid ?? null,
+      port: managed?.port ?? null,
       startedAt: running ? activity.startedAt : null,
       lastActivityAt: running ? activity.lastActivityAt : null,
       activeSessionCount,
@@ -400,6 +446,69 @@ export class RuntimeManager {
   private writeRuntime(record: RuntimeRecord) {
     this.store.write(record)
     return record
+  }
+
+  private managedTarget(record: RuntimeRecord): AppServerTarget {
+    return {
+      kind: 'codori-managed',
+      transport: 'tcp-websocket',
+      port: record.port,
+      pid: record.pid,
+      ownedByCodori: true,
+      appServerVersion: null
+    }
+  }
+
+  private setActiveTarget(
+    target: AppServerTarget,
+    fallbackReason: RuntimeBackendFallbackReason | null
+  ) {
+    this.activeTarget = target
+    this.backendStatus = {
+      backend: target.kind,
+      transport: target.transport,
+      state: target.kind === 'codex-daemon' ? 'ready' : 'fallback',
+      version: target.appServerVersion,
+      fallbackReason
+    }
+    return target
+  }
+
+  private setBackendIdle() {
+    this.activeTarget = null
+    this.backendStatus = {
+      backend: null,
+      transport: null,
+      state: 'idle',
+      version: null,
+      fallbackReason: null
+    }
+  }
+
+  getRuntimeBackendStatus(): RuntimeBackendStatus {
+    return {
+      ...this.backendStatus
+    }
+  }
+
+  private activeRuntimeTarget() {
+    if (this.activeTarget?.kind === 'codex-daemon') {
+      return this.activeTarget
+    }
+
+    const runtime = this.loadActiveRuntime()
+    if (!runtime) {
+      if (this.activeTarget?.kind === 'codori-managed') {
+        this.setBackendIdle()
+      }
+      return null
+    }
+
+    const target = this.managedTarget(runtime)
+    if (this.activeTarget?.kind === 'codori-managed') {
+      this.activeTarget = target
+    }
+    return target
   }
 
   private touchRuntimeRecord(record: RuntimeRecord, at = Date.now()) {
@@ -515,18 +624,30 @@ export class RuntimeManager {
   }
 
   private readRunningRuntime(project: ProjectRecord) {
+    if (this.activeTarget?.kind === 'codex-daemon') {
+      return this.normalizeStatus(project, this.activeTarget, null)
+    }
     const shared = this.readSharedRuntime()
-    return this.normalizeStatus(project, shared.runtime, shared.error)
+    return this.normalizeStatus(
+      project,
+      shared.runtime ? this.managedTarget(shared.runtime) : null,
+      shared.error
+    )
   }
 
   private touchProjectRuntime(project: ProjectRecord, at = Date.now()) {
+    if (this.activeTarget?.kind === 'codex-daemon') {
+      this.touchWorkspaceActivity(project.id, at)
+      return this.normalizeStatus(project, this.activeTarget, null)
+    }
     const runtime = this.loadActiveRuntime()
     if (!runtime) {
       return this.normalizeStatus(project, null, null)
     }
 
     this.touchWorkspaceActivity(project.id, at)
-    return this.normalizeStatus(project, this.touchRuntimeRecord(runtime, at), null)
+    const touched = this.touchRuntimeRecord(runtime, at)
+    return this.normalizeStatus(project, this.managedTarget(touched), null)
   }
 
   noteProjectActivity(projectId: string, at = Date.now()) {
@@ -608,6 +729,40 @@ export class RuntimeManager {
     return await this.startResolvedProject(project)
   }
 
+  async getProjectBridgeTarget(projectId: string): Promise<RuntimeBridgeTarget> {
+    const project = this.resolveProject(projectId)
+    const started = await this.startSharedRuntime(project)
+    return {
+      target: started.target,
+      workspacePath: project.path
+    }
+  }
+
+  async getChatBridgeTarget(chatId: string): Promise<RuntimeBridgeTarget> {
+    const chat = this.resolveChatSession(chatId)
+    const workspace = this.chatToRuntimeProject(chat)
+    const started = await this.startSharedRuntime(workspace)
+    return {
+      target: started.target,
+      workspacePath: chat.chatPath
+    }
+  }
+
+  invalidateRuntimeTarget(target: AppServerTarget) {
+    const active = this.activeTarget
+    if (!active || active.kind !== target.kind) {
+      return
+    }
+    const matches = active.kind === 'codex-daemon'
+      ? target.kind === 'codex-daemon' && active.socketPath === target.socketPath
+      : target.kind === 'codori-managed'
+        && active.pid === target.pid
+        && active.port === target.port
+    if (matches && active.kind === 'codex-daemon') {
+      this.setBackendIdle()
+    }
+  }
+
   async resetStoredRuntimes() {
     const resetResults = await Promise.all(this.store.list().map(async (loaded): Promise<number> => {
       if (loaded.kind === 'invalid') {
@@ -626,31 +781,46 @@ export class RuntimeManager {
 
     this.activeSessions.clear()
     this.workspaceActivity.clear()
+    this.setBackendIdle()
     return resetResults.reduce((total, stopped) => total + stopped, 0)
   }
 
   private async startResolvedProject(project: ProjectRecord): Promise<StartProjectResult> {
     const started = await this.startSharedRuntime(project)
     return {
-      ...this.normalizeStatus(project, this.loadActiveRuntime(), null),
+      ...this.normalizeStatus(project, started.target, null),
       reusedExisting: started.reusedExisting
     }
   }
 
-  private async startSharedRuntime(workspace: ProjectRecord): Promise<StartProjectResult> {
+  private async startSharedRuntime(workspace: ProjectRecord): Promise<StartedBackend> {
     if (this.sharedRuntimeStop) {
       await this.sharedRuntimeStop
     }
 
-    if (this.sharedRuntimeStart) {
-      await this.sharedRuntimeStart
-      const runtime = this.loadActiveRuntime()
-      this.activateWorkspace(workspace.id)
-      if (!runtime) {
-        throw new CodoriError('PROCESS_START_FAILED', 'Shared app-server runtime did not start.')
+    if (this.activeTarget) {
+      const target = this.activeRuntimeTarget()
+      if (target) {
+        const now = Date.now()
+        this.activateWorkspace(workspace.id, now)
+        if (target.kind === 'codori-managed') {
+          const runtime = this.loadActiveRuntime()
+          if (runtime) {
+            this.touchRuntimeRecord(runtime, now)
+          }
+        }
+        return {
+          target,
+          reusedExisting: true
+        }
       }
+    }
+
+    if (this.sharedRuntimeStart) {
+      const started = await this.sharedRuntimeStart
+      this.activateWorkspace(workspace.id)
       return {
-        ...this.normalizeStatus(workspace, this.touchRuntimeRecord(runtime), null),
+        target: started.target,
         reusedExisting: true
       }
     }
@@ -663,7 +833,39 @@ export class RuntimeManager {
     }
   }
 
-  private async startSharedRuntimeNow(workspace: ProjectRecord): Promise<StartProjectResult> {
+  private async startSharedRuntimeNow(workspace: ProjectRecord): Promise<StartedBackend> {
+    this.backendStatus = {
+      backend: null,
+      transport: null,
+      state: 'probing',
+      version: null,
+      fallbackReason: null
+    }
+    const daemon = await this.backendSelector.ensure()
+    if (daemon.selected) {
+      const runtimeProject = this.sharedRuntimeProject()
+      const loaded = this.store.load(runtimeProject.path)
+      if (loaded.kind === 'valid') {
+        await terminateProcess(loaded.record.pid)
+        this.store.remove(runtimeProject.path)
+      } else if (loaded.kind === 'invalid') {
+        this.store.remove(runtimeProject.path)
+      }
+      const target = this.setActiveTarget(daemon.target, null)
+      this.activateWorkspace(workspace.id)
+      return {
+        target,
+        reusedExisting: daemon.reusedExisting
+      }
+    }
+
+    return await this.startManagedRuntimeNow(workspace, daemon.reason)
+  }
+
+  private async startManagedRuntimeNow(
+    workspace: ProjectRecord,
+    fallbackReason: RuntimeBackendFallbackReason
+  ): Promise<StartedBackend> {
     const runtimeProject = this.sharedRuntimeProject()
     const loaded = this.store.load(runtimeProject.path)
 
@@ -671,8 +873,12 @@ export class RuntimeManager {
       const now = Date.now()
       this.activateWorkspace(workspace.id, now)
       const runtime = this.touchRuntimeRecord(loaded.record, now)
+      const target = this.setActiveTarget(
+        this.managedTarget(runtime),
+        fallbackReason
+      )
       return {
-        ...this.normalizeStatus(workspace, runtime, null),
+        target,
         reusedExisting: true
       }
     }
@@ -700,27 +906,43 @@ export class RuntimeManager {
     }
     this.writeRuntime(runtime)
     this.activateWorkspace(workspace.id, now)
+    const target = this.setActiveTarget(
+      this.managedTarget(runtime),
+      fallbackReason
+    )
 
     return {
-      ...this.normalizeStatus(workspace, runtime, null),
+      target,
       reusedExisting: false
     }
   }
 
   private readRunningChatRuntime(chat: ChatSessionRecord) {
+    if (this.activeTarget?.kind === 'codex-daemon') {
+      return this.normalizeChatStatus(chat, this.activeTarget, null)
+    }
     const shared = this.readSharedRuntime()
-    return this.normalizeChatStatus(chat, shared.runtime, shared.error)
+    return this.normalizeChatStatus(
+      chat,
+      shared.runtime ? this.managedTarget(shared.runtime) : null,
+      shared.error
+    )
   }
 
   private touchChatRuntime(chat: ChatSessionRecord, at = Date.now()) {
     const runtimeProject = this.chatToRuntimeProject(chat)
+    if (this.activeTarget?.kind === 'codex-daemon') {
+      this.touchWorkspaceActivity(runtimeProject.id, at)
+      return this.normalizeChatStatus(chat, this.activeTarget, null)
+    }
     const runtime = this.loadActiveRuntime()
     if (!runtime) {
       return this.normalizeChatStatus(chat, null, null)
     }
 
     this.touchWorkspaceActivity(runtimeProject.id, at)
-    return this.normalizeChatStatus(chat, this.touchRuntimeRecord(runtime, at), null)
+    const touched = this.touchRuntimeRecord(runtime, at)
+    return this.normalizeChatStatus(chat, this.managedTarget(touched), null)
   }
 
   async createChatSession(): Promise<StartChatSessionResult> {
@@ -821,14 +1043,21 @@ export class RuntimeManager {
       return false
     }
 
+    if (this.activeTarget?.kind === 'codex-daemon') {
+      this.setBackendIdle()
+      return false
+    }
+
     const runtimeProject = this.sharedRuntimeProject()
     const runtime = this.loadActiveRuntime()
     if (!runtime) {
+      this.setBackendIdle()
       return false
     }
 
     await terminateProcess(runtime.pid)
     this.store.remove(runtimeProject.path)
+    this.setBackendIdle()
     return true
   }
 
@@ -841,6 +1070,22 @@ export class RuntimeManager {
     let stopped = 0
 
     try {
+      if (this.activeTarget?.kind === 'codex-daemon') {
+        if (this.getTotalActiveSessionCount() > 0) {
+          return 0
+        }
+        const lastActivityAt = Math.max(
+          0,
+          ...[...this.workspaceActivity.values()].map(activity => activity.lastActivityAt)
+        )
+        if (lastActivityAt > 0
+          && Date.now() - lastActivityAt >= this.config.idleShutdown.timeoutMs) {
+          this.workspaceActivity.clear()
+          this.setBackendIdle()
+        }
+        return 0
+      }
+
       const runtimeProject = this.sharedRuntimeProject()
       const runtime = this.loadActiveRuntime()
       if (!runtime) {
@@ -856,6 +1101,7 @@ export class RuntimeManager {
         await terminateProcess(runtime.pid)
         this.store.remove(runtimeProject.path)
         this.workspaceActivity.clear()
+        this.setBackendIdle()
         stopped = 1
       }
 
@@ -881,5 +1127,6 @@ export const createRuntimeManager = (options: RuntimeManagerOptions = {}) =>
     documentsDir: options.documentsDir,
     configOverrides: options.configOverrides,
     config: options.config,
-    commandFactory: options.commandFactory
+    commandFactory: options.commandFactory,
+    backendSelector: options.backendSelector
   })

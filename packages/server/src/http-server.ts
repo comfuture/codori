@@ -37,9 +37,12 @@ import {
 } from './service-update.js'
 import { ServerAvatarResolver } from './server-avatar.js'
 import type {
+  AppServerTarget,
   ChatSessionStatusRecord,
   DeleteChatSessionResult,
   ProjectStatusRecord,
+  RuntimeBackendStatusResponse,
+  RuntimeBridgeTarget,
   ServerCapabilitiesResponse,
   StartChatSessionResult,
   StartProjectResult,
@@ -61,6 +64,10 @@ export type RuntimeManagerLike = {
   updateChatSessionThread?: (chatId: string, threadId: string | null) => MaybePromise<UpdateChatSessionThreadResult>
   startProject: (projectId: string) => MaybePromise<StartProjectResult>
   startChatSession?: (chatId: string) => MaybePromise<StartChatSessionResult>
+  getProjectBridgeTarget?: (projectId: string) => MaybePromise<RuntimeBridgeTarget>
+  getChatBridgeTarget?: (chatId: string) => MaybePromise<RuntimeBridgeTarget>
+  getRuntimeBackendStatus?: () => RuntimeBackendStatusResponse['backend']
+  invalidateRuntimeTarget?: (target: AppServerTarget) => void
   stopProject: (projectId: string) => MaybePromise<ProjectStatusRecord>
   stopChatSession?: (chatId: string) => MaybePromise<ChatSessionStatusRecord>
   noteProjectActivity?: (projectId: string) => MaybePromise<ProjectStatusRecord | void>
@@ -372,6 +379,16 @@ export const createHttpServer = async (
         experimental: true,
         feature: 'realtime_conversation'
       }
+    }
+  }))
+
+  app.get('/api/runtime/backend', async (): Promise<RuntimeBackendStatusResponse> => ({
+    backend: manager.getRuntimeBackendStatus?.() ?? {
+      backend: null,
+      transport: null,
+      state: 'idle',
+      version: null,
+      fallbackReason: null
     }
   }))
 
@@ -936,9 +953,22 @@ export const createHttpServer = async (
         clientSocket,
         avatarResolver,
         startRuntime: async () => {
+          if (manager.getChatBridgeTarget) {
+            return await resolveValue(manager.getChatBridgeTarget(chatId))
+          }
           const started = await resolveValue(manager.startChatSession!(chatId))
+          if (started.pid === null || started.port === null) {
+            throw new Error('Chat runtime did not report a managed app-server target.')
+          }
           return {
-            port: started.port,
+            target: {
+              kind: 'codori-managed',
+              transport: 'tcp-websocket',
+              port: started.port,
+              pid: started.pid,
+              ownedByCodori: true,
+              appServerVersion: null
+            },
             workspacePath: started.chatPath
           }
         },
@@ -947,7 +977,8 @@ export const createHttpServer = async (
         },
         releaseSession: () => {
           session?.release()
-        }
+        },
+        invalidateTarget: target => manager.invalidateRuntimeTarget?.(target)
       })
     }
   )
@@ -1257,9 +1288,22 @@ export const createHttpServer = async (
         clientSocket,
         avatarResolver,
         startRuntime: async () => {
+          if (manager.getProjectBridgeTarget) {
+            return await resolveValue(manager.getProjectBridgeTarget(projectId))
+          }
           const started = await resolveValue(manager.startProject(projectId))
+          if (started.pid === null || started.port === null) {
+            throw new Error('Project runtime did not report a managed app-server target.')
+          }
           return {
-            port: started.port,
+            target: {
+              kind: 'codori-managed',
+              transport: 'tcp-websocket',
+              port: started.port,
+              pid: started.pid,
+              ownedByCodori: true,
+              appServerVersion: null
+            },
             workspacePath: started.projectPath
           }
         },
@@ -1268,7 +1312,8 @@ export const createHttpServer = async (
         },
         releaseSession: () => {
           session?.release()
-        }
+        },
+        invalidateTarget: target => manager.invalidateRuntimeTarget?.(target)
       })
     }
   )
