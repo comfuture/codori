@@ -97,6 +97,27 @@ export type ServerCapabilitiesResponse = {
   }
 }
 
+export type RuntimeBackendFallbackReason =
+  | 'unsupported-platform'
+  | 'daemon-unavailable'
+  | 'permission-denied'
+  | 'daemon-unready'
+  | 'daemon-start-failed'
+  | 'invalid-daemon-response'
+  | 'incompatible-realtime'
+
+export type RuntimeBackendStatus = {
+  backend: 'codex-daemon' | 'codori-managed' | null
+  transport: 'unix-socket' | 'tcp-websocket' | null
+  state: 'idle' | 'probing' | 'ready' | 'fallback'
+  version: string | null
+  fallbackReason: RuntimeBackendFallbackReason | null
+}
+
+export type RuntimeBackendStatusResponse = {
+  backend: RuntimeBackendStatus
+}
+
 export type ProjectGitBranchesResponse = {
   currentBranch: string | null
   branches: string[]

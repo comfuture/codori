@@ -1,6 +1,6 @@
 # @codori/server
 
-Codori server for Git project discovery, Codex app-server lifecycle management, and bundled dashboard serving.
+Codori server for Git project discovery, Codex app-server backend selection, fallback lifecycle management, and bundled dashboard serving.
 
 ## Usage
 
@@ -25,9 +25,48 @@ avatar manifests. Only validated metadata and bounded PNG/WebP bytes cross the
 proxy; remote filesystem paths are never returned to the browser. Invalid or
 unavailable avatars fall back to a bundled icon.
 
-`@codori/server` includes the Codex CLI runtime it uses to start app-server. A separate global `codex` installation is not required. Set `CODORI_CODEX_BIN` to an executable path to opt into a custom runtime.
+`@codori/server` includes the Codex CLI runtime it uses for both the preferred
+remote-control daemon and the managed app-server fallback. A separate global
+`codex` installation is not required. Set `CODORI_CODEX_BIN` to an executable
+path to opt into a custom runtime.
 
-Experimental realtime voice is disabled by default. For a direct launch, opt in with `--experimental-realtime-voice`. For an installed service, set `realtimeVoice.enabled` to `true` in `~/.codori/config.json` and restart the service. This enables `realtime_conversation` only for the managed app-server process and does not edit `~/.codex/config.toml`.
+Experimental realtime voice is disabled by default. For a direct launch, opt
+in with `--experimental-realtime-voice`. For an installed service, set
+`realtimeVoice.enabled` to `true` in `~/.codori/config.json` and restart the
+service. A newly started daemon or managed fallback enables
+`realtime_conversation`; an already-running incompatible daemon is not
+restarted and causes a safe managed fallback. Codori does not edit
+`~/.codex/config.toml`.
+
+## App-server backend selection
+
+On macOS and Linux, Codori prefers the first-party Codex remote-control daemon:
+
+1. Resolve `$CODEX_HOME/app-server-control/app-server-control.sock`
+   (`CODEX_HOME` defaults to `~/.codex`).
+2. Perform a bounded Unix WebSocket connection and app-server `initialize`
+   probe. A socket file is not treated as proof of readiness.
+3. If needed, run the bundled `codex remote-control start --json` once across
+   concurrent callers and probe the socket reported by the command.
+4. Fall back to the existing Codori-managed TCP app-server for an unsupported
+   command, inaccessible socket, failed handshake, or incompatible realtime
+   capability.
+
+Codori does not own, persist, reap, restart, or stop the first-party daemon.
+Stopping a logical workspace only releases Codori's reference to it. If a
+daemon-backed bridge disconnects, that browser RPC connection closes and the
+next connection performs backend selection again; Codori never migrates an
+active JSON-RPC session between backends.
+
+`GET /api/runtime/backend` and the dashboard sidebar expose the selected
+backend kind, transport, readiness, version, and a compact fallback reason.
+They intentionally do not expose the Unix socket path.
+
+The daemon integration is Unix-only and requires the Codori service user to
+traverse the effective `CODEX_HOME` and open its socket. A container must mount
+the same Codex state directory at that path and use compatible UID/GID
+permissions. Codori does not relay the daemon protocol over TCP; when direct
+socket access is unavailable, the managed fallback is the supported behavior.
 
 ## Service Installation
 

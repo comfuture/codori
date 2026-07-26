@@ -23,7 +23,7 @@
               Pick a project and start coding.
             </h1>
             <p class="mx-auto max-w-2xl text-base leading-7 text-muted md:text-lg">
-              Codori manages one Codex runtime per Git project and keeps chat threads ready to resume from the dashboard.
+              Codori selects one shared Codex app-server backend and keeps project chat threads ready to resume from the dashboard.
             </p>
           </div>
 
@@ -41,7 +41,7 @@
                 2. Connect
               </div>
               <p class="mt-2 text-sm leading-6 text-muted">
-                Open a project and Codori starts its runtime only when needed.
+                Open a project and Codori connects to a backend only when needed.
               </p>
             </div>
             <div class="rounded-2xl border border-default/70 bg-elevated/30 px-4 py-4">
