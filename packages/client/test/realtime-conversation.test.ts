@@ -483,6 +483,11 @@ describe('realtime conversation controller', () => {
     expect(fixture.rpc.requests.some(request =>
       request.method === 'thread/realtime/stop'
     )).toBe(false)
+    await vi.waitFor(() => {
+      expect(fixture.controller.owningThreadId.value).toBeNull()
+    })
+    await stop
+    expect(fixture.controller.state.value).toBe('closed')
 
     startResponse.resolve()
     await vi.waitFor(() => {
@@ -494,10 +499,48 @@ describe('realtime conversation controller', () => {
       threadId: 'thread-1',
       reason: 'client_request'
     })
-    await Promise.all([connect, stop])
+    await connect
 
     expect(fixture.controller.owningThreadId.value).toBeNull()
     expect(fixture.controller.state.value).toBe('closed')
+  })
+
+  it('fails closed without retaining ownership when a submitted start never responds', async () => {
+    const fixture = createFixture({
+      peers: [new FakePeerConnection(), new FakePeerConnection()]
+    })
+    const startResponse = deferred<void>()
+    fixture.rpc.startRequest = async () => await startResponse.promise
+    await fixture.controller.refreshCapability('thread-1', true)
+
+    const pendingConnect = fixture.controller.connect('thread-1', {
+      kind: 'preview',
+      voice: 'cove',
+      previewText: 'Pending'
+    })
+    await vi.waitFor(() => {
+      expect(fixture.rpc.requests.some(request =>
+        request.method === 'thread/realtime/start'
+      )).toBe(true)
+    })
+    await fixture.controller.stop()
+    expect(fixture.controller.owningThreadId.value).toBeNull()
+
+    for (const timer of fixture.timers) {
+      timer()
+    }
+    await expect(fixture.controller.connect('thread-2', {
+      kind: 'preview',
+      voice: 'juniper',
+      previewText: 'Blocked'
+    })).rejects.toThrow(/did not confirm closure/)
+    expect(fixture.rpc.requests.filter(request =>
+      request.method === 'thread/realtime/start'
+    )).toHaveLength(1)
+
+    fixture.rpc.disconnect()
+    startResponse.resolve()
+    await pendingConnect
   })
 
   it('withholds a new session until an explicitly stopped session confirms closure', async () => {
@@ -644,7 +687,14 @@ describe('realtime conversation controller', () => {
       expect(fixture.controller.previewStatus.value).toBe('blocked')
     })
     expect(fixture.controller.previewError.value).toMatch(/autoplay blocked/)
+
+    fixture.audio.play.mockResolvedValue()
+    await fixture.controller.setOutputMuted(false)
+    expect(fixture.controller.autoplayBlocked.value).toBe(false)
+    expect(fixture.controller.previewError.value).toBeNull()
+
     await fixture.controller.stop()
+    expect(fixture.controller.previewStatus.value).toBe('idle')
   })
 
   it('stops tracks, media, subscriptions, and only the owned app-server session', async () => {

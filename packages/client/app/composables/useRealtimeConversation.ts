@@ -421,6 +421,23 @@ export const useRealtimeConversation = (options: ControllerOptions) => {
     return barrier
   }
 
+  const settlePendingCloseBarrier = (threadId: string) => {
+    const barrier = pendingCloseBarriers.get(threadId)
+    if (!barrier) {
+      return
+    }
+
+    environment.clearTimeout(barrier.timer)
+    barrier.release()
+    pendingCloseBarriers.delete(threadId)
+    if (barrier.status === 'pending') {
+      barrier.status = 'closed'
+      barrier.settle()
+    } else {
+      barrier.status = 'closed'
+    }
+  }
+
   const awaitPendingCloseBarriers = async () => {
     for (const barrier of pendingCloseBarriers.values()) {
       if (barrier.status === 'timed-out') {
@@ -653,10 +670,20 @@ export const useRealtimeConversation = (options: ControllerOptions) => {
       previewSpeechRequested = false
       activePreviewText = null
 
-      const accepted = startAccepted
-        || (input.sendStop ? await submittedStart?.accepted : false)
-        || false
-      if (input.sendStop && accepted && threadId && options.client.isConnected()) {
+      if (input.sendStop
+        && !startAccepted
+        && submittedStart
+        && threadId
+        && options.client.isConnected()) {
+        createPendingCloseBarrier(threadId)
+        void submittedStart.accepted.then(async (accepted) => {
+          if (!accepted || !options.client.isConnected()) {
+            settlePendingCloseBarrier(threadId)
+            return
+          }
+          await options.client.request('thread/realtime/stop', { threadId }).catch(() => {})
+        })
+      } else if (input.sendStop && startAccepted && threadId && options.client.isConnected()) {
         createPendingCloseBarrier(threadId)
         state.value = 'stopping'
         await options.client.request('thread/realtime/stop', { threadId }).catch(() => {})
@@ -1099,6 +1126,9 @@ export const useRealtimeConversation = (options: ControllerOptions) => {
       try {
         await audioElement.play()
         autoplayBlocked.value = false
+        if (sessionKind.value === 'preview') {
+          previewError.value = null
+        }
       } catch {
         autoplayBlocked.value = true
       }
