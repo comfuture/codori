@@ -1,7 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
-import { createServer as createNodeHttpServer } from 'node:http'
 import { createServer as createNetServer } from 'node:net'
 import os from 'node:os'
 import { join } from 'node:path'
@@ -23,7 +22,6 @@ import type {
 const startedApps: Array<Awaited<ReturnType<typeof createHttpServer>>> = []
 const startedSocketServers: WebSocketServer[] = []
 const occupiedTcpServers: Array<ReturnType<typeof createNetServer>> = []
-const unixHttpServers: Array<ReturnType<typeof createNodeHttpServer>> = []
 const attachmentsRoots: string[] = []
 const tempDirs: string[] = []
 
@@ -53,12 +51,6 @@ afterEach(async () => {
         }
         resolvePromise()
       })
-    })
-  }
-
-  for (const server of unixHttpServers.splice(0, unixHttpServers.length)) {
-    await new Promise<void>((resolvePromise) => {
-      server.close(() => resolvePromise())
     })
   }
 
@@ -804,23 +796,28 @@ describe('createHttpServer', () => {
     })
   })
 
-  it('bridges Unix WebSocket frames and invalidates a disconnected daemon target', async () => {
-    const socketRoot = mkdtempSync(join(os.tmpdir(), 'codori-unix-ws-'))
+  it('bridges raw Unix JSONL frames and invalidates a disconnected daemon target', async () => {
+    const socketRoot = mkdtempSync(join(os.tmpdir(), 'codori-unix-jsonl-'))
     tempDirs.push(socketRoot)
     const socketPath = join(socketRoot, 'daemon.sock')
-    const unixServer = createNodeHttpServer()
-    unixHttpServers.push(unixServer)
-    const backend = new WebSocketServer({ server: unixServer })
-    startedSocketServers.push(backend)
-    let extensionHeader: string | undefined
+    const receivedLines: string[] = []
     let closeUpstream = () => {}
-    backend.on('connection', (socket: WebSocket, request) => {
-      closeUpstream = () => socket.close()
-      extensionHeader = request.headers['sec-websocket-extensions']
-      socket.on('message', (message: WebSocket.RawData) => {
-        socket.send(`unix:${rawDataToString(message)}`)
+    const unixServer = createNetServer((socket) => {
+      closeUpstream = () => socket.destroy()
+      let buffer = ''
+      socket.on('data', (chunk) => {
+        buffer += chunk.toString()
+        let newlineIndex = buffer.indexOf('\n')
+        while (newlineIndex >= 0) {
+          const line = buffer.slice(0, newlineIndex)
+          buffer = buffer.slice(newlineIndex + 1)
+          receivedLines.push(line)
+          socket.write(`unix:${line}\n`)
+          newlineIndex = buffer.indexOf('\n')
+        }
       })
     })
+    occupiedTcpServers.push(unixServer)
     await new Promise<void>((resolvePromise, reject) => {
       unixServer.listen(socketPath, (error?: Error) => {
         if (error) {
@@ -870,7 +867,7 @@ describe('createHttpServer', () => {
       client.once('error', reject)
     })
 
-    expect(extensionHeader).toBeUndefined()
+    expect(receivedLines).toEqual(['ping'])
     const clientClosed = new Promise<void>((resolvePromise) => {
       client.once('close', () => resolvePromise())
     })

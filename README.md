@@ -328,8 +328,9 @@ Codori ignores common heavy directories during recursive scanning such as `node_
 - Each Codori server instance selects at most one active Codex app-server backend.
 - On macOS and Linux, Codori first probes
   `$CODEX_HOME/app-server-control/app-server-control.sock`, where `CODEX_HOME`
-  defaults to `~/.codex`. The probe performs a bounded WebSocket connection and
-  app-server `initialize`; the presence of a socket file alone is not enough.
+  defaults to `~/.codex`. The probe performs a bounded raw JSONL stream
+  connection and app-server `initialize`; the presence of a socket file alone
+  is not enough.
 - If the socket is not ready, Codori runs the bundled
   `codex remote-control start --json` once for concurrent requests and probes
   the socket returned by that command. Unsupported commands, permissions,
@@ -339,6 +340,9 @@ Codori ignores common heavy directories during recursive scanning such as `node_
   first-party daemon. A daemon disconnect closes the current browser bridge;
   the next connection selects a backend again instead of migrating an active
   JSON-RPC session.
+- Codori translates between browser WebSocket message frames and the daemon
+  control socket's newline-delimited JSON messages. The app-server payloads
+  themselves are unchanged.
 - The fallback preserves the existing PID/runtime-file and idle-shutdown
   lifecycle under `~/.codori/run/`. Projects and projectless chats remain
   logical workspaces sharing the selected backend.
