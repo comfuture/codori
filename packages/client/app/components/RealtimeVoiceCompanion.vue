@@ -25,8 +25,11 @@ const props = defineProps<{
 
 const bubbleOpen = ref(false)
 const avatarWidth = ref(64)
+const latestAnnouncement = ref('')
 let closeTimer: ReturnType<typeof setTimeout> | null = null
 let closeGeneration = 0
+let announcementGeneration = props.generation
+const announcedFinalSegments = new Set<number>()
 
 const active = computed(() => isRealtimeVoiceCompanionActive(props.sessionState))
 const entries = computed(() => resolveRealtimeVoiceCompanionEntries({
@@ -38,16 +41,15 @@ const transcriptSignature = computed(() =>
     .map(entry => `${entry.id}:${entry.role}:${entry.final ? 1 : 0}:${entry.text}`)
     .join('\u0000')
 )
-const latestEntry = computed(() => entries.value.at(-1) ?? null)
-const latestAnnouncement = computed(() => {
-  if (!latestEntry.value?.final) {
-    return ''
-  }
-  const speaker = latestEntry.value.role === 'user'
-    ? 'You'
-    : props.avatar?.displayName || 'Codex'
-  return `${speaker}: ${latestEntry.value.text}`
-})
+const announcementSignature = computed(() =>
+  props.transcripts
+    .filter(segment =>
+      segment.generation === props.generation
+      && (segment.role === 'user' || segment.role === 'assistant')
+    )
+    .map(segment => `${segment.id}:${segment.role}:${segment.final ? 1 : 0}:${segment.text}`)
+    .join('\u0000')
+)
 const rootStyle = computed(() => ({
   bottom: `${Math.max(12, props.bottomOffset)}px`
 }))
@@ -92,6 +94,46 @@ watch(
         closeTimer = null
       }
     }, 5000)
+  },
+  { immediate: true }
+)
+
+watch(
+  [active, () => props.generation, announcementSignature],
+  ([isActive, generation]) => {
+    if (generation !== announcementGeneration) {
+      announcementGeneration = generation
+      announcedFinalSegments.clear()
+      latestAnnouncement.value = ''
+    }
+    if (!isActive) {
+      announcedFinalSegments.clear()
+      latestAnnouncement.value = ''
+      return
+    }
+
+    let newestFinal: RealtimeTranscriptSegment | null = null
+    for (const segment of props.transcripts) {
+      if (
+        segment.generation !== generation
+        || (segment.role !== 'user' && segment.role !== 'assistant')
+        || !segment.final
+        || !segment.text.trim()
+        || announcedFinalSegments.has(segment.id)
+      ) {
+        continue
+      }
+      announcedFinalSegments.add(segment.id)
+      newestFinal = segment
+    }
+    if (!newestFinal) {
+      return
+    }
+
+    const speaker = newestFinal.role === 'user'
+      ? 'You'
+      : props.avatar?.displayName || 'Codex'
+    latestAnnouncement.value = `${speaker}: ${newestFinal.text.trim()}`
   },
   { immediate: true }
 )

@@ -76,10 +76,13 @@ const ServerPetAvatarStub = defineComponent({
   }
 })
 
-const mountCompanion = (transcripts: RealtimeTranscriptSegment[]) =>
+const mountCompanion = (
+  transcripts: RealtimeTranscriptSegment[],
+  selectedAvatar: ServerAvatarMetadata | null = avatar
+) =>
   mount(RealtimeVoiceCompanion, {
     props: {
-      avatar,
+      avatar: selectedAvatar,
       spriteUrl: 'blob:pet',
       sessionState: 'connected',
       activity: 'listening',
@@ -187,7 +190,40 @@ describe('RealtimeVoiceCompanion', () => {
     })
     expect(wrapper.get('[data-testid="realtime-transcript-assistant"]').text())
       .toContain('It is still streaming.')
+    expect(wrapper.get('[aria-live="polite"]').text()).toBe('Codex: It is ready.')
+  })
+
+  it('announces the segment that finalizes during overlapping speech', async () => {
+    const wrapper = mountCompanion([
+      transcript(1, 'assistant', 'Assistant still speaking', 3, false),
+      transcript(2, 'user', 'User barges in', 3, false)
+    ])
     expect(wrapper.get('[aria-live="polite"]').text()).toBe('')
+
+    await wrapper.setProps({
+      transcripts: [
+        transcript(1, 'assistant', 'Assistant completed', 3, true),
+        transcript(2, 'user', 'User keeps speaking', 3, false)
+      ]
+    })
+    expect(wrapper.get('[aria-live="polite"]').text()).toBe('Codex: Assistant completed')
+  })
+
+  it('does not repeat a finalized announcement when avatar metadata loads', async () => {
+    const wrapper = mountCompanion([
+      transcript(1, 'assistant', 'Completed before avatar load')
+    ], null)
+    expect(wrapper.get('[aria-live="polite"]').text())
+      .toBe('Codex: Completed before avatar load')
+
+    await wrapper.setProps({
+      avatar: {
+        ...avatar,
+        displayName: 'Newly loaded pet'
+      }
+    })
+    expect(wrapper.get('[aria-live="polite"]').text())
+      .toBe('Codex: Completed before avatar load')
   })
 
   it('refreshes the five-second timeout, closes, and reopens on new text', async () => {
