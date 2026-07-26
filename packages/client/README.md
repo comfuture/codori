@@ -18,5 +18,11 @@ attention is needed: Nuxt UI toast for another thread in an active tab, or an
 optional Web Notification while the tab is in the background. System
 notifications remain off until the user enables them from the sidebar.
 
+Active realtime voice sessions reuse the same server avatar cache and renderer
+for a bottom-right companion. A controlled Nuxt UI popover shows at most the
+latest two spoken exchange pairs and closes after five seconds of transcript
+inactivity. The avatar stays visible for the session and is viewport-bounded to
+64–88 pixels wide instead of using the source sprite cell size.
+
 For the complete product documentation, see the repository README:
 [https://github.com/comfuture/codori](https://github.com/comfuture/codori)

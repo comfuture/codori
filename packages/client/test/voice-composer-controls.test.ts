@@ -32,7 +32,6 @@ type VoiceProps = {
   microphoneEnabled: boolean
   outputMuted: boolean
   autoplayBlocked: boolean
-  latestUserTranscript: string | null
   error: string | null
 }
 
@@ -46,7 +45,6 @@ const baseProps: VoiceProps = {
   microphoneEnabled: false,
   outputMuted: false,
   autoplayBlocked: false,
-  latestUserTranscript: null,
   error: null
 }
 
@@ -66,9 +64,7 @@ const mountControls = (props: Partial<VoiceProps> = {}) =>
 
 describe('VoiceComposerControls', () => {
   it('exposes accessible toggle state with a stable audio-lines icon', async () => {
-    const wrapper = mountControls({
-      latestUserTranscript: 'Run the focused tests'
-    })
+    const wrapper = mountControls()
 
     const microphone = wrapper.get('button[aria-label="Activate microphone"]')
     expect(microphone.attributes('aria-pressed')).toBe('false')
@@ -76,7 +72,6 @@ describe('VoiceComposerControls', () => {
     expect(microphone.attributes('color')).toBe('neutral')
     expect(microphone.attributes('variant')).toBe('ghost')
     expect(wrapper.get('[aria-live="polite"]').text()).toContain('Voice ready')
-    expect(wrapper.get('[aria-live="polite"]').text()).toContain('Heard: Run the focused tests')
 
     await wrapper.setProps({
       activity: 'listening',

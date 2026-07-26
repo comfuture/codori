@@ -16,6 +16,7 @@ import PlanTaskListPanel from './PlanTaskListPanel.vue'
 import PlanImplementationPromptDrawer from './PlanImplementationPromptDrawer.vue'
 import ReviewStartDrawer from './ReviewStartDrawer.vue'
 import PendingUserRequestDrawer from './PendingUserRequestDrawer.vue'
+import RealtimeVoiceCompanion from './RealtimeVoiceCompanion.vue'
 import UsageStatusModal from './UsageStatusModal.vue'
 import VoiceComposerControls from './VoiceComposerControls.vue'
 import WorkspaceBranchControl from './WorkspaceBranchControl.vue'
@@ -80,6 +81,8 @@ import { useChatSubmitGuard } from '../composables/useChatSubmitGuard'
 import { useWorkspaceGitBranch } from '../composables/useWorkspaceGitBranch'
 import { useWorkspaceTerminalSurface } from '../composables/useWorkspaceTerminalSurface'
 import { useRealtimeConversation } from '../composables/useRealtimeConversation'
+import { acquireServerAvatar } from '../composables/useServerAvatar'
+import { isRealtimeVoiceCompanionActive } from '../utils/realtime-voice-companion'
 import { sortSidebarProjects } from '../utils/project-sidebar-order'
 import {
   promoteThreadSummaries,
@@ -168,6 +171,7 @@ import {
   type ServerCapabilitiesResponse
 } from '~~/shared/codori'
 import { resolveApiUrl, shouldUseServerProxy } from '~~/shared/network'
+import type { ServerAvatarMetadata } from '~~/shared/server-avatar'
 import {
   filterSlashCommands,
   findActiveSlashCommand,
@@ -365,12 +369,51 @@ const {
   capability: realtimeVoiceCapability,
   state: realtimeVoiceState,
   activity: realtimeVoiceActivity,
-  latestUserTranscript: realtimeVoiceLatestUserTranscript,
+  generation: realtimeVoiceGeneration,
+  transcripts: realtimeVoiceTranscripts,
   error: realtimeVoiceError,
   outputMuted: realtimeVoiceOutputMuted,
   autoplayBlocked: realtimeVoiceAutoplayBlocked,
   microphoneEnabled: realtimeVoiceMicrophoneEnabled
 } = realtimeVoice
+const realtimeVoiceAvatar = ref<ServerAvatarMetadata | null>(null)
+const realtimeVoiceSpriteUrl = ref<string | null>(null)
+let releaseRealtimeVoiceAvatar: (() => void) | null = null
+
+const releaseRealtimeVoiceAvatarResource = () => {
+  releaseRealtimeVoiceAvatar?.()
+  releaseRealtimeVoiceAvatar = null
+  realtimeVoiceAvatar.value = null
+  realtimeVoiceSpriteUrl.value = null
+}
+
+const syncRealtimeVoiceAvatarResource = () => {
+  releaseRealtimeVoiceAvatarResource()
+  if (!isRealtimeVoiceCompanionActive(realtimeVoiceState.value)) {
+    return
+  }
+  const scope = workspaceScope.value
+  if (!scope.id) {
+    return
+  }
+  const resource = acquireServerAvatar(getWorkspaceClient(scope))
+  const stopAvatar = watch(resource.avatar, (avatar) => {
+    realtimeVoiceAvatar.value = avatar
+  }, { immediate: true })
+  const stopSpriteUrl = watch(resource.spriteUrl, (spriteUrl) => {
+    realtimeVoiceSpriteUrl.value = spriteUrl
+  }, { immediate: true })
+  releaseRealtimeVoiceAvatar = () => {
+    stopAvatar()
+    stopSpriteUrl()
+    resource.release()
+  }
+}
+
+watch([
+  () => isRealtimeVoiceCompanionActive(realtimeVoiceState.value),
+  () => `${workspaceScope.value.kind}:${workspaceScope.value.id}`
+], syncRealtimeVoiceAvatarResource, { immediate: true })
 let realtimeVoiceCapabilityRequest = 0
 let releaseRealtimeVoicePageListeners: (() => void) | null = null
 
@@ -4500,6 +4543,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  releaseRealtimeVoiceAvatarResource()
   releaseRealtimeVoicePageListeners?.()
   releaseRealtimeVoicePageListeners = null
   void realtimeVoice.dispose()
@@ -5077,6 +5121,16 @@ watch(
       </div>
     </div>
 
+    <RealtimeVoiceCompanion
+      :avatar="realtimeVoiceAvatar"
+      :sprite-url="realtimeVoiceSpriteUrl"
+      :session-state="realtimeVoiceState"
+      :activity="realtimeVoiceActivity"
+      :generation="realtimeVoiceGeneration"
+      :transcripts="realtimeVoiceTranscripts"
+      :bottom-offset="stickyFooterHeight + 12"
+    />
+
     <div
       v-if="showScrollToBottomLink"
       class="pointer-events-none absolute inset-x-0 z-10 flex justify-center px-4 md:px-6"
@@ -5483,7 +5537,6 @@ watch(
                     :microphone-enabled="realtimeVoiceMicrophoneEnabled"
                     :output-muted="realtimeVoiceOutputMuted"
                     :autoplay-blocked="realtimeVoiceAutoplayBlocked"
-                    :latest-user-transcript="realtimeVoiceLatestUserTranscript"
                     :error="realtimeVoiceError"
                     @connect="void connectRealtimeVoice()"
                     @toggle-microphone="toggleRealtimeVoiceMicrophone"

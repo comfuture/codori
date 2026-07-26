@@ -13,7 +13,6 @@ const props = defineProps<{
   microphoneEnabled: boolean
   outputMuted: boolean
   autoplayBlocked: boolean
-  latestUserTranscript: string | null
   error: string | null
 }>()
 
@@ -207,12 +206,6 @@ const handleClick = () => {
     >
       <div class="font-medium text-default">
         {{ statusLabel }}
-      </div>
-      <div
-        v-if="latestUserTranscript"
-        class="max-w-72 truncate text-muted"
-      >
-        Heard: {{ latestUserTranscript }}
       </div>
     </div>
   </div>
