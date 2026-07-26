@@ -83,6 +83,28 @@ export const isRealtimeVoiceActiveElsewhere = (input: {
     )
   )
 
+export const useActiveRealtimeConversation = () => {
+  const controller = computed(() =>
+    activeConversation.value?.entry.controller ?? null
+  )
+
+  return {
+    activeWorkspaceKey: computed(() =>
+      activeConversation.value?.entry.workspaceKey ?? null
+    ),
+    activeThreadId: computed(() =>
+      activeConversation.value?.threadId ?? null
+    ),
+    activeClient: computed(() =>
+      activeConversation.value?.entry.getClient() ?? null
+    ),
+    state: computed(() => controller.value?.state.value ?? 'idle'),
+    activity: computed(() => controller.value?.activity.value ?? 'idle'),
+    generation: computed(() => controller.value?.generation.value ?? 0),
+    transcripts: computed(() => controller.value?.transcripts.value ?? [])
+  }
+}
+
 export const useSharedRealtimeConversation = (
   workspaceKey: string,
   getClient: () => CodexRpcClient

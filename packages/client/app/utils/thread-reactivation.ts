@@ -29,8 +29,18 @@ type ThreadReactivationResumeClient = {
   request<T>(method: 'thread/read', params: ThreadReadParams): Promise<T>
 }
 
+type ThreadViewHydrationClient = {
+  request<T>(method: 'thread/resume', params: ThreadResumeParams): Promise<T>
+  request<T>(method: 'thread/read', params: ThreadReadParams): Promise<T>
+}
+
 export type ThreadReactivationResumeResult = {
   resumeResponse: ThreadResumeResponse
+  readResponse: ThreadReadResponse
+}
+
+export type ThreadViewHydrationResult = {
+  resumeResponse: ThreadResumeResponse | null
   readResponse: ThreadReadResponse
 }
 
@@ -140,6 +150,27 @@ export const resolveHydratedActiveTurn = (input: {
   }
 
   return resumeActiveTurn
+}
+
+export const hydrateThreadView = async (
+  client: ThreadViewHydrationClient,
+  resumeParams: ThreadResumeParams,
+  options: {
+    resume: boolean
+  }
+): Promise<ThreadViewHydrationResult> => {
+  const resumeResponse = options.resume
+    ? await client.request<ThreadResumeResponse>('thread/resume', resumeParams)
+    : null
+  const readResponse = await client.request<ThreadReadResponse>('thread/read', {
+    threadId: resumeParams.threadId,
+    includeTurns: true
+  })
+
+  return {
+    resumeResponse,
+    readResponse
+  }
 }
 
 export const resumeThreadStreamAfterReactivation = async (
