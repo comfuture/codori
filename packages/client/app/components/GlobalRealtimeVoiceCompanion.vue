@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref, watch } from 'vue'
 import RealtimeVoiceCompanion from './RealtimeVoiceCompanion.vue'
+import { useRealtimeVoiceWakeLock } from '../composables/useRealtimeVoiceWakeLock'
 import { useActiveRealtimeConversation } from '../composables/useSharedRealtimeConversation'
 import { acquireServerAvatar } from '../composables/useServerAvatar'
 import { isRealtimeVoiceCompanionActive } from '../utils/realtime-voice-companion'
 import type { ServerAvatarMetadata } from '~~/shared/server-avatar'
 
 const realtimeVoice = useActiveRealtimeConversation()
+useRealtimeVoiceWakeLock(realtimeVoice.state)
 const avatar = ref<ServerAvatarMetadata | null>(null)
 const spriteUrl = ref<string | null>(null)
 let releaseAvatar: (() => void) | null = null
