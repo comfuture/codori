@@ -13,8 +13,9 @@ export const useRealtimeVoiceWakeLock = (
   createWakeLock: () => RealtimeVoiceWakeLock = useWakeLock
 ) => {
   const wakeLock = createWakeLock()
-  let syncGeneration = 0
+  let shouldHoldWakeLock = false
   let wakeLockRequested = false
+  let syncOperation = Promise.resolve()
 
   const releaseWakeLock = async () => {
     try {
@@ -24,9 +25,8 @@ export const useRealtimeVoiceWakeLock = (
     }
   }
 
-  const syncWakeLock = async (shouldHold: boolean) => {
-    const candidateGeneration = ++syncGeneration
-    if (!shouldHold) {
+  const syncWakeLock = async () => {
+    if (!shouldHoldWakeLock) {
       if (!wakeLockRequested && !wakeLock.isActive.value) {
         return
       }
@@ -43,33 +43,32 @@ export const useRealtimeVoiceWakeLock = (
     try {
       await wakeLock.request('screen')
     } catch {
-      if (candidateGeneration === syncGeneration) {
-        wakeLockRequested = false
-      }
+      wakeLockRequested = false
       return
     }
 
-    if (
-      candidateGeneration !== syncGeneration
-      || !isRealtimeVoiceCompanionActive(state.value)
-    ) {
+    if (!shouldHoldWakeLock) {
       wakeLockRequested = false
       await releaseWakeLock()
     }
   }
 
+  const queueWakeLockSync = () => {
+    syncOperation = syncOperation.then(syncWakeLock, syncWakeLock)
+  }
+
   watch(
     () => isRealtimeVoiceCompanionActive(state.value),
-    shouldHold => void syncWakeLock(shouldHold),
+    shouldHold => {
+      shouldHoldWakeLock = shouldHold
+      queueWakeLockSync()
+    },
     { immediate: true }
   )
 
   onScopeDispose(() => {
-    syncGeneration += 1
-    if (wakeLockRequested || wakeLock.isActive.value) {
-      wakeLockRequested = false
-      void releaseWakeLock()
-    }
+    shouldHoldWakeLock = false
+    queueWakeLockSync()
   })
 
   return {
