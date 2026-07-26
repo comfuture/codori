@@ -14,6 +14,7 @@ const props = defineProps<{
   outputMuted: boolean
   autoplayBlocked: boolean
   error: string | null
+  activeElsewhere: boolean
 }>()
 
 const emit = defineEmits<{
@@ -24,7 +25,8 @@ const emit = defineEmits<{
 }>()
 
 const sessionActive = computed(() =>
-  props.sessionState === 'requesting-permission'
+  props.activeElsewhere
+  || props.sessionState === 'requesting-permission'
   || props.sessionState === 'creating-offer'
   || props.sessionState === 'starting'
   || props.sessionState === 'connected'
@@ -39,7 +41,8 @@ const capabilityUnavailable = computed(() =>
 )
 
 const microphoneDisabled = computed(() =>
-  capabilityUnavailable.value
+  props.activeElsewhere
+  || capabilityUnavailable.value
   || props.sessionState === 'requesting-permission'
   || props.sessionState === 'creating-offer'
   || props.sessionState === 'starting'
@@ -49,6 +52,9 @@ const microphoneDisabled = computed(() =>
 const showStatus = computed(() => sessionActive.value || props.sessionState === 'connected')
 
 const statusLabel = computed(() => {
+  if (props.activeElsewhere) {
+    return 'Voice session active in another thread'
+  }
   if (props.sessionState === 'error') {
     return props.error || 'Voice session error'
   }
@@ -91,6 +97,9 @@ const statusLabel = computed(() => {
 })
 
 const microphoneLabel = computed(() => {
+  if (props.activeElsewhere) {
+    return 'A voice session is already active in another thread'
+  }
   if (props.sessionState === 'error') {
     return props.error || 'Voice session error'
   }
@@ -107,13 +116,15 @@ const microphoneLabel = computed(() => {
 })
 
 const microphoneIcon = computed(() =>
-  capabilityUnavailable.value || props.sessionState === 'error'
+  props.activeElsewhere || capabilityUnavailable.value || props.sessionState === 'error'
     ? 'i-lucide-mic-off'
     : 'i-lucide-audio-lines'
 )
 
 const microphoneColor = computed(() =>
-  capabilityUnavailable.value || props.sessionState === 'error'
+  props.activeElsewhere
+    ? 'neutral'
+    : capabilityUnavailable.value || props.sessionState === 'error'
     ? 'error'
     : props.microphoneEnabled
       ? 'primary'
@@ -121,7 +132,7 @@ const microphoneColor = computed(() =>
 )
 
 const microphoneVariant = computed(() =>
-  capabilityUnavailable.value || props.sessionState === 'error' || props.microphoneEnabled
+  props.activeElsewhere || capabilityUnavailable.value || props.sessionState === 'error' || props.microphoneEnabled
     ? 'soft'
     : 'ghost'
 )
@@ -143,9 +154,9 @@ const handleClick = () => {
     <UTooltip :text="microphoneLabel">
       <span
         class="inline-flex shrink-0 rounded-full"
-        :tabindex="capabilityUnavailable ? 0 : undefined"
-        :aria-label="capabilityUnavailable ? microphoneLabel : undefined"
-        :aria-disabled="capabilityUnavailable ? 'true' : undefined"
+        :tabindex="capabilityUnavailable || activeElsewhere ? 0 : undefined"
+        :aria-label="capabilityUnavailable || activeElsewhere ? microphoneLabel : undefined"
+        :aria-disabled="capabilityUnavailable || activeElsewhere ? 'true' : undefined"
       >
         <UButton
           type="button"
@@ -164,7 +175,7 @@ const handleClick = () => {
     </UTooltip>
 
     <UTooltip
-      v-if="sessionActive"
+      v-if="sessionActive && !activeElsewhere"
       :text="outputMuted ? 'Unmute remote speech' : 'Mute remote speech'"
     >
       <UButton
