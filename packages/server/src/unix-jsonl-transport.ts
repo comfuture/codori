@@ -28,6 +28,20 @@ const payloadToBuffer = (payload: UnixJsonlPayload) => {
   return payload as Buffer
 }
 
+const normalizeJsonlRecord = (payload: Buffer) => {
+  const text = payload.toString('utf8')
+  try {
+    return Buffer.from(JSON.stringify(JSON.parse(text)))
+  } catch {
+    if (payload.includes(0x0A) || payload.includes(0x0D)) {
+      throw new Error(
+        'Multiline Unix app-server payload was not valid JSON.'
+      )
+    }
+    return payload
+  }
+}
+
 export class UnixJsonlTransport {
   private readonly socket: net.Socket
 
@@ -79,7 +93,18 @@ export class UnixJsonlTransport {
     if (!this.isOpen()) {
       throw new Error('Unix app-server transport is not open.')
     }
-    this.socket.write(payloadToBuffer(payload))
+    let record: Buffer
+    try {
+      record = normalizeJsonlRecord(payloadToBuffer(payload))
+    } catch (error) {
+      this.fail(error instanceof Error ? error : new Error(String(error)))
+      return
+    }
+    if (record.length > this.maxBufferBytes) {
+      this.failOversizedFrame()
+      return
+    }
+    this.socket.write(record)
     this.socket.write('\n')
   }
 
@@ -119,7 +144,10 @@ export class UnixJsonlTransport {
   }
 
   private failOversizedFrame() {
-    const error = new Error('Unix app-server JSONL frame exceeded the buffer limit.')
+    this.fail(new Error('Unix app-server JSONL frame exceeded the buffer limit.'))
+  }
+
+  private fail(error: Error) {
     this.handlers.error?.(error)
     this.close()
   }

@@ -142,6 +142,14 @@ const versionFromUserAgent = (value: unknown) => {
   return userAgent.match(/\b\d+\.\d+\.\d+(?:[-+][\w.-]+)?\b/)?.[0] ?? null
 }
 
+const hasCompatibleRealtimeVoices = (value: unknown) => {
+  const result = isRecord(value) ? value : null
+  const voices = isRecord(result?.voices) ? result.voices : null
+  return Array.isArray(voices?.v1)
+    && voices.v1.every(voice => typeof voice === 'string')
+    && typeof voices.defaultV1 === 'string'
+}
+
 export const probeDaemonSocket = async (
   socketPath: string,
   input: { timeoutMs?: number, realtimeVoiceEnabled?: boolean } = {}
@@ -242,7 +250,7 @@ export const probeDaemonSocket = async (
         }
 
         if (message.id === 'codori-probe-realtime-voices') {
-          finish(message.error
+          finish(message.error || !hasCompatibleRealtimeVoices(message.result)
             ? { ready: false, reason: 'incompatible-realtime' }
             : { ready: true, appServerVersion })
         }

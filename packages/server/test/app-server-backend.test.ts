@@ -70,7 +70,10 @@ describe('app-server backend selection', () => {
               id: message.id,
               result: {
                 voices: {
-                  voices: []
+                  v1: ['cove'],
+                  v2: ['alloy'],
+                  defaultV1: 'cove',
+                  defaultV2: 'alloy'
                 }
               }
             })}\n`)
@@ -106,6 +109,75 @@ describe('app-server backend selection', () => {
         experimentalApi: true,
         requestAttestation: false,
         optOutNotificationMethods: null
+      })
+    } finally {
+      await new Promise<void>(resolvePromise => server.close(() => resolvePromise()))
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects a successful legacy realtime voice response', async () => {
+    const root = await mkdtemp('/tmp/codori-daemon-legacy-')
+    const socketPath = join(root, 'control.sock')
+    const server = createServer((socket) => {
+      let buffer = ''
+      socket.on('data', (chunk) => {
+        buffer += chunk.toString()
+        let newlineIndex = buffer.indexOf('\n')
+        while (newlineIndex >= 0) {
+          const line = buffer.slice(0, newlineIndex)
+          buffer = buffer.slice(newlineIndex + 1)
+          const message = JSON.parse(line) as {
+            id?: string
+            method: string
+          }
+          if (message.method === 'initialize') {
+            socket.write(`${JSON.stringify({
+              id: message.id,
+              result: {
+                userAgent: 'codex-app-server/0.144.0'
+              }
+            })}\n`)
+          } else if (message.method === 'experimentalFeature/list') {
+            socket.write(`${JSON.stringify({
+              id: message.id,
+              result: {
+                data: [{
+                  name: 'realtime_conversation',
+                  enabled: true
+                }]
+              }
+            })}\n`)
+          } else if (message.method === 'thread/realtime/listVoices') {
+            socket.write(`${JSON.stringify({
+              id: message.id,
+              result: {
+                voices: {
+                  voices: []
+                }
+              }
+            })}\n`)
+          }
+          newlineIndex = buffer.indexOf('\n')
+        }
+      })
+    })
+    await new Promise<void>((resolvePromise, reject) => {
+      server.listen(socketPath, (error?: Error) => {
+        if (error) {
+          reject(error)
+          return
+        }
+        resolvePromise()
+      })
+    })
+
+    try {
+      await expect(probeDaemonSocket(socketPath, {
+        realtimeVoiceEnabled: true
+      })).resolves.toEqual({
+        ready: false,
+        reason: 'incompatible-realtime'
       })
     } finally {
       await new Promise<void>(resolvePromise => server.close(() => resolvePromise()))
