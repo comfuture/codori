@@ -150,6 +150,25 @@ const hasCompatibleRealtimeVoices = (value: unknown) => {
     && typeof voices.defaultV1 === 'string'
 }
 
+const daemonProbeFailureReason = (
+  error: unknown
+): DaemonProbeFailure['reason'] => {
+  const code = (error as NodeJS.ErrnoException | null)?.code
+  if (code === 'EACCES' || code === 'EPERM') {
+    return 'permission-denied'
+  }
+  if (
+    code === 'ENOENT'
+    || code === 'ECONNREFUSED'
+    || code === 'EINVAL'
+    || code === 'ERR_INVALID_ARG_TYPE'
+    || code === 'ERR_INVALID_ARG_VALUE'
+  ) {
+    return 'daemon-unavailable'
+  }
+  return 'daemon-unready'
+}
+
 export const probeDaemonSocket = async (
   socketPath: string,
   input: { timeoutMs?: number, realtimeVoiceEnabled?: boolean } = {}
@@ -160,118 +179,126 @@ export const probeDaemonSocket = async (
   return await new Promise<DaemonProbeResult>((resolve) => {
     let settled = false
     let appServerVersion: string | null = null
-    const timer = setTimeout(() => {
-      finish({
-        ready: false,
-        reason: 'daemon-unready'
-      })
-    }, timeoutMs)
+    let timer: ReturnType<typeof setTimeout> | null = null
+    let transport: UnixJsonlTransport | null = null
 
     const finish = (result: DaemonProbeResult) => {
       if (settled) {
         return
       }
       settled = true
-      clearTimeout(timer)
-      transport.close()
+      if (timer) {
+        clearTimeout(timer)
+      }
+      transport?.close()
       resolve(result)
     }
 
-    const transport = new UnixJsonlTransport(socketPath, {
-      open: () => {
-        transport.send(JSON.stringify({
-          id: 'codori-probe-initialize',
-          method: 'initialize',
-          params: {
-            clientInfo: {
-              name: 'codori',
-              version: '0.0.0'
-            },
-            capabilities: {
-              experimentalApi: true,
-              requestAttestation: false,
-              optOutNotificationMethods: null
+    try {
+      transport = new UnixJsonlTransport(socketPath, {
+        open: () => {
+          transport?.send(JSON.stringify({
+            id: 'codori-probe-initialize',
+            method: 'initialize',
+            params: {
+              clientInfo: {
+                name: 'codori',
+                version: '0.0.0'
+              },
+              capabilities: {
+                experimentalApi: true,
+                requestAttestation: false,
+                optOutNotificationMethods: null
+              }
             }
-          }
-        }))
-      },
-      message: (raw) => {
-        let message: Record<string, unknown>
-        try {
-          const parsed = JSON.parse(raw.toString()) as unknown
-          if (!isRecord(parsed)) {
+          }))
+        },
+        message: (raw) => {
+          let message: Record<string, unknown>
+          try {
+            const parsed = JSON.parse(raw.toString()) as unknown
+            if (!isRecord(parsed)) {
+              return
+            }
+            message = parsed
+          } catch {
             return
           }
-          message = parsed
-        } catch {
-          return
-        }
 
-        if (message.id === 'codori-probe-initialize') {
-          if (message.error) {
+          if (message.id === 'codori-probe-initialize') {
+            if (message.error) {
+              finish({ ready: false, reason: 'daemon-unready' })
+              return
+            }
+            const result = isRecord(message.result) ? message.result : null
+            appServerVersion = versionFromUserAgent(result?.userAgent)
+            transport?.send(JSON.stringify({ method: 'initialized' }))
+            if (!realtimeVoiceEnabled) {
+              finish({ ready: true, appServerVersion })
+              return
+            }
+            transport?.send(JSON.stringify({
+              id: 'codori-probe-features',
+              method: 'experimentalFeature/list',
+              params: {}
+            }))
+            return
+          }
+
+          if (message.id === 'codori-probe-features') {
+            if (message.error) {
+              finish({ ready: false, reason: 'incompatible-realtime' })
+              return
+            }
+            const result = isRecord(message.result) ? message.result : null
+            const data = Array.isArray(result?.data) ? result.data : []
+            const realtimeFeature = data.find((feature) =>
+              isRecord(feature) && feature.name === 'realtime_conversation'
+            )
+            if (!isRecord(realtimeFeature) || realtimeFeature.enabled !== true) {
+              finish({ ready: false, reason: 'incompatible-realtime' })
+              return
+            }
+            transport?.send(JSON.stringify({
+              id: 'codori-probe-realtime-voices',
+              method: 'thread/realtime/listVoices',
+              params: {}
+            }))
+            return
+          }
+
+          if (message.id === 'codori-probe-realtime-voices') {
+            finish(message.error || !hasCompatibleRealtimeVoices(message.result)
+              ? { ready: false, reason: 'incompatible-realtime' }
+              : { ready: true, appServerVersion })
+          }
+        },
+        error: (error) => {
+          finish({
+            ready: false,
+            reason: daemonProbeFailureReason(error)
+          })
+        },
+        close: () => {
+          if (!settled) {
             finish({ ready: false, reason: 'daemon-unready' })
-            return
           }
-          const result = isRecord(message.result) ? message.result : null
-          appServerVersion = versionFromUserAgent(result?.userAgent)
-          transport.send(JSON.stringify({ method: 'initialized' }))
-          if (!realtimeVoiceEnabled) {
-            finish({ ready: true, appServerVersion })
-            return
-          }
-          transport.send(JSON.stringify({
-            id: 'codori-probe-features',
-            method: 'experimentalFeature/list',
-            params: {}
-          }))
-          return
         }
+      })
+    } catch (error) {
+      finish({
+        ready: false,
+        reason: daemonProbeFailureReason(error)
+      })
+      return
+    }
 
-        if (message.id === 'codori-probe-features') {
-          if (message.error) {
-            finish({ ready: false, reason: 'incompatible-realtime' })
-            return
-          }
-          const result = isRecord(message.result) ? message.result : null
-          const data = Array.isArray(result?.data) ? result.data : []
-          const realtimeFeature = data.find((feature) =>
-            isRecord(feature) && feature.name === 'realtime_conversation'
-          )
-          if (!isRecord(realtimeFeature) || realtimeFeature.enabled !== true) {
-            finish({ ready: false, reason: 'incompatible-realtime' })
-            return
-          }
-          transport.send(JSON.stringify({
-            id: 'codori-probe-realtime-voices',
-            method: 'thread/realtime/listVoices',
-            params: {}
-          }))
-          return
-        }
-
-        if (message.id === 'codori-probe-realtime-voices') {
-          finish(message.error || !hasCompatibleRealtimeVoices(message.result)
-            ? { ready: false, reason: 'incompatible-realtime' }
-            : { ready: true, appServerVersion })
-        }
-      },
-      error: (error) => {
-        const code = (error as NodeJS.ErrnoException).code
-        finish({
-          ready: false,
-          reason: code === 'EACCES' || code === 'EPERM'
-            ? 'permission-denied'
-            : code === 'ENOENT' || code === 'ECONNREFUSED' || code === 'EINVAL'
-              ? 'daemon-unavailable'
-              : 'daemon-unready'
-        })
-      },
-      close: () => {
-        if (!settled) {
-          finish({ ready: false, reason: 'daemon-unready' })
-        }
-      }
-    })
+    timer = setTimeout(() => {
+      finish({
+        ready: false,
+        reason: 'daemon-unready'
+      })
+    }, timeoutMs)
   })
 }
 

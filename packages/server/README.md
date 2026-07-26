@@ -63,6 +63,11 @@ maps each browser message to one newline-delimited daemon message and maps each
 complete daemon JSONL message back to one WebSocket frame without changing the
 JSON-RPC payload.
 
+If Codori cannot safely stop an already-tracked managed fallback before
+selecting the daemon, it retains the runtime record and continues using the
+managed backend. The status API reports this controlled fallback instead of
+orphaning the process.
+
 `GET /api/runtime/backend` and the dashboard sidebar expose the selected
 backend kind, transport, readiness, version, and a compact fallback reason.
 They intentionally do not expose the Unix socket path.

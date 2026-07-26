@@ -346,6 +346,9 @@ Codori ignores common heavy directories during recursive scanning such as `node_
 - The fallback preserves the existing PID/runtime-file and idle-shutdown
   lifecycle under `~/.codori/run/`. Projects and projectless chats remain
   logical workspaces sharing the selected backend.
+- If an existing managed fallback cannot be stopped safely, Codori keeps its
+  runtime record and continues using it instead of orphaning that process or
+  selecting a second backend.
 - The sidebar runtime indicator and `GET /api/runtime/backend` report only a
   safe backend kind, transport, readiness, version, and fallback reason. The
   daemon socket path is never exposed to the browser.

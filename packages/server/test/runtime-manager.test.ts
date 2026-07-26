@@ -245,6 +245,82 @@ describe('RuntimeManager', () => {
     expect(commandFactory).not.toHaveBeenCalled()
   })
 
+  it('keeps tracking a managed runtime when it cannot stop it before daemon selection', async () => {
+    const fixture = createFixture()
+    const fakePid = 987_654
+    const store = new RuntimeStore(fixture.homeDir)
+    store.write({
+      projectId: 'codori:shared-app-server',
+      projectPath: fixture.root,
+      pid: fakePid,
+      port: 46000,
+      startedAt: Date.now(),
+      lastActivityAt: Date.now()
+    })
+    const daemonTarget = {
+      kind: 'codex-daemon' as const,
+      transport: 'unix-socket' as const,
+      socketPath: join(fixture.homeDir, '.codex', 'app-server-control', 'app-server-control.sock'),
+      ownedByCodori: false as const,
+      cliVersion: '0.145.0',
+      appServerVersion: '0.145.0'
+    }
+    const originalKill = process.kill
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation((pid, signal) => {
+      if (pid === fakePid) {
+        throw Object.assign(new Error('Operation not permitted.'), {
+          code: 'EPERM'
+        })
+      }
+      return signal === undefined
+        ? originalKill.call(process, pid)
+        : originalKill.call(process, pid, signal)
+    })
+
+    try {
+      const manager = createRuntimeManager({
+        homeDir: fixture.homeDir,
+        documentsDir: fixture.documentsDir,
+        config: fixture.config,
+        backendSelector: {
+          ensure: async () => ({
+            selected: true,
+            reusedExisting: true,
+            target: daemonTarget
+          })
+        },
+        commandFactory: () => {
+          throw new Error('A second managed runtime must not start.')
+        }
+      })
+      runningManagers.push(manager)
+
+      const started = await manager.startProject('demo')
+      expect(started).toMatchObject({
+        status: 'running',
+        pid: fakePid,
+        port: 46000,
+        reusedExisting: true
+      })
+      expect(manager.getRuntimeBackendStatus()).toEqual({
+        backend: 'codori-managed',
+        transport: 'tcp-websocket',
+        state: 'fallback',
+        version: null,
+        fallbackReason: 'managed-runtime-stop-failed'
+      })
+      expect(store.load(fixture.root)).toMatchObject({
+        kind: 'valid',
+        record: {
+          pid: fakePid,
+          port: 46000
+        }
+      })
+    } finally {
+      killSpy.mockRestore()
+    }
+  })
+
   it('starts once and reuses the existing process', async () => {
     const fixture = createFixture()
     const ensure = vi.fn(async () => ({
