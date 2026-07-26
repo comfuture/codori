@@ -53,7 +53,7 @@ const waitForControllerOwnership = async (
   connectPromise: Promise<void>
 ) => {
   if (controller.owningThreadId.value === threadId) {
-    return
+    return true
   }
 
   let releaseWatch = () => {}
@@ -70,6 +70,7 @@ const waitForControllerOwnership = async (
     connectPromise.then(() => undefined, () => undefined)
   ])
   releaseWatch()
+  return controller.owningThreadId.value === threadId
 }
 
 const createEntry = (
@@ -230,7 +231,19 @@ export const useSharedRealtimeConversation = (
         threadId
       }
       connectPromise = entry.controller.connect(threadId, options)
-      await waitForControllerOwnership(entry.controller, threadId, connectPromise)
+      const ownsRequestedThread = await waitForControllerOwnership(
+        entry.controller,
+        threadId,
+        connectPromise
+      )
+      if (!ownsRequestedThread) {
+        if (activeConversation.value?.entry === entry
+          && !entry.controller.owningThreadId.value) {
+          activeConversation.value = null
+        }
+        await connectPromise
+        return
+      }
     } finally {
       releaseOwnershipClaim()
     }

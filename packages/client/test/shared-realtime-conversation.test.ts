@@ -235,4 +235,37 @@ describe('shared realtime conversation lifecycle', () => {
     await third.stop()
     await nextTick()
   })
+
+  it('clears failed provisional ownership before waking the next workspace', async () => {
+    const controllerOffset = mockControllers.length
+    const failed = useSharedRealtimeConversation(
+      'project:failed-provisional-owner',
+      () => client
+    )
+    const next = useSharedRealtimeConversation(
+      'project:next-after-failure',
+      () => client
+    )
+    const [failedController, nextController] = mockControllers.slice(controllerOffset)
+    if (!failedController || !nextController) {
+      throw new Error('Expected two realtime controller fixtures.')
+    }
+    failedController.connect.mockRejectedValueOnce(
+      new Error('Realtime voice is unavailable.')
+    )
+
+    const failedPreview = failed.preview('thread-failed-owner', 'cove', 'Failed')
+    const nextPreview = next.preview('thread-next-owner', 'cove', 'Next')
+
+    await expect(failedPreview).rejects.toThrow('Realtime voice is unavailable.')
+    await expect(nextPreview).resolves.toBeUndefined()
+
+    expect(failedController.stopForReplacement).not.toHaveBeenCalled()
+    expect(nextController.connect).toHaveBeenCalledOnce()
+    expect(useActiveRealtimeConversation().activeWorkspaceKey.value)
+      .toBe('project:next-after-failure')
+
+    await next.stop()
+    await nextTick()
+  })
 })
