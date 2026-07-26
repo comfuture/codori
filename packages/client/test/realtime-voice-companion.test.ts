@@ -178,6 +178,16 @@ describe('RealtimeVoiceCompanion', () => {
     expect(assistant.text()).toContain('Codex')
     expect(assistant.get('p.text-sm').classes()).toContain('text-default')
     expect(wrapper.get('[aria-live="polite"]').text()).toBe('Codex: It is ready.')
+
+    await wrapper.setProps({
+      transcripts: [
+        transcript(1, 'user', 'Can you check this?'),
+        transcript(2, 'assistant', 'It is still streaming.', 3, false)
+      ]
+    })
+    expect(wrapper.get('[data-testid="realtime-transcript-assistant"]').text())
+      .toContain('It is still streaming.')
+    expect(wrapper.get('[aria-live="polite"]').text()).toBe('')
   })
 
   it('refreshes the five-second timeout, closes, and reopens on new text', async () => {

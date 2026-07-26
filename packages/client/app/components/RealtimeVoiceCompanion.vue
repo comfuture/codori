@@ -40,7 +40,7 @@ const transcriptSignature = computed(() =>
 )
 const latestEntry = computed(() => entries.value.at(-1) ?? null)
 const latestAnnouncement = computed(() => {
-  if (!latestEntry.value) {
+  if (!latestEntry.value?.final) {
     return ''
   }
   const speaker = latestEntry.value.role === 'user'
