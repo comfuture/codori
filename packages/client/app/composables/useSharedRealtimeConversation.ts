@@ -1,4 +1,4 @@
-import { computed, shallowRef, watch } from 'vue'
+import { computed, effectScope, shallowRef, watch } from 'vue'
 import type { CodexRpcClient } from '~~/shared/codex-rpc'
 import { useRealtimeConversation } from './useRealtimeConversation'
 
@@ -17,6 +17,7 @@ type ActiveRealtimeConversation = {
 
 const entries = new Map<string, RealtimeConversationEntry>()
 const activeConversation = shallowRef<ActiveRealtimeConversation | null>(null)
+const ownershipScope = effectScope(true)
 
 const createEntry = (
   workspaceKey: string,
@@ -39,19 +40,21 @@ const createEntry = (
     controller
   }
 
-  watch(controller.owningThreadId, (threadId) => {
-    const active = activeConversation.value
-    if (active?.entry !== entry) {
-      return
-    }
-    if (!threadId) {
-      activeConversation.value = null
-      return
-    }
-    activeConversation.value = {
-      entry,
-      threadId
-    }
+  ownershipScope.run(() => {
+    watch(controller.owningThreadId, (threadId) => {
+      const active = activeConversation.value
+      if (active?.entry !== entry) {
+        return
+      }
+      if (!threadId) {
+        activeConversation.value = null
+        return
+      }
+      activeConversation.value = {
+        entry,
+        threadId
+      }
+    })
   })
 
   return entry
@@ -82,6 +85,24 @@ export const isRealtimeVoiceActiveElsewhere = (input: {
       || input.activeThreadId !== input.threadId
     )
   )
+
+export const promoteSharedRealtimeConversation = (
+  sourceWorkspaceKey: string,
+  targetWorkspaceKey: string
+) => {
+  if (sourceWorkspaceKey === targetWorkspaceKey || entries.has(targetWorkspaceKey)) {
+    return
+  }
+
+  const entry = entries.get(sourceWorkspaceKey)
+  if (!entry) {
+    return
+  }
+
+  entry.workspaceKey = targetWorkspaceKey
+  entries.set(targetWorkspaceKey, entry)
+  entries.delete(sourceWorkspaceKey)
+}
 
 export const useActiveRealtimeConversation = () => {
   const controller = computed(() =>
