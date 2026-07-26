@@ -294,6 +294,14 @@ After enabling realtime voice, open an existing thread and use the microphone ac
 
 The voice status surface shows live/final transcripts and whether Codex is listening, transcribing, delegating, working, or speaking. Spoken requests use app-server's automatic handoff into the active thread, so its existing turn, tool, approval, and final-response UI remains authoritative. Codori does not resubmit the recognized text as a second turn.
 
+While the realtime session is active, the server's selected pet appears above
+the bottom-right edge of the composer. Its Nuxt UI speech bubble keeps only the
+latest two user/assistant exchange pairs, renders user speech with muted
+emphasis, and closes five seconds after the newest transcript update while the
+pet remains visible. The companion is clipped to one sprite frame and scales
+between 64 and 88 pixels wide according to the viewport; it never displays the
+192×208 source frame at native size.
+
 Browser autoplay policy may require an explicit unmute/play gesture before remote speech is audible. Losing focus, hiding the page, releasing/cancelling the pointer, switching threads, disconnecting RPC, or leaving the page disables capture or tears down the owned session. Voice controls are app-scoped: there are no global hotkeys or background listening. Plain HTTP is supported only on localhost; private remote use requires a secure HTTPS origin supplied outside Codori.
 
 ## Project Discovery Rules
