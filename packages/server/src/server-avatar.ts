@@ -308,8 +308,9 @@ const validateFrameSpec = (
 
 const normalizeAnimations = (
   value: unknown,
-  frameCount: number
+  frame: FrameSpec
 ): Record<string, ServerAvatarAnimation> => {
+  const frameCount = frame.columns * frame.rows
   const defaults = defaultServerAvatarAnimations()
   const safeIdle: ServerAvatarAnimation = {
     frames: idleFrames()
@@ -318,7 +319,8 @@ const normalizeAnimations = (
     fallback: 'idle'
   }
   if (!isRecord(value) || Object.keys(value).length === 0) {
-    return frameCount >= DEFAULT_COLUMNS * DEFAULT_V1_ROWS
+    return frame.columns === DEFAULT_COLUMNS
+      && (frame.rows === DEFAULT_V1_ROWS || frame.rows === DEFAULT_V2_ROWS)
       ? defaults
       : { idle: safeIdle }
   }
@@ -624,7 +626,7 @@ export class ServerAvatarResolver {
               ...frame,
               frameCount
             },
-            animations: normalizeAnimations(manifest.animations, frameCount)
+            animations: normalizeAnimations(manifest.animations, frame)
           },
           bytes,
           watchPath: await realpath(candidate.directory)

@@ -194,10 +194,26 @@ describe('ServerAvatarResolver', () => {
       width: 128,
       height: 64
     })
+    writeCustomPet({
+      codexHome,
+      id: 'nonstandard-72',
+      manifest: {
+        spritesheetPath: 'spritesheet.png',
+        frame: {
+          width: 64,
+          height: 64,
+          columns: 12,
+          rows: 6
+        }
+      },
+      width: 768,
+      height: 384
+    })
     const resolver = new ServerAvatarResolver({ serverLabel: 'studio-mac' })
 
     const singleFrame = await resolver.resolve(codexHome, 'single-frame')
     const customTrack = await resolver.resolve(codexHome, 'custom-track')
+    const nonstandard = await resolver.resolve(codexHome, 'nonstandard-72')
 
     expect(singleFrame.metadata.animations).toEqual({
       idle: {
@@ -216,6 +232,9 @@ describe('ServerAvatarResolver', () => {
         frame.spriteIndex < customTrack.metadata.frame.frameCount
       )).toBe(true)
     }
+    expect(Object.keys(nonstandard.metadata.animations)).toEqual(['idle'])
+    expect(nonstandard.metadata.animations.idle?.frames.map(frame => frame.spriteIndex))
+      .toEqual([0, 1, 2, 3, 4, 5])
   })
 
   it('supports the legacy avatars directory', async () => {
