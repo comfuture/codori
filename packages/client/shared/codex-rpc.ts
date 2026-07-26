@@ -71,6 +71,12 @@ type LegacyCodexRpcNotification =
       method: 'stream/error'
       params?: unknown
     }
+  | {
+      method: 'codori/avatar/changed'
+      params: {
+        serverId: string
+      }
+    }
 
 export type CodexRpcNotification = ServerNotification | LegacyCodexRpcNotification
 export type CodexRpcConnectionState = 'idle' | 'connecting' | 'connected' | 'disconnected'

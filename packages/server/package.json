@@ -46,6 +46,7 @@
     "@fastify/websocket": "^11.2.0",
     "@openai/codex": "^0.145.0",
     "fastify": "^5.8.5",
+    "image-size": "^2.0.2",
     "mime-types": "^3.0.2",
     "ws": "^8.20.0"
   },

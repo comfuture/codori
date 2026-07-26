@@ -88,6 +88,22 @@ http://127.0.0.1:4310
 
 Codori now serves the dashboard UI, REST API, and WebSocket proxy from the same origin. Choose a discovered Git project, then start a new thread or resume an older one.
 
+Codori also mirrors the avatar selected by the remote Codex host. Built-in pets
+and custom manifests under `~/.codex/pets` are resolved on the server, while the
+browser receives only validated animation metadata and bounded image bytes. The
+dashboard never needs direct access to the remote host's filesystem paths.
+
+Completed assistant turns can use that avatar for attention-aware alerts:
+
+- the currently visible and focused thread does not notify
+- another thread in the active tab uses a Nuxt UI toast
+- a background tab uses the Web Notifications API only after the user enables
+  **Notifications** in the sidebar and grants browser permission
+
+Selecting a toast or system notification opens the relevant thread. Browser
+notification permission is optional and is requested only from that explicit
+sidebar action.
+
 ## Remote Access
 
 Codori does not create private connectivity on its own. Typical patterns are:
@@ -298,6 +314,20 @@ Codori ignores common heavy directories during recursive scanning such as `node_
 - If a PID/runtime file points to a live shared process, Codori reuses it instead of spawning another app-server.
 - Codori records `startedAt` and `lastActivityAt` for the shared runtime under `~/.codori/run/`.
 - The shared runtime is stopped automatically after the configured inactivity timeout when no workspace has an active proxied WebSocket session.
+
+### Server avatar RPC extension
+
+Codori reserves the `codori/avatar/*` JSON-RPC namespace on its WebSocket proxy.
+The client uses `read`, `sprites`, `watch`, and `unwatch`; avatar changes are
+published as `codori/avatar/changed`. These messages are consumed by Codori and
+are not forwarded to Codex app-server. Standard app-server messages, malformed
+text frames, and binary frames continue through the shared proxy unchanged.
+
+Avatar manifests and spritesheets are size-bounded, image dimensions and
+animation frames are validated, custom paths must remain within their pet
+directory, and built-in downloads are restricted to the Codex pet CDN. Invalid
+or missing selections use a small built-in fallback avatar rather than breaking
+the RPC connection.
 - Stopping the final active workspace stops the shared runtime immediately unless a proxied WebSocket session is still open; if one is open, Codori stops the runtime when that final session closes.
 - Workspaces with an active proxied WebSocket session keep the shared runtime from being reaped as idle.
 - If a PID/runtime file is stale, Codori cleans it up and starts a fresh runtime.
