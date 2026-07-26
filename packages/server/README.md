@@ -44,7 +44,7 @@ On macOS and Linux, Codori prefers the first-party Codex remote-control daemon:
 
 1. Resolve `$CODEX_HOME/app-server-control/app-server-control.sock`
    (`CODEX_HOME` defaults to `~/.codex`).
-2. Perform a bounded Unix WebSocket connection and app-server `initialize`
+2. Perform a bounded raw Unix JSONL connection and app-server `initialize`
    probe. A socket file is not treated as proof of readiness.
 3. If needed, run the bundled `codex remote-control start --json` once across
    concurrent callers and probe the socket reported by the command.
@@ -57,6 +57,11 @@ Stopping a logical workspace only releases Codori's reference to it. If a
 daemon-backed bridge disconnects, that browser RPC connection closes and the
 next connection performs backend selection again; Codori never migrates an
 active JSON-RPC session between backends.
+
+The browser-facing route remains WebSocket. Codori's thin transport adapter
+maps each browser message to one newline-delimited daemon message and maps each
+complete daemon JSONL message back to one WebSocket frame without changing the
+JSON-RPC payload.
 
 `GET /api/runtime/backend` and the dashboard sidebar expose the selected
 backend kind, transport, readiness, version, and a compact fallback reason.

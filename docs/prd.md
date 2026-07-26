@@ -118,7 +118,7 @@ Preferred daemon selection:
 - On Unix platforms, resolve
   `$CODEX_HOME/app-server-control/app-server-control.sock`, defaulting
   `CODEX_HOME` to `~/.codex`.
-- Verify readiness with a bounded Unix WebSocket connection and `initialize`;
+- Verify readiness with a bounded raw Unix JSONL connection and `initialize`;
   never infer readiness from the socket file alone.
 - If the default socket is not ready, invoke
   `codex remote-control start --json` once across concurrent callers and probe
@@ -131,6 +131,8 @@ Preferred daemon selection:
   already-running incompatible daemon.
 - Keep one backend for the lifetime of a browser bridge. A daemon disconnect
   closes that bridge and invalidates the selection for the next connection.
+- Adapt browser WebSocket message boundaries to the daemon control socket's
+  newline-delimited JSON framing without changing the JSON-RPC payload.
 
 Managed fallback start command:
 

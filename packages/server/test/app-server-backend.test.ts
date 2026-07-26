@@ -1,9 +1,11 @@
+import { mkdtemp, rm } from 'node:fs/promises'
+import { createServer } from 'node:net'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import {
   AppServerBackendSelector,
-  daemonWebSocketUrl,
   parseDaemonStartOutput,
+  probeDaemonSocket,
   resolveDaemonStartCommand,
   resolveEffectiveCodexHome,
   type DaemonProbeResult,
@@ -11,14 +13,94 @@ import {
 } from '../src/app-server-backend.js'
 
 describe('app-server backend selection', () => {
-  it('resolves CODEX_HOME and the Unix WebSocket URL without exposing a TCP port', () => {
+  it('resolves CODEX_HOME without exposing a TCP endpoint', () => {
     expect(resolveEffectiveCodexHome('/Users/test', {
       CODEX_HOME: '/srv/codex-home'
     })).toBe('/srv/codex-home')
     expect(resolveEffectiveCodexHome('/Users/test', {}))
       .toBe('/Users/test/.codex')
-    expect(daemonWebSocketUrl('/srv/codex-home/control.sock'))
-      .toBe('ws+unix:///srv/codex-home/control.sock:/rpc')
+  })
+
+  it('probes the daemon over its raw Unix JSONL protocol', async () => {
+    const root = await mkdtemp('/tmp/codori-daemon-probe-')
+    const socketPath = join(root, 'control.sock')
+    const methods: string[] = []
+    const server = createServer((socket) => {
+      let buffer = ''
+      socket.on('data', (chunk) => {
+        buffer += chunk.toString()
+        let newlineIndex = buffer.indexOf('\n')
+        while (newlineIndex >= 0) {
+          const line = buffer.slice(0, newlineIndex)
+          buffer = buffer.slice(newlineIndex + 1)
+          const message = JSON.parse(line) as {
+            id?: string
+            method: string
+          }
+          methods.push(message.method)
+          if (message.method === 'initialize') {
+            const response = `${JSON.stringify({
+              method: 'server/ready',
+              params: {}
+            })}\n${JSON.stringify({
+              id: message.id,
+              result: {
+                userAgent: 'codex-app-server/0.145.0'
+              }
+            })}\n`
+            socket.write(response.slice(0, 17))
+            socket.write(response.slice(17))
+          } else if (message.method === 'experimentalFeature/list') {
+            socket.write(`${JSON.stringify({
+              id: message.id,
+              result: {
+                data: [{
+                  name: 'realtime_conversation',
+                  enabled: true
+                }]
+              }
+            })}\n`)
+          } else if (message.method === 'thread/realtime/listVoices') {
+            socket.write(`${JSON.stringify({
+              id: message.id,
+              result: {
+                voices: {
+                  voices: []
+                }
+              }
+            })}\n`)
+          }
+          newlineIndex = buffer.indexOf('\n')
+        }
+      })
+    })
+    await new Promise<void>((resolvePromise, reject) => {
+      server.listen(socketPath, (error?: Error) => {
+        if (error) {
+          reject(error)
+          return
+        }
+        resolvePromise()
+      })
+    })
+
+    try {
+      await expect(probeDaemonSocket(socketPath, {
+        realtimeVoiceEnabled: true
+      })).resolves.toEqual({
+        ready: true,
+        appServerVersion: '0.145.0'
+      })
+      expect(methods).toEqual([
+        'initialize',
+        'initialized',
+        'experimentalFeature/list',
+        'thread/realtime/listVoices'
+      ])
+    } finally {
+      await new Promise<void>(resolvePromise => server.close(() => resolvePromise()))
+      await rm(root, { recursive: true, force: true })
+    }
   })
 
   it('parses current and nested daemon start output shapes', () => {

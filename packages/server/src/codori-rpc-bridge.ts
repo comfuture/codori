@@ -6,11 +6,14 @@ import {
   ServerAvatarResolver,
   type ResolvedServerAvatar
 } from './server-avatar.js'
-import { daemonWebSocketUrl } from './app-server-backend.js'
 import type {
   AppServerTarget,
   RuntimeBridgeTarget
 } from './types.js'
+import {
+  UnixJsonlTransport,
+  type UnixJsonlPayload
+} from './unix-jsonl-transport.js'
 
 type JsonRpcId = string | number
 
@@ -31,6 +34,15 @@ type PendingInternalRequest = {
 type QueuedFrame = {
   message: WebSocket.RawData
   isBinary: boolean
+}
+
+type RpcPayload = WebSocket.RawData | string
+
+type RpcUpstream = {
+  isOpen: () => boolean
+  isConnecting: () => boolean
+  send: (message: RpcPayload, isBinary?: boolean) => void
+  close: () => void
 }
 
 export type CodoriRpcBridgeOptions = {
@@ -109,7 +121,7 @@ const waitForPortReady = async (port: number, attempts = 80, delayMs = 100) => {
 
 class CodoriAvatarRpcExtension {
   private readonly clientSocket: WebSocket
-  private readonly upstream: WebSocket
+  private readonly upstream: RpcUpstream
   private readonly resolver: ServerAvatarResolver
   private readonly workspacePath: string | null
   private readonly internalPrefix = `${INTERNAL_ID_PREFIX}:${randomUUID()}:`
@@ -128,7 +140,7 @@ class CodoriAvatarRpcExtension {
 
   constructor(options: {
     clientSocket: WebSocket
-    upstream: WebSocket
+    upstream: RpcUpstream
     avatarResolver: ServerAvatarResolver
     workspacePath: string | null
   }) {
@@ -234,7 +246,7 @@ class CodoriAvatarRpcExtension {
       this.pendingInternal.delete(requestId)
     }
     // App-server watches are connection-scoped and are released when the
-    // upstream websocket closes. Avoid creating new pending requests while
+    // upstream transport closes. Avoid creating new pending requests while
     // this extension is being torn down.
     this.ownedWatchIds.clear()
   }
@@ -323,7 +335,7 @@ class CodoriAvatarRpcExtension {
   }
 
   private requestInternal(method: string, params?: unknown) {
-    if (this.upstream.readyState !== WebSocket.OPEN) {
+    if (!this.upstream.isOpen()) {
       return Promise.reject(new Error('Upstream app-server is unavailable.'))
     }
     const id = `${this.internalPrefix}${this.pendingInternal.size + 1}:${randomUUID()}`
@@ -416,7 +428,7 @@ class CodoriAvatarRpcExtension {
 
 export const bridgeCodexRpcWebSocket = (options: CodoriRpcBridgeOptions) => {
   const queuedClientFrames: QueuedFrame[] = []
-  let upstream: WebSocket | null = null
+  let upstream: RpcUpstream | null = null
   let extension: CodoriAvatarRpcExtension | null = null
   let sessionReleased = false
   let selectedTarget: AppServerTarget | null = null
@@ -440,9 +452,9 @@ export const bridgeCodexRpcWebSocket = (options: CodoriRpcBridgeOptions) => {
     }
     if (
       upstream
-      && (upstream.readyState === WebSocket.OPEN || upstream.readyState === WebSocket.CONNECTING)
+      && (upstream.isOpen() || upstream.isConnecting())
     ) {
-      upstream.close(code, reason)
+      upstream.close()
     }
   }
 
@@ -455,14 +467,14 @@ export const bridgeCodexRpcWebSocket = (options: CodoriRpcBridgeOptions) => {
   }
 
   const forwardClientFrame = (frame: QueuedFrame) => {
-    if (!upstream || upstream.readyState !== WebSocket.OPEN) {
+    if (!upstream || !upstream.isOpen()) {
       queuedClientFrames.push(frame)
       return
     }
     if (extension?.handleClientMessage(frame.message, frame.isBinary)) {
       return
     }
-    upstream.send(frame.message, { binary: frame.isBinary })
+    upstream.send(frame.message, frame.isBinary)
   }
 
   options.clientSocket.on('message', (message: WebSocket.RawData, isBinary: boolean) => {
@@ -479,7 +491,7 @@ export const bridgeCodexRpcWebSocket = (options: CodoriRpcBridgeOptions) => {
     releaseSession()
     if (
       upstream
-      && (upstream.readyState === WebSocket.OPEN || upstream.readyState === WebSocket.CONNECTING)
+      && (upstream.isOpen() || upstream.isConnecting())
     ) {
       upstream.close()
     }
@@ -505,12 +517,7 @@ export const bridgeCodexRpcWebSocket = (options: CodoriRpcBridgeOptions) => {
       return
     }
 
-    upstream = target.transport === 'unix-socket'
-      ? new WebSocket(daemonWebSocketUrl(target.socketPath), {
-          perMessageDeflate: false
-        })
-      : new WebSocket(`ws://127.0.0.1:${target.port}`)
-    upstream.once('open', () => {
+    const handleUpstreamOpen = () => {
       if (options.clientSocket.readyState !== WebSocket.OPEN) {
         upstream?.close()
         return
@@ -524,8 +531,11 @@ export const bridgeCodexRpcWebSocket = (options: CodoriRpcBridgeOptions) => {
       for (const frame of queuedClientFrames.splice(0, queuedClientFrames.length)) {
         forwardClientFrame(frame)
       }
-    })
-    upstream.on('message', (message: WebSocket.RawData, isBinary: boolean) => {
+    }
+    const handleUpstreamMessage = (
+      message: WebSocket.RawData,
+      isBinary: boolean
+    ) => {
       options.touchActivity()
       if (extension?.handleUpstreamMessage(message, isBinary)) {
         return
@@ -533,12 +543,12 @@ export const bridgeCodexRpcWebSocket = (options: CodoriRpcBridgeOptions) => {
       if (options.clientSocket.readyState === WebSocket.OPEN) {
         options.clientSocket.send(message, { binary: isBinary })
       }
-    })
-    upstream.on('error', () => {
+    }
+    const handleUpstreamError = () => {
       invalidateSelectedTarget()
-      closeBoth(1011, 'upstream websocket failed')
-    })
-    upstream.on('close', () => {
+      closeBoth(1011, 'upstream transport failed')
+    }
+    const handleUpstreamClose = () => {
       extension?.dispose()
       if (
         options.clientSocket.readyState === WebSocket.OPEN
@@ -547,7 +557,36 @@ export const bridgeCodexRpcWebSocket = (options: CodoriRpcBridgeOptions) => {
         invalidateSelectedTarget()
         options.clientSocket.close()
       }
-    })
+    }
+
+    if (target.transport === 'unix-socket') {
+      const transport = new UnixJsonlTransport(target.socketPath, {
+        open: handleUpstreamOpen,
+        message: message => handleUpstreamMessage(message, false),
+        error: handleUpstreamError,
+        close: handleUpstreamClose
+      })
+      upstream = {
+        isOpen: () => transport.isOpen(),
+        isConnecting: () => transport.isConnecting(),
+        send: message => transport.send(message as UnixJsonlPayload),
+        close: () => transport.close()
+      }
+    } else {
+      const socket = new WebSocket(`ws://127.0.0.1:${target.port}`)
+      upstream = {
+        isOpen: () => socket.readyState === WebSocket.OPEN,
+        isConnecting: () => socket.readyState === WebSocket.CONNECTING,
+        send: (message, isBinary = false) => {
+          socket.send(message, { binary: isBinary })
+        },
+        close: () => socket.close()
+      }
+      socket.once('open', handleUpstreamOpen)
+      socket.on('message', handleUpstreamMessage)
+      socket.on('error', handleUpstreamError)
+      socket.on('close', handleUpstreamClose)
+    }
   })().catch(() => {
     closeBoth(1011, 'upstream bootstrap failed')
   })
