@@ -1,8 +1,10 @@
 import { computed, ref } from 'vue'
 import type { CodexRpcClient, CodexRpcNotification } from '~~/shared/codex-rpc'
 import type { ExperimentalFeatureListResponse } from '~~/shared/generated/codex-app-server/v2/ExperimentalFeatureListResponse'
+import type { RealtimeVoice } from '~~/shared/generated/codex-app-server/RealtimeVoice'
 import type { ThreadRealtimeClosedNotification } from '~~/shared/generated/codex-app-server/v2/ThreadRealtimeClosedNotification'
 import type { ThreadRealtimeErrorNotification } from '~~/shared/generated/codex-app-server/v2/ThreadRealtimeErrorNotification'
+import type { ThreadRealtimeListVoicesResponse } from '~~/shared/generated/codex-app-server/v2/ThreadRealtimeListVoicesResponse'
 import type { ThreadRealtimeSdpNotification } from '~~/shared/generated/codex-app-server/v2/ThreadRealtimeSdpNotification'
 import type { ThreadRealtimeStartedNotification } from '~~/shared/generated/codex-app-server/v2/ThreadRealtimeStartedNotification'
 import type { ThreadRealtimeStartParams } from '~~/shared/generated/codex-app-server/v2/ThreadRealtimeStartParams'
@@ -25,6 +27,25 @@ export type RealtimeSessionState =
   | 'connected'
   | 'stopping'
   | 'closed'
+  | 'error'
+
+export type RealtimeSessionKind = 'conversation' | 'preview'
+
+export type RealtimeVoiceCatalogStatus = 'idle' | 'loading' | 'ready' | 'error'
+
+export type RealtimeVoiceCatalog = {
+  status: RealtimeVoiceCatalogStatus
+  voices: RealtimeVoice[]
+  protocolDefault: RealtimeVoice | null
+  error: string | null
+}
+
+export type RealtimeVoicePreviewStatus =
+  | 'idle'
+  | 'loading'
+  | 'playing'
+  | 'blocked'
+  | 'stopping'
   | 'error'
 
 export type RealtimeActivity =
@@ -80,6 +101,7 @@ type RealtimePeerConnection = {
   ontrack: ((event: { streams: RealtimeMediaStream[] }) => void) | null
   onconnectionstatechange: (() => void) | null
   addTrack: (track: RealtimeTrack, stream: RealtimeMediaStream) => unknown
+  addTransceiver: (kind: 'audio', init: { direction: 'recvonly' }) => unknown
   createDataChannel: (label: string) => RealtimeDataChannel
   createOffer: () => Promise<RTCSessionDescriptionInit>
   setLocalDescription: (description: RTCSessionDescriptionInit) => Promise<void>
@@ -108,7 +130,30 @@ type ControllerOptions = {
   connectionTimeoutMs?: number
 }
 
+type PendingStartRequest = {
+  generation: number
+  threadId: string
+  accepted: Promise<boolean>
+}
+
+type PendingCloseBarrier = {
+  status: 'pending' | 'timed-out' | 'closed'
+  promise: Promise<void>
+  settle: () => void
+  release: () => void
+  timer: ReturnType<typeof globalThis.setTimeout>
+}
+
 const DEFAULT_CONNECTION_TIMEOUT_MS = 20_000
+const DEFAULT_PREVIEW_TIMEOUT_MS = 12_000
+const REPLACEMENT_CLOSE_TIMEOUT_MS = 1_500
+
+export type RealtimeConnectOptions = {
+  voice?: RealtimeVoice
+  kind?: RealtimeSessionKind
+  previewText?: string
+  previewTimeoutMs?: number
+}
 
 const defaultEnvironment = (): RealtimeBrowserEnvironment => ({
   isSecureContext: () => window.isSecureContext,
@@ -200,6 +245,8 @@ export const useRealtimeConversation = (options: ControllerOptions) => {
   })
   const state = ref<RealtimeSessionState>('idle')
   const activity = ref<RealtimeActivity>('idle')
+  const sessionKind = ref<RealtimeSessionKind | null>(null)
+  const activeVoice = ref<RealtimeVoice | null>(null)
   const owningThreadId = ref<string | null>(null)
   const generation = ref(0)
   const transcripts = ref<RealtimeTranscriptSegment[]>([])
@@ -209,12 +256,32 @@ export const useRealtimeConversation = (options: ControllerOptions) => {
   const microphoneEnabled = ref(false)
   const remoteAudioActive = ref(false)
   const peerConnectionState = ref<RTCPeerConnectionState | null>(null)
+  const voiceCatalog = ref<RealtimeVoiceCatalog>({
+    status: 'idle',
+    voices: [],
+    protocolDefault: null,
+    error: null
+  })
+  const previewError = ref<string | null>(null)
+  const previewStatus = computed<RealtimeVoicePreviewStatus>(() => {
+    if (sessionKind.value === 'preview') {
+      if (state.value === 'stopping') {
+        return 'stopping'
+      }
+      if (autoplayBlocked.value) {
+        return 'blocked'
+      }
+      return state.value === 'connected' ? 'playing' : 'loading'
+    }
+    return previewError.value ? 'error' : 'idle'
+  })
   const latestUserTranscript = computed(() =>
     transcripts.value.findLast(segment => segment.role === 'user' && segment.final)?.text ?? null
   )
 
   let generationCounter = 0
   let capabilityProbeCounter = 0
+  let voiceCatalogProbeCounter = 0
   let transcriptCounter = 0
   let activeGeneration: number | null = null
   let mediaStream: RealtimeMediaStream | null = null
@@ -223,19 +290,49 @@ export const useRealtimeConversation = (options: ControllerOptions) => {
   let dataChannel: RealtimeDataChannel | null = null
   let audioElement: RealtimeAudioElement | null = null
   let releaseNotifications: (() => void) | null = null
-  let releaseConnection: (() => void) | null = null
   let releaseMicrophoneEnded: (() => void) | null = null
   let connectionTimer: ReturnType<typeof globalThis.setTimeout> | null = null
+  let previewTimer: ReturnType<typeof globalThis.setTimeout> | null = null
   let startPromise: Promise<void> | null = null
+  let pendingStartRequest: PendingStartRequest | null = null
   let teardownPromise: Promise<void> | null = null
+  let connectClaim: Promise<void> | null = null
+  let releasePersistentConnection: (() => void) | null = null
   let startedReceived = false
   let remoteDescriptionApplied = false
   let pendingSdp: string | null = null
   let startAccepted = false
+  let previewSpeechRequested = false
+  let activePreviewText: string | null = null
+  let activePreviewTimeoutMs = DEFAULT_PREVIEW_TIMEOUT_MS
+  const pendingCloseBarriers = new Map<string, PendingCloseBarrier>()
 
   const isCurrent = (candidateGeneration: number, threadId?: string) =>
     activeGeneration === candidateGeneration
     && (!threadId || owningThreadId.value === threadId)
+
+  const acquireConnectClaim = async () => {
+    while (connectClaim) {
+      await connectClaim
+    }
+
+    let settleClaim!: () => void
+    const claim = new Promise<void>((resolve) => {
+      settleClaim = resolve
+    })
+    connectClaim = claim
+    let released = false
+    return () => {
+      if (released) {
+        return
+      }
+      released = true
+      if (connectClaim === claim) {
+        connectClaim = null
+      }
+      settleClaim()
+    }
+  }
 
   const clearConnectionTimer = () => {
     if (connectionTimer === null) {
@@ -243,6 +340,180 @@ export const useRealtimeConversation = (options: ControllerOptions) => {
     }
     environment.clearTimeout(connectionTimer)
     connectionTimer = null
+  }
+
+  const clearPreviewTimers = () => {
+    if (previewTimer !== null) {
+      environment.clearTimeout(previewTimer)
+      previewTimer = null
+    }
+  }
+
+  const invalidateVoiceCatalog = () => {
+    voiceCatalogProbeCounter += 1
+    voiceCatalog.value = {
+      status: 'idle',
+      voices: [],
+      protocolDefault: null,
+      error: null
+    }
+  }
+
+  const clearPendingCloseBarriers = () => {
+    for (const [threadId, barrier] of pendingCloseBarriers) {
+      environment.clearTimeout(barrier.timer)
+      barrier.release()
+      if (barrier.status === 'pending') {
+        // A disconnected RPC transport also terminates its server-side session.
+        // Resolve pending waiters so a later connection epoch can start cleanly.
+        barrier.status = 'closed'
+        barrier.settle()
+      } else {
+        barrier.status = 'closed'
+      }
+      pendingCloseBarriers.delete(threadId)
+    }
+  }
+
+  const ensureConnectionMonitor = () => {
+    if (releasePersistentConnection) {
+      return
+    }
+    releasePersistentConnection = options.client.subscribeConnectionState((connectionState) => {
+      if (connectionState !== 'disconnected') {
+        return
+      }
+      invalidateVoiceCatalog()
+      clearPendingCloseBarriers()
+      if (activeGeneration !== null) {
+        void fail(activeGeneration, 'The Codex RPC connection closed.', false)
+      }
+    })
+  }
+
+  const createPendingCloseBarrier = (threadId: string) => {
+    const existing = pendingCloseBarriers.get(threadId)
+    if (existing) {
+      return existing
+    }
+
+    let resolveClosed!: () => void
+    let rejectTimedOut!: (error: Error) => void
+    const promise = new Promise<void>((resolve, reject) => {
+      resolveClosed = resolve
+      rejectTimedOut = reject
+    })
+    const barrier: PendingCloseBarrier = {
+      status: 'pending',
+      promise,
+      settle: resolveClosed,
+      release: () => {},
+      timer: 0 as unknown as ReturnType<typeof globalThis.setTimeout>
+    }
+    const release = options.client.subscribe((notification) => {
+      const params = notification.params as { threadId?: unknown } | undefined
+      if (notification.method !== 'thread/realtime/closed'
+        || params?.threadId !== threadId) {
+        return
+      }
+
+      environment.clearTimeout(barrier.timer)
+      barrier.release()
+      pendingCloseBarriers.delete(threadId)
+      if (barrier.status === 'pending') {
+        barrier.status = 'closed'
+        resolveClosed()
+      } else {
+        barrier.status = 'closed'
+      }
+    })
+    barrier.release = release
+    const timer = environment.setTimeout(() => {
+      if (barrier.status !== 'pending') {
+        return
+      }
+      barrier.status = 'timed-out'
+      rejectTimedOut(new Error(
+        `Timed out waiting for the previous realtime voice session on ${threadId} to close.`
+      ))
+    }, REPLACEMENT_CLOSE_TIMEOUT_MS)
+    barrier.timer = timer
+    // A regular stop does not await this barrier. Mark the rejection handled
+    // while preserving it for the next start, which must fail closed.
+    void promise.catch(() => {})
+    pendingCloseBarriers.set(threadId, barrier)
+    return barrier
+  }
+
+  const settlePendingCloseBarrier = (
+    threadId: string,
+    expectedBarrier: PendingCloseBarrier
+  ) => {
+    const barrier = pendingCloseBarriers.get(threadId)
+    if (barrier !== expectedBarrier) {
+      return
+    }
+
+    environment.clearTimeout(barrier.timer)
+    barrier.release()
+    pendingCloseBarriers.delete(threadId)
+    if (barrier.status === 'pending') {
+      barrier.status = 'closed'
+      barrier.settle()
+    } else {
+      barrier.status = 'closed'
+    }
+  }
+
+  const awaitPendingCloseBarriers = async () => {
+    for (const barrier of pendingCloseBarriers.values()) {
+      if (barrier.status === 'timed-out') {
+        throw new Error(
+          'The previous realtime voice session did not confirm closure. Reconnect Codex before starting another session.'
+        )
+      }
+      await barrier.promise
+    }
+  }
+
+  const refreshVoiceCatalog = async (force = false) => {
+    ensureConnectionMonitor()
+    if (!force && voiceCatalog.value.status === 'ready') {
+      return voiceCatalog.value
+    }
+
+    const probeGeneration = ++voiceCatalogProbeCounter
+    voiceCatalog.value = {
+      ...voiceCatalog.value,
+      status: 'loading',
+      error: null
+    }
+
+    try {
+      const response = await options.client.request<ThreadRealtimeListVoicesResponse>(
+        'thread/realtime/listVoices',
+        {}
+      )
+      if (probeGeneration === voiceCatalogProbeCounter) {
+        voiceCatalog.value = {
+          status: 'ready',
+          voices: [...response.voices.v1],
+          protocolDefault: response.voices.defaultV1,
+          error: null
+        }
+      }
+    } catch (caughtError) {
+      if (probeGeneration === voiceCatalogProbeCounter) {
+        voiceCatalog.value = {
+          status: 'error',
+          voices: [],
+          protocolDefault: null,
+          error: `Could not load realtime voices: ${errorMessage(caughtError)}`
+        }
+      }
+    }
+
+    return voiceCatalog.value
   }
 
   const reconcileTranscriptDelta = (
@@ -330,6 +601,44 @@ export const useRealtimeConversation = (options: ControllerOptions) => {
     clearConnectionTimer()
     state.value = 'connected'
     activity.value = microphoneEnabled.value ? 'listening' : 'idle'
+
+    if (sessionKind.value !== 'preview'
+      || previewSpeechRequested
+      || !activePreviewText) {
+      return
+    }
+
+    previewSpeechRequested = true
+    const threadId = owningThreadId.value
+    if (!threadId) {
+      void fail(candidateGeneration, 'The preview thread is no longer available.')
+      return
+    }
+
+    previewTimer = environment.setTimeout(() => {
+      if (isCurrent(candidateGeneration, threadId) && sessionKind.value === 'preview') {
+        void teardown({
+          candidateGeneration,
+          sendStop: true,
+          terminalState: 'closed'
+        })
+      }
+    }, activePreviewTimeoutMs)
+
+    void options.client.request('thread/realtime/appendSpeech', {
+      threadId,
+      text: activePreviewText
+    }).then(() => {
+      // The current app-server contract has no output-playout completion event.
+      // The authoritative preview bound remains armed until explicit stop/teardown.
+    }).catch((caughtError) => {
+      if (isCurrent(candidateGeneration, threadId)) {
+        void fail(
+          candidateGeneration,
+          `Could not play the voice preview: ${errorMessage(caughtError)}`
+        )
+      }
+    })
   }
 
   const teardown = async (input: {
@@ -337,6 +646,7 @@ export const useRealtimeConversation = (options: ControllerOptions) => {
     sendStop: boolean
     terminalState: 'closed' | 'error'
     message?: string | null
+    preservePreviewFailure?: boolean
   }) => {
     if (!isCurrent(input.candidateGeneration)) {
       return
@@ -347,12 +657,14 @@ export const useRealtimeConversation = (options: ControllerOptions) => {
 
     teardownPromise = (async () => {
       const threadId = owningThreadId.value
+      const submittedStart = pendingStartRequest?.generation === input.candidateGeneration
+        ? pendingStartRequest
+        : null
       activeGeneration = null
       clearConnectionTimer()
+      clearPreviewTimers()
       releaseNotifications?.()
       releaseNotifications = null
-      releaseConnection?.()
-      releaseConnection = null
       releaseMicrophoneEnded?.()
       releaseMicrophoneEnded = null
       microphoneEnabled.value = false
@@ -383,13 +695,38 @@ export const useRealtimeConversation = (options: ControllerOptions) => {
       pendingSdp = null
       startedReceived = false
       remoteDescriptionApplied = false
+      previewSpeechRequested = false
+      activePreviewText = null
 
-      if (input.sendStop && startAccepted && threadId && options.client.isConnected()) {
+      if (input.sendStop
+        && !startAccepted
+        && submittedStart
+        && threadId
+        && options.client.isConnected()) {
+        const closeBarrier = createPendingCloseBarrier(threadId)
+        void submittedStart.accepted.then(async (accepted) => {
+          if (pendingCloseBarriers.get(threadId) !== closeBarrier) {
+            return
+          }
+          if (!accepted || !options.client.isConnected()) {
+            settlePendingCloseBarrier(threadId, closeBarrier)
+            return
+          }
+          await options.client.request('thread/realtime/stop', { threadId }).catch(() => {})
+        })
+      } else if (input.sendStop && startAccepted && threadId && options.client.isConnected()) {
+        createPendingCloseBarrier(threadId)
         state.value = 'stopping'
         await options.client.request('thread/realtime/stop', { threadId }).catch(() => {})
       }
 
       owningThreadId.value = null
+      sessionKind.value = null
+      activeVoice.value = null
+      if (!input.preservePreviewFailure) {
+        autoplayBlocked.value = false
+        previewError.value = null
+      }
       startAccepted = false
       activity.value = 'idle'
       error.value = input.terminalState === 'error'
@@ -404,12 +741,39 @@ export const useRealtimeConversation = (options: ControllerOptions) => {
   }
 
   const fail = async (candidateGeneration: number, message: string, sendStop = startAccepted) => {
+    const previewFailed = sessionKind.value === 'preview'
+    if (previewFailed) {
+      previewError.value = message
+    }
     await teardown({
       candidateGeneration,
       sendStop,
-      terminalState: 'error',
-      message
+      terminalState: previewFailed ? 'closed' : 'error',
+      message: previewFailed ? null : message,
+      preservePreviewFailure: previewFailed
     })
+  }
+
+  const stopForReplacement = async () => {
+    const inFlightTeardown = teardownPromise
+    if (inFlightTeardown) {
+      await inFlightTeardown
+    }
+
+    if (activeGeneration === null) {
+      return
+    }
+
+    const candidateGeneration = activeGeneration
+    const threadId = owningThreadId.value
+    await teardown({
+      candidateGeneration,
+      sendStop: true,
+      terminalState: 'closed'
+    })
+    if (threadId) {
+      await awaitPendingCloseBarriers()
+    }
   }
 
   const applyRemoteSdp = async (candidateGeneration: number, sdp: string) => {
@@ -456,6 +820,9 @@ export const useRealtimeConversation = (options: ControllerOptions) => {
         return
       }
       case 'thread/realtime/sdp': {
+        if (!startedReceived) {
+          return
+        }
         const sdp = (notification.params as ThreadRealtimeSdpNotification).sdp
         void applyRemoteSdp(candidateGeneration, sdp)
         return
@@ -476,6 +843,9 @@ export const useRealtimeConversation = (options: ControllerOptions) => {
         return
       }
       case 'thread/realtime/closed': {
+        if (!startedReceived) {
+          return
+        }
         const closed = notification.params as ThreadRealtimeClosedNotification
         void teardown({
           candidateGeneration,
@@ -548,75 +918,102 @@ export const useRealtimeConversation = (options: ControllerOptions) => {
     return capability.value
   }
 
-  const connect = async (threadId: string) => {
-    if (owningThreadId.value === threadId && startPromise) {
-      return await startPromise
+  const connectWithClaim = async (
+    threadId: string,
+    connectOptions: RealtimeConnectOptions,
+    releaseConnectClaim: () => void
+  ) => {
+    const nextSessionKind = connectOptions.kind ?? 'conversation'
+    if (!teardownPromise
+      && owningThreadId.value === threadId
+      && sessionKind.value === nextSessionKind
+      && activeVoice.value === (connectOptions.voice ?? null)
+      && startPromise) {
+      const existingStartPromise = startPromise
+      releaseConnectClaim()
+      return await existingStartPromise
     }
-    if (owningThreadId.value === threadId && state.value === 'connected') {
+    if (!teardownPromise
+      && owningThreadId.value === threadId
+      && sessionKind.value === nextSessionKind
+      && activeVoice.value === (connectOptions.voice ?? null)
+      && state.value === 'connected') {
       return
     }
     if (capability.value.status !== 'available') {
       throw new Error(capability.value.message)
     }
 
-    if (activeGeneration !== null) {
-      await teardown({
-        candidateGeneration: activeGeneration,
-        sendStop: true,
-        terminalState: 'closed'
-      })
+    ensureConnectionMonitor()
+    while (
+      teardownPromise
+      || activeGeneration !== null
+      || pendingCloseBarriers.size > 0
+    ) {
+      await stopForReplacement()
+      await awaitPendingCloseBarriers()
     }
 
     const candidateGeneration = ++generationCounter
     activeGeneration = candidateGeneration
     generation.value = candidateGeneration
     owningThreadId.value = threadId
+    sessionKind.value = nextSessionKind
+    activeVoice.value = connectOptions.voice ?? null
     transcripts.value = []
     error.value = null
+    previewError.value = null
     autoplayBlocked.value = false
     activity.value = 'idle'
-    state.value = 'requesting-permission'
+    state.value = nextSessionKind === 'preview' ? 'creating-offer' : 'requesting-permission'
     startedReceived = false
     remoteDescriptionApplied = false
     startAccepted = false
+    previewSpeechRequested = false
+    activePreviewText = nextSessionKind === 'preview'
+      ? connectOptions.previewText?.trim() || null
+      : null
+    activePreviewTimeoutMs = connectOptions.previewTimeoutMs ?? DEFAULT_PREVIEW_TIMEOUT_MS
+
+    if (nextSessionKind === 'preview' && (!connectOptions.voice || !activePreviewText)) {
+      await fail(candidateGeneration, 'A supported voice and sample text are required for preview.', false)
+      throw new Error('A supported voice and sample text are required for preview.')
+    }
 
     releaseNotifications = options.client.subscribe(notification => {
       handleNotification(candidateGeneration, threadId, notification)
     })
-    releaseConnection = options.client.subscribeConnectionState((connectionState) => {
-      if (connectionState === 'disconnected' && isCurrent(candidateGeneration, threadId)) {
-        void fail(candidateGeneration, 'The Codex RPC connection closed.', false)
-      }
-    })
-
     const currentStartPromise = (async () => {
       try {
         audioElement = environment.createAudioElement()
         audioElement.autoplay = true
         audioElement.muted = outputMuted.value
 
-        const candidateMediaStream = await environment.getUserMedia()
-        if (!isCurrent(candidateGeneration, threadId)) {
-          for (const track of candidateMediaStream.getTracks()) {
-            track.stop()
+        let candidateMediaStream: RealtimeMediaStream | null = null
+        if (nextSessionKind === 'conversation') {
+          candidateMediaStream = await environment.getUserMedia()
+          if (!isCurrent(candidateGeneration, threadId)) {
+            for (const track of candidateMediaStream.getTracks()) {
+              track.stop()
+            }
+            return
           }
-          return
-        }
-        mediaStream = candidateMediaStream
+          mediaStream = candidateMediaStream
 
-        microphoneTrack = candidateMediaStream.getAudioTracks()[0] ?? null
-        if (!microphoneTrack) {
-          throw new Error('No microphone audio track is available.')
-        }
-        microphoneTrack.enabled = false
-        const handleMicrophoneEnded = () => {
-          if (isCurrent(candidateGeneration, threadId)) {
-            void fail(candidateGeneration, 'Microphone access ended or the input device was removed.')
+          microphoneTrack = candidateMediaStream.getAudioTracks()[0] ?? null
+          if (!microphoneTrack) {
+            throw new Error('No microphone audio track is available.')
           }
-        }
-        microphoneTrack.addEventListener?.('ended', handleMicrophoneEnded)
-        releaseMicrophoneEnded = () => {
-          microphoneTrack?.removeEventListener?.('ended', handleMicrophoneEnded)
+          microphoneTrack.enabled = false
+          const handleMicrophoneEnded = () => {
+            if (isCurrent(candidateGeneration, threadId)) {
+              void fail(candidateGeneration, 'Microphone access ended or the input device was removed.')
+            }
+          }
+          microphoneTrack.addEventListener?.('ended', handleMicrophoneEnded)
+          releaseMicrophoneEnded = () => {
+            microphoneTrack?.removeEventListener?.('ended', handleMicrophoneEnded)
+          }
         }
 
         state.value = 'creating-offer'
@@ -638,10 +1035,16 @@ export const useRealtimeConversation = (options: ControllerOptions) => {
           void audioElement.play().then(() => {
             if (isCurrent(candidateGeneration, threadId)) {
               autoplayBlocked.value = false
+              if (sessionKind.value === 'preview') {
+                previewError.value = null
+              }
             }
           }).catch(() => {
             if (isCurrent(candidateGeneration, threadId)) {
               autoplayBlocked.value = true
+              if (sessionKind.value === 'preview') {
+                previewError.value = 'Browser autoplay blocked this preview. Interact with the page and retry.'
+              }
             }
           })
         }
@@ -663,7 +1066,11 @@ export const useRealtimeConversation = (options: ControllerOptions) => {
           maybeMarkConnected(candidateGeneration)
         }
 
-        candidatePeerConnection.addTrack(microphoneTrack, candidateMediaStream)
+        if (nextSessionKind === 'preview') {
+          candidatePeerConnection.addTransceiver('audio', { direction: 'recvonly' })
+        } else if (microphoneTrack && candidateMediaStream) {
+          candidatePeerConnection.addTrack(microphoneTrack, candidateMediaStream)
+        }
         dataChannel = candidatePeerConnection.createDataChannel('oai-events')
         const offer = await candidatePeerConnection.createOffer()
         if (!isCurrent(candidateGeneration, threadId)
@@ -690,12 +1097,26 @@ export const useRealtimeConversation = (options: ControllerOptions) => {
           threadId,
           outputModality: 'audio',
           version: 'v3',
+          ...(connectOptions.voice ? { voice: connectOptions.voice } : {}),
+          ...(nextSessionKind === 'preview'
+            ? {
+                includeStartupContext: false,
+                clientManagedHandoffs: true
+              }
+            : {}),
           transport: {
             type: 'webrtc',
             sdp
           }
         }
-        await options.client.request('thread/realtime/start', params)
+        const startRequest = options.client.request('thread/realtime/start', params)
+        const submittedStart: PendingStartRequest = {
+          generation: candidateGeneration,
+          threadId,
+          accepted: startRequest.then(() => true, () => false)
+        }
+        pendingStartRequest = submittedStart
+        await startRequest
         if (!isCurrent(candidateGeneration, threadId)) {
           return
         }
@@ -715,6 +1136,10 @@ export const useRealtimeConversation = (options: ControllerOptions) => {
           : message
         await fail(candidateGeneration, normalized, startAccepted)
         throw caughtError
+      } finally {
+        if (pendingStartRequest?.generation === candidateGeneration) {
+          pendingStartRequest = null
+        }
       }
     })().finally(() => {
       if (startPromise === currentStartPromise) {
@@ -722,8 +1147,21 @@ export const useRealtimeConversation = (options: ControllerOptions) => {
       }
     })
     startPromise = currentStartPromise
+    releaseConnectClaim()
 
     return await currentStartPromise
+  }
+
+  const connect = async (
+    threadId: string,
+    connectOptions: RealtimeConnectOptions = {}
+  ) => {
+    const releaseConnectClaim = await acquireConnectClaim()
+    try {
+      return await connectWithClaim(threadId, connectOptions, releaseConnectClaim)
+    } finally {
+      releaseConnectClaim()
+    }
   }
 
   const setMicrophoneEnabled = (enabled: boolean) => {
@@ -751,6 +1189,9 @@ export const useRealtimeConversation = (options: ControllerOptions) => {
       try {
         await audioElement.play()
         autoplayBlocked.value = false
+        if (sessionKind.value === 'preview') {
+          previewError.value = null
+        }
       } catch {
         autoplayBlocked.value = true
       }
@@ -776,12 +1217,17 @@ export const useRealtimeConversation = (options: ControllerOptions) => {
 
   const dispose = async () => {
     await stop()
+    releasePersistentConnection?.()
+    releasePersistentConnection = null
+    clearPendingCloseBarriers()
   }
 
   return {
     capability,
     state,
     activity,
+    sessionKind,
+    activeVoice,
     owningThreadId,
     generation,
     transcripts,
@@ -792,11 +1238,17 @@ export const useRealtimeConversation = (options: ControllerOptions) => {
     microphoneEnabled,
     remoteAudioActive,
     peerConnectionState,
+    voiceCatalog,
+    previewStatus,
+    previewError,
     refreshCapability,
+    refreshVoiceCatalog,
+    invalidateVoiceCatalog,
     connect,
     setMicrophoneEnabled,
     setOutputMuted,
     stop,
+    stopForReplacement,
     stopForThreadChange,
     dispose
   }

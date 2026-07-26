@@ -3,8 +3,12 @@ import { computed } from 'vue'
 import type {
   RealtimeActivity,
   RealtimeCapability,
-  RealtimeSessionState
+  RealtimeSessionKind,
+  RealtimeSessionState,
+  RealtimeVoiceCatalog,
+  RealtimeVoicePreviewStatus
 } from '../composables/useRealtimeConversation'
+import type { RealtimeVoice } from '~~/shared/generated/codex-app-server/RealtimeVoice'
 
 const props = defineProps<{
   capability: RealtimeCapability
@@ -15,6 +19,14 @@ const props = defineProps<{
   autoplayBlocked: boolean
   error: string | null
   activeElsewhere: boolean
+  voiceCatalog: RealtimeVoiceCatalog
+  selectedVoice?: RealtimeVoice
+  savedVoice: string | null
+  sessionKind: RealtimeSessionKind | null
+  activeVoice: RealtimeVoice | null
+  previewStatus: RealtimeVoicePreviewStatus
+  previewError: string | null
+  hasMaterializedThread: boolean
 }>()
 
 const emit = defineEmits<{
@@ -22,6 +34,10 @@ const emit = defineEmits<{
   'toggle-microphone': []
   'toggle-output': []
   stop: []
+  'select-voice': [voice: RealtimeVoice | null]
+  'refresh-voices': []
+  'preview-voice': [voice: RealtimeVoice]
+  'stop-preview': []
 }>()
 
 const sessionActive = computed(() =>
@@ -55,11 +71,18 @@ const statusLabel = computed(() => {
   if (props.activeElsewhere) {
     return 'Voice session active in another thread'
   }
+  if (props.autoplayBlocked) {
+    return props.sessionKind === 'preview'
+      ? props.previewError || 'Browser autoplay blocked the voice preview. Interact with the page and retry.'
+      : 'Remote speech is blocked. Use the speaker control to play it.'
+  }
+  if (props.sessionKind === 'preview' && sessionActive.value) {
+    return props.activeVoice
+      ? `Previewing ${props.activeVoice}`
+      : 'Voice preview active'
+  }
   if (props.sessionState === 'error') {
     return props.error || 'Voice session error'
-  }
-  if (props.autoplayBlocked) {
-    return 'Remote speech is blocked. Use the speaker control to play it.'
   }
   if (props.sessionState === 'requesting-permission') {
     return 'Waiting for microphone permission'
@@ -99,6 +122,9 @@ const statusLabel = computed(() => {
 const microphoneLabel = computed(() => {
   if (props.activeElsewhere) {
     return 'A voice session is already active in another thread'
+  }
+  if (props.sessionKind === 'preview' && sessionActive.value) {
+    return 'Start voice conversation and stop preview'
   }
   if (props.sessionState === 'error') {
     return props.error || 'Voice session error'
@@ -141,7 +167,7 @@ const handleClick = () => {
   if (microphoneDisabled.value) {
     return
   }
-  if (props.sessionState !== 'connected') {
+  if (props.sessionState !== 'connected' || props.sessionKind === 'preview') {
     emit('connect')
     return
   }
@@ -174,6 +200,24 @@ const handleClick = () => {
       </span>
     </UTooltip>
 
+    <RealtimeVoicePicker
+      :capability="capability"
+      :catalog="voiceCatalog"
+      :selected-voice="selectedVoice"
+      :saved-voice="savedVoice"
+      :session-kind="sessionKind"
+      :session-state="sessionState"
+      :active-voice="activeVoice"
+      :preview-status="previewStatus"
+      :preview-error="previewError"
+      :active-elsewhere="activeElsewhere"
+      :has-materialized-thread="hasMaterializedThread"
+      @select="emit('select-voice', $event)"
+      @refresh="emit('refresh-voices')"
+      @preview="emit('preview-voice', $event)"
+      @stop-preview="emit('stop-preview')"
+    />
+
     <UTooltip
       v-if="sessionActive && !activeElsewhere"
       :text="outputMuted ? 'Unmute remote speech' : 'Mute remote speech'"
@@ -194,7 +238,7 @@ const handleClick = () => {
 
     <UTooltip
       v-if="sessionActive"
-      text="Stop voice session"
+      :text="sessionKind === 'preview' ? 'Stop voice preview' : 'Stop voice session'"
     >
       <UButton
         type="button"
@@ -202,7 +246,7 @@ const handleClick = () => {
         variant="ghost"
         size="sm"
         icon="i-lucide-square"
-        aria-label="Stop voice session"
+        :aria-label="sessionKind === 'preview' ? 'Stop voice preview' : 'Stop voice session'"
         class="size-11 shrink-0 justify-center rounded-full border border-default/70 md:size-8"
         :ui="{ leadingIcon: 'size-4', base: 'px-0' }"
         @click="emit('stop')"

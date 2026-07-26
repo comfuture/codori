@@ -292,6 +292,10 @@ Example:
 
 After enabling realtime voice, open an existing thread and use the microphone action in the composer. The first activation requests microphone permission and prepares the WebRTC session. Once it is ready, hold the microphone action with a pointer, touch, <kbd>Space</kbd>, or <kbd>Enter</kbd> while that button is focused; releasing immediately mutes input while keeping the session ready for a follow-up. The adjacent controls mute remote speech or stop and release the entire voice session.
 
+The waveform picker discovers the V3 voice list from the active Codex runtime. “Use Codex setting” is the default and sends no per-session voice override; an explicit choice is stored only in that browser and applies to the next session. “Protocol default” identifies the app-server protocol fallback and does not claim to show the active Codex configuration. If a saved voice is no longer advertised, Codori preserves it for diagnostics but safely falls back to the Codex setting.
+
+Each advertised voice has a receive-only preview on an existing, materialized thread. Preview never requests microphone access, creates a normal turn, or adds hidden conversation history. It plays a short locale-aware sample and stops automatically after 12 seconds. Preview and conversation audio share one owner: starting a conversation preempts preview, thread changes stop preview, and a new audio session waits for the previous app-server session to confirm closure.
+
 The voice status surface shows live/final transcripts and whether Codex is listening, transcribing, delegating, working, or speaking. Spoken requests use app-server's automatic handoff into the active thread, so its existing turn, tool, approval, and final-response UI remains authoritative. Codori does not resubmit the recognized text as a second turn.
 
 While the realtime session is active, the server's selected pet appears above
