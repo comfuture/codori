@@ -25,6 +25,7 @@ describe('app-server backend selection', () => {
     const root = await mkdtemp('/tmp/codori-daemon-probe-')
     const socketPath = join(root, 'control.sock')
     const methods: string[] = []
+    let initializeCapabilities: unknown
     const server = createServer((socket) => {
       let buffer = ''
       socket.on('data', (chunk) => {
@@ -36,9 +37,13 @@ describe('app-server backend selection', () => {
           const message = JSON.parse(line) as {
             id?: string
             method: string
+            params?: {
+              capabilities?: unknown
+            }
           }
           methods.push(message.method)
           if (message.method === 'initialize') {
+            initializeCapabilities = message.params?.capabilities
             const response = `${JSON.stringify({
               method: 'server/ready',
               params: {}
@@ -97,6 +102,11 @@ describe('app-server backend selection', () => {
         'experimentalFeature/list',
         'thread/realtime/listVoices'
       ])
+      expect(initializeCapabilities).toEqual({
+        experimentalApi: true,
+        requestAttestation: false,
+        optOutNotificationMethods: null
+      })
     } finally {
       await new Promise<void>(resolvePromise => server.close(() => resolvePromise()))
       await rm(root, { recursive: true, force: true })
