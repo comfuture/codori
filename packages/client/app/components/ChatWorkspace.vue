@@ -16,7 +16,6 @@ import PlanTaskListPanel from './PlanTaskListPanel.vue'
 import PlanImplementationPromptDrawer from './PlanImplementationPromptDrawer.vue'
 import ReviewStartDrawer from './ReviewStartDrawer.vue'
 import PendingUserRequestDrawer from './PendingUserRequestDrawer.vue'
-import RealtimeVoiceCompanion from './RealtimeVoiceCompanion.vue'
 import UsageStatusModal from './UsageStatusModal.vue'
 import VoiceComposerControls from './VoiceComposerControls.vue'
 import WorkspaceBranchControl from './WorkspaceBranchControl.vue'
@@ -53,6 +52,7 @@ import {
   type ChatScrollMetrics
 } from '../utils/chat-scroll'
 import {
+  hydrateThreadView,
   isConstrainedBrowserRequiringDeferredSync,
   isActiveTurnStatus,
   resumeThreadStreamAfterReactivation,
@@ -84,8 +84,6 @@ import {
   isRealtimeVoiceActiveElsewhere,
   useSharedRealtimeConversation
 } from '../composables/useSharedRealtimeConversation'
-import { acquireServerAvatar } from '../composables/useServerAvatar'
-import { isRealtimeVoiceCompanionActive } from '../utils/realtime-voice-companion'
 import { sortSidebarProjects } from '../utils/project-sidebar-order'
 import {
   promoteThreadSummaries,
@@ -126,11 +124,9 @@ import {
 import type { ConfigReadParams } from '~~/shared/generated/codex-app-server/v2/ConfigReadParams'
 import type { ConfigReadResponse } from '~~/shared/generated/codex-app-server/v2/ConfigReadResponse'
 import type { ModelListParams } from '~~/shared/generated/codex-app-server/v2/ModelListParams'
-import type { ThreadReadResponse } from '~~/shared/generated/codex-app-server/v2/ThreadReadResponse'
 import type { Thread } from '~~/shared/generated/codex-app-server/v2/Thread'
 import type { ThreadItem } from '~~/shared/generated/codex-app-server/v2/ThreadItem'
 import type { ThreadResumeParams } from '~~/shared/generated/codex-app-server/v2/ThreadResumeParams'
-import type { ThreadResumeResponse } from '~~/shared/generated/codex-app-server/v2/ThreadResumeResponse'
 import type { ThreadStartParams } from '~~/shared/generated/codex-app-server/v2/ThreadStartParams'
 import type { ThreadStartResponse } from '~~/shared/generated/codex-app-server/v2/ThreadStartResponse'
 import type { ThreadSettingsUpdateParams } from '~~/shared/generated/codex-app-server/v2/ThreadSettingsUpdateParams'
@@ -174,7 +170,6 @@ import {
   type ServerCapabilitiesResponse
 } from '~~/shared/codori'
 import { resolveApiUrl, shouldUseServerProxy } from '~~/shared/network'
-import type { ServerAvatarMetadata } from '~~/shared/server-avatar'
 import {
   filterSlashCommands,
   findActiveSlashCommand,
@@ -368,9 +363,6 @@ const {
   activity: realtimeVoiceActivity,
   owningThreadId: realtimeVoiceOwningThreadId,
   activeWorkspaceKey: realtimeVoiceActiveWorkspaceKey,
-  activeClient: realtimeVoiceActiveClient,
-  generation: realtimeVoiceGeneration,
-  transcripts: realtimeVoiceTranscripts,
   error: realtimeVoiceError,
   outputMuted: realtimeVoiceOutputMuted,
   autoplayBlocked: realtimeVoiceAutoplayBlocked,
@@ -384,44 +376,6 @@ const realtimeVoiceActiveElsewhere = computed(() =>
     threadId: activeThreadId.value
   })
 )
-const realtimeVoiceAvatar = ref<ServerAvatarMetadata | null>(null)
-const realtimeVoiceSpriteUrl = ref<string | null>(null)
-let releaseRealtimeVoiceAvatar: (() => void) | null = null
-
-const releaseRealtimeVoiceAvatarResource = () => {
-  releaseRealtimeVoiceAvatar?.()
-  releaseRealtimeVoiceAvatar = null
-  realtimeVoiceAvatar.value = null
-  realtimeVoiceSpriteUrl.value = null
-}
-
-const syncRealtimeVoiceAvatarResource = () => {
-  releaseRealtimeVoiceAvatarResource()
-  if (!isRealtimeVoiceCompanionActive(realtimeVoiceState.value)) {
-    return
-  }
-  const client = realtimeVoiceActiveClient.value
-  if (!client) {
-    return
-  }
-  const resource = acquireServerAvatar(client)
-  const stopAvatar = watch(resource.avatar, (avatar) => {
-    realtimeVoiceAvatar.value = avatar
-  }, { immediate: true })
-  const stopSpriteUrl = watch(resource.spriteUrl, (spriteUrl) => {
-    realtimeVoiceSpriteUrl.value = spriteUrl
-  }, { immediate: true })
-  releaseRealtimeVoiceAvatar = () => {
-    stopAvatar()
-    stopSpriteUrl()
-    resource.release()
-  }
-}
-
-watch([
-  () => isRealtimeVoiceCompanionActive(realtimeVoiceState.value),
-  realtimeVoiceActiveWorkspaceKey
-], syncRealtimeVoiceAvatarResource, { immediate: true })
 let realtimeVoiceCapabilityRequest = 0
 let releaseRealtimeVoicePageListeners: (() => void) | null = null
 
@@ -3009,15 +2963,24 @@ const hydrateThread = async (threadId: string) => {
       const { resumeResponse, response } = await runThreadHydrationWithoutPromptControlsGate(
         ensurePromptControlsReady,
         async () => {
-          const resumeResponse = await client.request<ThreadResumeResponse>('thread/resume', buildThreadResumeParams(threadId))
-          const response = await client.request<ThreadReadResponse>('thread/read', {
-            threadId,
-            includeTurns: true
+          const shouldResumeThread = !(
+            realtimeVoiceActiveWorkspaceKey.value === workspaceSessionKey
+            && realtimeVoiceOwningThreadId.value === threadId
+          )
+          const {
+            resumeResponse,
+            readResponse
+          } = await hydrateThreadView(client, buildThreadResumeParams(threadId), {
+            resume: shouldResumeThread
           })
-          return { resumeResponse, response }
+          return { resumeResponse, response: readResponse }
         },
         ({ resumeResponse }) => {
-          if (loadVersion.value !== requestVersion || activeThreadId.value !== threadId) {
+          if (
+            !resumeResponse
+            || loadVersion.value !== requestVersion
+            || activeThreadId.value !== threadId
+          ) {
             return
           }
 
@@ -3038,7 +3001,7 @@ const hydrateThread = async (threadId: string) => {
       markAwaitingAssistantOutput(false)
       const activeTurn = resolveHydratedActiveTurn({
         readThread: response.thread,
-        resumeThread: resumeResponse.thread
+        resumeThread: resumeResponse?.thread
       })
       const liveStream = session.liveStream
       const activeTurnId = activeTurn?.id ?? null
@@ -4555,7 +4518,6 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-  releaseRealtimeVoiceAvatarResource()
   releaseRealtimeVoicePageListeners?.()
   releaseRealtimeVoicePageListeners = null
   releaseServerRequestHandler?.()
@@ -5137,16 +5099,6 @@ watch(
         </UChatMessages>
       </div>
     </div>
-
-    <RealtimeVoiceCompanion
-      :avatar="realtimeVoiceAvatar"
-      :sprite-url="realtimeVoiceSpriteUrl"
-      :session-state="realtimeVoiceState"
-      :activity="realtimeVoiceActivity"
-      :generation="realtimeVoiceGeneration"
-      :transcripts="realtimeVoiceTranscripts"
-      :bottom-offset="stickyFooterHeight + 12"
-    />
 
     <div
       v-if="showScrollToBottomLink"

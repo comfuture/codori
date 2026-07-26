@@ -162,7 +162,7 @@ onBeforeUnmount(() => {
     v-if="active"
     data-testid="realtime-voice-companion"
     :data-activity="activity"
-    class="pointer-events-none absolute end-3 z-20 md:end-6"
+    class="pointer-events-none fixed end-3 z-20 md:end-6"
     :style="rootStyle"
   >
     <UPopover

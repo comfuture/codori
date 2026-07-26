@@ -3,6 +3,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   findActiveTurn,
+  hydrateThreadView,
   isConstrainedBrowserRequiringDeferredSync,
   isActiveTurnStatus,
   resumeThreadStreamAfterReactivation,
@@ -211,6 +212,60 @@ describe('thread reactivation policy', () => {
     })
     expect(client.request).toHaveBeenNthCalledWith(2, 'thread/read', {
       threadId: 'thread-1',
+      includeTurns: true
+    })
+  })
+
+  it('hydrates an ordinary thread view through resume and read', async () => {
+    const resumeResponse = { thread: { id: 'thread-1' } } as unknown as ThreadResumeResponse
+    const readResponse = { thread: { id: 'thread-1', turns: [] } } as unknown as ThreadReadResponse
+    const client = {
+      request: vi.fn(async (method: string) =>
+        method === 'thread/resume' ? resumeResponse : readResponse)
+    }
+
+    await expect(hydrateThreadView(client, {
+      threadId: 'thread-1',
+      cwd: '/tmp/project',
+      approvalPolicy: 'never'
+    }, {
+      resume: true
+    })).resolves.toEqual({
+      resumeResponse,
+      readResponse
+    })
+
+    expect(client.request).toHaveBeenNthCalledWith(1, 'thread/resume', {
+      threadId: 'thread-1',
+      cwd: '/tmp/project',
+      approvalPolicy: 'never'
+    })
+    expect(client.request).toHaveBeenNthCalledWith(2, 'thread/read', {
+      threadId: 'thread-1',
+      includeTurns: true
+    })
+  })
+
+  it('reattaches a voice-owned thread view without resuming its runtime', async () => {
+    const readResponse = { thread: { id: 'thread-voice', turns: [] } } as unknown as ThreadReadResponse
+    const client = {
+      request: vi.fn(async () => readResponse)
+    }
+
+    await expect(hydrateThreadView(client, {
+      threadId: 'thread-voice',
+      cwd: '/tmp/project',
+      approvalPolicy: 'never'
+    }, {
+      resume: false
+    })).resolves.toEqual({
+      resumeResponse: null,
+      readResponse
+    })
+
+    expect(client.request).toHaveBeenCalledOnce()
+    expect(client.request).toHaveBeenCalledWith('thread/read', {
+      threadId: 'thread-voice',
       includeTurns: true
     })
   })

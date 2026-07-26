@@ -138,6 +138,7 @@ const sidebarUi = computed(() =>
 
     <GlobalCommandPalette v-model:open="commandPaletteOpen" />
     <ActivityNotifications />
+    <GlobalRealtimeVoiceCompanion />
 
     <NuxtPage />
   </UDashboardGroup>
