@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
+import { createServer as createNodeHttpServer } from 'node:http'
 import { createServer as createNetServer } from 'node:net'
 import os from 'node:os'
 import { join } from 'node:path'
@@ -22,6 +23,7 @@ import type {
 const startedApps: Array<Awaited<ReturnType<typeof createHttpServer>>> = []
 const startedSocketServers: WebSocketServer[] = []
 const occupiedTcpServers: Array<ReturnType<typeof createNetServer>> = []
+const unixHttpServers: Array<ReturnType<typeof createNodeHttpServer>> = []
 const attachmentsRoots: string[] = []
 const tempDirs: string[] = []
 
@@ -51,6 +53,12 @@ afterEach(async () => {
         }
         resolvePromise()
       })
+    })
+  }
+
+  for (const server of unixHttpServers.splice(0, unixHttpServers.length)) {
+    await new Promise<void>((resolvePromise) => {
+      server.close(() => resolvePromise())
     })
   }
 
@@ -269,6 +277,36 @@ describe('createHttpServer', () => {
         }
       }
     })
+  })
+
+  it('reports safe typed runtime backend status without a socket path', async () => {
+    const app = await createHttpServer(createManager({
+      getRuntimeBackendStatus: () => ({
+        backend: 'codori-managed',
+        transport: 'tcp-websocket',
+        state: 'fallback',
+        version: '0.145.0',
+        fallbackReason: 'incompatible-realtime'
+      })
+    }))
+    startedApps.push(app)
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/runtime/backend'
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toEqual({
+      backend: {
+        backend: 'codori-managed',
+        transport: 'tcp-websocket',
+        state: 'fallback',
+        version: '0.145.0',
+        fallbackReason: 'incompatible-realtime'
+      }
+    })
+    expect(response.body).not.toContain('socketPath')
   })
 
   it('clones a project through the management API', async () => {
@@ -764,6 +802,81 @@ describe('createHttpServer', () => {
       })
       client.once('error', reject)
     })
+  })
+
+  it('bridges Unix WebSocket frames and invalidates a disconnected daemon target', async () => {
+    const socketRoot = mkdtempSync(join(os.tmpdir(), 'codori-unix-ws-'))
+    tempDirs.push(socketRoot)
+    const socketPath = join(socketRoot, 'daemon.sock')
+    const unixServer = createNodeHttpServer()
+    unixHttpServers.push(unixServer)
+    const backend = new WebSocketServer({ server: unixServer })
+    startedSocketServers.push(backend)
+    let extensionHeader: string | undefined
+    let closeUpstream = () => {}
+    backend.on('connection', (socket: WebSocket, request) => {
+      closeUpstream = () => socket.close()
+      extensionHeader = request.headers['sec-websocket-extensions']
+      socket.on('message', (message: WebSocket.RawData) => {
+        socket.send(`unix:${rawDataToString(message)}`)
+      })
+    })
+    await new Promise<void>((resolvePromise, reject) => {
+      unixServer.listen(socketPath, (error?: Error) => {
+        if (error) {
+          reject(error)
+          return
+        }
+        resolvePromise()
+      })
+    })
+
+    const daemonTarget = {
+      kind: 'codex-daemon' as const,
+      transport: 'unix-socket' as const,
+      socketPath,
+      ownedByCodori: false as const,
+      cliVersion: '0.145.0',
+      appServerVersion: '0.145.0'
+    }
+    const invalidateRuntimeTarget = vi.fn()
+    const app = await createHttpServer(createManager({
+      getProjectBridgeTarget: () => ({
+        target: daemonTarget,
+        workspacePath: '/tmp/demo'
+      }),
+      invalidateRuntimeTarget
+    }))
+    startedApps.push(app)
+    await app.listen({
+      host: '127.0.0.1',
+      port: 0
+    })
+
+    const serverAddress = app.addresses()[0]
+    const client = new WebSocket(
+      `ws://127.0.0.1:${serverAddress.port}/api/projects/demo/rpc`
+    )
+    await new Promise<void>((resolvePromise, reject) => {
+      client.once('open', () => client.send('ping'))
+      client.once('message', (message: WebSocket.RawData) => {
+        try {
+          expect(rawDataToString(message)).toBe('unix:ping')
+          resolvePromise()
+        } catch (error) {
+          reject(error instanceof Error ? error : new Error(String(error)))
+        }
+      })
+      client.once('error', reject)
+    })
+
+    expect(extensionHeader).toBeUndefined()
+    const clientClosed = new Promise<void>((resolvePromise) => {
+      client.once('close', () => resolvePromise())
+    })
+    closeUpstream()
+    await clientClosed
+    expect(invalidateRuntimeTarget).toHaveBeenCalledWith(daemonTarget)
   })
 
   it('handles Codori avatar RPC locally without leaking internal requests', async () => {

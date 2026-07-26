@@ -6,6 +6,11 @@ import {
   ServerAvatarResolver,
   type ResolvedServerAvatar
 } from './server-avatar.js'
+import { daemonWebSocketUrl } from './app-server-backend.js'
+import type {
+  AppServerTarget,
+  RuntimeBridgeTarget
+} from './types.js'
 
 type JsonRpcId = string | number
 
@@ -28,17 +33,13 @@ type QueuedFrame = {
   isBinary: boolean
 }
 
-type RuntimeBridgeTarget = {
-  port: number | null
-  workspacePath: string | null
-}
-
 export type CodoriRpcBridgeOptions = {
   clientSocket: WebSocket
   startRuntime: () => Promise<RuntimeBridgeTarget>
   touchActivity: () => void
   releaseSession: () => void
   avatarResolver: ServerAvatarResolver
+  invalidateTarget?: (target: AppServerTarget) => void
 }
 
 const INTERNAL_REQUEST_TIMEOUT_MS = 10_000
@@ -418,6 +419,8 @@ export const bridgeCodexRpcWebSocket = (options: CodoriRpcBridgeOptions) => {
   let upstream: WebSocket | null = null
   let extension: CodoriAvatarRpcExtension | null = null
   let sessionReleased = false
+  let selectedTarget: AppServerTarget | null = null
+  let targetInvalidated = false
 
   const releaseSession = () => {
     if (sessionReleased) {
@@ -441,6 +444,14 @@ export const bridgeCodexRpcWebSocket = (options: CodoriRpcBridgeOptions) => {
     ) {
       upstream.close(code, reason)
     }
+  }
+
+  const invalidateSelectedTarget = () => {
+    if (!selectedTarget || targetInvalidated) {
+      return
+    }
+    targetInvalidated = true
+    options.invalidateTarget?.(selectedTarget)
   }
 
   const forwardClientFrame = (frame: QueuedFrame) => {
@@ -475,15 +486,16 @@ export const bridgeCodexRpcWebSocket = (options: CodoriRpcBridgeOptions) => {
   })
 
   void (async () => {
-    const target = await options.startRuntime()
-    if (typeof target.port !== 'number') {
-      closeBoth(1011, 'runtime port unavailable')
-      return
-    }
-    const ready = await waitForPortReady(target.port)
-    if (!ready) {
-      closeBoth(1011, 'runtime did not become ready')
-      return
+    const bridgeTarget = await options.startRuntime()
+    const target = bridgeTarget.target
+    selectedTarget = target
+    if (target.transport === 'tcp-websocket') {
+      const ready = await waitForPortReady(target.port)
+      if (!ready) {
+        invalidateSelectedTarget()
+        closeBoth(1011, 'runtime did not become ready')
+        return
+      }
     }
     if (
       options.clientSocket.readyState !== WebSocket.OPEN
@@ -493,7 +505,11 @@ export const bridgeCodexRpcWebSocket = (options: CodoriRpcBridgeOptions) => {
       return
     }
 
-    upstream = new WebSocket(`ws://127.0.0.1:${target.port}`)
+    upstream = target.transport === 'unix-socket'
+      ? new WebSocket(daemonWebSocketUrl(target.socketPath), {
+          perMessageDeflate: false
+        })
+      : new WebSocket(`ws://127.0.0.1:${target.port}`)
     upstream.once('open', () => {
       if (options.clientSocket.readyState !== WebSocket.OPEN) {
         upstream?.close()
@@ -503,7 +519,7 @@ export const bridgeCodexRpcWebSocket = (options: CodoriRpcBridgeOptions) => {
         clientSocket: options.clientSocket,
         upstream: upstream!,
         avatarResolver: options.avatarResolver,
-        workspacePath: target.workspacePath
+        workspacePath: bridgeTarget.workspacePath
       })
       for (const frame of queuedClientFrames.splice(0, queuedClientFrames.length)) {
         forwardClientFrame(frame)
@@ -519,6 +535,7 @@ export const bridgeCodexRpcWebSocket = (options: CodoriRpcBridgeOptions) => {
       }
     })
     upstream.on('error', () => {
+      invalidateSelectedTarget()
       closeBoth(1011, 'upstream websocket failed')
     })
     upstream.on('close', () => {
@@ -527,6 +544,7 @@ export const bridgeCodexRpcWebSocket = (options: CodoriRpcBridgeOptions) => {
         options.clientSocket.readyState === WebSocket.OPEN
         || options.clientSocket.readyState === WebSocket.CONNECTING
       ) {
+        invalidateSelectedTarget()
         options.clientSocket.close()
       }
     })

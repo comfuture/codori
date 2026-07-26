@@ -2,7 +2,7 @@ import { createServer } from 'node:net'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { resolveConfig } from '../src/config.js'
 import { createRuntimeManager, resolveCodexCommand } from '../src/process-manager.js'
 import { RuntimeStore } from '../src/runtime-store.js'
@@ -183,11 +183,78 @@ describe('RuntimeManager', () => {
     })
   })
 
+  it('reuses an external daemon without persisting or terminating its ownership', async () => {
+    const fixture = createFixture()
+    const daemonTarget = {
+      kind: 'codex-daemon' as const,
+      transport: 'unix-socket' as const,
+      socketPath: join(fixture.homeDir, '.codex', 'app-server-control', 'app-server-control.sock'),
+      ownedByCodori: false as const,
+      cliVersion: '0.145.0',
+      appServerVersion: '0.145.0'
+    }
+    const ensure = vi.fn(async () => ({
+      selected: true as const,
+      reusedExisting: true,
+      target: daemonTarget
+    }))
+    const commandFactory = vi.fn(() => {
+      throw new Error('Managed fallback must not start.')
+    })
+    const manager = createRuntimeManager({
+      homeDir: fixture.homeDir,
+      documentsDir: fixture.documentsDir,
+      config: fixture.config,
+      backendSelector: { ensure },
+      commandFactory
+    })
+    runningManagers.push(manager)
+
+    const [demo, other, chat] = await Promise.all([
+      manager.startProject('demo'),
+      manager.startProject('other'),
+      manager.createChatSession()
+    ])
+
+    expect(ensure).toHaveBeenCalledOnce()
+    expect(commandFactory).not.toHaveBeenCalled()
+    expect(demo).toMatchObject({
+      status: 'running',
+      pid: null,
+      port: null
+    })
+    expect(other.status).toBe('running')
+    expect(chat.status).toBe('running')
+    expect(manager.getRuntimeBackendStatus()).toEqual({
+      backend: 'codex-daemon',
+      transport: 'unix-socket',
+      state: 'ready',
+      version: '0.145.0',
+      fallbackReason: null
+    })
+    const bridgeTarget = await manager.getProjectBridgeTarget('demo')
+    expect(bridgeTarget.target).toEqual(daemonTarget)
+    expect(realpathSync(bridgeTarget.workspacePath))
+      .toBe(realpathSync(join(fixture.root, 'demo')))
+    expect(manager.store.list()).toEqual([])
+
+    manager.invalidateRuntimeTarget(daemonTarget)
+    await manager.getProjectBridgeTarget('demo')
+    expect(ensure).toHaveBeenCalledTimes(2)
+    expect(await manager.resetStoredRuntimes()).toBe(0)
+    expect(commandFactory).not.toHaveBeenCalled()
+  })
+
   it('starts once and reuses the existing process', async () => {
     const fixture = createFixture()
+    const ensure = vi.fn(async () => ({
+      selected: false as const,
+      reason: 'daemon-unavailable' as const
+    }))
     const manager = createRuntimeManager({
       homeDir: fixture.homeDir,
       config: fixture.config,
+      backendSelector: { ensure },
       commandFactory: () => ({
         command: process.execPath,
         args: ['-e', 'setInterval(() => {}, 1000)']
@@ -205,6 +272,17 @@ describe('RuntimeManager', () => {
     expect(other.reusedExisting).toBe(true)
     expect(other.pid).toBe(started.pid)
     expect(other.port).toBe(started.port)
+    const bridge = await manager.getProjectBridgeTarget('demo')
+    manager.invalidateRuntimeTarget(bridge.target)
+    const afterBridgeFailure = await manager.getProjectBridgeTarget('demo')
+    expect(afterBridgeFailure.target).toEqual(bridge.target)
+    expect(ensure).toHaveBeenCalledOnce()
+    expect(manager.getRuntimeBackendStatus()).toMatchObject({
+      backend: 'codori-managed',
+      transport: 'tcp-websocket',
+      state: 'fallback',
+      fallbackReason: 'daemon-unavailable'
+    })
   })
 
   it('deduplicates concurrent starts across workspaces', async () => {
@@ -266,6 +344,12 @@ describe('RuntimeManager', () => {
           realtimeVoice: {
             enabled: true
           }
+        },
+        backendSelector: {
+          ensure: async () => ({
+            selected: false,
+            reason: 'daemon-unavailable'
+          })
         }
       })
       runningManagers.push(manager)

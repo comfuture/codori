@@ -52,6 +52,52 @@ export type RuntimeRecord = {
   lastActivityAt: number
 }
 
+export type RuntimeBackendFallbackReason =
+  | 'unsupported-platform'
+  | 'daemon-unavailable'
+  | 'permission-denied'
+  | 'daemon-unready'
+  | 'daemon-start-failed'
+  | 'invalid-daemon-response'
+  | 'incompatible-realtime'
+
+export type CodexDaemonTarget = {
+  kind: 'codex-daemon'
+  transport: 'unix-socket'
+  socketPath: string
+  ownedByCodori: false
+  cliVersion: string | null
+  appServerVersion: string | null
+}
+
+export type CodoriManagedTarget = {
+  kind: 'codori-managed'
+  transport: 'tcp-websocket'
+  port: number
+  pid: number
+  ownedByCodori: true
+  appServerVersion: string | null
+}
+
+export type AppServerTarget = CodexDaemonTarget | CodoriManagedTarget
+
+export type RuntimeBackendStatus = {
+  backend: AppServerTarget['kind'] | null
+  transport: AppServerTarget['transport'] | null
+  state: 'idle' | 'probing' | 'ready' | 'fallback'
+  version: string | null
+  fallbackReason: RuntimeBackendFallbackReason | null
+}
+
+export type RuntimeBackendStatusResponse = {
+  backend: RuntimeBackendStatus
+}
+
+export type RuntimeBridgeTarget = {
+  target: AppServerTarget
+  workspacePath: string
+}
+
 export type ProjectRuntimeStatus = 'running' | 'stopped' | 'error'
 
 export type ProjectStatusRecord = {
