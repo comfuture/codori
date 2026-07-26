@@ -802,6 +802,36 @@ describe('realtime conversation controller', () => {
     expect(fixture.rpc.requests.some(request => request.method === 'thread/realtime/stop')).toBe(false)
   })
 
+  it('does not wait on an in-flight start after the RPC transport disconnects', async () => {
+    const fixture = createFixture()
+    const startResponse = deferred<void>()
+    fixture.rpc.startRequest = async () => await startResponse.promise
+    await fixture.controller.refreshCapability('thread-1', true)
+
+    const connect = fixture.controller.connect('thread-1', {
+      kind: 'preview',
+      voice: 'cove',
+      previewText: 'Disconnect'
+    })
+    await vi.waitFor(() => {
+      expect(fixture.rpc.requests.some(request =>
+        request.method === 'thread/realtime/start'
+      )).toBe(true)
+    })
+    fixture.rpc.disconnect()
+
+    await vi.waitFor(() => {
+      expect(fixture.controller.state.value).toBe('closed')
+    })
+    expect(fixture.controller.previewError.value).toMatch(/RPC connection closed/)
+    expect(fixture.rpc.requests.some(request =>
+      request.method === 'thread/realtime/stop'
+    )).toBe(false)
+
+    startResponse.resolve()
+    await connect
+  })
+
   it('normalizes permission denial and partial startup cleanup', async () => {
     const fixture = createFixture({ permissionError: new Error('NotAllowedError: Permission denied') })
     await fixture.controller.refreshCapability('thread-1', true)

@@ -188,12 +188,20 @@ export const useSharedRealtimeConversation = (
     }
   }
 
-  const preview = async (threadId: string, voice: RealtimeVoice, text: string) =>
-    await connect(threadId, {
-      kind: 'preview',
-      voice,
-      previewText: text
-    })
+  const preview = async (threadId: string, voice: RealtimeVoice, text: string) => {
+    try {
+      await connect(threadId, {
+        kind: 'preview',
+        voice,
+        previewText: text
+      })
+    } catch (error) {
+      entry.controller.previewError.value = error instanceof Error
+        ? error.message
+        : String(error)
+      throw error
+    }
+  }
 
   const activeController = () =>
     activeConversation.value?.entry.controller ?? entry.controller

@@ -653,7 +653,9 @@ export const useRealtimeConversation = (options: ControllerOptions) => {
       previewSpeechRequested = false
       activePreviewText = null
 
-      const accepted = startAccepted || await submittedStart?.accepted || false
+      const accepted = startAccepted
+        || (input.sendStop ? await submittedStart?.accepted : false)
+        || false
       if (input.sendStop && accepted && threadId && options.client.isConnected()) {
         createPendingCloseBarrier(threadId)
         state.value = 'stopping'
