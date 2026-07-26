@@ -22,6 +22,55 @@ type ActiveRealtimeConversation = {
 const entries = new Map<string, RealtimeConversationEntry>()
 const activeConversation = shallowRef<ActiveRealtimeConversation | null>(null)
 const ownershipScope = effectScope(true)
+let ownershipClaim: Promise<void> | null = null
+
+const acquireOwnershipClaim = async () => {
+  while (ownershipClaim) {
+    await ownershipClaim
+  }
+
+  let settleClaim!: () => void
+  const claim = new Promise<void>((resolve) => {
+    settleClaim = resolve
+  })
+  ownershipClaim = claim
+  let released = false
+  return () => {
+    if (released) {
+      return
+    }
+    released = true
+    if (ownershipClaim === claim) {
+      ownershipClaim = null
+    }
+    settleClaim()
+  }
+}
+
+const waitForControllerOwnership = async (
+  controller: RealtimeConversationController,
+  threadId: string,
+  connectPromise: Promise<void>
+) => {
+  if (controller.owningThreadId.value === threadId) {
+    return
+  }
+
+  let releaseWatch = () => {}
+  const ownershipReady = new Promise<void>((resolve) => {
+    releaseWatch = watch(controller.owningThreadId, (owningThreadId) => {
+      if (owningThreadId === threadId) {
+        releaseWatch()
+        resolve()
+      }
+    }, { flush: 'sync' })
+  })
+  await Promise.race([
+    ownershipReady,
+    connectPromise.then(() => undefined, () => undefined)
+  ])
+  releaseWatch()
+}
 
 const createEntry = (
   workspaceKey: string,
@@ -156,29 +205,38 @@ export const useSharedRealtimeConversation = (
     threadId: string,
     options: RealtimeConnectOptions = {}
   ) => {
-    const active = activeConversation.value
-    if (active) {
-      if (active.entry === entry
-        && active.threadId === threadId
-        && active.entry.controller.sessionKind.value === (options.kind ?? 'conversation')
-        && active.entry.controller.activeVoice.value === (options.voice ?? null)) {
-        return
+    const releaseOwnershipClaim = await acquireOwnershipClaim()
+    let connectPromise!: Promise<void>
+    try {
+      const active = activeConversation.value
+      if (active) {
+        if (active.entry === entry
+          && active.threadId === threadId
+          && active.entry.controller.sessionKind.value === (options.kind ?? 'conversation')
+          && active.entry.controller.activeVoice.value === (options.voice ?? null)) {
+          return
+        }
+        if (active.entry.controller.sessionKind.value !== 'preview') {
+          throw new Error('A voice session is already active in another thread.')
+        }
+        await active.entry.controller.stopForReplacement()
+        if (activeConversation.value === active) {
+          activeConversation.value = null
+        }
       }
-      if (active.entry.controller.sessionKind.value !== 'preview') {
-        throw new Error('A voice session is already active in another thread.')
+
+      activeConversation.value = {
+        entry,
+        threadId
       }
-      await active.entry.controller.stopForReplacement()
-      if (activeConversation.value === active) {
-        activeConversation.value = null
-      }
+      connectPromise = entry.controller.connect(threadId, options)
+      await waitForControllerOwnership(entry.controller, threadId, connectPromise)
+    } finally {
+      releaseOwnershipClaim()
     }
 
-    activeConversation.value = {
-      entry,
-      threadId
-    }
     try {
-      await entry.controller.connect(threadId, options)
+      await connectPromise
     } catch (error) {
       if (activeConversation.value?.entry === entry
         && !entry.controller.owningThreadId.value) {

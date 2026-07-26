@@ -48,6 +48,8 @@ type MockController = {
   dispose: ReturnType<typeof vi.fn>
 }
 
+const mockControllers = vi.hoisted(() => [] as MockController[])
+
 vi.mock('../app/composables/useRealtimeConversation', async () => {
   const { computed, ref } = await vi.importActual<typeof import('vue')>('vue')
 
@@ -113,12 +115,21 @@ vi.mock('../app/composables/useRealtimeConversation', async () => {
           owningThreadId.value = null
         })
       }
+      mockControllers.push(controller)
       return controller
     }
   }
 })
 
 const client = {} as CodexRpcClient
+
+const deferred = <T>() => {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise
+  })
+  return { promise, resolve }
+}
 
 describe('shared realtime conversation lifecycle', () => {
   it('keeps ownership synchronization alive after the creating scope stops', async () => {
@@ -172,6 +183,56 @@ describe('shared realtime conversation lifecycle', () => {
     expect(conversation.activeVoice.value).toBe('cove')
 
     await conversation.stop()
+    await nextTick()
+  })
+
+  it('serializes competing preview replacements across workspaces', async () => {
+    const controllerOffset = mockControllers.length
+    const first = useSharedRealtimeConversation(
+      'project:global-preview-first',
+      () => client
+    )
+    const second = useSharedRealtimeConversation(
+      'project:global-preview-second',
+      () => client
+    )
+    const third = useSharedRealtimeConversation(
+      'project:global-preview-third',
+      () => client
+    )
+    const [firstController, secondController, thirdController] =
+      mockControllers.slice(controllerOffset)
+    if (!firstController || !secondController || !thirdController) {
+      throw new Error('Expected three realtime controller fixtures.')
+    }
+
+    await first.preview('thread-global-first', 'cove', 'First')
+    const stopped = deferred<void>()
+    firstController.stopForReplacement.mockImplementationOnce(async () => {
+      await stopped.promise
+      firstController.owningThreadId.value = null
+      firstController.sessionKind.value = null
+      firstController.activeVoice.value = null
+    })
+
+    const secondPreview = second.preview('thread-global-second', 'cove', 'Second')
+    const thirdPreview = third.preview('thread-global-third', 'cove', 'Third')
+    await nextTick()
+
+    expect(firstController.stopForReplacement).toHaveBeenCalledOnce()
+    expect(secondController.connect).not.toHaveBeenCalled()
+    expect(thirdController.connect).not.toHaveBeenCalled()
+
+    stopped.resolve()
+    await Promise.all([secondPreview, thirdPreview])
+
+    expect(secondController.connect).toHaveBeenCalledOnce()
+    expect(secondController.stopForReplacement).toHaveBeenCalledOnce()
+    expect(secondController.owningThreadId.value).toBeNull()
+    expect(thirdController.connect).toHaveBeenCalledOnce()
+    expect(thirdController.owningThreadId.value).toBe('thread-global-third')
+
+    await third.stop()
     await nextTick()
   })
 })
