@@ -697,6 +697,38 @@ describe('realtime conversation controller', () => {
     expect(fixture.controller.previewStatus.value).toBe('idle')
   })
 
+  it('clears an autoplay-denied preview error when the user stops the preview', async () => {
+    const fixture = createFixture({ playError: new Error('NotAllowedError') })
+    await fixture.controller.refreshCapability('thread-1', true)
+    await fixture.controller.connect('thread-1', {
+      kind: 'preview',
+      voice: 'cove',
+      previewText: 'Hello preview'
+    })
+    fixture.rpc.emit('thread/realtime/started', {
+      threadId: 'thread-1',
+      realtimeSessionId: null,
+      version: 'v3'
+    })
+    fixture.rpc.emit('thread/realtime/sdp', {
+      threadId: 'thread-1',
+      sdp: 'answer-sdp'
+    })
+    fixture.peer.connectionState = 'connected'
+    fixture.peer.onconnectionstatechange?.()
+    fixture.peer.ontrack?.({ streams: [new FakeStream()] })
+
+    await vi.waitFor(() => {
+      expect(fixture.controller.previewStatus.value).toBe('blocked')
+    })
+
+    await fixture.controller.stop()
+
+    expect(fixture.controller.autoplayBlocked.value).toBe(false)
+    expect(fixture.controller.previewError.value).toBeNull()
+    expect(fixture.controller.previewStatus.value).toBe('idle')
+  })
+
   it('stops tracks, media, subscriptions, and only the owned app-server session', async () => {
     const fixture = createFixture()
     await connectFixture(fixture)

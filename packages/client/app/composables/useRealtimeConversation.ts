@@ -619,6 +619,7 @@ export const useRealtimeConversation = (options: ControllerOptions) => {
     sendStop: boolean
     terminalState: 'closed' | 'error'
     message?: string | null
+    preservePreviewFailure?: boolean
   }) => {
     if (!isCurrent(input.candidateGeneration)) {
       return
@@ -692,6 +693,10 @@ export const useRealtimeConversation = (options: ControllerOptions) => {
       owningThreadId.value = null
       sessionKind.value = null
       activeVoice.value = null
+      if (!input.preservePreviewFailure) {
+        autoplayBlocked.value = false
+        previewError.value = null
+      }
       startAccepted = false
       activity.value = 'idle'
       error.value = input.terminalState === 'error'
@@ -714,7 +719,8 @@ export const useRealtimeConversation = (options: ControllerOptions) => {
       candidateGeneration,
       sendStop,
       terminalState: previewFailed ? 'closed' : 'error',
-      message: previewFailed ? null : message
+      message: previewFailed ? null : message,
+      preservePreviewFailure: previewFailed
     })
   }
 
