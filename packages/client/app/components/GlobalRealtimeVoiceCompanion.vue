@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import RealtimeVoiceCompanion from './RealtimeVoiceCompanion.vue'
 import { useRealtimeVoiceWakeLock } from '../composables/useRealtimeVoiceWakeLock'
 import { useActiveRealtimeConversation } from '../composables/useSharedRealtimeConversation'
@@ -8,7 +8,10 @@ import { isRealtimeVoiceCompanionActive } from '../utils/realtime-voice-companio
 import type { ServerAvatarMetadata } from '~~/shared/server-avatar'
 
 const realtimeVoice = useActiveRealtimeConversation()
-useRealtimeVoiceWakeLock(realtimeVoice.state)
+const companionState = computed(() =>
+  realtimeVoice.sessionKind.value === 'preview' ? 'idle' : realtimeVoice.state.value
+)
+useRealtimeVoiceWakeLock(companionState)
 const avatar = ref<ServerAvatarMetadata | null>(null)
 const spriteUrl = ref<string | null>(null)
 let releaseAvatar: (() => void) | null = null
@@ -22,7 +25,7 @@ const releaseAvatarResource = () => {
 
 const syncAvatarResource = () => {
   releaseAvatarResource()
-  if (!isRealtimeVoiceCompanionActive(realtimeVoice.state.value)) {
+  if (!isRealtimeVoiceCompanionActive(companionState.value)) {
     return
   }
 
@@ -47,6 +50,7 @@ const syncAvatarResource = () => {
 
 watch([
   () => isRealtimeVoiceCompanionActive(realtimeVoice.state.value),
+  realtimeVoice.sessionKind,
   realtimeVoice.activeClient
 ], syncAvatarResource, { immediate: true })
 
@@ -57,7 +61,7 @@ onBeforeUnmount(releaseAvatarResource)
   <RealtimeVoiceCompanion
     :avatar="avatar"
     :sprite-url="spriteUrl"
-    :session-state="realtimeVoice.state.value"
+    :session-state="companionState"
     :activity="realtimeVoice.activity.value"
     :generation="realtimeVoice.generation.value"
     :transcripts="realtimeVoice.transcripts.value"

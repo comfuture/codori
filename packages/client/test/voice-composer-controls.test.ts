@@ -7,8 +7,12 @@ import VoiceComposerControls from '../app/components/VoiceComposerControls.vue'
 import type {
   RealtimeActivity,
   RealtimeCapability,
-  RealtimeSessionState
+  RealtimeSessionKind,
+  RealtimeSessionState,
+  RealtimeVoiceCatalog,
+  RealtimeVoicePreviewStatus
 } from '../app/composables/useRealtimeConversation'
+import type { RealtimeVoice } from '../shared/generated/codex-app-server/RealtimeVoice'
 
 const ButtonStub = defineComponent({
   inheritAttrs: false,
@@ -25,6 +29,11 @@ const TooltipStub = defineComponent({
   template: '<div class="tooltip-stub" :data-tooltip="text"><slot /></div>'
 })
 
+const VoicePickerStub = defineComponent({
+  emits: ['select', 'refresh', 'preview', 'stop-preview'],
+  template: '<div data-testid="voice-picker-stub" />'
+})
+
 type VoiceProps = {
   capability: RealtimeCapability
   sessionState: RealtimeSessionState
@@ -34,6 +43,14 @@ type VoiceProps = {
   autoplayBlocked: boolean
   error: string | null
   activeElsewhere: boolean
+  voiceCatalog: RealtimeVoiceCatalog
+  selectedVoice?: RealtimeVoice
+  savedVoice: string | null
+  sessionKind: RealtimeSessionKind | null
+  activeVoice: RealtimeVoice | null
+  previewStatus: RealtimeVoicePreviewStatus
+  previewError: string | null
+  hasMaterializedThread: boolean
 }
 
 const baseProps: VoiceProps = {
@@ -47,7 +64,20 @@ const baseProps: VoiceProps = {
   outputMuted: false,
   autoplayBlocked: false,
   error: null,
-  activeElsewhere: false
+  activeElsewhere: false,
+  voiceCatalog: {
+    status: 'ready',
+    voices: ['cove', 'juniper'],
+    protocolDefault: 'cove',
+    error: null
+  },
+  selectedVoice: undefined,
+  savedVoice: null,
+  sessionKind: 'conversation',
+  activeVoice: null,
+  previewStatus: 'idle',
+  previewError: null,
+  hasMaterializedThread: true
 }
 
 const mountControls = (props: Partial<VoiceProps> = {}) =>
@@ -59,7 +89,8 @@ const mountControls = (props: Partial<VoiceProps> = {}) =>
     global: {
       stubs: {
         UButton: ButtonStub,
-        UTooltip: TooltipStub
+        UTooltip: TooltipStub,
+        RealtimeVoicePicker: VoicePickerStub
       }
     }
   })
@@ -126,6 +157,40 @@ describe('VoiceComposerControls', () => {
     expect(wrapper.emitted('toggle-output')).toHaveLength(1)
     expect(wrapper.emitted('stop')).toHaveLength(1)
     expect(wrapper.get('[aria-live="polite"]').text()).toContain('Remote speech is blocked')
+    wrapper.unmount()
+  })
+
+  it('lets a normal conversation preempt preview without toggling a missing microphone', async () => {
+    const wrapper = mountControls({
+      sessionKind: 'preview',
+      sessionState: 'connected',
+      activeVoice: 'cove',
+      previewStatus: 'playing'
+    })
+
+    await wrapper.get('button[aria-label="Start voice conversation and stop preview"]').trigger('click')
+
+    expect(wrapper.emitted('connect')).toHaveLength(1)
+    expect(wrapper.emitted('toggle-microphone')).toBeUndefined()
+    expect(wrapper.get('button[aria-label="Stop voice preview"]').attributes('aria-label'))
+      .toBe('Stop voice preview')
+    expect(wrapper.get('[aria-live="polite"]').text()).toContain('Previewing cove')
+    wrapper.unmount()
+  })
+
+  it('announces preview autoplay denial instead of claiming playback', () => {
+    const wrapper = mountControls({
+      sessionKind: 'preview',
+      sessionState: 'connected',
+      activeVoice: 'cove',
+      previewStatus: 'blocked',
+      previewError: 'Browser autoplay blocked this preview.',
+      autoplayBlocked: true
+    })
+
+    expect(wrapper.get('[aria-live="polite"]').text())
+      .toContain('Browser autoplay blocked this preview')
+    expect(wrapper.get('[aria-live="polite"]').text()).not.toContain('Previewing cove')
     wrapper.unmount()
   })
 

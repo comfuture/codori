@@ -85,6 +85,12 @@ import {
   promoteSharedRealtimeConversation,
   useSharedRealtimeConversation
 } from '../composables/useSharedRealtimeConversation'
+import {
+  resolveRealtimeVoiceOverride,
+  resolveRealtimeVoicePreviewText,
+  useRealtimeVoicePreference
+} from '../composables/useRealtimeVoicePreference'
+import type { RealtimeVoice } from '~~/shared/generated/codex-app-server/RealtimeVoice'
 import { sortSidebarProjects } from '../utils/project-sidebar-order'
 import {
   promoteThreadSummaries,
@@ -358,17 +364,30 @@ const realtimeVoice = useSharedRealtimeConversation(
   workspaceSessionKey,
   getRuntimeClient
 )
+const realtimeVoicePreference = useRealtimeVoicePreference()
 const {
   capability: realtimeVoiceCapability,
   state: realtimeVoiceState,
+  sessionKind: realtimeVoiceSessionKind,
+  activeVoice: realtimeVoiceActiveVoice,
   activity: realtimeVoiceActivity,
   owningThreadId: realtimeVoiceOwningThreadId,
   activeWorkspaceKey: realtimeVoiceActiveWorkspaceKey,
+  ownsActiveSession: ownsRealtimeVoiceSession,
   error: realtimeVoiceError,
   outputMuted: realtimeVoiceOutputMuted,
   autoplayBlocked: realtimeVoiceAutoplayBlocked,
-  microphoneEnabled: realtimeVoiceMicrophoneEnabled
+  microphoneEnabled: realtimeVoiceMicrophoneEnabled,
+  voiceCatalog: realtimeVoiceCatalog,
+  previewStatus: realtimeVoicePreviewStatus,
+  previewError: realtimeVoicePreviewError
 } = realtimeVoice
+const realtimeVoiceOverride = computed(() =>
+  resolveRealtimeVoiceOverride({
+    advertisedVoices: realtimeVoiceCatalog.value.voices,
+    savedVoice: realtimeVoicePreference.savedVoice.value
+  })
+)
 const realtimeVoiceActiveElsewhere = computed(() =>
   isRealtimeVoiceActiveElsewhere({
     activeWorkspaceKey: realtimeVoiceActiveWorkspaceKey.value,
@@ -407,9 +426,43 @@ const refreshRealtimeVoiceCapability = async (threadId: string) => {
         return
       }
     }
-    await realtimeVoice.refreshCapability(threadId, configured)
+    const capability = await realtimeVoice.refreshCapability(threadId, configured)
+    if (capability.status === 'available') {
+      await realtimeVoice.refreshVoiceCatalog(true)
+    }
   } catch (caughtError) {
     if (request !== realtimeVoiceCapabilityRequest || activeThreadId.value !== threadId) {
+      return
+    }
+    realtimeVoiceCapability.value = {
+      status: 'failed',
+      message: `Could not load Codori voice capability: ${caughtError instanceof Error ? caughtError.message : String(caughtError)}`
+    }
+  }
+}
+
+const refreshDraftRealtimeVoiceCatalog = async () => {
+  const request = ++realtimeVoiceCapabilityRequest
+  try {
+    const response = await $fetch<ServerCapabilitiesResponse>(realtimeVoiceCapabilitiesUrl())
+    if (request !== realtimeVoiceCapabilityRequest || activeThreadId.value) {
+      return
+    }
+    if (!response.capabilities.realtimeVoice.configured) {
+      realtimeVoiceCapability.value = {
+        status: 'disabled',
+        message: 'Experimental realtime voice is disabled in Codori.'
+      }
+      return
+    }
+
+    await ensureProjectRuntime()
+    if (request !== realtimeVoiceCapabilityRequest || activeThreadId.value) {
+      return
+    }
+    await realtimeVoice.refreshVoiceCatalog(true)
+  } catch (caughtError) {
+    if (request !== realtimeVoiceCapabilityRequest || activeThreadId.value) {
       return
     }
     realtimeVoiceCapability.value = {
@@ -446,8 +499,12 @@ const connectRealtimeVoice = async () => {
       pendingRealtimeVoiceMicrophoneActivation.value = false
       return
     }
-    await realtimeVoice.connect(threadId)
-    if (realtimeVoiceState.value === 'connected') {
+    await realtimeVoice.refreshVoiceCatalog(true)
+    await realtimeVoice.connect(threadId, {
+      voice: realtimeVoiceOverride.value
+    })
+    if (realtimeVoiceState.value === 'connected'
+      && realtimeVoiceSessionKind.value === 'conversation') {
       pendingRealtimeVoiceMicrophoneActivation.value = false
       realtimeVoice.setMicrophoneEnabled(true)
     }
@@ -459,6 +516,50 @@ const connectRealtimeVoice = async () => {
         message: caughtError instanceof Error ? caughtError.message : String(caughtError)
       }
     }
+  }
+}
+
+const selectRealtimeVoice = (voice: RealtimeVoice | null) => {
+  realtimeVoicePreference.selectVoice(voice)
+}
+
+const refreshRealtimeVoicesForPicker = async () => {
+  const threadId = activeThreadId.value
+  if (threadId) {
+    await refreshRealtimeVoiceCapability(threadId)
+    return
+  }
+  await refreshDraftRealtimeVoiceCatalog()
+}
+
+const previewRealtimeVoice = async (voice: RealtimeVoice) => {
+  const threadId = activeThreadId.value
+  if (!threadId || realtimeVoiceActiveElsewhere.value) {
+    return
+  }
+
+  try {
+    await ensureProjectRuntime()
+    await ensureObservedThreadSubscription()
+    if (realtimeVoiceCapability.value.status !== 'available') {
+      await refreshRealtimeVoiceCapability(threadId)
+    }
+    if (realtimeVoiceCapability.value.status !== 'available') {
+      return
+    }
+    await realtimeVoice.refreshVoiceCatalog(true)
+    if (!realtimeVoiceCatalog.value.voices.includes(voice)) {
+      return
+    }
+    await realtimeVoice.preview(
+      threadId,
+      voice,
+      resolveRealtimeVoicePreviewText(
+        import.meta.client ? window.navigator.language : null
+      )
+    )
+  } catch {
+    // The preview controller exposes a bounded, user-facing error state.
   }
 }
 
@@ -4520,6 +4621,10 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  if (realtimeVoiceSessionKind.value === 'preview'
+    && ownsRealtimeVoiceSession.value) {
+    void realtimeVoice.stop()
+  }
   releaseRealtimeVoicePageListeners?.()
   releaseRealtimeVoicePageListeners = null
   releaseServerRequestHandler?.()
@@ -4546,6 +4651,11 @@ watch([
   realtimeVoiceActiveWorkspaceKey,
   realtimeVoiceOwningThreadId
 ], ([threadId]) => {
+  if (realtimeVoiceSessionKind.value === 'preview'
+    && ownsRealtimeVoiceSession.value
+    && realtimeVoiceOwningThreadId.value !== threadId) {
+    void realtimeVoice.stop()
+  }
   realtimeVoiceCapabilityRequest += 1
   if (realtimeVoiceActiveElsewhere.value) {
     return
@@ -4557,6 +4667,8 @@ watch([
   void (async () => {
     if (threadId && activeThreadId.value === threadId) {
       await refreshRealtimeVoiceCapability(threadId)
+    } else if (!threadId) {
+      await refreshDraftRealtimeVoiceCatalog()
     }
   })()
 }, { immediate: true })
@@ -4586,7 +4698,9 @@ watch([
 }, { immediate: true })
 
 watch(realtimeVoiceState, (voiceState) => {
-  if (voiceState === 'connected' && pendingRealtimeVoiceMicrophoneActivation.value) {
+  if (voiceState === 'connected'
+    && realtimeVoiceSessionKind.value === 'conversation'
+    && pendingRealtimeVoiceMicrophoneActivation.value) {
     pendingRealtimeVoiceMicrophoneActivation.value = false
     realtimeVoice.setMicrophoneEnabled(true)
     return
@@ -5510,10 +5624,22 @@ watch(
                     :autoplay-blocked="realtimeVoiceAutoplayBlocked"
                     :error="realtimeVoiceError"
                     :active-elsewhere="realtimeVoiceActiveElsewhere"
+                    :voice-catalog="realtimeVoiceCatalog"
+                    :selected-voice="realtimeVoiceOverride"
+                    :saved-voice="realtimeVoicePreference.savedVoice.value"
+                    :session-kind="realtimeVoiceSessionKind"
+                    :active-voice="realtimeVoiceActiveVoice"
+                    :preview-status="realtimeVoicePreviewStatus"
+                    :preview-error="realtimeVoicePreviewError"
+                    :has-materialized-thread="Boolean(activeThreadId)"
                     @connect="void connectRealtimeVoice()"
                     @toggle-microphone="toggleRealtimeVoiceMicrophone"
                     @toggle-output="void toggleRealtimeVoiceOutput()"
                     @stop="void stopRealtimeVoice()"
+                    @select-voice="selectRealtimeVoice"
+                    @refresh-voices="void refreshRealtimeVoicesForPicker()"
+                    @preview-voice="void previewRealtimeVoice($event)"
+                    @stop-preview="void realtimeVoice.stop()"
                   />
 
                   <UPopover

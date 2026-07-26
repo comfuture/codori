@@ -71,6 +71,7 @@ class FakePeerConnection {
   onconnectionstatechange: (() => void) | null = null
   readonly dataChannel = new FakeDataChannel()
   readonly addTrack = vi.fn()
+  readonly addTransceiver = vi.fn()
   readonly createDataChannel = vi.fn(() => this.dataChannel)
   readonly createOffer = vi.fn(async () => ({ type: 'offer' as const, sdp: 'offer-sdp' }))
   readonly setLocalDescription = vi.fn(async (description: RTCSessionDescriptionInit) => {
@@ -90,15 +91,30 @@ class FakeRpcClient {
   readonly connectionListeners = new Set<(state: CodexRpcConnectionState) => void>()
   connected = true
   featureResponse = enabledFeatureResponse
+  voicesResponse = {
+    voices: {
+      v1: ['juniper', 'cove'],
+      v2: ['alloy'],
+      defaultV1: 'cove',
+      defaultV2: 'alloy'
+    }
+  }
   startError: Error | null = null
+  startRequest: (() => Promise<void>) | null = null
 
   async request<T>(method: string, params?: unknown): Promise<T> {
     this.requests.push({ method, params })
     if (method === 'experimentalFeature/list') {
       return this.featureResponse as T
     }
+    if (method === 'thread/realtime/listVoices') {
+      return this.voicesResponse as T
+    }
     if (method === 'thread/realtime/start' && this.startError) {
       throw this.startError
+    }
+    if (method === 'thread/realtime/start' && this.startRequest) {
+      await this.startRequest()
     }
     return {} as T
   }
@@ -234,6 +250,42 @@ describe('realtime capability normalization', () => {
 })
 
 describe('realtime conversation controller', () => {
+  it('discovers and caches the advertised V1 voice catalog for V3', async () => {
+    const fixture = createFixture()
+
+    await fixture.controller.refreshVoiceCatalog()
+    await fixture.controller.refreshVoiceCatalog()
+
+    expect(fixture.rpc.requests.filter(request =>
+      request.method === 'thread/realtime/listVoices'
+    )).toEqual([{
+      method: 'thread/realtime/listVoices',
+      params: {}
+    }])
+    expect(fixture.controller.voiceCatalog.value).toEqual({
+      status: 'ready',
+      voices: ['juniper', 'cove'],
+      protocolDefault: 'cove',
+      error: null
+    })
+  })
+
+  it('invalidates an idle catalog when the RPC connection epoch ends', async () => {
+    const fixture = createFixture()
+    await fixture.controller.refreshVoiceCatalog()
+
+    fixture.rpc.disconnect()
+    expect(fixture.controller.voiceCatalog.value.status).toBe('idle')
+
+    fixture.rpc.connected = true
+    fixture.rpc.voicesResponse.voices.v1 = ['juniper']
+    await fixture.controller.refreshVoiceCatalog()
+    expect(fixture.rpc.requests.filter(request =>
+      request.method === 'thread/realtime/listVoices'
+    )).toHaveLength(2)
+    expect(fixture.controller.voiceCatalog.value.voices).toEqual(['juniper'])
+  })
+
   it('requests microphone permission only when connect is invoked', async () => {
     const fixture = createFixture()
 
@@ -273,6 +325,253 @@ describe('realtime conversation controller', () => {
     fixture.controller.setMicrophoneEnabled(true)
     expect(fixture.stream.track.enabled).toBe(true)
     expect(fixture.controller.microphoneEnabled.value).toBe(true)
+  })
+
+  it('sends only an explicitly selected advertised voice as a session override', async () => {
+    const fixture = createFixture()
+    await fixture.controller.refreshCapability('thread-1', true)
+    await fixture.controller.connect('thread-1', { voice: 'juniper' })
+
+    expect(fixture.rpc.requests).toContainEqual({
+      method: 'thread/realtime/start',
+      params: {
+        threadId: 'thread-1',
+        outputModality: 'audio',
+        version: 'v3',
+        voice: 'juniper',
+        transport: {
+          type: 'webrtc',
+          sdp: 'offer-sdp'
+        }
+      }
+    })
+
+    await fixture.controller.stop()
+  })
+
+  it('previews through receive-only WebRTC with a strict bound and no microphone', async () => {
+    const fixture = createFixture()
+    await fixture.controller.refreshCapability('thread-1', true)
+    await fixture.controller.connect('thread-1', {
+      kind: 'preview',
+      voice: 'cove',
+      previewText: 'Hello preview'
+    })
+
+    expect(fixture.getUserMedia).not.toHaveBeenCalled()
+    expect(fixture.peer.addTrack).not.toHaveBeenCalled()
+    expect(fixture.peer.addTransceiver).toHaveBeenCalledWith('audio', {
+      direction: 'recvonly'
+    })
+    expect(fixture.peer.createDataChannel).toHaveBeenCalledWith('oai-events')
+    expect(fixture.rpc.requests).toContainEqual({
+      method: 'thread/realtime/start',
+      params: {
+        threadId: 'thread-1',
+        outputModality: 'audio',
+        version: 'v3',
+        voice: 'cove',
+        includeStartupContext: false,
+        clientManagedHandoffs: true,
+        transport: {
+          type: 'webrtc',
+          sdp: 'offer-sdp'
+        }
+      }
+    })
+    expect(fixture.rpc.requests.some(request => request.method === 'turn/start')).toBe(false)
+    expect(fixture.rpc.requests.some(request =>
+      request.method === 'thread/realtime/appendSpeech'
+    )).toBe(false)
+
+    fixture.rpc.emit('thread/realtime/started', {
+      threadId: 'thread-1',
+      realtimeSessionId: null,
+      version: 'v3'
+    })
+    fixture.rpc.emit('thread/realtime/sdp', {
+      threadId: 'thread-1',
+      sdp: 'answer-sdp'
+    })
+    await Promise.resolve()
+    fixture.peer.connectionState = 'connected'
+    fixture.peer.onconnectionstatechange?.()
+    await vi.waitFor(() => {
+      expect(fixture.rpc.requests).toContainEqual({
+        method: 'thread/realtime/appendSpeech',
+        params: {
+          threadId: 'thread-1',
+          text: 'Hello preview'
+        }
+      })
+    })
+    expect(fixture.controller.previewStatus.value).toBe('playing')
+
+    for (const timer of fixture.timers) {
+      timer()
+    }
+    await vi.waitFor(() => {
+      expect(fixture.controller.previewStatus.value).toBe('idle')
+    })
+    expect(fixture.peer.close).toHaveBeenCalledTimes(1)
+    expect(fixture.rpc.requests.filter(request =>
+      request.method === 'thread/realtime/stop'
+    )).toHaveLength(1)
+  })
+
+  it('ignores late same-thread SDP and close notifications before replacement starts', async () => {
+    const fixture = createFixture({
+      peers: [new FakePeerConnection(), new FakePeerConnection()]
+    })
+    await fixture.controller.refreshCapability('thread-1', true)
+    await fixture.controller.connect('thread-1', {
+      kind: 'preview',
+      voice: 'cove',
+      previewText: 'First'
+    })
+    const replacement = fixture.controller.connect('thread-1', {
+      kind: 'preview',
+      voice: 'juniper',
+      previewText: 'Second'
+    })
+    await vi.waitFor(() => {
+      expect(fixture.rpc.requests.filter(request =>
+        request.method === 'thread/realtime/stop'
+      )).toHaveLength(1)
+    })
+    fixture.rpc.emit('thread/realtime/closed', {
+      threadId: 'thread-1',
+      reason: 'client_request'
+    })
+    await replacement
+
+    fixture.rpc.emit('thread/realtime/sdp', {
+      threadId: 'thread-1',
+      sdp: 'stale-answer'
+    })
+    fixture.rpc.emit('thread/realtime/closed', {
+      threadId: 'thread-1',
+      reason: 'replaced'
+    })
+    await Promise.resolve()
+
+    expect(fixture.controller.owningThreadId.value).toBe('thread-1')
+    expect(fixture.controller.activeVoice.value).toBe('juniper')
+    expect(fixture.controller.state.value).toBe('starting')
+    expect(fixture.peers[1]!.remoteDescription).toBeNull()
+
+    await fixture.controller.stop()
+  })
+
+  it('compensates when stop wins a submitted realtime start request', async () => {
+    const fixture = createFixture()
+    const startResponse = deferred<void>()
+    fixture.rpc.startRequest = async () => await startResponse.promise
+    await fixture.controller.refreshCapability('thread-1', true)
+
+    const connect = fixture.controller.connect('thread-1', {
+      kind: 'preview',
+      voice: 'cove',
+      previewText: 'Deferred'
+    })
+    await vi.waitFor(() => {
+      expect(fixture.rpc.requests.filter(request =>
+        request.method === 'thread/realtime/start'
+      )).toHaveLength(1)
+    })
+    const stop = fixture.controller.stop()
+    expect(fixture.rpc.requests.some(request =>
+      request.method === 'thread/realtime/stop'
+    )).toBe(false)
+
+    startResponse.resolve()
+    await vi.waitFor(() => {
+      expect(fixture.rpc.requests.filter(request =>
+        request.method === 'thread/realtime/stop'
+      )).toHaveLength(1)
+    })
+    fixture.rpc.emit('thread/realtime/closed', {
+      threadId: 'thread-1',
+      reason: 'client_request'
+    })
+    await Promise.all([connect, stop])
+
+    expect(fixture.controller.owningThreadId.value).toBeNull()
+    expect(fixture.controller.state.value).toBe('closed')
+  })
+
+  it('withholds a new session until an explicitly stopped session confirms closure', async () => {
+    const fixture = createFixture({
+      peers: [new FakePeerConnection(), new FakePeerConnection()]
+    })
+    await fixture.controller.refreshCapability('thread-1', true)
+    await fixture.controller.connect('thread-1', {
+      kind: 'preview',
+      voice: 'cove',
+      previewText: 'First'
+    })
+    await fixture.controller.stop()
+
+    const next = fixture.controller.connect('thread-2', {
+      kind: 'preview',
+      voice: 'juniper',
+      previewText: 'Second'
+    })
+    await Promise.resolve()
+    expect(fixture.rpc.requests.filter(request =>
+      request.method === 'thread/realtime/start'
+    )).toHaveLength(1)
+    expect(fixture.peers[1]!.createOffer).not.toHaveBeenCalled()
+
+    fixture.rpc.emit('thread/realtime/closed', {
+      threadId: 'thread-1',
+      reason: 'client_request'
+    })
+    await next
+
+    expect(fixture.rpc.requests.filter(request =>
+      request.method === 'thread/realtime/start'
+    )).toHaveLength(2)
+    await fixture.controller.stop()
+  })
+
+  it('fails closed when the previous session never confirms closure', async () => {
+    const fixture = createFixture({
+      peers: [new FakePeerConnection(), new FakePeerConnection()]
+    })
+    await fixture.controller.refreshCapability('thread-1', true)
+    await fixture.controller.connect('thread-1', {
+      kind: 'preview',
+      voice: 'cove',
+      previewText: 'First'
+    })
+    await fixture.controller.stop()
+
+    for (const timer of fixture.timers) {
+      timer()
+    }
+    await expect(fixture.controller.connect('thread-2', {
+      kind: 'preview',
+      voice: 'juniper',
+      previewText: 'Second'
+    })).rejects.toThrow(/did not confirm closure/)
+    expect(fixture.rpc.requests.filter(request =>
+      request.method === 'thread/realtime/start'
+    )).toHaveLength(1)
+
+    fixture.rpc.emit('thread/realtime/closed', {
+      threadId: 'thread-1',
+      reason: 'client_request'
+    })
+    await fixture.controller.connect('thread-2', {
+      kind: 'preview',
+      voice: 'juniper',
+      previewText: 'Second'
+    })
+    expect(fixture.rpc.requests.filter(request =>
+      request.method === 'thread/realtime/start'
+    )).toHaveLength(2)
+    await fixture.controller.stop()
   })
 
   it('reconciles role transcripts without duplicating final text', async () => {
@@ -318,6 +617,34 @@ describe('realtime conversation controller', () => {
     await vi.waitFor(() => {
       expect(fixture.controller.autoplayBlocked.value).toBe(true)
     })
+  })
+
+  it('reports autoplay denial as a blocked preview instead of successful playback', async () => {
+    const fixture = createFixture({ playError: new Error('NotAllowedError') })
+    await fixture.controller.refreshCapability('thread-1', true)
+    await fixture.controller.connect('thread-1', {
+      kind: 'preview',
+      voice: 'cove',
+      previewText: 'Hello preview'
+    })
+    fixture.rpc.emit('thread/realtime/started', {
+      threadId: 'thread-1',
+      realtimeSessionId: null,
+      version: 'v3'
+    })
+    fixture.rpc.emit('thread/realtime/sdp', {
+      threadId: 'thread-1',
+      sdp: 'answer-sdp'
+    })
+    fixture.peer.connectionState = 'connected'
+    fixture.peer.onconnectionstatechange?.()
+    fixture.peer.ontrack?.({ streams: [new FakeStream()] })
+
+    await vi.waitFor(() => {
+      expect(fixture.controller.previewStatus.value).toBe('blocked')
+    })
+    expect(fixture.controller.previewError.value).toMatch(/autoplay blocked/)
+    await fixture.controller.stop()
   })
 
   it('stops tracks, media, subscriptions, and only the owned app-server session', async () => {
@@ -484,7 +811,7 @@ describe('realtime conversation controller', () => {
     expect(fixture.controller.state.value).toBe('error')
     expect(fixture.controller.error.value).toMatch(/Microphone permission was denied/)
     expect(fixture.rpc.notificationListeners.size).toBe(0)
-    expect(fixture.rpc.connectionListeners.size).toBe(0)
+    expect(fixture.rpc.connectionListeners.size).toBe(1)
   })
 
   it('fails safely when microphone permission or the input device is lost', async () => {
@@ -506,6 +833,10 @@ describe('realtime conversation controller', () => {
     const oldListener = [...fixture.rpc.notificationListeners][0]!
 
     await fixture.controller.stopForThreadChange('thread-2')
+    fixture.rpc.emit('thread/realtime/closed', {
+      threadId: 'thread-1',
+      reason: 'client_request'
+    })
     fixture.peer.connectionState = 'new'
     fixture.peer.close.mockClear()
     await fixture.controller.refreshCapability('thread-2', true)

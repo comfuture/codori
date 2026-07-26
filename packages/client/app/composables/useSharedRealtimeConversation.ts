@@ -1,6 +1,10 @@
 import { computed, effectScope, shallowRef, watch } from 'vue'
 import type { CodexRpcClient } from '~~/shared/codex-rpc'
-import { useRealtimeConversation } from './useRealtimeConversation'
+import {
+  useRealtimeConversation,
+  type RealtimeConnectOptions
+} from './useRealtimeConversation'
+import type { RealtimeVoice } from '~~/shared/generated/codex-app-server/RealtimeVoice'
 
 type RealtimeConversationController = ReturnType<typeof useRealtimeConversation>
 
@@ -120,6 +124,7 @@ export const useActiveRealtimeConversation = () => {
       activeConversation.value?.entry.getClient() ?? null
     ),
     state: computed(() => controller.value?.state.value ?? 'idle'),
+    sessionKind: computed(() => controller.value?.sessionKind.value ?? null),
     activity: computed(() => controller.value?.activity.value ?? 'idle'),
     generation: computed(() => controller.value?.generation.value ?? 0),
     transcripts: computed(() => controller.value?.transcripts.value ?? [])
@@ -143,14 +148,29 @@ export const useSharedRealtimeConversation = (
   const owningThreadId = computed(() =>
     activeConversation.value?.threadId ?? null
   )
+  const ownsActiveSession = computed(() =>
+    activeConversation.value?.entry === entry
+  )
 
-  const connect = async (threadId: string) => {
+  const connect = async (
+    threadId: string,
+    options: RealtimeConnectOptions = {}
+  ) => {
     const active = activeConversation.value
     if (active) {
-      if (active.entry === entry && active.threadId === threadId) {
+      if (active.entry === entry
+        && active.threadId === threadId
+        && active.entry.controller.sessionKind.value === (options.kind ?? 'conversation')
+        && active.entry.controller.activeVoice.value === (options.voice ?? null)) {
         return
       }
-      throw new Error('A voice session is already active in another thread.')
+      if (active.entry.controller.sessionKind.value !== 'preview') {
+        throw new Error('A voice session is already active in another thread.')
+      }
+      await active.entry.controller.stopForReplacement()
+      if (activeConversation.value === active) {
+        activeConversation.value = null
+      }
     }
 
     activeConversation.value = {
@@ -158,7 +178,7 @@ export const useSharedRealtimeConversation = (
       threadId
     }
     try {
-      await entry.controller.connect(threadId)
+      await entry.controller.connect(threadId, options)
     } catch (error) {
       if (activeConversation.value?.entry === entry
         && !entry.controller.owningThreadId.value) {
@@ -168,16 +188,26 @@ export const useSharedRealtimeConversation = (
     }
   }
 
+  const preview = async (threadId: string, voice: RealtimeVoice, text: string) =>
+    await connect(threadId, {
+      kind: 'preview',
+      voice,
+      previewText: text
+    })
+
   const activeController = () =>
     activeConversation.value?.entry.controller ?? entry.controller
 
   return {
     capability: entry.controller.capability,
     state: computed(() => displayController.value.state.value),
+    sessionKind: computed(() => displayController.value.sessionKind.value),
+    activeVoice: computed(() => displayController.value.activeVoice.value),
     activity: computed(() => displayController.value.activity.value),
     owningThreadId,
     activeWorkspaceKey,
     activeClient,
+    ownsActiveSession,
     generation: computed(() => displayController.value.generation.value),
     transcripts: computed(() => displayController.value.transcripts.value),
     latestUserTranscript: computed(() => displayController.value.latestUserTranscript.value),
@@ -187,8 +217,14 @@ export const useSharedRealtimeConversation = (
     microphoneEnabled: computed(() => displayController.value.microphoneEnabled.value),
     remoteAudioActive: computed(() => displayController.value.remoteAudioActive.value),
     peerConnectionState: computed(() => displayController.value.peerConnectionState.value),
+    voiceCatalog: entry.controller.voiceCatalog,
+    previewStatus: computed(() => displayController.value.previewStatus.value),
+    previewError: computed(() => displayController.value.previewError.value),
     refreshCapability: entry.controller.refreshCapability,
+    refreshVoiceCatalog: entry.controller.refreshVoiceCatalog,
+    invalidateVoiceCatalog: entry.controller.invalidateVoiceCatalog,
     connect,
+    preview,
     setMicrophoneEnabled: (enabled: boolean) =>
       activeController().setMicrophoneEnabled(enabled),
     setOutputMuted: (muted: boolean) =>

@@ -24,5 +24,11 @@ latest two spoken exchange pairs and closes after five seconds of transcript
 inactivity. The avatar stays visible for the session and is viewport-bounded to
 64–88 pixels wide instead of using the source sprite cell size.
 
+The composer voice picker loads the runtime's V3-compatible voices. Its default
+omits the per-session voice override, while an explicit selection is persisted
+only in browser storage. Receive-only previews are limited to existing threads,
+never request microphone access or create turns, and share the single global
+audio owner with normal realtime conversations.
+
 For the complete product documentation, see the repository README:
 [https://github.com/comfuture/codori](https://github.com/comfuture/codori)
