@@ -33,6 +33,7 @@ type VoiceProps = {
   outputMuted: boolean
   autoplayBlocked: boolean
   error: string | null
+  activeElsewhere: boolean
 }
 
 const baseProps: VoiceProps = {
@@ -45,7 +46,8 @@ const baseProps: VoiceProps = {
   microphoneEnabled: false,
   outputMuted: false,
   autoplayBlocked: false,
-  error: null
+  error: null,
+  activeElsewhere: false
 }
 
 const mountControls = (props: Partial<VoiceProps> = {}) =>
@@ -124,6 +126,23 @@ describe('VoiceComposerControls', () => {
     expect(wrapper.emitted('toggle-output')).toHaveLength(1)
     expect(wrapper.emitted('stop')).toHaveLength(1)
     expect(wrapper.get('[aria-live="polite"]').text()).toContain('Remote speech is blocked')
+    wrapper.unmount()
+  })
+
+  it('blocks starting another voice session while keeping the global stop action', async () => {
+    const wrapper = mountControls({
+      sessionState: 'idle',
+      activeElsewhere: true
+    })
+
+    const microphone = wrapper.get('button[aria-label="A voice session is already active in another thread"]')
+    expect(microphone.attributes('disabled')).toBeDefined()
+    expect(wrapper.find('button[aria-label="Stop voice session"]').exists()).toBe(true)
+    expect(wrapper.find('button[aria-label="Mute remote speech"]').exists()).toBe(false)
+    expect(wrapper.get('[aria-live="polite"]').text()).toContain('another thread')
+
+    await microphone.trigger('click')
+    expect(wrapper.emitted('connect')).toBeUndefined()
     wrapper.unmount()
   })
 

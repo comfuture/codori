@@ -80,7 +80,10 @@ import { useRpc } from '../composables/useRpc'
 import { useChatSubmitGuard } from '../composables/useChatSubmitGuard'
 import { useWorkspaceGitBranch } from '../composables/useWorkspaceGitBranch'
 import { useWorkspaceTerminalSurface } from '../composables/useWorkspaceTerminalSurface'
-import { useRealtimeConversation } from '../composables/useRealtimeConversation'
+import {
+  isRealtimeVoiceActiveElsewhere,
+  useSharedRealtimeConversation
+} from '../composables/useSharedRealtimeConversation'
 import { acquireServerAvatar } from '../composables/useServerAvatar'
 import { isRealtimeVoiceCompanionActive } from '../utils/realtime-voice-companion'
 import { sortSidebarProjects } from '../utils/project-sidebar-order'
@@ -355,20 +358,17 @@ const {
   planImplementationPromptTurnId,
   planImplementationPromptThreadId
 } = session
-const realtimeRpcClient = {
-  request: async <T>(method: string, params?: unknown) =>
-    await getRuntimeClient().request<T>(method, params),
-  subscribe: (listener: Parameters<ReturnType<typeof getRuntimeClient>['subscribe']>[0]) =>
-    getRuntimeClient().subscribe(listener),
-  subscribeConnectionState: (listener: Parameters<ReturnType<typeof getRuntimeClient>['subscribeConnectionState']>[0]) =>
-    getRuntimeClient().subscribeConnectionState(listener),
-  isConnected: () => getRuntimeClient().isConnected()
-}
-const realtimeVoice = useRealtimeConversation({ client: realtimeRpcClient })
+const realtimeVoice = useSharedRealtimeConversation(
+  workspaceSessionKey,
+  getRuntimeClient
+)
 const {
   capability: realtimeVoiceCapability,
   state: realtimeVoiceState,
   activity: realtimeVoiceActivity,
+  owningThreadId: realtimeVoiceOwningThreadId,
+  activeWorkspaceKey: realtimeVoiceActiveWorkspaceKey,
+  activeClient: realtimeVoiceActiveClient,
   generation: realtimeVoiceGeneration,
   transcripts: realtimeVoiceTranscripts,
   error: realtimeVoiceError,
@@ -376,6 +376,14 @@ const {
   autoplayBlocked: realtimeVoiceAutoplayBlocked,
   microphoneEnabled: realtimeVoiceMicrophoneEnabled
 } = realtimeVoice
+const realtimeVoiceActiveElsewhere = computed(() =>
+  isRealtimeVoiceActiveElsewhere({
+    activeWorkspaceKey: realtimeVoiceActiveWorkspaceKey.value,
+    activeThreadId: realtimeVoiceOwningThreadId.value,
+    workspaceKey: workspaceSessionKey,
+    threadId: activeThreadId.value
+  })
+)
 const realtimeVoiceAvatar = ref<ServerAvatarMetadata | null>(null)
 const realtimeVoiceSpriteUrl = ref<string | null>(null)
 let releaseRealtimeVoiceAvatar: (() => void) | null = null
@@ -392,11 +400,11 @@ const syncRealtimeVoiceAvatarResource = () => {
   if (!isRealtimeVoiceCompanionActive(realtimeVoiceState.value)) {
     return
   }
-  const scope = workspaceScope.value
-  if (!scope.id) {
+  const client = realtimeVoiceActiveClient.value
+  if (!client) {
     return
   }
-  const resource = acquireServerAvatar(getWorkspaceClient(scope))
+  const resource = acquireServerAvatar(client)
   const stopAvatar = watch(resource.avatar, (avatar) => {
     realtimeVoiceAvatar.value = avatar
   }, { immediate: true })
@@ -412,7 +420,7 @@ const syncRealtimeVoiceAvatarResource = () => {
 
 watch([
   () => isRealtimeVoiceCompanionActive(realtimeVoiceState.value),
-  () => `${workspaceScope.value.kind}:${workspaceScope.value.id}`
+  realtimeVoiceActiveWorkspaceKey
 ], syncRealtimeVoiceAvatarResource, { immediate: true })
 let realtimeVoiceCapabilityRequest = 0
 let releaseRealtimeVoicePageListeners: (() => void) | null = null
@@ -457,6 +465,10 @@ const refreshRealtimeVoiceCapability = async (threadId: string) => {
 }
 
 const connectRealtimeVoice = async () => {
+  if (realtimeVoiceActiveElsewhere.value) {
+    pendingRealtimeVoiceMicrophoneActivation.value = false
+    return
+  }
   pendingRealtimeVoiceMicrophoneActivation.value = true
   try {
     const threadId = activeThreadId.value ?? (await ensurePendingLiveStream()).threadId
@@ -4546,7 +4558,6 @@ onBeforeUnmount(() => {
   releaseRealtimeVoiceAvatarResource()
   releaseRealtimeVoicePageListeners?.()
   releaseRealtimeVoicePageListeners = null
-  void realtimeVoice.dispose()
   releaseServerRequestHandler?.()
   releaseServerRequestHandler = null
   releaseSkillNotificationSubscription?.()
@@ -4566,14 +4577,20 @@ onBeforeUnmount(() => {
   }
 })
 
-watch(activeThreadId, (threadId) => {
+watch([
+  activeThreadId,
+  realtimeVoiceActiveWorkspaceKey,
+  realtimeVoiceOwningThreadId
+], ([threadId]) => {
   realtimeVoiceCapabilityRequest += 1
+  if (realtimeVoiceActiveElsewhere.value) {
+    return
+  }
   realtimeVoiceCapability.value = {
     status: 'checking',
     message: threadId ? 'Checking realtime voice support.' : 'Start voice session'
   }
   void (async () => {
-    await realtimeVoice.stopForThreadChange(threadId)
     if (threadId && activeThreadId.value === threadId) {
       await refreshRealtimeVoiceCapability(threadId)
     }
@@ -5538,6 +5555,7 @@ watch(
                     :output-muted="realtimeVoiceOutputMuted"
                     :autoplay-blocked="realtimeVoiceAutoplayBlocked"
                     :error="realtimeVoiceError"
+                    :active-elsewhere="realtimeVoiceActiveElsewhere"
                     @connect="void connectRealtimeVoice()"
                     @toggle-microphone="toggleRealtimeVoiceMicrophone"
                     @toggle-output="void toggleRealtimeVoiceOutput()"
