@@ -156,6 +156,68 @@ describe('ServerAvatarResolver', () => {
     expect(avatar.metadata.animations.idle).toBeDefined()
   })
 
+  it('keeps default and injected idle animations inside a custom sprite grid', async () => {
+    const codexHome = createCodexHome()
+    writeCustomPet({
+      codexHome,
+      id: 'single-frame',
+      manifest: {
+        spritesheetPath: 'spritesheet.png',
+        frame: {
+          width: 64,
+          height: 64,
+          columns: 1,
+          rows: 1
+        }
+      },
+      width: 64,
+      height: 64
+    })
+    writeCustomPet({
+      codexHome,
+      id: 'custom-track',
+      manifest: {
+        spritesheetPath: 'spritesheet.png',
+        frame: {
+          width: 64,
+          height: 64,
+          columns: 2,
+          rows: 1
+        },
+        animations: {
+          wave: {
+            frames: [1],
+            fallback: 'idle'
+          }
+        }
+      },
+      width: 128,
+      height: 64
+    })
+    const resolver = new ServerAvatarResolver({ serverLabel: 'studio-mac' })
+
+    const singleFrame = await resolver.resolve(codexHome, 'single-frame')
+    const customTrack = await resolver.resolve(codexHome, 'custom-track')
+
+    expect(singleFrame.metadata.animations).toEqual({
+      idle: {
+        frames: [{ spriteIndex: 0, durationMs: 1680 }],
+        loopStart: 0,
+        fallback: 'idle'
+      }
+    })
+    expect(customTrack.metadata.animations.idle?.frames)
+      .toEqual([
+        { spriteIndex: 0, durationMs: 1680 },
+        { spriteIndex: 1, durationMs: 660 }
+      ])
+    for (const animation of Object.values(customTrack.metadata.animations)) {
+      expect(animation.frames.every(frame =>
+        frame.spriteIndex < customTrack.metadata.frame.frameCount
+      )).toBe(true)
+    }
+  })
+
   it('supports the legacy avatars directory', async () => {
     const codexHome = createCodexHome()
     writeCustomPet({

@@ -311,8 +311,16 @@ const normalizeAnimations = (
   frameCount: number
 ): Record<string, ServerAvatarAnimation> => {
   const defaults = defaultServerAvatarAnimations()
+  const safeIdle: ServerAvatarAnimation = {
+    frames: idleFrames()
+      .filter(frame => frame.spriteIndex < frameCount),
+    loopStart: 0,
+    fallback: 'idle'
+  }
   if (!isRecord(value) || Object.keys(value).length === 0) {
-    return defaults
+    return frameCount >= DEFAULT_COLUMNS * DEFAULT_V1_ROWS
+      ? defaults
+      : { idle: safeIdle }
   }
   if (Object.keys(value).length > MAX_ANIMATION_COUNT) {
     throw new Error('avatar manifest contains too many animations')
@@ -350,7 +358,7 @@ const normalizeAnimations = (
   }
 
   if (!animations.idle) {
-    animations.idle = defaults.idle!
+    animations.idle = safeIdle
   }
   for (const animation of Object.values(animations)) {
     if (!animations[animation.fallback]) {
