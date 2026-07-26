@@ -296,6 +296,7 @@ export const useRealtimeConversation = (options: ControllerOptions) => {
   let startPromise: Promise<void> | null = null
   let pendingStartRequest: PendingStartRequest | null = null
   let teardownPromise: Promise<void> | null = null
+  let connectClaim: Promise<void> | null = null
   let releasePersistentConnection: (() => void) | null = null
   let startedReceived = false
   let remoteDescriptionApplied = false
@@ -309,6 +310,29 @@ export const useRealtimeConversation = (options: ControllerOptions) => {
   const isCurrent = (candidateGeneration: number, threadId?: string) =>
     activeGeneration === candidateGeneration
     && (!threadId || owningThreadId.value === threadId)
+
+  const acquireConnectClaim = async () => {
+    while (connectClaim) {
+      await connectClaim
+    }
+
+    let settleClaim!: () => void
+    const claim = new Promise<void>((resolve) => {
+      settleClaim = resolve
+    })
+    connectClaim = claim
+    let released = false
+    return () => {
+      if (released) {
+        return
+      }
+      released = true
+      if (connectClaim === claim) {
+        connectClaim = null
+      }
+      settleClaim()
+    }
+  }
 
   const clearConnectionTimer = () => {
     if (connectionTimer === null) {
@@ -894,9 +918,10 @@ export const useRealtimeConversation = (options: ControllerOptions) => {
     return capability.value
   }
 
-  const connect = async (
+  const connectWithClaim = async (
     threadId: string,
-    connectOptions: RealtimeConnectOptions = {}
+    connectOptions: RealtimeConnectOptions,
+    releaseConnectClaim: () => void
   ) => {
     const nextSessionKind = connectOptions.kind ?? 'conversation'
     if (!teardownPromise
@@ -904,7 +929,9 @@ export const useRealtimeConversation = (options: ControllerOptions) => {
       && sessionKind.value === nextSessionKind
       && activeVoice.value === (connectOptions.voice ?? null)
       && startPromise) {
-      return await startPromise
+      const existingStartPromise = startPromise
+      releaseConnectClaim()
+      return await existingStartPromise
     }
     if (!teardownPromise
       && owningThreadId.value === threadId
@@ -918,8 +945,14 @@ export const useRealtimeConversation = (options: ControllerOptions) => {
     }
 
     ensureConnectionMonitor()
-    await stopForReplacement()
-    await awaitPendingCloseBarriers()
+    while (
+      teardownPromise
+      || activeGeneration !== null
+      || pendingCloseBarriers.size > 0
+    ) {
+      await stopForReplacement()
+      await awaitPendingCloseBarriers()
+    }
 
     const candidateGeneration = ++generationCounter
     activeGeneration = candidateGeneration
@@ -1114,8 +1147,21 @@ export const useRealtimeConversation = (options: ControllerOptions) => {
       }
     })
     startPromise = currentStartPromise
+    releaseConnectClaim()
 
     return await currentStartPromise
+  }
+
+  const connect = async (
+    threadId: string,
+    connectOptions: RealtimeConnectOptions = {}
+  ) => {
+    const releaseConnectClaim = await acquireConnectClaim()
+    try {
+      return await connectWithClaim(threadId, connectOptions, releaseConnectClaim)
+    } finally {
+      releaseConnectClaim()
+    }
   }
 
   const setMicrophoneEnabled = (enabled: boolean) => {
