@@ -423,10 +423,10 @@ export const useRealtimeConversation = (options: ControllerOptions) => {
 
   const settlePendingCloseBarrier = (
     threadId: string,
-    expectedBarrier?: PendingCloseBarrier
+    expectedBarrier: PendingCloseBarrier
   ) => {
     const barrier = pendingCloseBarriers.get(threadId)
-    if (!barrier || (expectedBarrier && barrier !== expectedBarrier)) {
+    if (barrier !== expectedBarrier) {
       return
     }
 
