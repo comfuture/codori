@@ -101,6 +101,7 @@ class FakeRpcClient {
   }
   startError: Error | null = null
   startRequest: (() => Promise<void>) | null = null
+  stopRequest: (() => Promise<void>) | null = null
 
   async request<T>(method: string, params?: unknown): Promise<T> {
     this.requests.push({ method, params })
@@ -115,6 +116,9 @@ class FakeRpcClient {
     }
     if (method === 'thread/realtime/start' && this.startRequest) {
       await this.startRequest()
+    }
+    if (method === 'thread/realtime/stop' && this.stopRequest) {
+      await this.stopRequest()
     }
     return {} as T
   }
@@ -149,10 +153,12 @@ class FakeRpcClient {
 
 const deferred = <T>() => {
   let resolve!: (value: T) => void
-  const promise = new Promise<T>((resolvePromise) => {
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
     resolve = resolvePromise
+    reject = rejectPromise
   })
-  return { promise, resolve }
+  return { promise, resolve, reject }
 }
 
 const createFixture = (input?: {
@@ -461,6 +467,133 @@ describe('realtime conversation controller', () => {
     expect(fixture.peers[1]!.remoteDescription).toBeNull()
 
     await fixture.controller.stop()
+  })
+
+  it('waits for an in-flight teardown before initializing its replacement', async () => {
+    const fixture = createFixture({
+      peers: [new FakePeerConnection(), new FakePeerConnection()]
+    })
+    const stopResponse = deferred<void>()
+    fixture.rpc.stopRequest = async () => await stopResponse.promise
+    await fixture.controller.refreshCapability('thread-1', true)
+    await fixture.controller.connect('thread-1', {
+      kind: 'preview',
+      voice: 'cove',
+      previewText: 'First'
+    })
+
+    const stop = fixture.controller.stop()
+    await vi.waitFor(() => {
+      expect(fixture.rpc.requests.filter(request =>
+        request.method === 'thread/realtime/stop'
+      )).toHaveLength(1)
+    })
+    const replacement = fixture.controller.connect('thread-1', {
+      kind: 'preview',
+      voice: 'juniper',
+      previewText: 'Second'
+    })
+    await Promise.resolve()
+    expect(fixture.peers[1]!.createOffer).not.toHaveBeenCalled()
+
+    fixture.rpc.emit('thread/realtime/closed', {
+      threadId: 'thread-1',
+      reason: 'client_request'
+    })
+    stopResponse.resolve()
+    await Promise.all([stop, replacement])
+
+    expect(fixture.controller.owningThreadId.value).toBe('thread-1')
+    expect(fixture.controller.activeVoice.value).toBe('juniper')
+    expect(fixture.controller.state.value).toBe('starting')
+    await fixture.controller.stop()
+  })
+
+  it('does not let delayed start cleanup stop a same-thread replacement', async () => {
+    const fixture = createFixture({
+      peers: [new FakePeerConnection(), new FakePeerConnection()]
+    })
+    const firstStart = deferred<void>()
+    fixture.rpc.startRequest = async () => await firstStart.promise
+    await fixture.controller.refreshCapability('thread-1', true)
+
+    const firstConnect = fixture.controller.connect('thread-1', {
+      kind: 'preview',
+      voice: 'cove',
+      previewText: 'First'
+    })
+    await vi.waitFor(() => {
+      expect(fixture.rpc.requests.filter(request =>
+        request.method === 'thread/realtime/start'
+      )).toHaveLength(1)
+    })
+    await fixture.controller.stop()
+    fixture.rpc.emit('thread/realtime/closed', {
+      threadId: 'thread-1',
+      reason: 'client_request'
+    })
+
+    fixture.rpc.startRequest = null
+    await fixture.controller.connect('thread-1', {
+      kind: 'preview',
+      voice: 'juniper',
+      previewText: 'Second'
+    })
+    firstStart.resolve()
+    await firstConnect
+    await Promise.resolve()
+
+    expect(fixture.rpc.requests.filter(request =>
+      request.method === 'thread/realtime/stop'
+    )).toHaveLength(0)
+    expect(fixture.controller.owningThreadId.value).toBe('thread-1')
+    expect(fixture.controller.activeVoice.value).toBe('juniper')
+    await fixture.controller.stop()
+  })
+
+  it('does not let delayed rejected-start cleanup settle a newer barrier', async () => {
+    const fixture = createFixture({
+      peers: [new FakePeerConnection(), new FakePeerConnection(), new FakePeerConnection()]
+    })
+    const firstStart = deferred<void>()
+    fixture.rpc.startRequest = async () => await firstStart.promise
+    await fixture.controller.refreshCapability('thread-1', true)
+
+    const firstConnect = fixture.controller.connect('thread-1', {
+      kind: 'preview',
+      voice: 'cove',
+      previewText: 'First'
+    })
+    await vi.waitFor(() => {
+      expect(fixture.rpc.requests.filter(request =>
+        request.method === 'thread/realtime/start'
+      )).toHaveLength(1)
+    })
+    await fixture.controller.stop()
+    fixture.rpc.emit('thread/realtime/closed', {
+      threadId: 'thread-1',
+      reason: 'client_request'
+    })
+
+    fixture.rpc.startRequest = null
+    await fixture.controller.connect('thread-1', {
+      kind: 'preview',
+      voice: 'juniper',
+      previewText: 'Second'
+    })
+    await fixture.controller.stop()
+    firstStart.reject(new Error('start rejected'))
+    await firstConnect
+    await Promise.resolve()
+
+    for (const timer of fixture.timers) {
+      timer()
+    }
+    await expect(fixture.controller.connect('thread-2', {
+      kind: 'preview',
+      voice: 'cove',
+      previewText: 'Third'
+    })).rejects.toThrow(/did not confirm closure/)
   })
 
   it('compensates when stop wins a submitted realtime start request', async () => {

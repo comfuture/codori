@@ -421,9 +421,12 @@ export const useRealtimeConversation = (options: ControllerOptions) => {
     return barrier
   }
 
-  const settlePendingCloseBarrier = (threadId: string) => {
+  const settlePendingCloseBarrier = (
+    threadId: string,
+    expectedBarrier?: PendingCloseBarrier
+  ) => {
     const barrier = pendingCloseBarriers.get(threadId)
-    if (!barrier) {
+    if (!barrier || (expectedBarrier && barrier !== expectedBarrier)) {
       return
     }
 
@@ -676,10 +679,13 @@ export const useRealtimeConversation = (options: ControllerOptions) => {
         && submittedStart
         && threadId
         && options.client.isConnected()) {
-        createPendingCloseBarrier(threadId)
+        const closeBarrier = createPendingCloseBarrier(threadId)
         void submittedStart.accepted.then(async (accepted) => {
+          if (pendingCloseBarriers.get(threadId) !== closeBarrier) {
+            return
+          }
           if (!accepted || !options.client.isConnected()) {
-            settlePendingCloseBarrier(threadId)
+            settlePendingCloseBarrier(threadId, closeBarrier)
             return
           }
           await options.client.request('thread/realtime/stop', { threadId }).catch(() => {})
@@ -725,6 +731,11 @@ export const useRealtimeConversation = (options: ControllerOptions) => {
   }
 
   const stopForReplacement = async () => {
+    const inFlightTeardown = teardownPromise
+    if (inFlightTeardown) {
+      await inFlightTeardown
+    }
+
     if (activeGeneration === null) {
       return
     }
@@ -888,13 +899,15 @@ export const useRealtimeConversation = (options: ControllerOptions) => {
     connectOptions: RealtimeConnectOptions = {}
   ) => {
     const nextSessionKind = connectOptions.kind ?? 'conversation'
-    if (owningThreadId.value === threadId
+    if (!teardownPromise
+      && owningThreadId.value === threadId
       && sessionKind.value === nextSessionKind
       && activeVoice.value === (connectOptions.voice ?? null)
       && startPromise) {
       return await startPromise
     }
-    if (owningThreadId.value === threadId
+    if (!teardownPromise
+      && owningThreadId.value === threadId
       && sessionKind.value === nextSessionKind
       && activeVoice.value === (connectOptions.voice ?? null)
       && state.value === 'connected') {
@@ -905,9 +918,7 @@ export const useRealtimeConversation = (options: ControllerOptions) => {
     }
 
     ensureConnectionMonitor()
-    if (activeGeneration !== null) {
-      await stopForReplacement()
-    }
+    await stopForReplacement()
     await awaitPendingCloseBarriers()
 
     const candidateGeneration = ++generationCounter
