@@ -17,7 +17,8 @@ describe('realtime voice workspace context', () => {
         id: 'codori'
       },
       workspaceKey: 'project:codori',
-      threadId: 'thread-1'
+      threadId: 'thread-1',
+      cwd: '/projects/codori'
     })
 
     expect(useRealtimeVoiceWorkspaceContext().value).toEqual({
@@ -26,7 +27,8 @@ describe('realtime voice workspace context', () => {
         id: 'codori'
       },
       workspaceKey: 'project:codori',
-      threadId: 'thread-1'
+      threadId: 'thread-1',
+      cwd: '/projects/codori'
     })
   })
 
@@ -37,7 +39,8 @@ describe('realtime voice workspace context', () => {
         id: 'chat-1'
       },
       workspaceKey: 'chat:chat-1',
-      threadId: 'thread-1'
+      threadId: 'thread-1',
+      cwd: null
     })
     rememberRealtimeVoiceWorkspaceContext({
       workspace: {
@@ -45,7 +48,8 @@ describe('realtime voice workspace context', () => {
         id: ''
       },
       workspaceKey: 'chat:draft',
-      threadId: ''
+      threadId: '',
+      cwd: null
     })
 
     expect(useRealtimeVoiceWorkspaceContext().value?.workspaceKey).toBe('chat:chat-1')

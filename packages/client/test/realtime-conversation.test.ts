@@ -355,6 +355,32 @@ describe('realtime conversation controller', () => {
     await fixture.controller.stop()
   })
 
+  it('sends an explicit browser voice prompt only for a normal conversation', async () => {
+    const fixture = createFixture()
+    await fixture.controller.refreshCapability('thread-1', true)
+    await fixture.controller.connect('thread-1', {
+      voice: 'juniper',
+      prompt: 'Use the browser voice instructions.'
+    })
+
+    expect(fixture.rpc.requests).toContainEqual({
+      method: 'thread/realtime/start',
+      params: {
+        threadId: 'thread-1',
+        outputModality: 'audio',
+        version: 'v3',
+        voice: 'juniper',
+        prompt: 'Use the browser voice instructions.',
+        transport: {
+          type: 'webrtc',
+          sdp: 'offer-sdp'
+        }
+      }
+    })
+
+    await fixture.controller.stop()
+  })
+
   it('previews through receive-only WebRTC with a strict bound and no microphone', async () => {
     const fixture = createFixture()
     await fixture.controller.refreshCapability('thread-1', true)

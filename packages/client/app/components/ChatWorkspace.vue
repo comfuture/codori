@@ -86,8 +86,11 @@ import {
   useSharedRealtimeConversation
 } from '../composables/useSharedRealtimeConversation'
 import {
+  resolveConfiguredRealtimeVoicePrompt,
   resolveRealtimeVoiceOverride,
-  useRealtimeVoicePreference
+  resolveRealtimeVoiceStartPrompt,
+  useRealtimeVoicePreference,
+  useRealtimeVoicePromptPreference
 } from '../composables/useRealtimeVoicePreference'
 import { useRealtimeVoiceCapabilityLifecycle } from '../composables/useRealtimeVoiceCapabilityLifecycle'
 import { rememberRealtimeVoiceWorkspaceContext } from '../composables/useRealtimeVoiceWorkspaceContext'
@@ -369,6 +372,7 @@ const realtimeVoice = useSharedRealtimeConversation(
   getRuntimeClient
 )
 const realtimeVoicePreference = useRealtimeVoicePreference()
+const realtimeVoicePromptPreference = useRealtimeVoicePromptPreference()
 const {
   capability: realtimeVoiceCapability,
   state: realtimeVoiceState,
@@ -502,8 +506,25 @@ const connectRealtimeVoice = async () => {
       return
     }
     await realtimeVoice.refreshVoiceCatalog(true)
+    let startPrompt: string | undefined
+    try {
+      const configResponse = await getRuntimeClient().request<ConfigReadResponse>(
+        'config/read',
+        {
+          includeLayers: false,
+          cwd: selectedProject.value?.projectPath ?? null
+        } satisfies ConfigReadParams
+      )
+      startPrompt = resolveRealtimeVoiceStartPrompt({
+        configuredPrompt: resolveConfiguredRealtimeVoicePrompt(configResponse.config),
+        localOverride: realtimeVoicePromptPreference.savedPrompt.value
+      })
+    } catch {
+      startPrompt = realtimeVoicePromptPreference.savedPrompt.value ?? undefined
+    }
     await realtimeVoice.connect(threadId, {
-      voice: realtimeVoiceOverride.value
+      voice: realtimeVoiceOverride.value,
+      ...(startPrompt !== undefined ? { prompt: startPrompt } : {})
     })
     if (realtimeVoiceState.value === 'connected'
       && realtimeVoiceSessionKind.value === 'conversation') {
@@ -4587,7 +4608,8 @@ watch([
   rememberRealtimeVoiceWorkspaceContext({
     workspace,
     workspaceKey: `${workspace.kind}:${workspace.id}`,
-    threadId
+    threadId,
+    cwd: selectedProject.value?.projectPath ?? null
   })
 }, { immediate: true })
 

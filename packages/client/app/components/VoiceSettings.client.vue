@@ -3,15 +3,20 @@ import { useRuntimeConfig } from '#imports'
 import { $fetch } from 'ofetch'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { RealtimeVoice } from '~~/shared/generated/codex-app-server/RealtimeVoice'
+import type { ConfigReadParams } from '~~/shared/generated/codex-app-server/v2/ConfigReadParams'
+import type { ConfigReadResponse } from '~~/shared/generated/codex-app-server/v2/ConfigReadResponse'
 import type { ServerCapabilitiesResponse } from '~~/shared/codori'
 import { resolveApiUrl, shouldUseServerProxy } from '~~/shared/network'
+import { selectRealtimeVoicePreviewSource } from '~~/shared/realtime-voice-preview'
 import {
+  resolveConfiguredRealtimeVoicePrompt,
   resolveRealtimeVoiceOverride,
-  resolveRealtimeVoicePreviewText,
-  useRealtimeVoicePreference
+  useRealtimeVoicePreference,
+  useRealtimeVoicePromptPreference
 } from '../composables/useRealtimeVoicePreference'
 import type {
   RealtimeCapability,
+  RealtimeSessionState,
   RealtimeVoiceCatalog
 } from '../composables/useRealtimeConversation'
 import { useRpc } from '../composables/useRpc'
@@ -30,6 +35,7 @@ const emptyCatalog = ref<RealtimeVoiceCatalog>({
 })
 const context = useRealtimeVoiceWorkspaceContext().value
 const preference = useRealtimeVoicePreference()
+const promptPreference = useRealtimeVoicePromptPreference()
 const { getWorkspaceClient } = useRpc()
 const configuredBase = String(useRuntimeConfig().public.serverBase ?? '')
 const realtimeVoice = context
@@ -56,13 +62,64 @@ const activeElsewhere = computed(() =>
     && !realtimeVoice.ownsActiveSession.value
   )
 )
+const previewVoice = ref<RealtimeVoice | null>(null)
+const previewStatus = ref<'idle' | 'loading' | 'playing' | 'error'>('idle')
+const previewError = ref<string | null>(null)
+const displayedSessionKind = computed(() =>
+  previewStatus.value === 'loading' || previewStatus.value === 'playing'
+    ? 'preview' as const
+    : realtimeVoice?.sessionKind.value ?? null
+)
+const displayedSessionState = computed<RealtimeSessionState>(() => {
+  if (previewStatus.value === 'loading') {
+    return 'starting'
+  }
+  if (previewStatus.value === 'playing') {
+    return 'connected'
+  }
+  return realtimeVoice?.state.value ?? 'idle'
+})
+const displayedActiveVoice = computed(() =>
+  previewVoice.value ?? realtimeVoice?.activeVoice.value ?? null
+)
+const configuredPrompt = ref<string | null>(null)
+const promptConfigLoading = ref(false)
+const promptConfigError = ref<string | null>(null)
 
 let refreshRequest = 0
+let previewGeneration = 0
+let previewAudio: HTMLAudioElement | null = null
 
 const capabilitiesUrl = () => {
   return shouldUseServerProxy(configuredBase)
     ? '/api/codori/capabilities'
     : resolveApiUrl('/capabilities', configuredBase)
+}
+
+const refreshPromptConfig = async () => {
+  if (!context) {
+    promptConfigError.value = 'Open an existing thread before Settings to read config.toml.'
+    return
+  }
+
+  promptConfigLoading.value = true
+  promptConfigError.value = null
+  try {
+    const response = await getWorkspaceClient(context.workspace).request<ConfigReadResponse>(
+      'config/read',
+      {
+        includeLayers: false,
+        cwd: context.cwd
+      } satisfies ConfigReadParams
+    )
+    configuredPrompt.value = resolveConfiguredRealtimeVoicePrompt(response.config)
+  } catch (error) {
+    promptConfigError.value = `Could not read config.toml: ${
+      error instanceof Error ? error.message : String(error)
+    }`
+  } finally {
+    promptConfigLoading.value = false
+  }
 }
 
 const refresh = async () => {
@@ -99,37 +156,88 @@ const refresh = async () => {
   }
 }
 
+const releasePreviewAudio = () => {
+  if (!previewAudio) {
+    return
+  }
+  previewAudio.pause()
+  previewAudio.removeAttribute('src')
+  previewAudio.load()
+  previewAudio = null
+}
+
+const stopLocalPreview = () => {
+  previewGeneration += 1
+  releasePreviewAudio()
+  previewVoice.value = null
+  previewStatus.value = 'idle'
+  previewError.value = null
+}
+
 const preview = async (voice: RealtimeVoice) => {
   if (
-    !context
-    || !realtimeVoice
-    || realtimeVoice.sessionKind.value === 'conversation'
-    || activeElsewhere.value
+    activeElsewhere.value
+    || (realtimeVoice?.sessionKind.value === 'conversation'
+      && realtimeVoice.state.value === 'connected')
   ) {
     return
   }
 
+  stopLocalPreview()
+  const generation = previewGeneration
+  const audio = new Audio()
+  const source = selectRealtimeVoicePreviewSource(
+    voice,
+    type => audio.canPlayType(type)
+  )
+  if (!source) {
+    previewError.value = `No supported preview format is available for ${voice}.`
+    previewStatus.value = 'error'
+    return
+  }
+
+  previewAudio = audio
+  previewVoice.value = voice
+  previewStatus.value = 'loading'
+  audio.preload = 'none'
+  audio.src = source.src
+  audio.addEventListener('playing', () => {
+    if (generation === previewGeneration && previewAudio === audio) {
+      previewStatus.value = 'playing'
+    }
+  })
+  audio.addEventListener('ended', () => {
+    if (generation === previewGeneration && previewAudio === audio) {
+      previewAudio = null
+      previewVoice.value = null
+      previewStatus.value = 'idle'
+    }
+  })
+  audio.addEventListener('error', () => {
+    if (generation === previewGeneration && previewAudio === audio) {
+      previewAudio = null
+      previewVoice.value = null
+      previewStatus.value = 'error'
+      previewError.value = `Could not play the ${voice} preview.`
+    }
+  })
+
   try {
-    if (realtimeVoice.capability.value.status !== 'available') {
-      await refresh()
+    await audio.play()
+  } catch (error) {
+    if (generation === previewGeneration && previewAudio === audio) {
+      releasePreviewAudio()
+      previewVoice.value = null
+      previewStatus.value = 'error'
+      previewError.value = `Could not play the ${voice} preview: ${
+        error instanceof Error ? error.message : String(error)
+      }`
     }
-    if (
-      realtimeVoice.capability.value.status !== 'available'
-      || !realtimeVoice.voiceCatalog.value.voices.includes(voice)
-    ) {
-      return
-    }
-    await realtimeVoice.preview(
-      context.threadId,
-      voice,
-      resolveRealtimeVoicePreviewText(window.navigator.language)
-    )
-  } catch {
-    // The shared controller exposes a bounded preview error for the page.
   }
 }
 
 const stopPreview = () => {
+  stopLocalPreview()
   if (
     realtimeVoice?.sessionKind.value === 'preview'
     && realtimeVoice.ownsActiveSession.value
@@ -140,6 +248,7 @@ const stopPreview = () => {
 
 onMounted(() => {
   void refresh()
+  void refreshPromptConfig()
 })
 
 onBeforeUnmount(() => {
@@ -154,16 +263,25 @@ onBeforeUnmount(() => {
     :catalog="catalog"
     :selected-voice="selectedVoice"
     :saved-voice="preference.savedVoice.value"
-    :session-kind="realtimeVoice?.sessionKind.value ?? null"
-    :session-state="realtimeVoice?.state.value ?? 'idle'"
-    :active-voice="realtimeVoice?.activeVoice.value ?? null"
-    :preview-status="realtimeVoice?.previewStatus.value ?? 'idle'"
-    :preview-error="realtimeVoice?.previewError.value ?? null"
+    :session-kind="displayedSessionKind"
+    :session-state="displayedSessionState"
+    :active-voice="displayedActiveVoice"
+    :preview-status="previewStatus"
+    :preview-error="previewError"
     :active-elsewhere="activeElsewhere"
     :has-workspace-context="Boolean(context)"
     @select="preference.selectVoice"
     @refresh="void refresh()"
     @preview="void preview($event)"
     @stop-preview="stopPreview"
+  />
+  <RealtimeVoicePromptSettings
+    :configured-prompt="configuredPrompt"
+    :prompt-override="promptPreference.savedPrompt.value"
+    :loading="promptConfigLoading"
+    :error="promptConfigError"
+    @save="promptPreference.setPrompt"
+    @clear="promptPreference.setPrompt(null)"
+    @refresh="void refreshPromptConfig()"
   />
 </template>

@@ -8,6 +8,8 @@ import type {
   RealtimeVoiceCatalog,
   RealtimeVoicePreviewStatus
 } from '../composables/useRealtimeConversation'
+import { REALTIME_VOICE_OPTIONS } from '../composables/useRealtimeVoicePreference'
+import { REALTIME_VOICE_PREVIEW_VOICES } from '~~/shared/realtime-voice-preview'
 
 const props = defineProps<{
   capability: RealtimeCapability
@@ -51,6 +53,30 @@ const staleSavedVoice = computed(() =>
   && props.savedVoice !== null
   && props.selectedVoice === undefined
 )
+const selectableVoices = computed<readonly RealtimeVoice[]>(() =>
+  props.catalog.status === 'ready'
+    ? props.catalog.voices
+    : props.catalog.voices.length > 0
+      ? props.catalog.voices
+      : REALTIME_VOICE_OPTIONS
+)
+const displayedSelectedVoice = computed<RealtimeVoice | undefined>(() => {
+  if (props.catalog.status === 'ready') {
+    return props.selectedVoice
+  }
+  return selectableVoices.value.find(voice => voice === props.savedVoice)
+})
+const usingBuiltInVoiceList = computed(() =>
+  props.catalog.status !== 'ready' && props.catalog.voices.length === 0
+)
+const previewVoices = computed(() => {
+  const selectable = new Set<RealtimeVoice>(selectableVoices.value)
+  return REALTIME_VOICE_PREVIEW_VOICES.filter(voice => selectable.has(voice))
+})
+const hasBundledPreview = (voice: RealtimeVoice) =>
+  previewVoices.value.includes(
+    voice as (typeof REALTIME_VOICE_PREVIEW_VOICES)[number]
+  )
 const savedPreferenceLabel = computed(() =>
   props.savedVoice ?? 'Use Codex setting'
 )
@@ -82,12 +108,6 @@ const previewUnavailableReason = computed(() => {
   if (normalSessionActive.value) {
     return 'Preview is unavailable during a voice conversation.'
   }
-  if (!props.hasWorkspaceContext) {
-    return 'Open an existing thread before Settings to preview voices without creating hidden history.'
-  }
-  if (capabilityUnavailable.value) {
-    return props.capability.message
-  }
   return null
 })
 
@@ -108,7 +128,7 @@ const handlePreview = (voice: RealtimeVoice) => {
 }
 
 const handleRadioKeydown = async (event: KeyboardEvent, currentIndex: number) => {
-  const optionCount = props.catalog.voices.length + 1
+  const optionCount = selectableVoices.value.length + 1
   let nextIndex: number | null = null
   if (event.key === 'ArrowDown' || event.key === 'ArrowRight') {
     nextIndex = (currentIndex + 1) % optionCount
@@ -125,7 +145,7 @@ const handleRadioKeydown = async (event: KeyboardEvent, currentIndex: number) =>
 
   event.preventDefault()
   const fieldset = (event.currentTarget as HTMLElement).closest('fieldset')
-  emit('select', nextIndex === 0 ? null : props.catalog.voices[nextIndex - 1]!)
+  emit('select', nextIndex === 0 ? null : selectableVoices.value[nextIndex - 1]!)
   await nextTick()
   fieldset?.querySelectorAll<HTMLInputElement>('input[type="radio"]')[nextIndex]?.focus()
 }
@@ -175,7 +195,7 @@ const handleRadioKeydown = async (event: KeyboardEvent, currentIndex: number) =>
         class="mt-5 border-s-2 border-warning ps-4 text-sm leading-6 text-warning"
         role="status"
       >
-        No materialized thread context is available. Your saved preference remains readable, but Codori will not create a thread or connect a hidden workspace just to discover voices. Open an existing thread, then return to Settings.
+        No materialized thread context is available. You can still choose and preview a voice; only the server availability check requires an existing thread.
       </div>
 
       <div
@@ -217,7 +237,6 @@ const handleRadioKeydown = async (event: KeyboardEvent, currentIndex: number) =>
       </div>
 
       <fieldset
-        v-else
         class="mt-5 divide-y divide-default border-y border-default"
       >
         <legend class="sr-only">
@@ -229,15 +248,15 @@ const handleRadioKeydown = async (event: KeyboardEvent, currentIndex: number) =>
             :name="radioName"
             value=""
             class="sr-only"
-            :tabindex="selectedVoice === undefined ? 0 : -1"
-            :checked="selectedVoice === undefined"
+            :tabindex="displayedSelectedVoice === undefined ? 0 : -1"
+            :checked="displayedSelectedVoice === undefined"
             @change="emit('select', null)"
             @keydown="handleRadioKeydown($event, 0)"
           >
           <UIcon
-            :name="selectedVoice === undefined ? 'i-lucide-circle-check' : 'i-lucide-circle'"
+            :name="displayedSelectedVoice === undefined ? 'i-lucide-circle-check' : 'i-lucide-circle'"
             class="size-4 shrink-0"
-            :class="selectedVoice === undefined ? 'text-primary' : 'text-muted'"
+            :class="displayedSelectedVoice === undefined ? 'text-primary' : 'text-muted'"
           />
           <span class="min-w-0 flex-1">
             <span class="block text-highlighted">Use Codex setting</span>
@@ -245,47 +264,67 @@ const handleRadioKeydown = async (event: KeyboardEvent, currentIndex: number) =>
           </span>
         </label>
 
-        <label
-          v-for="voice in catalog.voices"
+        <div
+          v-for="voice in selectableVoices"
           :key="voice"
-          class="flex min-h-14 cursor-pointer items-center gap-3 py-3 text-sm"
+          class="flex min-h-14 items-center gap-2 py-2 text-sm"
         >
-          <input
-            type="radio"
-            :name="radioName"
-            :value="voice"
-            class="sr-only"
-            :tabindex="selectedVoice === voice ? 0 : -1"
-            :checked="selectedVoice === voice"
-            @change="emit('select', voice)"
-            @keydown="handleRadioKeydown($event, catalog.voices.indexOf(voice) + 1)"
+          <label class="flex min-h-10 min-w-0 flex-1 cursor-pointer items-center gap-3">
+            <input
+              type="radio"
+              :name="radioName"
+              :value="voice"
+              class="sr-only"
+              :tabindex="displayedSelectedVoice === voice ? 0 : -1"
+              :checked="displayedSelectedVoice === voice"
+              @change="emit('select', voice)"
+              @keydown="handleRadioKeydown($event, selectableVoices.indexOf(voice) + 1)"
+            >
+            <UIcon
+              :name="displayedSelectedVoice === voice ? 'i-lucide-circle-check' : 'i-lucide-circle'"
+              class="size-4 shrink-0"
+              :class="displayedSelectedVoice === voice ? 'text-primary' : 'text-muted'"
+            />
+            <span class="min-w-0 flex-1 truncate text-highlighted">{{ voice }}</span>
+            <UBadge
+              v-if="catalog.protocolDefault === voice"
+              color="neutral"
+              variant="soft"
+              size="sm"
+            >
+              Protocol default
+            </UBadge>
+            <UBadge
+              v-if="savedVoice === voice"
+              color="primary"
+              variant="soft"
+              size="sm"
+            >
+              Saved
+            </UBadge>
+          </label>
+
+          <UTooltip
+            v-if="hasBundledPreview(voice)"
+            :text="previewUnavailableReason || (isPreviewing(voice) ? `Stop ${voice} preview` : `Preview ${voice}`)"
           >
-          <UIcon
-            :name="selectedVoice === voice ? 'i-lucide-circle-check' : 'i-lucide-circle'"
-            class="size-4 shrink-0"
-            :class="selectedVoice === voice ? 'text-primary' : 'text-muted'"
-          />
-          <span class="min-w-0 flex-1 truncate text-highlighted">{{ voice }}</span>
-          <UBadge
-            v-if="catalog.protocolDefault === voice"
-            color="neutral"
-            variant="soft"
-            size="sm"
-          >
-            Protocol default
-          </UBadge>
-          <UBadge
-            v-if="savedVoice === voice"
-            color="primary"
-            variant="soft"
-            size="sm"
-          >
-            Saved
-          </UBadge>
-        </label>
+            <UButton
+              type="button"
+              color="neutral"
+              :variant="isPreviewing(voice) ? 'soft' : 'ghost'"
+              size="sm"
+              :icon="isPreviewing(voice) ? 'i-lucide-square' : 'i-lucide-play'"
+              :loading="activeVoice === voice && previewStatus === 'loading'"
+              :disabled="Boolean(previewUnavailableReason)"
+              :aria-label="isPreviewing(voice) ? `Stop preview for ${voice}` : `Preview voice ${voice}`"
+              class="shrink-0"
+              @click="handlePreview(voice)"
+            />
+          </UTooltip>
+        </div>
 
         <p
-          v-if="catalog.voices.length === 0"
+          v-if="selectableVoices.length === 0"
           class="py-5 text-sm text-muted"
         >
           Codex did not advertise any V3-compatible voices.
@@ -293,45 +332,18 @@ const handleRadioKeydown = async (event: KeyboardEvent, currentIndex: number) =>
       </fieldset>
 
       <p
+        v-if="usingBuiltInVoiceList"
+        class="mt-3 text-xs leading-5 text-muted"
+      >
+        Showing Codex-compatible voices. Availability will be checked when a Codex server is connected.
+      </p>
+
+      <p
         v-if="staleSavedVoice"
         class="mt-4 border-s-2 border-warning ps-4 text-sm leading-6 text-warning"
       >
         Saved voice “{{ savedVoice }}” is not advertised by this Codex server. The value is preserved for diagnostics, and Codex settings will be used safely.
       </p>
-    </div>
-
-    <div class="py-6">
-      <h3 class="text-sm font-medium text-highlighted">
-        Voice previews
-      </h3>
-      <p class="mt-1 text-sm leading-6 text-muted">
-        Previews use a receive-only session on the remembered thread. They do not request microphone access or add conversation history.
-      </p>
-
-      <div
-        v-if="catalog.voices.length > 0"
-        class="mt-4 flex flex-wrap gap-2"
-      >
-        <UTooltip
-          v-for="voice in catalog.voices"
-          :key="`preview-${voice}`"
-          :text="previewUnavailableReason || (isPreviewing(voice) ? `Stop ${voice} preview` : `Preview ${voice}`)"
-        >
-          <UButton
-            type="button"
-            color="neutral"
-            :variant="isPreviewing(voice) ? 'soft' : 'outline'"
-            size="sm"
-            :icon="isPreviewing(voice) ? 'i-lucide-square' : 'i-lucide-play'"
-            :loading="activeVoice === voice && previewStatus === 'loading'"
-            :disabled="Boolean(previewUnavailableReason)"
-            :aria-label="isPreviewing(voice) ? `Stop preview for ${voice}` : `Preview voice ${voice}`"
-            @click="handlePreview(voice)"
-          >
-            {{ voice }}
-          </UButton>
-        </UTooltip>
-      </div>
 
       <p
         v-if="previewUnavailableReason"

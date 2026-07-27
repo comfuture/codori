@@ -142,7 +142,7 @@ describe('RealtimeVoiceSettings', () => {
       .toBe(true)
   })
 
-  it('disables preview during a normal session and without a remembered thread', async () => {
+  it('disables preview during a normal session but keeps local preview available without a remembered thread', async () => {
     const wrapper = mountSettings({
       sessionKind: 'conversation',
       sessionState: 'connected'
@@ -156,13 +156,35 @@ describe('RealtimeVoiceSettings', () => {
       sessionState: 'idle',
       hasWorkspaceContext: false
     })
-    expect(wrapper.text()).toContain('Open an existing thread')
-    expect(wrapper.text()).toContain('will not create a thread')
+    expect(wrapper.text()).toContain('server availability check requires an existing thread')
     expect(wrapper.get('button[aria-label="Preview voice cove"]').attributes('disabled'))
-      .toBeDefined()
+      .toBeUndefined()
+    await wrapper.get('button[aria-label="Preview voice cove"]').trigger('click')
+    expect(wrapper.emitted('preview')?.at(-1)).toEqual(['cove'])
+
+    const cove = wrapper.get('input[type="radio"][value="cove"]')
+    await cove.trigger('change')
+    expect(wrapper.emitted('select')?.at(-1)).toEqual(['cove'])
   })
 
-  it('explains why voice discovery is unavailable', () => {
+  it('offers the built-in voice list before workspace discovery', async () => {
+    const wrapper = mountSettings({
+      hasWorkspaceContext: false,
+      catalog: {
+        status: 'idle',
+        voices: [],
+        protocolDefault: null,
+        error: null
+      }
+    })
+
+    expect(wrapper.text()).toContain('Showing Codex-compatible voices')
+    const shimmer = wrapper.get('input[type="radio"][value="shimmer"]')
+    await shimmer.trigger('change')
+    expect(wrapper.emitted('select')?.at(-1)).toEqual(['shimmer'])
+  })
+
+  it('explains why voice discovery is unavailable without blocking preference changes', async () => {
     const wrapper = mountSettings({
       capability: {
         status: 'disabled',
@@ -171,7 +193,9 @@ describe('RealtimeVoiceSettings', () => {
     })
 
     expect(wrapper.text()).toContain('disabled in Codori')
-    expect(wrapper.find('fieldset').exists()).toBe(false)
+    const cove = wrapper.get('input[type="radio"][value="cove"]')
+    await cove.trigger('change')
+    expect(wrapper.emitted('select')?.at(-1)).toEqual(['cove'])
   })
 
   it('offers an explicit discovery retry and avoids a premature stale warning', async () => {

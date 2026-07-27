@@ -117,8 +117,9 @@ workspace with directly loadable sections:
   `codori:system-notifications` opt-in without requesting permission on page
   load.
 - `/settings/voice` stores the next-conversation voice preference under
-  `codori:realtime-voice:v1` and discovers the available catalog from an
-  existing workspace runtime.
+  `codori:realtime-voice:v1`, provides bundled local previews, and lets this
+  browser override the root-level `experimental_realtime_ws_backend_prompt`
+  Codex setting under `codori:realtime-voice-prompt:v1`.
 - `/settings/backend` reports the selected backend, transport, state, version,
   and fallback reason as read-only diagnostics.
 
@@ -345,9 +346,11 @@ Example:
 
 After enabling realtime voice, open an existing thread and use the microphone action in the composer. The first activation requests microphone permission and prepares the WebRTC session. Once it is ready, hold the microphone action with a pointer, touch, <kbd>Space</kbd>, or <kbd>Enter</kbd> while that button is focused; releasing immediately mutes input while keeping the session ready for a follow-up. The adjacent controls mute remote speech or stop and release the entire voice session.
 
-Settings → Voice discovers the V3 voice list from the most recently used, materialized workspace runtime. “Use Codex setting” is the default and sends no per-session voice override; an explicit choice is stored only in that browser and applies to the next session. “Protocol default” identifies the app-server protocol fallback and does not claim to show the active Codex configuration. If a saved voice is no longer advertised, Codori preserves it for diagnostics but safely falls back to the Codex setting. On a direct Settings visit without a usable workspace context, Codori keeps the saved value readable and does not create a hidden thread just to load the catalog.
+Settings → Voice discovers the V3 voice list from the most recently used, materialized workspace runtime and falls back to the built-in Codex-compatible list when no runtime context is available. “Use Codex setting” is the default and sends no per-session voice override; an explicit choice is stored only in that browser and applies to the next session. “Protocol default” identifies the app-server protocol fallback and does not claim to show the active Codex configuration. If a saved voice is no longer advertised, Codori preserves it for diagnostics but safely falls back to the Codex setting.
 
-Each advertised voice has a receive-only preview under Settings → Voice when an existing, materialized thread context is available. Preview never requests microphone access, creates a normal turn, or adds hidden conversation history. It plays a short locale-aware sample and stops automatically after 12 seconds. Preview and conversation audio share one owner: an active conversation blocks preview, leaving Voice settings stops its preview, and a new audio session waits for the previous app-server session to confirm closure.
+Voices with a bundled sample have an inline preview action under Settings → Voice. The nine samples are compact Opus public assets that play locally, so preview does not require a runtime or thread, request microphone access, create a turn, or add hidden conversation history. An active realtime conversation blocks preview, and leaving Voice settings stops local playback.
+
+Voice instructions use the root-level `experimental_realtime_ws_backend_prompt` value from `config.toml` when present. Settings shows that value first, while “Save browser override” stores a browser-only replacement under `codori:realtime-voice-prompt:v1`; “Use config.toml” removes the replacement. If neither value exists, Codori supplies its language-independent bright, youthful voice prompt. Instruction changes apply when the next realtime voice session starts.
 
 The voice status surface shows live/final transcripts and whether Codex is listening, transcribing, delegating, working, or speaking. Spoken requests use app-server's automatic handoff into the active thread, so its existing turn, tool, approval, and final-response UI remains authoritative. Codori does not resubmit the recognized text as a second turn.
 
