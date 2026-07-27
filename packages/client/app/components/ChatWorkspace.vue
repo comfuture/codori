@@ -90,6 +90,7 @@ import {
   resolveRealtimeVoicePreviewText,
   useRealtimeVoicePreference
 } from '../composables/useRealtimeVoicePreference'
+import { useRealtimeVoiceCapabilityLifecycle } from '../composables/useRealtimeVoiceCapabilityLifecycle'
 import type { RealtimeVoice } from '~~/shared/generated/codex-app-server/RealtimeVoice'
 import { sortSidebarProjects } from '../utils/project-sidebar-order'
 import {
@@ -397,6 +398,7 @@ const realtimeVoiceActiveElsewhere = computed(() =>
   })
 )
 let realtimeVoiceCapabilityRequest = 0
+const realtimeVoiceRpcConnectionEpoch = ref(0)
 let releaseRealtimeVoicePageListeners: (() => void) | null = null
 
 const realtimeVoiceCapabilitiesUrl = () => {
@@ -1420,6 +1422,7 @@ let pendingThreadHydration: Promise<void> | null = null
 let pendingThreadReactivationSync: Promise<void> | null = null
 let releaseServerRequestHandler: (() => void) | null = null
 let releaseSkillNotificationSubscription: (() => void) | null = null
+let releaseRealtimeVoiceConnectionStateSubscription: (() => void) | null = null
 let releaseWorkspaceGitBranchEnvironmentListeners: (() => void) | null = null
 let releaseThreadReactivationListeners: (() => void) | null = null
 let runtimeSubscriptionKey: string | null = null
@@ -4492,8 +4495,10 @@ const ensureRuntimeSubscriptions = () => {
     return true
   }
 
+  const replacingRuntimeClient = runtimeSubscriptionKey !== null
   releaseServerRequestHandler?.()
   releaseSkillNotificationSubscription?.()
+  releaseRealtimeVoiceConnectionStateSubscription?.()
   const client = getRuntimeClient()
   releaseServerRequestHandler = client.setServerRequestHandler(handleServerRequest)
   releaseSkillNotificationSubscription = client.subscribe((notification) => {
@@ -4503,7 +4508,21 @@ const ensureRuntimeSubscriptions = () => {
 
     skillAutocompleteInvalidationVersion.value += 1
   })
+  let realtimeVoiceRpcWasDisconnected = false
+  releaseRealtimeVoiceConnectionStateSubscription = client.subscribeConnectionState((connectionState) => {
+    if (connectionState === 'disconnected') {
+      realtimeVoiceRpcWasDisconnected = true
+      return
+    }
+    if (connectionState === 'connected' && realtimeVoiceRpcWasDisconnected) {
+      realtimeVoiceRpcWasDisconnected = false
+      realtimeVoiceRpcConnectionEpoch.value += 1
+    }
+  })
   runtimeSubscriptionKey = nextKey
+  if (replacingRuntimeClient) {
+    realtimeVoiceRpcConnectionEpoch.value += 1
+  }
   void client.connect().catch(() => {})
   return true
 }
@@ -4631,6 +4650,8 @@ onBeforeUnmount(() => {
   releaseServerRequestHandler = null
   releaseSkillNotificationSubscription?.()
   releaseSkillNotificationSubscription = null
+  releaseRealtimeVoiceConnectionStateSubscription?.()
+  releaseRealtimeVoiceConnectionStateSubscription = null
   runtimeSubscriptionKey = null
   releaseWorkspaceGitBranchEnvironmentListeners?.()
   releaseWorkspaceGitBranchEnvironmentListeners = null
@@ -4646,32 +4667,32 @@ onBeforeUnmount(() => {
   }
 })
 
-watch([
+useRealtimeVoiceCapabilityLifecycle({
   activeThreadId,
-  realtimeVoiceActiveWorkspaceKey,
-  realtimeVoiceOwningThreadId
-], ([threadId]) => {
-  if (realtimeVoiceSessionKind.value === 'preview'
-    && ownsRealtimeVoiceSession.value
-    && realtimeVoiceOwningThreadId.value !== threadId) {
-    void realtimeVoice.stop()
-  }
-  realtimeVoiceCapabilityRequest += 1
-  if (realtimeVoiceActiveElsewhere.value) {
-    return
-  }
-  realtimeVoiceCapability.value = {
-    status: 'checking',
-    message: threadId ? 'Checking realtime voice support.' : 'Start voice session'
-  }
-  void (async () => {
-    if (threadId && activeThreadId.value === threadId) {
+  rpcConnectionEpoch: realtimeVoiceRpcConnectionEpoch,
+  activeElsewhere: realtimeVoiceActiveElsewhere,
+  capability: realtimeVoiceCapability,
+  cancelPendingRefresh: () => {
+    realtimeVoiceCapabilityRequest += 1
+  },
+  refreshThreadCapability: async (threadId) => {
+    if (activeThreadId.value === threadId) {
       await refreshRealtimeVoiceCapability(threadId)
-    } else if (!threadId) {
+    }
+  },
+  refreshDraftCatalog: async () => {
+    if (!activeThreadId.value) {
       await refreshDraftRealtimeVoiceCatalog()
     }
-  })()
-}, { immediate: true })
+  },
+  beforeContextRefresh: (threadId) => {
+    if (realtimeVoiceSessionKind.value === 'preview'
+      && ownsRealtimeVoiceSession.value
+      && realtimeVoiceOwningThreadId.value !== threadId) {
+      void realtimeVoice.stop()
+    }
+  }
+})
 
 watch([
   pendingRealtimeVoiceConnectThreadId,
