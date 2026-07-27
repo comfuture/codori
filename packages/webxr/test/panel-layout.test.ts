@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { allocatePanelSlots } from '../src/panel-layout'
+import {
+  allocatePanelSlots,
+  promotePanelToFrontSlots
+} from '../src/panel-layout'
 import type { SpatialPanelSnapshot } from '../src/panel-model'
 
 const snapshot = (id: string, background = false): SpatialPanelSnapshot => ({
@@ -34,5 +37,24 @@ describe('panel slot allocation', () => {
     expect(new Set(visible.map(placement => placement.slot)).size).toBe(8)
     expect(first.filter(placement => placement.overflow)).toHaveLength(2)
     expect(visible.every(placement => placement.position.y > 0)).toBe(true)
+    expect(visible.every(placement =>
+      Math.abs(placement.position.x - center.x) <= 1.55
+    )).toBe(true)
+  })
+
+  it('promotes a selected panel and shifts earlier slots back once', () => {
+    const panels = Array.from(
+      { length: 5 },
+      (_, index) => snapshot(`panel-${index}`)
+    )
+    expect(Object.fromEntries(
+      promotePanelToFrontSlots(panels, 'panel-3')
+        .map(assignment => [assignment.id, assignment.slot])
+    )).toEqual({
+      'panel-0': 1,
+      'panel-1': 2,
+      'panel-2': 3,
+      'panel-3': 0
+    })
   })
 })

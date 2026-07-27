@@ -1,13 +1,35 @@
 import { describe, expect, it } from 'vitest'
-import { resolvePanelVisualState } from '../src/panel-view'
+import {
+  resolvePanelInteractionLayout,
+  resolvePanelSlotTransition,
+  resolvePanelVisualState
+} from '../src/panel-view'
 
 describe('spatial panel visual states', () => {
+  it('gives the visible title bar a broad, non-overlapping grab target', () => {
+    const layout = resolvePanelInteractionLayout(1.55, 0.92)
+    const titleBottom = layout.titleBar.y - (layout.titleBar.height / 2)
+    const contentTop = layout.content.y + (layout.content.height / 2)
+
+    expect(layout.titleBar).toMatchObject({
+      width: 1.48,
+      height: 0.2
+    })
+    expect(contentTop).toBeLessThan(titleBottom)
+  })
+
   it('uses a 250ms standard scale transition', () => {
     expect(resolvePanelVisualState('appearing', 0).normalizedScale).toBe(0)
     expect(resolvePanelVisualState('appearing', 125).normalizedScale)
       .toBeGreaterThan(0.8)
     expect(resolvePanelVisualState('appearing', 250).normalizedScale).toBe(1)
     expect(resolvePanelVisualState('disappearing', 250).normalizedScale).toBe(0)
+  })
+
+  it('uses the standard eased transition when cycling panel slots', () => {
+    expect(resolvePanelSlotTransition(0)).toBe(0)
+    expect(resolvePanelSlotTransition(125)).toBeGreaterThan(0.8)
+    expect(resolvePanelSlotTransition(250)).toBe(1)
   })
 
   it('expands to double size and fades over a 125ms forced dismissal', () => {

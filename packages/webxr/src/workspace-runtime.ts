@@ -520,15 +520,29 @@ export class WorkspaceRuntime {
   }
 
   scrollPanel(panelId: string, deltaLines: number) {
-    this.panelModel.scroll(panelId, deltaLines)
-    this.emit()
+    if (this.panelModel.scroll(panelId, deltaLines, this.now())) {
+      this.emit()
+    }
+  }
+
+  touchPanel(panelId: string) {
+    if (this.panelModel.markInteraction(panelId, {}, this.now())) {
+      this.emit()
+    }
   }
 
   markPanelMoved(panelId: string) {
-    this.panelModel.markInteraction(panelId, {
+    if (this.panelModel.markInteraction(panelId, {
       userMoved: true
-    })
-    this.emit()
+    }, this.now())) {
+      this.emit()
+    }
+  }
+
+  focusPanel(panelId: string) {
+    if (this.panelModel.promote(panelId, this.now())) {
+      this.emit()
+    }
   }
 
   dismissPanel(panelId: string) {

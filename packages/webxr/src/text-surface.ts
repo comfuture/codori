@@ -1,6 +1,7 @@
 import {
   CanvasTexture,
   LinearFilter,
+  LinearMipmapLinearFilter,
   Mesh,
   MeshBasicMaterial,
   PlaneGeometry,
@@ -13,7 +14,8 @@ import {
 } from '@codori/client/shared/ansi-output'
 import {
   MAX_PANEL_CANVAS_EDGE,
-  MAX_PANEL_OUTPUT_CHARS
+  MAX_PANEL_OUTPUT_CHARS,
+  TEXT_TEXTURE_ANISOTROPY
 } from './config'
 
 export type TextSurfaceOptions = {
@@ -27,6 +29,7 @@ export type TextSurfaceOptions = {
   font: string
   lineHeightPixels: number
   paddingPixels: number
+  bodyFontSizePixels?: number
   titleFontSizePixels?: number
   opacity?: number
   glow?: boolean
@@ -152,6 +155,25 @@ const roundedRect = (
   context.roundRect(x, y, width, height, radius)
 }
 
+type ConfigurableTextTexture = Pick<
+  CanvasTexture,
+  | 'anisotropy'
+  | 'colorSpace'
+  | 'generateMipmaps'
+  | 'magFilter'
+  | 'minFilter'
+>
+
+export const configureCanvasTextTexture = (
+  texture: ConfigurableTextTexture
+) => {
+  texture.colorSpace = SRGBColorSpace
+  texture.generateMipmaps = true
+  texture.minFilter = LinearMipmapLinearFilter
+  texture.magFilter = LinearFilter
+  texture.anisotropy = TEXT_TEXTURE_ANISOTROPY
+}
+
 export class CanvasTextSurface {
   readonly canvas: HTMLCanvasElement
 
@@ -171,6 +193,7 @@ export class CanvasTextSurface {
     this.options = {
       widthPixels: 1_536,
       heightPixels: 896,
+      bodyFontSizePixels: 27,
       titleFontSizePixels: 32,
       opacity: 1,
       glow: false,
@@ -185,9 +208,7 @@ export class CanvasTextSurface {
     }
     this.context = context
     this.texture = new CanvasTexture(this.canvas)
-    this.texture.colorSpace = SRGBColorSpace
-    this.texture.minFilter = LinearFilter
-    this.texture.magFilter = LinearFilter
+    configureCanvasTextTexture(this.texture)
     this.material = new MeshBasicMaterial({
       map: this.texture,
       transparent: true,
@@ -219,6 +240,7 @@ export class CanvasTextSurface {
       font,
       lineHeightPixels,
       paddingPixels,
+      bodyFontSizePixels,
       titleFontSizePixels,
       glow
     } = this.options
@@ -267,7 +289,7 @@ export class CanvasTextSurface {
       context.stroke()
     }
 
-    const bodyFontSize = 27
+    const bodyFontSize = bodyFontSizePixels
     context.font = `400 ${bodyFontSize}px ${font}`
     context.fillStyle = color
     context.textBaseline = 'top'

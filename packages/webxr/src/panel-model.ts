@@ -5,6 +5,7 @@ import {
   PANEL_FORCE_DISMISS_MS
 } from './config'
 import type { FilePanelChange } from './file-change-visual'
+import { promotePanelToFrontSlots } from './panel-layout'
 
 export type SpatialPanelKind =
   | 'command'
@@ -234,45 +235,84 @@ export class SpatialPanelModel {
     scrollOffset?: number
     returnToLiveTail?: boolean
     userMoved?: boolean
-  }) {
+  }, now?: number) {
     const panel = this.panels.get(id)
     if (!panel) {
-      return
+      return false
     }
     const autoFollow = input.returnToLiveTail
       ? true
       : input.scrollOffset == null
         ? panel.autoFollow
         : false
+    const interactionNow = (
+      typeof now === 'number'
+      && Number.isFinite(now)
+    )
+      ? now
+      : null
+    const resetsDwell = (
+      interactionNow != null
+      && !panel.background
+      && isTerminalStatus(panel.status)
+      && (
+        panel.phase === 'dwelling'
+        || panel.phase === 'disappearing'
+      )
+    )
     this.panels.set(id, {
       ...panel,
+      phase: resetsDwell ? 'dwelling' : panel.phase,
+      phaseStartedAt: resetsDwell
+        ? interactionNow
+        : panel.phaseStartedAt,
       autoFollow,
       scrollOffset: autoFollow
         ? Number.POSITIVE_INFINITY
         : input.scrollOffset ?? panel.scrollOffset,
       userMoved: input.userMoved ?? panel.userMoved
     })
+    return true
   }
 
-  scroll(id: string, deltaLines: number) {
+  scroll(id: string, deltaLines: number, now?: number) {
     const panel = this.panels.get(id)
     if (!panel || !Number.isFinite(deltaLines) || deltaLines === 0) {
-      return
+      return false
     }
     const liveTail = Math.max(
       0,
       panel.retainedText.split('\n').length - 1
     )
     if (panel.autoFollow && deltaLines > 0) {
-      return
+      return this.markInteraction(id, {}, now)
     }
     const current = panel.autoFollow || !Number.isFinite(panel.scrollOffset)
       ? liveTail
       : panel.scrollOffset
     const next = Math.max(0, current + deltaLines)
-    this.markInteraction(id, next >= liveTail
+    return this.markInteraction(id, next >= liveTail
       ? { returnToLiveTail: true }
-      : { scrollOffset: next })
+      : { scrollOffset: next }, now)
+  }
+
+  promote(id: string, now: number) {
+    const assignments = promotePanelToFrontSlots(this.snapshots(), id)
+    if (assignments.length === 0) {
+      return false
+    }
+    for (const assignment of assignments) {
+      const panel = this.panels.get(assignment.id)
+      if (panel) {
+        this.panels.set(assignment.id, {
+          ...panel,
+          slot: assignment.slot,
+          userMoved: false
+        })
+      }
+    }
+    this.markInteraction(id, {}, now)
+    return true
   }
 
   assignSlot(id: string, slot: number) {

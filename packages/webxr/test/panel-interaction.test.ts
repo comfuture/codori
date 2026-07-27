@@ -1,9 +1,58 @@
 import { describe, expect, it, vi } from 'vitest'
-import { Group, Line, Mesh, type WebGLRenderer } from 'three'
-import { ImmersiveInteractionSystem } from '../src/interaction-system'
+import {
+  Group,
+  Line,
+  Mesh,
+  Ray,
+  Sphere,
+  Vector3,
+  type WebGLRenderer
+} from 'three'
+import {
+  ImmersiveInteractionSystem,
+  isPanelGrabTap,
+  resolveRayGrabPosition
+} from '../src/interaction-system'
 import { PanelInteractionModel } from '../src/panel-interaction'
 
 describe('panel interaction model', () => {
+  it('keeps ray-grabbed pointer positions at a fixed viewer distance', () => {
+    const sphere = new Sphere(new Vector3(0, 0, 0), 2)
+    const offset = new Vector3()
+    const first = resolveRayGrabPosition(
+      new Ray(
+        new Vector3(0, 0, 0),
+        new Vector3(0.25, 0, -1).normalize()
+      ),
+      sphere,
+      offset
+    )!
+    const second = resolveRayGrabPosition(
+      new Ray(
+        new Vector3(0, 0, 0),
+        new Vector3(0.5, 0, -1).normalize()
+      ),
+      sphere,
+      offset
+    )!
+
+    expect(first.length()).toBeCloseTo(2)
+    expect(second.length()).toBeCloseTo(2)
+    expect(second.x).toBeGreaterThan(first.x)
+  })
+
+  it('treats only a small title-bar movement as a focus tap', () => {
+    const initial = new Vector3(0, 1, -2)
+    expect(isPanelGrabTap(
+      initial,
+      new Vector3(0.02, 1, -2)
+    )).toBe(true)
+    expect(isPanelGrabTap(
+      initial,
+      new Vector3(0.04, 1, -2)
+    )).toBe(false)
+  })
+
   it('separates content selection from grab zones', () => {
     const model = new PanelInteractionModel()
     expect(model.grabStart('left', {
@@ -61,7 +110,9 @@ describe('panel interaction model', () => {
       getPanels: () => new Map(),
       getControlTargets: () => [],
       onScroll: () => {},
+      onPanelInteracted: () => {},
       onPanelMoved: () => {},
+      onPanelFocused: () => {},
       onPanelDismiss: () => {},
       onAction: () => {}
     })
