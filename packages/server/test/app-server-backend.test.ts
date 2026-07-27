@@ -1,7 +1,8 @@
 import { mkdtemp, rm } from 'node:fs/promises'
-import { createServer } from 'node:net'
+import { createServer } from 'node:http'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
+import WebSocket, { WebSocketServer } from 'ws'
 import {
   AppServerBackendSelector,
   parseDaemonStartOutput,
@@ -11,6 +12,65 @@ import {
   type DaemonProbeResult,
   type DaemonStartRequest
 } from '../src/app-server-backend.js'
+
+type TestAppServerMessage = {
+  id?: string
+  method: string
+  params?: {
+    capabilities?: unknown
+  }
+}
+
+const startUnixAppServer = async (
+  socketPath: string,
+  handleMessage: (socket: WebSocket, message: TestAppServerMessage) => void,
+  handleConnection?: () => void
+) => {
+  const server = createServer()
+  const webSocketServer = new WebSocketServer({ server })
+  webSocketServer.on('connection', (socket) => {
+    handleConnection?.()
+    socket.on('message', (raw, isBinary) => {
+      if (isBinary) {
+        return
+      }
+      handleMessage(socket, JSON.parse(raw.toString()) as TestAppServerMessage)
+    })
+  })
+  await new Promise<void>((resolvePromise, reject) => {
+    server.listen(socketPath, (error?: Error) => {
+      if (error) {
+        reject(error)
+        return
+      }
+      resolvePromise()
+    })
+  })
+
+  return async () => {
+    for (const socket of webSocketServer.clients) {
+      socket.terminate()
+    }
+    await new Promise<void>((resolvePromise, reject) => {
+      webSocketServer.close((error?: Error) => {
+        if (error) {
+          reject(error)
+          return
+        }
+        resolvePromise()
+      })
+    })
+    await new Promise<void>((resolvePromise, reject) => {
+      server.close((error?: Error) => {
+        if (error) {
+          reject(error)
+          return
+        }
+        resolvePromise()
+      })
+    })
+  }
+}
 
 describe('app-server backend selection', () => {
   it('resolves CODEX_HOME without exposing a TCP endpoint', () => {
@@ -30,75 +90,48 @@ describe('app-server backend selection', () => {
     })
   })
 
-  it('probes the daemon over its raw Unix JSONL protocol', async () => {
+  it('probes the daemon over WebSocket-over-Unix', async () => {
     const root = await mkdtemp('/tmp/codori-daemon-probe-')
     const socketPath = join(root, 'control.sock')
     const methods: string[] = []
     let initializeCapabilities: unknown
-    const server = createServer((socket) => {
-      let buffer = ''
-      socket.on('data', (chunk) => {
-        buffer += chunk.toString()
-        let newlineIndex = buffer.indexOf('\n')
-        while (newlineIndex >= 0) {
-          const line = buffer.slice(0, newlineIndex)
-          buffer = buffer.slice(newlineIndex + 1)
-          const message = JSON.parse(line) as {
-            id?: string
-            method: string
-            params?: {
-              capabilities?: unknown
+    const stopServer = await startUnixAppServer(socketPath, (socket, message) => {
+      methods.push(message.method)
+      if (message.method === 'initialize') {
+        initializeCapabilities = message.params?.capabilities
+        socket.send(JSON.stringify({
+          method: 'server/ready',
+          params: {}
+        }))
+        socket.send(JSON.stringify({
+          id: message.id,
+          result: {
+            userAgent: 'codex-app-server/0.145.0'
+          }
+        }))
+      } else if (message.method === 'experimentalFeature/list') {
+        socket.send(JSON.stringify({
+          id: message.id,
+          result: {
+            data: [{
+              name: 'realtime_conversation',
+              enabled: true
+            }]
+          }
+        }))
+      } else if (message.method === 'thread/realtime/listVoices') {
+        socket.send(JSON.stringify({
+          id: message.id,
+          result: {
+            voices: {
+              v1: ['cove'],
+              v2: ['alloy'],
+              defaultV1: 'cove',
+              defaultV2: 'alloy'
             }
           }
-          methods.push(message.method)
-          if (message.method === 'initialize') {
-            initializeCapabilities = message.params?.capabilities
-            const response = `${JSON.stringify({
-              method: 'server/ready',
-              params: {}
-            })}\n${JSON.stringify({
-              id: message.id,
-              result: {
-                userAgent: 'codex-app-server/0.145.0'
-              }
-            })}\n`
-            socket.write(response.slice(0, 17))
-            socket.write(response.slice(17))
-          } else if (message.method === 'experimentalFeature/list') {
-            socket.write(`${JSON.stringify({
-              id: message.id,
-              result: {
-                data: [{
-                  name: 'realtime_conversation',
-                  enabled: true
-                }]
-              }
-            })}\n`)
-          } else if (message.method === 'thread/realtime/listVoices') {
-            socket.write(`${JSON.stringify({
-              id: message.id,
-              result: {
-                voices: {
-                  v1: ['cove'],
-                  v2: ['alloy'],
-                  defaultV1: 'cove',
-                  defaultV2: 'alloy'
-                }
-              }
-            })}\n`)
-          }
-          newlineIndex = buffer.indexOf('\n')
-        }
-      })
-    })
-    await new Promise<void>((resolvePromise, reject) => {
-      server.listen(socketPath, (error?: Error) => {
-        if (error) {
-          reject(error)
-          return
-        }
-        resolvePromise()
-      })
+        }))
+      }
     })
 
     try {
@@ -120,7 +153,43 @@ describe('app-server backend selection', () => {
         optOutNotificationMethods: null
       })
     } finally {
-      await new Promise<void>(resolvePromise => server.close(() => resolvePromise()))
+      await stopServer()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('supports concurrent clients on one Unix control socket', async () => {
+    const root = await mkdtemp('/tmp/codori-daemon-concurrent-')
+    const socketPath = join(root, 'control.sock')
+    let connections = 0
+    const stopServer = await startUnixAppServer(
+      socketPath,
+      (socket, message) => {
+        if (message.method === 'initialize') {
+          socket.send(JSON.stringify({
+            id: message.id,
+            result: {
+              userAgent: 'codex-app-server/0.145.0'
+            }
+          }))
+        }
+      },
+      () => {
+        connections += 1
+      }
+    )
+
+    try {
+      await expect(Promise.all([
+        probeDaemonSocket(socketPath),
+        probeDaemonSocket(socketPath)
+      ])).resolves.toEqual([
+        { ready: true, appServerVersion: '0.145.0' },
+        { ready: true, appServerVersion: '0.145.0' }
+      ])
+      expect(connections).toBe(2)
+    } finally {
+      await stopServer()
       await rm(root, { recursive: true, force: true })
     }
   })
@@ -128,57 +197,34 @@ describe('app-server backend selection', () => {
   it('rejects a successful legacy realtime voice response', async () => {
     const root = await mkdtemp('/tmp/codori-daemon-legacy-')
     const socketPath = join(root, 'control.sock')
-    const server = createServer((socket) => {
-      let buffer = ''
-      socket.on('data', (chunk) => {
-        buffer += chunk.toString()
-        let newlineIndex = buffer.indexOf('\n')
-        while (newlineIndex >= 0) {
-          const line = buffer.slice(0, newlineIndex)
-          buffer = buffer.slice(newlineIndex + 1)
-          const message = JSON.parse(line) as {
-            id?: string
-            method: string
+    const stopServer = await startUnixAppServer(socketPath, (socket, message) => {
+      if (message.method === 'initialize') {
+        socket.send(JSON.stringify({
+          id: message.id,
+          result: {
+            userAgent: 'codex-app-server/0.144.0'
           }
-          if (message.method === 'initialize') {
-            socket.write(`${JSON.stringify({
-              id: message.id,
-              result: {
-                userAgent: 'codex-app-server/0.144.0'
-              }
-            })}\n`)
-          } else if (message.method === 'experimentalFeature/list') {
-            socket.write(`${JSON.stringify({
-              id: message.id,
-              result: {
-                data: [{
-                  name: 'realtime_conversation',
-                  enabled: true
-                }]
-              }
-            })}\n`)
-          } else if (message.method === 'thread/realtime/listVoices') {
-            socket.write(`${JSON.stringify({
-              id: message.id,
-              result: {
-                voices: {
-                  voices: []
-                }
-              }
-            })}\n`)
+        }))
+      } else if (message.method === 'experimentalFeature/list') {
+        socket.send(JSON.stringify({
+          id: message.id,
+          result: {
+            data: [{
+              name: 'realtime_conversation',
+              enabled: true
+            }]
           }
-          newlineIndex = buffer.indexOf('\n')
-        }
-      })
-    })
-    await new Promise<void>((resolvePromise, reject) => {
-      server.listen(socketPath, (error?: Error) => {
-        if (error) {
-          reject(error)
-          return
-        }
-        resolvePromise()
-      })
+        }))
+      } else if (message.method === 'thread/realtime/listVoices') {
+        socket.send(JSON.stringify({
+          id: message.id,
+          result: {
+            voices: {
+              voices: []
+            }
+          }
+        }))
+      }
     })
 
     try {
@@ -189,7 +235,7 @@ describe('app-server backend selection', () => {
         reason: 'incompatible-realtime'
       })
     } finally {
-      await new Promise<void>(resolvePromise => server.close(() => resolvePromise()))
+      await stopServer()
       await rm(root, { recursive: true, force: true })
     }
   })

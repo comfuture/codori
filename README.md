@@ -328,21 +328,26 @@ Codori ignores common heavy directories during recursive scanning such as `node_
 - Each Codori server instance selects at most one active Codex app-server backend.
 - On macOS and Linux, Codori first probes
   `$CODEX_HOME/app-server-control/app-server-control.sock`, where `CODEX_HOME`
-  defaults to `~/.codex`. The probe performs a bounded raw JSONL stream
-  connection and app-server `initialize`; the presence of a socket file alone
-  is not enough.
+  defaults to `~/.codex`. The probe performs a bounded WebSocket-over-Unix
+  handshake and app-server `initialize`; the presence of a socket file alone is
+  not enough.
 - If the socket is not ready, Codori runs the bundled
   `codex remote-control start --json` once for concurrent requests and probes
   the socket returned by that command. Unsupported commands, permissions,
   handshake failures, and incompatible realtime capabilities safely fall back
   to the Codori-managed TCP app-server.
-- Codori never owns, records the PID of, reaps, restarts, or stops the
-  first-party daemon. A daemon disconnect closes the current browser bridge;
-  the next connection selects a backend again instead of migrating an active
-  JSON-RPC session.
-- Codori translates between browser WebSocket message frames and the daemon
-  control socket's newline-delimited JSON messages. The app-server payloads
-  themselves are unchanged.
+- Codori connects to the daemon socket only as a WebSocket client; it never
+  binds, removes, or claims ownership of the socket. Independent clients such
+  as a Codex Desktop SSH proxy and Codori can share one daemon.
+- Codori does not record the daemon PID or directly reap, restart, or stop the
+  daemon. When no ready socket can be reused, however,
+  `codex remote-control start` may restart a managed app-server if it needs to
+  change the persisted remote-control setting.
+- Each browser bridge gets an independent WebSocket-over-Unix connection.
+  Text and binary app-server frames are forwarded without changing their
+  payloads. A daemon disconnect closes the current browser bridge; the next
+  connection selects a backend again instead of migrating an active JSON-RPC
+  session.
 - The fallback preserves the existing PID/runtime-file and idle-shutdown
   lifecycle under `~/.codori/run/`. Projects and projectless chats remain
   logical workspaces sharing the selected backend.

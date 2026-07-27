@@ -10,10 +10,7 @@ import type {
   AppServerTarget,
   RuntimeBridgeTarget
 } from './types.js'
-import {
-  UnixJsonlTransport,
-  type UnixJsonlPayload
-} from './unix-jsonl-transport.js'
+import { createUnixWebSocket } from './unix-websocket.js'
 
 type JsonRpcId = string | number
 
@@ -560,18 +557,19 @@ export const bridgeCodexRpcWebSocket = (options: CodoriRpcBridgeOptions) => {
     }
 
     if (target.transport === 'unix-socket') {
-      const transport = new UnixJsonlTransport(target.socketPath, {
-        open: handleUpstreamOpen,
-        message: message => handleUpstreamMessage(message, false),
-        error: handleUpstreamError,
-        close: handleUpstreamClose
-      })
+      const socket = createUnixWebSocket(target.socketPath)
       upstream = {
-        isOpen: () => transport.isOpen(),
-        isConnecting: () => transport.isConnecting(),
-        send: message => transport.send(message as UnixJsonlPayload),
-        close: () => transport.close()
+        isOpen: () => socket.readyState === WebSocket.OPEN,
+        isConnecting: () => socket.readyState === WebSocket.CONNECTING,
+        send: (message, isBinary = false) => {
+          socket.send(message, { binary: isBinary })
+        },
+        close: () => socket.close()
       }
+      socket.once('open', handleUpstreamOpen)
+      socket.on('message', handleUpstreamMessage)
+      socket.on('error', handleUpstreamError)
+      socket.on('close', handleUpstreamClose)
     } else {
       const socket = new WebSocket(`ws://127.0.0.1:${target.port}`)
       upstream = {

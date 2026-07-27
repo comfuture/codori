@@ -1,6 +1,10 @@
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
+import {
+  createServer as createNodeHttpServer,
+  type Server as NodeHttpServer
+} from 'node:http'
 import { createServer as createNetServer } from 'node:net'
 import os from 'node:os'
 import { join } from 'node:path'
@@ -21,6 +25,7 @@ import type {
 
 const startedApps: Array<Awaited<ReturnType<typeof createHttpServer>>> = []
 const startedSocketServers: WebSocketServer[] = []
+const startedNodeHttpServers: NodeHttpServer[] = []
 const occupiedTcpServers: Array<ReturnType<typeof createNetServer>> = []
 const attachmentsRoots: string[] = []
 const tempDirs: string[] = []
@@ -31,6 +36,18 @@ afterEach(async () => {
   }
 
   for (const server of startedSocketServers.splice(0, startedSocketServers.length)) {
+    await new Promise<void>((resolvePromise, reject) => {
+      server.close((error?: Error) => {
+        if (error) {
+          reject(error)
+          return
+        }
+        resolvePromise()
+      })
+    })
+  }
+
+  for (const server of startedNodeHttpServers.splice(0, startedNodeHttpServers.length)) {
     await new Promise<void>((resolvePromise, reject) => {
       server.close((error?: Error) => {
         if (error) {
@@ -796,30 +813,29 @@ describe('createHttpServer', () => {
     })
   })
 
-  it('bridges raw Unix JSONL frames and invalidates a disconnected daemon target', async () => {
-    const socketRoot = mkdtempSync(join(os.tmpdir(), 'codori-unix-jsonl-'))
+  it('bridges WebSocket frames over Unix and invalidates a disconnected daemon target', async () => {
+    const socketRoot = mkdtempSync(join(os.tmpdir(), 'codori-unix-websocket-'))
     tempDirs.push(socketRoot)
     const socketPath = join(socketRoot, 'daemon.sock')
-    const receivedLines: string[] = []
+    const receivedFrames: string[] = []
     let closeUpstream = () => {}
-    const unixServer = createNetServer((socket) => {
-      closeUpstream = () => socket.destroy()
-      let buffer = ''
-      socket.on('data', (chunk) => {
-        buffer += chunk.toString()
-        let newlineIndex = buffer.indexOf('\n')
-        while (newlineIndex >= 0) {
-          const line = buffer.slice(0, newlineIndex)
-          buffer = buffer.slice(newlineIndex + 1)
-          receivedLines.push(line)
-          socket.write(`unix:${line}\n`)
-          newlineIndex = buffer.indexOf('\n')
-        }
+    const unixHttpServer = createNodeHttpServer()
+    startedNodeHttpServers.push(unixHttpServer)
+    const unixWebSocketServer = new WebSocketServer({
+      server: unixHttpServer
+    })
+    startedSocketServers.push(unixWebSocketServer)
+    unixWebSocketServer.on('connection', (socket) => {
+      closeUpstream = () => socket.close()
+      socket.on('message', (message, isBinary) => {
+        expect(isBinary).toBe(false)
+        const frame = rawDataToString(message)
+        receivedFrames.push(frame)
+        socket.send(`unix:${frame}`)
       })
     })
-    occupiedTcpServers.push(unixServer)
     await new Promise<void>((resolvePromise, reject) => {
-      unixServer.listen(socketPath, (error?: Error) => {
+      unixHttpServer.listen(socketPath, (error?: Error) => {
         if (error) {
           reject(error)
           return
@@ -861,12 +877,11 @@ describe('createHttpServer', () => {
         enabled: true
       }
     }, null, 2)
-    const compactRequest = JSON.stringify(JSON.parse(prettyPrintedRequest))
     await new Promise<void>((resolvePromise, reject) => {
       client.once('open', () => client.send(prettyPrintedRequest))
       client.once('message', (message: WebSocket.RawData) => {
         try {
-          expect(rawDataToString(message)).toBe(`unix:${compactRequest}`)
+          expect(rawDataToString(message)).toBe(`unix:${prettyPrintedRequest}`)
           resolvePromise()
         } catch (error) {
           reject(error instanceof Error ? error : new Error(String(error)))
@@ -875,7 +890,7 @@ describe('createHttpServer', () => {
       client.once('error', reject)
     })
 
-    expect(receivedLines).toEqual([compactRequest])
+    expect(receivedFrames).toEqual([prettyPrintedRequest])
     const clientClosed = new Promise<void>((resolvePromise) => {
       client.once('close', () => resolvePromise())
     })

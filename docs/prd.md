@@ -118,21 +118,25 @@ Preferred daemon selection:
 - On Unix platforms, resolve
   `$CODEX_HOME/app-server-control/app-server-control.sock`, defaulting
   `CODEX_HOME` to `~/.codex`.
-- Verify readiness with a bounded raw Unix JSONL connection and `initialize`;
-  never infer readiness from the socket file alone.
+- Verify readiness with a bounded WebSocket-over-Unix handshake and
+  `initialize`; never infer readiness from the socket file alone.
+- Connect as a client without binding, replacing, or unlinking the daemon
+  socket. Multiple independent WebSocket clients may share the same control
+  socket.
 - If the default socket is not ready, invoke
   `codex remote-control start --json` once across concurrent callers and probe
-  the returned socket.
+  the returned socket. This command may restart a managed app-server when it
+  changes the persisted remote-control setting.
 - When realtime voice is configured, also require the daemon to advertise the
   feature and successfully answer V3 voice discovery.
 - Use the managed fallback for unsupported, inaccessible, unready, incompatible,
   or malformed daemon paths.
-- Never persist a daemon PID, kill/reap/restart the daemon, or replace an
-  already-running incompatible daemon.
+- Never persist a daemon PID, directly kill/reap/restart the daemon, or replace
+  an already-running incompatible daemon.
 - Keep one backend for the lifetime of a browser bridge. A daemon disconnect
   closes that bridge and invalidates the selection for the next connection.
-- Adapt browser WebSocket message boundaries to the daemon control socket's
-  newline-delimited JSON framing without changing the JSON-RPC payload.
+- Forward browser WebSocket frames through an independent WebSocket-over-Unix
+  connection without changing text, binary, or JSON-RPC payload boundaries.
 
 Managed fallback start command:
 
