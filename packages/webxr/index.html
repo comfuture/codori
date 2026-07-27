@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#02050b">
+    <meta name="color-scheme" content="dark">
+    <title>Immersive Codori</title>
+  </head>
+  <body>
+    <main id="app">
+      <section class="entry-card" aria-labelledby="entry-title">
+        <div class="entry-orbit" aria-hidden="true"></div>
+        <p class="eyebrow">Codori · Immersive workspace</p>
+        <h1 id="entry-title">Step into your coding session.</h1>
+        <p id="entry-message" class="entry-message">Checking this browser for immersive WebXR support…</p>
+        <div id="entry-actions" class="entry-actions" hidden>
+          <button id="enter-xr" class="primary-action" type="button">Enter immersive Codori</button>
+          <a id="continue-2d" class="secondary-action" href="/">Continue in 2D</a>
+        </div>
+        <button id="retry-entry" class="text-action" type="button" hidden>Try again</button>
+        <label class="effects-toggle">
+          <input id="reduced-effects" type="checkbox">
+          <span>Use reduced immersive effects</span>
+        </label>
+      </section>
+      <canvas id="xr-canvas" aria-label="Immersive Codori scene" hidden></canvas>
+      <div id="scene-status" class="scene-status" role="status" aria-live="polite" hidden></div>
+      <div id="scene-controls" class="scene-controls" hidden>
+        <button id="voice-toggle" type="button">Start voice</button>
+        <button id="exit-xr" type="button">Exit immersive</button>
+      </div>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

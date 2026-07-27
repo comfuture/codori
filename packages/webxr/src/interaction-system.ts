@@ -1,0 +1,411 @@
+import {
+  BufferGeometry,
+  Line,
+  LineBasicMaterial,
+  Matrix4,
+  Mesh,
+  MeshBasicMaterial,
+  Raycaster,
+  SphereGeometry,
+  Vector3,
+  type Object3D,
+  type WebGLRenderer,
+  type XRGripSpace,
+  type XRHandSpace,
+  type XRTargetRaySpace
+} from 'three'
+import {
+  PanelInteractionModel,
+  type PanelHit
+} from './panel-interaction'
+import type { SpatialPanelView } from './panel-view'
+import type { WorldControlAction } from './world-controls'
+
+type SourceRuntime = {
+  id: string
+  targetRay: XRTargetRaySpace
+  grip: XRGripSpace
+  hand: XRHandSpace
+  ray: Line<BufferGeometry, LineBasicMaterial>
+  gripMarker: Mesh<SphereGeometry, MeshBasicMaterial>
+  inputSource: XRInputSource | null
+  selecting: boolean
+  pinching: boolean
+  grabbedBy: 'select' | 'squeeze' | 'pinch' | null
+  lastPointerY: number
+  grabOffset: Vector3
+  listeners: {
+    connected: (event: unknown) => void
+    disconnected: () => void
+    selectstart: () => void
+    selectend: () => void
+    squeezestart: () => void
+    squeezeend: () => void
+  } | null
+}
+
+export type InteractionSystemOptions = {
+  renderer: WebGLRenderer
+  root: Object3D
+  getPanels: () => ReadonlyMap<string, SpatialPanelView>
+  getControlTargets: () => readonly Mesh[]
+  onScroll: (panelId: string, deltaLines: number) => void
+  onPanelMoved: (panelId: string, position: Vector3) => void
+  onAction: (action: WorldControlAction) => void
+}
+
+const rayOrigin = new Vector3()
+const rayDirection = new Vector3()
+const sourcePosition = new Vector3()
+const rotationMatrix = new Matrix4()
+const thumbPosition = new Vector3()
+const indexPosition = new Vector3()
+
+export class ImmersiveInteractionSystem {
+  private readonly model = new PanelInteractionModel()
+
+  private readonly raycaster = new Raycaster()
+
+  private readonly sources: SourceRuntime[] = []
+
+  private disposed = false
+
+  constructor(private readonly options: InteractionSystemOptions) {
+    for (let index = 0; index < 2; index += 1) {
+      this.sources.push(this.createSource(index))
+    }
+  }
+
+  private createSource(index: number): SourceRuntime {
+    const id = `xr-input-${index}`
+    const targetRay = this.options.renderer.xr.getController(index)
+    const grip = this.options.renderer.xr.getControllerGrip(index)
+    const hand = this.options.renderer.xr.getHand(index)
+
+    const ray = new Line(
+      new BufferGeometry().setFromPoints([
+        new Vector3(0, 0, 0),
+        new Vector3(0, 0, -1)
+      ]),
+      new LineBasicMaterial({
+        color: '#63dcff',
+        transparent: true,
+        opacity: 0.48
+      })
+    )
+    ray.name = 'generic-controller-ray'
+    ray.scale.z = 3.5
+    targetRay.add(ray)
+
+    const gripMarker = new Mesh(
+      new SphereGeometry(0.035, 12, 8),
+      new MeshBasicMaterial({
+        color: '#6cddff',
+        transparent: true,
+        opacity: 0.45
+      })
+    )
+    gripMarker.name = 'generic-controller-grip'
+    grip.add(gripMarker)
+    this.options.root.add(targetRay, grip, hand)
+
+    const runtime: SourceRuntime = {
+      id,
+      targetRay,
+      grip,
+      hand,
+      ray,
+      gripMarker,
+      inputSource: null,
+      selecting: false,
+      pinching: false,
+      grabbedBy: null,
+      lastPointerY: 0,
+      grabOffset: new Vector3(),
+      listeners: null
+    }
+    const listeners = {
+      connected: (event: unknown) => {
+        runtime.inputSource = (
+          event as unknown as { data: XRInputSource }
+        ).data
+      },
+      disconnected: () => {
+        const grabbedPanelId = this.model.snapshot().sources
+          .get(id)?.grabbedPanelId
+        runtime.inputSource = null
+        runtime.selecting = false
+        runtime.pinching = false
+        runtime.grabbedBy = null
+        this.model.sourceLost(id)
+        if (grabbedPanelId) {
+          const panel = this.options.getPanels().get(grabbedPanelId)
+          if (panel) {
+            this.options.onPanelMoved(
+              grabbedPanelId,
+              panel.group.position.clone()
+            )
+          }
+        }
+        this.refreshPanelInteraction()
+      },
+      selectstart: () => {
+        this.handleSelectStart(runtime, performance.now(), true)
+      },
+      selectend: () => {
+        runtime.selecting = false
+        this.model.selectEnd(id)
+        if (runtime.grabbedBy === 'select') {
+          this.releaseGrab(runtime)
+        }
+      },
+      squeezestart: () => {
+        this.handleGrabStart(runtime, 'squeeze')
+      },
+      squeezeend: () => {
+        if (runtime.grabbedBy === 'squeeze') {
+          this.releaseGrab(runtime)
+        }
+      }
+    }
+    runtime.listeners = listeners
+    targetRay.addEventListener('connected', listeners.connected)
+    targetRay.addEventListener('disconnected', listeners.disconnected)
+    targetRay.addEventListener('selectstart', listeners.selectstart)
+    targetRay.addEventListener('selectend', listeners.selectend)
+    targetRay.addEventListener('squeezestart', listeners.squeezestart)
+    targetRay.addEventListener('squeezeend', listeners.squeezeend)
+    return runtime
+  }
+
+  private interactionTargets() {
+    const targets: Object3D[] = []
+    for (const panel of this.options.getPanels().values()) {
+      if (!panel.group.visible) {
+        continue
+      }
+      targets.push(panel.contentHit, panel.grabHit)
+    }
+    targets.push(...this.options.getControlTargets())
+    return targets
+  }
+
+  private hitFromObject(object: Object3D): PanelHit | null {
+    const panelId = object.userData.panelId
+    const hitZone = object.userData.hitZone
+    if (
+      typeof panelId === 'string'
+      && (hitZone === 'content' || hitZone === 'grab')
+    ) {
+      return {
+        panelId,
+        zone: hitZone
+      }
+    }
+    return null
+  }
+
+  private raycast(runtime: SourceRuntime) {
+    runtime.targetRay.getWorldPosition(rayOrigin)
+    rotationMatrix.extractRotation(runtime.targetRay.matrixWorld)
+    rayDirection.set(0, 0, -1).applyMatrix4(rotationMatrix).normalize()
+    this.raycaster.set(rayOrigin, rayDirection)
+    return this.raycaster.intersectObjects(this.interactionTargets(), false)[0] ?? null
+  }
+
+  private handleSelectStart(
+    runtime: SourceRuntime,
+    now: number,
+    native: boolean
+  ) {
+    const intersection = this.raycast(runtime)
+    const action = intersection?.object.userData.action
+    if (action === 'toggle-voice' || action === 'exit-xr') {
+      this.options.onAction(action)
+      return
+    }
+    const hit = intersection ? this.hitFromObject(intersection.object) : null
+    if (!this.model.selectStart(runtime.id, hit, now, native)) {
+      return
+    }
+    runtime.selecting = true
+    runtime.targetRay.getWorldPosition(sourcePosition)
+    runtime.lastPointerY = sourcePosition.y
+    if (hit?.zone === 'grab') {
+      this.handleGrabStart(runtime, native ? 'select' : 'pinch')
+    }
+  }
+
+  private handleGrabStart(
+    runtime: SourceRuntime,
+    activation: NonNullable<SourceRuntime['grabbedBy']>
+  ) {
+    const intersection = this.raycast(runtime)
+    const hit = intersection ? this.hitFromObject(intersection.object) : null
+    if (!this.model.grabStart(runtime.id, hit)) {
+      return
+    }
+    runtime.grabbedBy = activation
+    const panel = hit
+      ? this.options.getPanels().get(hit.panelId)
+      : null
+    if (!panel) {
+      return
+    }
+    runtime.grip.getWorldPosition(sourcePosition)
+    if (!runtime.inputSource?.gripSpace) {
+      runtime.targetRay.getWorldPosition(sourcePosition)
+    }
+    runtime.grabOffset.copy(panel.group.position).sub(sourcePosition)
+    this.refreshPanelInteraction()
+  }
+
+  private releaseGrab(runtime: SourceRuntime) {
+    const grabbedPanelId = this.model.snapshot().sources
+      .get(runtime.id)?.grabbedPanelId
+    this.model.releaseGrab(runtime.id)
+    runtime.grabbedBy = null
+    if (grabbedPanelId) {
+      const panel = this.options.getPanels().get(grabbedPanelId)
+      if (panel) {
+        this.options.onPanelMoved(grabbedPanelId, panel.group.position.clone())
+      }
+    }
+    this.refreshPanelInteraction()
+  }
+
+  private updatePinch(runtime: SourceRuntime, now: number) {
+    if (!runtime.inputSource?.hand) {
+      return
+    }
+    const thumb = runtime.hand.getObjectByName('thumb-tip')
+    const index = runtime.hand.getObjectByName('index-finger-tip')
+    if (!thumb || !index) {
+      return
+    }
+    thumb.getWorldPosition(thumbPosition)
+    index.getWorldPosition(indexPosition)
+    const distance = thumbPosition.distanceTo(indexPosition)
+    if (!runtime.pinching && distance <= 0.026) {
+      runtime.pinching = true
+      this.handleSelectStart(runtime, now, false)
+    } else if (runtime.pinching && distance >= 0.038) {
+      runtime.pinching = false
+      runtime.selecting = false
+      this.model.selectEnd(runtime.id)
+      if (runtime.grabbedBy === 'pinch') {
+        this.releaseGrab(runtime)
+      }
+    }
+  }
+
+  private updateGamepadScroll(runtime: SourceRuntime) {
+    const axes = runtime.inputSource?.gamepad?.axes
+    if (!axes || axes.length === 0) {
+      return
+    }
+    const axis = axes.at(-1) ?? 0
+    if (Math.abs(axis) < 0.22) {
+      return
+    }
+    const hover = this.model.snapshot().sources.get(runtime.id)?.hover
+    if (hover?.zone === 'content') {
+      this.options.onScroll(hover.panelId, axis * 0.5)
+    }
+  }
+
+  private refreshPanelInteraction() {
+    const snapshot = this.model.snapshot()
+    for (const [panelId, panel] of this.options.getPanels().entries()) {
+      const hovered = [...snapshot.sources.values()]
+        .some(source => source.hover?.panelId === panelId)
+      const grabbed = snapshot.grabOwners.has(panelId)
+      panel.setInteraction(hovered, grabbed)
+    }
+  }
+
+  update(now: number) {
+    if (this.disposed) {
+      return
+    }
+    for (const runtime of this.sources) {
+      const intersection = this.raycast(runtime)
+      this.model.hover(
+        runtime.id,
+        intersection ? this.hitFromObject(intersection.object) : null
+      )
+      this.updatePinch(runtime, now)
+      this.updateGamepadScroll(runtime)
+
+      const sourceState = this.model.snapshot().sources.get(runtime.id)
+      if (sourceState?.selected?.zone === 'content' && runtime.selecting) {
+        runtime.targetRay.getWorldPosition(sourcePosition)
+        const delta = runtime.lastPointerY - sourcePosition.y
+        if (Math.abs(delta) > 0.0025) {
+          this.options.onScroll(
+            sourceState.selected.panelId,
+            delta * 42
+          )
+          runtime.lastPointerY = sourcePosition.y
+        }
+      }
+
+      if (sourceState?.grabbedPanelId) {
+        const panel = this.options.getPanels().get(sourceState.grabbedPanelId)
+        if (panel) {
+          runtime.grip.getWorldPosition(sourcePosition)
+          if (!runtime.inputSource?.gripSpace) {
+            runtime.targetRay.getWorldPosition(sourcePosition)
+          }
+          panel.moveTo(sourcePosition.add(runtime.grabOffset))
+        }
+      }
+    }
+    this.refreshPanelInteraction()
+  }
+
+  dispose() {
+    this.disposed = true
+    this.model.clear()
+    for (const runtime of this.sources) {
+      if (runtime.listeners) {
+        runtime.targetRay.removeEventListener(
+          'connected',
+          runtime.listeners.connected
+        )
+        runtime.targetRay.removeEventListener(
+          'disconnected',
+          runtime.listeners.disconnected
+        )
+        runtime.targetRay.removeEventListener(
+          'selectstart',
+          runtime.listeners.selectstart
+        )
+        runtime.targetRay.removeEventListener(
+          'selectend',
+          runtime.listeners.selectend
+        )
+        runtime.targetRay.removeEventListener(
+          'squeezestart',
+          runtime.listeners.squeezestart
+        )
+        runtime.targetRay.removeEventListener(
+          'squeezeend',
+          runtime.listeners.squeezeend
+        )
+        runtime.listeners = null
+      }
+      runtime.ray.geometry.dispose()
+      runtime.ray.material.dispose()
+      runtime.gripMarker.geometry.dispose()
+      runtime.gripMarker.material.dispose()
+      runtime.targetRay.clear()
+      runtime.grip.clear()
+      runtime.hand.clear()
+      runtime.targetRay.removeFromParent()
+      runtime.grip.removeFromParent()
+      runtime.hand.removeFromParent()
+    }
+    this.sources.length = 0
+  }
+}

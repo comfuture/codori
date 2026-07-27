@@ -1,0 +1,49 @@
+{
+  "name": "@codori/webxr",
+  "version": "0.9.1",
+  "private": false,
+  "description": "Immersive WebXR voice coding workspace for Codori.",
+  "type": "module",
+  "exports": {
+    ".": "./dist/index.html"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/comfuture/codori.git",
+    "directory": "packages/webxr"
+  },
+  "homepage": "https://github.com/comfuture/codori#immersive-webxr",
+  "bugs": {
+    "url": "https://github.com/comfuture/codori/issues"
+  },
+  "keywords": [
+    "codori",
+    "codex",
+    "webxr",
+    "virtual-reality",
+    "threejs"
+  ],
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json --noEmit && vite build",
+    "dev": "vite",
+    "lint": "eslint src test vite.config.ts --ext .ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@codori/client": "workspace:*",
+    "three": "0.185.1"
+  },
+  "devDependencies": {
+    "@types/three": "0.185.0",
+    "@types/webxr": "^0.5.24",
+    "vite": "^7.2.2"
+  }
+}

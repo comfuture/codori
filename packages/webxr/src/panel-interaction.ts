@@ -1,0 +1,117 @@
+export type InteractionSourceId = string
+export type PanelHitZone = 'content' | 'grab'
+
+export type PanelHit = {
+  panelId: string
+  zone: PanelHitZone
+}
+
+export type InteractionSourceState = {
+  hover: PanelHit | null
+  selected: PanelHit | null
+  grabbedPanelId: string | null
+  lastNativeSelectAt: number
+}
+
+export type InteractionSnapshot = {
+  sources: ReadonlyMap<InteractionSourceId, InteractionSourceState>
+  grabOwners: ReadonlyMap<string, InteractionSourceId>
+}
+
+const createSourceState = (): InteractionSourceState => ({
+  hover: null,
+  selected: null,
+  grabbedPanelId: null,
+  lastNativeSelectAt: Number.NEGATIVE_INFINITY
+})
+
+export class PanelInteractionModel {
+  private readonly sources = new Map<InteractionSourceId, InteractionSourceState>()
+
+  private readonly grabOwners = new Map<string, InteractionSourceId>()
+
+  private source(id: InteractionSourceId) {
+    const existing = this.sources.get(id)
+    if (existing) {
+      return existing
+    }
+    const created = createSourceState()
+    this.sources.set(id, created)
+    return created
+  }
+
+  hover(sourceId: InteractionSourceId, hit: PanelHit | null) {
+    const source = this.source(sourceId)
+    source.hover = hit
+  }
+
+  selectStart(
+    sourceId: InteractionSourceId,
+    hit: PanelHit | null,
+    now: number,
+    native = true
+  ) {
+    const source = this.source(sourceId)
+    if (!native && now - source.lastNativeSelectAt < 250) {
+      return false
+    }
+    if (native) {
+      source.lastNativeSelectAt = now
+    }
+    source.selected = hit
+    return Boolean(hit)
+  }
+
+  selectEnd(sourceId: InteractionSourceId) {
+    const source = this.sources.get(sourceId)
+    if (source) {
+      source.selected = null
+    }
+  }
+
+  grabStart(sourceId: InteractionSourceId, hit: PanelHit | null) {
+    if (!hit || hit.zone !== 'grab') {
+      return false
+    }
+    const owner = this.grabOwners.get(hit.panelId)
+    if (owner && owner !== sourceId) {
+      return false
+    }
+    const source = this.source(sourceId)
+    this.releaseGrab(sourceId)
+    source.grabbedPanelId = hit.panelId
+    this.grabOwners.set(hit.panelId, sourceId)
+    return true
+  }
+
+  releaseGrab(sourceId: InteractionSourceId) {
+    const source = this.sources.get(sourceId)
+    if (!source?.grabbedPanelId) {
+      return
+    }
+    if (this.grabOwners.get(source.grabbedPanelId) === sourceId) {
+      this.grabOwners.delete(source.grabbedPanelId)
+    }
+    source.grabbedPanelId = null
+  }
+
+  sourceLost(sourceId: InteractionSourceId) {
+    this.releaseGrab(sourceId)
+    this.sources.delete(sourceId)
+  }
+
+  snapshot(): InteractionSnapshot {
+    return {
+      sources: new Map([...this.sources.entries()].map(([id, source]) => [
+        id,
+        { ...source }
+      ])),
+      grabOwners: new Map(this.grabOwners)
+    }
+  }
+
+  clear() {
+    this.sources.clear()
+    this.grabOwners.clear()
+  }
+}
