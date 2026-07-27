@@ -52,6 +52,7 @@ export type ImmersiveSceneOptions = {
 const viewerPosition = new Vector3()
 const viewerDirection = new Vector3()
 const worldCenter = new Vector3(0, 1.65, 0)
+const worldForward = new Vector3(0, 0, -1)
 const floorCenter = new Vector3()
 
 const clamp = (value: number, minimum: number, maximum: number) =>
@@ -189,19 +190,25 @@ export class ImmersiveScene {
     this.room.add(back, front, left, right)
   }
 
-  private setWorldCenter(center: Vector3) {
+  private setWorldCenter(
+    center: Vector3,
+    forward: Vector3 = worldForward
+  ) {
     worldCenter.copy(center)
+    worldForward.copy(forward)
+    worldForward.y = 0
+    if (worldForward.lengthSq() < 0.001) {
+      worldForward.set(0, 0, -1)
+    } else {
+      worldForward.normalize()
+    }
     this.agentLight.group.position.copy(center)
     this.transcriptView.group.position.set(
       center.x,
       center.y + 0.72,
       center.z
     )
-    this.controls.group.position.set(
-      center.x,
-      center.y - 0.52,
-      center.z + 0.02
-    )
+    this.controls.placeExitDoor(center, worldForward)
     this.status.group.position.set(
       center.x,
       center.y + 1.22,
@@ -231,7 +238,7 @@ export class ImmersiveScene {
       MIN_LIGHT_HEIGHT_METERS,
       MAX_LIGHT_HEIGHT_METERS
     )
-    this.setWorldCenter(center)
+    this.setWorldCenter(center, viewerDirection)
     this.placedFromViewer = true
     this.syncPanelViews()
   }
