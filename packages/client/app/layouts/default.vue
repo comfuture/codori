@@ -1,7 +1,10 @@
 <script setup lang="ts">
+import { useRoute } from '#imports'
 import { computed, ref } from 'vue'
 import { useProjects } from '../composables/useProjects'
+import { DEFAULT_SETTINGS_ROUTE } from '~~/shared/settings'
 
+const route = useRoute()
 const sidebarCollapsed = ref(false)
 const commandPaletteOpen = ref(false)
 const { serviceUpdate, serviceUpdatePending, triggerServiceUpdate } = useProjects()
@@ -40,6 +43,13 @@ const sidebarUi = computed(() =>
         footer: 'overflow-visible'
       }
 )
+
+const settingsRoute = computed(() => ({
+  path: DEFAULT_SETTINGS_ROUTE,
+  query: {
+    returnTo: route.fullPath
+  }
+}))
 </script>
 
 <template>
@@ -122,14 +132,18 @@ const sidebarUi = computed(() =>
 
       <template #footer>
         <div class="flex w-full items-center gap-2">
-          <RuntimeBackendStatusButton />
-          <SystemNotificationButton :collapsed="sidebarCollapsed" />
-          <span
-            v-if="!sidebarCollapsed"
-            class="min-w-0 flex-1 truncate text-xs text-muted"
-          >
-            Dashboard
-          </span>
+          <UTooltip text="Settings">
+            <UButton
+              color="neutral"
+              variant="ghost"
+              size="sm"
+              icon="i-lucide-settings"
+              :label="sidebarCollapsed ? undefined : 'Settings'"
+              aria-label="Open settings"
+              :to="settingsRoute"
+              :class="sidebarCollapsed ? 'justify-center' : 'min-w-0 flex-1 justify-start'"
+            />
+          </UTooltip>
           <UDashboardSidebarCollapse
             class="relative z-20 ms-auto shrink-0"
           />
@@ -138,9 +152,7 @@ const sidebarUi = computed(() =>
     </UDashboardSidebar>
 
     <GlobalCommandPalette v-model:open="commandPaletteOpen" />
-    <ActivityNotifications />
-    <GlobalRealtimeVoiceCompanion />
 
-    <NuxtPage />
+    <slot />
   </UDashboardGroup>
 </template>

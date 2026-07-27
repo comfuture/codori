@@ -1,55 +1,76 @@
-import { computed, ref } from 'vue'
+import { onMounted, ref } from 'vue'
 
-const STORAGE_KEY = 'codori:system-notifications'
-const enabled = ref(false)
-const hydrated = ref(false)
+export const SYSTEM_NOTIFICATIONS_STORAGE_KEY = 'codori:system-notifications'
 
-const hydrate = () => {
-  if (hydrated.value || !import.meta.client) {
-    return
-  }
-  hydrated.value = true
-  try {
-    enabled.value = localStorage.getItem(STORAGE_KEY) === 'enabled'
-      && 'Notification' in window
-      && Notification.permission === 'granted'
-  } catch {
-    enabled.value = false
-  }
+type NotificationStorage = Pick<Storage, 'getItem' | 'setItem'>
+
+type NotificationApi = {
+  readonly permission: NotificationPermission
+  requestPermission: () => Promise<NotificationPermission>
 }
 
-export const useSystemNotifications = () => {
-  hydrate()
-  const supported = computed(() => import.meta.client && 'Notification' in window)
-  const permission = computed(() =>
-    supported.value ? Notification.permission : 'default'
-  )
+export const createSystemNotifications = (
+  initialStorage: NotificationStorage | null,
+  initialApi: NotificationApi | null
+) => {
+  const supported = ref(initialApi !== null)
+  const permission = ref<NotificationPermission>(initialApi?.permission ?? 'default')
+  const enabled = ref(false)
+  let storage = initialStorage
+  let api = initialApi
+
+  const hydrate = (
+    nextStorage: NotificationStorage | null,
+    nextApi: NotificationApi | null
+  ) => {
+    storage = nextStorage
+    api = nextApi
+    supported.value = nextApi !== null
+    permission.value = nextApi?.permission ?? 'default'
+    try {
+      enabled.value = nextStorage?.getItem(SYSTEM_NOTIFICATIONS_STORAGE_KEY) === 'enabled'
+        && permission.value === 'granted'
+    } catch {
+      enabled.value = false
+    }
+  }
+
+  const refreshPermission = () => {
+    supported.value = api !== null
+    permission.value = api?.permission ?? 'default'
+    if (permission.value !== 'granted') {
+      enabled.value = false
+    }
+  }
 
   const enable = async () => {
-    if (!supported.value) {
+    if (!api) {
       return false
     }
     try {
-      const nextPermission = Notification.permission === 'granted'
+      const nextPermission = api.permission === 'granted'
         ? 'granted'
-        : await Notification.requestPermission()
+        : await api.requestPermission()
+      permission.value = nextPermission
       enabled.value = nextPermission === 'granted'
-      localStorage.setItem(STORAGE_KEY, enabled.value ? 'enabled' : 'disabled')
+      storage?.setItem(
+        SYSTEM_NOTIFICATIONS_STORAGE_KEY,
+        enabled.value ? 'enabled' : 'disabled'
+      )
       return enabled.value
     } catch {
       enabled.value = false
+      refreshPermission()
       return false
     }
   }
 
   const disable = () => {
     enabled.value = false
-    if (import.meta.client) {
-      try {
-        localStorage.setItem(STORAGE_KEY, 'disabled')
-      } catch {
-        // Notification opt-in is best-effort when storage is unavailable.
-      }
+    try {
+      storage?.setItem(SYSTEM_NOTIFICATIONS_STORAGE_KEY, 'disabled')
+    } catch {
+      // Notification opt-in is best-effort when storage is unavailable.
     }
   }
 
@@ -57,7 +78,47 @@ export const useSystemNotifications = () => {
     supported,
     enabled,
     permission,
+    hydrate,
+    refreshPermission,
     enable,
     disable
   }
+}
+
+let sharedSystemNotifications: ReturnType<typeof createSystemNotifications> | null = null
+
+const resolveBrowserDependencies = () => {
+  if (typeof window === 'undefined') {
+    return {
+      storage: null,
+      api: null
+    }
+  }
+
+  let storage: NotificationStorage | null = null
+  try {
+    storage = window.localStorage
+  } catch {
+    // Browser storage is optional.
+  }
+
+  return {
+    storage,
+    api: 'Notification' in window ? window.Notification : null
+  }
+}
+
+export const useSystemNotifications = () => {
+  if (!sharedSystemNotifications) {
+    sharedSystemNotifications = createSystemNotifications(null, null)
+  }
+
+  if (import.meta.client) {
+    onMounted(() => {
+      const { storage, api } = resolveBrowserDependencies()
+      sharedSystemNotifications?.hydrate(storage, api)
+    })
+  }
+
+  return sharedSystemNotifications
 }
