@@ -354,7 +354,8 @@ export class ImmersiveScene {
         this.transcriptSegments,
         this.transcriptGeneration,
         now
-      )
+      ),
+      now
     )
     const bubbleTarget = viewerFacingQuaternion(
       this.transcriptView.group.position,
