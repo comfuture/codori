@@ -35,5 +35,7 @@ onBeforeUnmount(() => {
     <NuxtLayout>
       <NuxtPage />
     </NuxtLayout>
+    <ActivityNotifications />
+    <GlobalRealtimeVoiceCompanion />
   </UApp>
 </template>
