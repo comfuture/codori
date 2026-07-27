@@ -155,6 +155,9 @@ const ensureScene = async () => {
           },
           onPanelMoved: (panelId) => {
             workspaceRuntime?.markPanelMoved(panelId)
+          },
+          onPanelDismiss: (panelId) => {
+            workspaceRuntime?.dismissPanel(panelId)
           }
         })
         return immersiveScene

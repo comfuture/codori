@@ -62,6 +62,7 @@ describe('panel interaction model', () => {
       getControlTargets: () => [],
       onScroll: () => {},
       onPanelMoved: () => {},
+      onPanelDismiss: () => {},
       onAction: () => {}
     })
     const listenerRemoval = targetRays.map(targetRay =>
@@ -88,5 +89,30 @@ describe('panel interaction model', () => {
     expect(rayGeometryDisposal.every(spy => spy.mock.calls.length === 1)).toBe(true)
     expect(gripGeometryDisposal.every(spy => spy.mock.calls.length === 1)).toBe(true)
     expect(root.children).toHaveLength(0)
+  })
+
+  it('releases every source that points at a dismissed panel', () => {
+    const model = new PanelInteractionModel()
+    model.hover('left', {
+      panelId: 'panel-1',
+      zone: 'content'
+    })
+    model.grabStart('left', {
+      panelId: 'panel-1',
+      zone: 'grab'
+    })
+    model.hover('right', {
+      panelId: 'panel-1',
+      zone: 'dismiss'
+    })
+
+    model.dismissPanel('panel-1')
+
+    expect(model.snapshot().grabOwners.has('panel-1')).toBe(false)
+    expect(model.snapshot().sources.get('left')).toMatchObject({
+      hover: null,
+      grabbedPanelId: null
+    })
+    expect(model.snapshot().sources.get('right')?.hover).toBe(null)
   })
 })

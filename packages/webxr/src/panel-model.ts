@@ -1,7 +1,8 @@
 import {
   FOREGROUND_PANEL_DWELL_MS,
   MAX_PANEL_OUTPUT_CHARS,
-  PANEL_ANIMATION_MS
+  PANEL_ANIMATION_MS,
+  PANEL_FORCE_DISMISS_MS
 } from './config'
 
 export type SpatialPanelKind =
@@ -24,6 +25,7 @@ export type SpatialPanelPhase =
   | 'visible'
   | 'dwelling'
   | 'disappearing'
+  | 'bursting'
 
 export type SpatialPanelInput = {
   id: string
@@ -84,7 +86,12 @@ export class SpatialPanelModel {
 
   private readonly retiredForeground = new Set<string>()
 
+  private readonly manuallyDismissed = new Set<string>()
+
   upsert(input: SpatialPanelInput, now: number) {
+    if (this.manuallyDismissed.has(input.id)) {
+      return null
+    }
     const terminal = isTerminalStatus(input.status)
     if (!input.background && terminal && this.retiredForeground.has(input.id)) {
       return null
@@ -237,9 +244,30 @@ export class SpatialPanelModel {
     }
   }
 
+  dismiss(id: string, now: number) {
+    const panel = this.panels.get(id)
+    if (!panel || panel.phase === 'bursting') {
+      return false
+    }
+    this.manuallyDismissed.add(id)
+    this.panels.set(id, {
+      ...panel,
+      phase: 'bursting',
+      phaseStartedAt: now
+    })
+    return true
+  }
+
   advance(now: number) {
     for (const [id, panel] of this.panels.entries()) {
       const age = now - panel.phaseStartedAt
+      if (
+        panel.phase === 'bursting'
+        && age >= PANEL_FORCE_DISMISS_MS
+      ) {
+        this.panels.delete(id)
+        continue
+      }
       if (panel.phase === 'appearing' && age >= PANEL_ANIMATION_MS) {
         this.panels.set(id, {
           ...panel,
@@ -277,5 +305,6 @@ export class SpatialPanelModel {
   clear() {
     this.panels.clear()
     this.retiredForeground.clear()
+    this.manuallyDismissed.clear()
   }
 }

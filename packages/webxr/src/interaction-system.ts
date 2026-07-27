@@ -51,6 +51,7 @@ export type InteractionSystemOptions = {
   getControlTargets: () => readonly Mesh[]
   onScroll: (panelId: string, deltaLines: number) => void
   onPanelMoved: (panelId: string, position: Vector3) => void
+  onPanelDismiss: (panelId: string) => void
   onAction: (action: WorldControlAction) => void
 }
 
@@ -185,6 +186,9 @@ export class ImmersiveInteractionSystem {
         continue
       }
       targets.push(panel.contentHit, panel.grabHit)
+      if (panel.dismissHit.visible && panel.dismissHit.parent?.visible) {
+        targets.push(panel.dismissHit)
+      }
     }
     targets.push(...this.options.getControlTargets())
     return targets
@@ -195,7 +199,11 @@ export class ImmersiveInteractionSystem {
     const hitZone = object.userData.hitZone
     if (
       typeof panelId === 'string'
-      && (hitZone === 'content' || hitZone === 'grab')
+      && (
+        hitZone === 'content'
+        || hitZone === 'grab'
+        || hitZone === 'dismiss'
+      )
     ) {
       return {
         panelId,
@@ -225,6 +233,21 @@ export class ImmersiveInteractionSystem {
       return
     }
     const hit = intersection ? this.hitFromObject(intersection.object) : null
+    if (hit?.zone === 'dismiss') {
+      const snapshot = this.model.snapshot()
+      for (const source of this.sources) {
+        if (
+          snapshot.sources.get(source.id)?.grabbedPanelId
+          === hit.panelId
+        ) {
+          source.grabbedBy = null
+        }
+      }
+      this.model.dismissPanel(hit.panelId)
+      this.options.onPanelDismiss(hit.panelId)
+      this.refreshPanelInteraction()
+      return
+    }
     if (!this.model.selectStart(runtime.id, hit, now, native)) {
       return
     }
