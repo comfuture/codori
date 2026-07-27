@@ -102,11 +102,28 @@ Completed assistant turns can use that avatar for attention-aware alerts:
 - the currently visible and focused thread does not notify
 - another thread in the active tab uses a Nuxt UI toast
 - a background tab uses the Web Notifications API only after the user enables
-  **Notifications** in the sidebar and grants browser permission
+  **Settings → Notifications** and grants browser permission
 
 Selecting a toast or system notification opens the relevant thread. Browser
 notification permission is optional and is requested only from that explicit
-sidebar action.
+settings action.
+
+### Settings workspace
+
+The Settings item at the bottom of the application sidebar opens a dedicated
+workspace with directly loadable sections:
+
+- `/settings/notifications` controls the browser-local
+  `codori:system-notifications` opt-in without requesting permission on page
+  load.
+- `/settings/voice` stores the next-conversation voice preference under
+  `codori:realtime-voice:v1` and discovers the available catalog from an
+  existing workspace runtime.
+- `/settings/backend` reports the selected backend, transport, state, version,
+  and fallback reason as read-only diagnostics.
+
+`/settings` redirects to Notifications. The settings navigation includes a
+safe return to the app route from which it was opened.
 
 ## Remote Access
 
@@ -296,9 +313,9 @@ Example:
 
 After enabling realtime voice, open an existing thread and use the microphone action in the composer. The first activation requests microphone permission and prepares the WebRTC session. Once it is ready, hold the microphone action with a pointer, touch, <kbd>Space</kbd>, or <kbd>Enter</kbd> while that button is focused; releasing immediately mutes input while keeping the session ready for a follow-up. The adjacent controls mute remote speech or stop and release the entire voice session.
 
-The waveform picker discovers the V3 voice list from the active Codex runtime. “Use Codex setting” is the default and sends no per-session voice override; an explicit choice is stored only in that browser and applies to the next session. “Protocol default” identifies the app-server protocol fallback and does not claim to show the active Codex configuration. If a saved voice is no longer advertised, Codori preserves it for diagnostics but safely falls back to the Codex setting.
+Settings → Voice discovers the V3 voice list from the most recently used, materialized workspace runtime. “Use Codex setting” is the default and sends no per-session voice override; an explicit choice is stored only in that browser and applies to the next session. “Protocol default” identifies the app-server protocol fallback and does not claim to show the active Codex configuration. If a saved voice is no longer advertised, Codori preserves it for diagnostics but safely falls back to the Codex setting. On a direct Settings visit without a usable workspace context, Codori keeps the saved value readable and does not create a hidden thread just to load the catalog.
 
-Each advertised voice has a receive-only preview on an existing, materialized thread. Preview never requests microphone access, creates a normal turn, or adds hidden conversation history. It plays a short locale-aware sample and stops automatically after 12 seconds. Preview and conversation audio share one owner: starting a conversation preempts preview, thread changes stop preview, and a new audio session waits for the previous app-server session to confirm closure.
+Each advertised voice has a receive-only preview under Settings → Voice when an existing, materialized thread context is available. Preview never requests microphone access, creates a normal turn, or adds hidden conversation history. It plays a short locale-aware sample and stops automatically after 12 seconds. Preview and conversation audio share one owner: an active conversation blocks preview, leaving Voice settings stops its preview, and a new audio session waits for the previous app-server session to confirm closure.
 
 The voice status surface shows live/final transcripts and whether Codex is listening, transcribing, delegating, working, or speaking. Spoken requests use app-server's automatic handoff into the active thread, so its existing turn, tool, approval, and final-response UI remains authoritative. Codori does not resubmit the recognized text as a second turn.
 
@@ -354,7 +371,7 @@ Codori ignores common heavy directories during recursive scanning such as `node_
 - If an existing managed fallback cannot be stopped safely, Codori keeps its
   runtime record and continues using it instead of orphaning that process or
   selecting a second backend.
-- The sidebar runtime indicator and `GET /api/runtime/backend` report only a
+- Settings → Backend and `GET /api/runtime/backend` report only a
   safe backend kind, transport, readiness, version, and fallback reason. The
   daemon socket path is never exposed to the browser.
 
