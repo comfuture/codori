@@ -1,5 +1,8 @@
 import { Group } from 'three'
-import { TRANSCRIPT_ANIMATION_MS } from './config'
+import {
+  TRANSCRIPT_ANIMATION_MS,
+  TRANSCRIPT_RENDER_INTERVAL_MS
+} from './config'
 import type {
   TranscriptBubblePhase,
   TranscriptBubbleSnapshot
@@ -26,6 +29,23 @@ export const resolveTranscriptBubbleScale = (
   return phase === 'appearing' ? eased : 1 - eased
 }
 
+export const shouldRenderTranscriptTexture = (input: {
+  visibleText: string
+  visibleGeneration: number | null
+  nextText: string
+  nextGeneration: number
+  final: boolean
+  lastRenderedAt: number
+  now: number
+}) => input.nextGeneration !== input.visibleGeneration
+  || (
+    input.nextText !== input.visibleText
+    && (
+      input.final
+      || input.now - input.lastRenderedAt >= TRANSCRIPT_RENDER_INTERVAL_MS
+    )
+  )
+
 export class TranscriptBubbleView {
   readonly group = new Group()
 
@@ -45,6 +65,10 @@ export class TranscriptBubbleView {
 
   private visibleText = ''
 
+  private visibleGeneration: number | null = null
+
+  private lastRenderedAt = Number.NEGATIVE_INFINITY
+
   constructor() {
     this.group.name = 'assistant-transcript-bubble'
     this.group.visible = false
@@ -60,10 +84,22 @@ export class TranscriptBubbleView {
       && Boolean(snapshot.text)
       && scale > 0
     this.group.scale.setScalar(Math.max(0.001, scale))
-    if (snapshot.text === this.visibleText) {
+    if (!shouldRenderTranscriptTexture({
+      visibleText: this.visibleText,
+      visibleGeneration: this.visibleGeneration,
+      nextText: snapshot.text,
+      nextGeneration: snapshot.generation,
+      final: snapshot.final,
+      lastRenderedAt: this.lastRenderedAt,
+      now
+    })) {
       return
     }
     this.visibleText = snapshot.text
+    this.visibleGeneration = snapshot.generation
+    this.lastRenderedAt = snapshot.text
+      ? now
+      : Number.NEGATIVE_INFINITY
     this.surface.render({
       title: 'Codex',
       body: snapshot.text
