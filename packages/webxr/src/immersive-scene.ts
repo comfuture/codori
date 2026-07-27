@@ -127,7 +127,10 @@ export class ImmersiveScene {
       renderer: this.renderer,
       root: this.scene,
       getPanels: () => this.panels,
-      getControlTargets: () => this.controls.hitTargets,
+      getControlTargets: () => [
+        this.agentLight.hitTarget,
+        ...this.controls.hitTargets
+      ],
       onScroll: options.onPanelScroll,
       onPanelMoved: options.onPanelMoved,
       onAction: options.onAction
@@ -248,10 +251,6 @@ export class ImmersiveScene {
   setPanels(panels: readonly SpatialPanelSnapshot[]) {
     this.panelSnapshots = [...panels]
     this.syncPanelViews()
-  }
-
-  setVoiceActive(active: boolean) {
-    this.controls.setVoiceActive(active)
   }
 
   setStatus(message: string, error = false) {

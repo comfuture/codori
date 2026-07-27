@@ -38,7 +38,7 @@ export class VoiceRuntime {
     this.controller = createRealtimeConversationController({
       client: options.client
     })
-    this.fetch = options.fetch ?? globalThis.fetch
+    this.fetch = options.fetch ?? globalThis.fetch.bind(globalThis)
     this.snapshot = this.controller.getSnapshot()
     this.releaseController = this.controller.subscribe((snapshot) => {
       this.snapshot = snapshot
@@ -53,7 +53,6 @@ export class VoiceRuntime {
       if (
         snapshot.state === 'closed'
         || snapshot.state === 'error'
-        || snapshot.state === 'idle'
       ) {
         this.pendingMicrophone = false
       }
@@ -86,7 +85,6 @@ export class VoiceRuntime {
       return
     }
 
-    this.pendingMicrophone = true
     try {
       const response = await this.fetch(
         this.options.capabilitiesUrl ?? '/api/capabilities',
@@ -109,6 +107,7 @@ export class VoiceRuntime {
         this.pendingMicrophone = false
         return
       }
+      this.pendingMicrophone = true
       await this.controller.connect(this.options.threadId)
     } catch (error) {
       this.pendingMicrophone = false
