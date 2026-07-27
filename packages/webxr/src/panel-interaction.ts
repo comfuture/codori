@@ -1,5 +1,5 @@
 export type InteractionSourceId = string
-export type PanelHitZone = 'content' | 'grab'
+export type PanelHitZone = 'content' | 'grab' | 'dismiss'
 
 export type PanelHit = {
   panelId: string
@@ -98,6 +98,20 @@ export class PanelInteractionModel {
   sourceLost(sourceId: InteractionSourceId) {
     this.releaseGrab(sourceId)
     this.sources.delete(sourceId)
+  }
+
+  dismissPanel(panelId: string) {
+    for (const [sourceId, source] of this.sources.entries()) {
+      if (source.hover?.panelId === panelId) {
+        source.hover = null
+      }
+      if (source.selected?.panelId === panelId) {
+        source.selected = null
+      }
+      if (source.grabbedPanelId === panelId) {
+        this.releaseGrab(sourceId)
+      }
+    }
   }
 
   snapshot(): InteractionSnapshot {

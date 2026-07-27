@@ -47,6 +47,7 @@ export type ImmersiveSceneOptions = {
   onAction: (action: WorldControlAction) => void
   onPanelScroll: (panelId: string, deltaLines: number) => void
   onPanelMoved: (panelId: string, position: Vector3) => void
+  onPanelDismiss: (panelId: string) => void
 }
 
 const viewerPosition = new Vector3()
@@ -134,6 +135,7 @@ export class ImmersiveScene {
       ],
       onScroll: options.onPanelScroll,
       onPanelMoved: options.onPanelMoved,
+      onPanelDismiss: options.onPanelDismiss,
       onAction: options.onAction
     })
     this.renderer.setAnimationLoop((timestamp) => {

@@ -28,7 +28,7 @@ describe('spatial panel model', () => {
     expect(retained.text).toHaveLength(64)
   })
 
-  it('eases in, dwells three seconds after completion, then disappears', () => {
+  it('appears at start, then dwells one minute after completion', () => {
     const model = new SpatialPanelModel()
     model.upsert(panel(), 0)
     expect(model.snapshots()[0]?.phase).toBe('appearing')
@@ -41,11 +41,11 @@ describe('spatial panel model', () => {
       exitCode: 0
     }), 1_000)
     expect(model.snapshots()[0]?.phase).toBe('dwelling')
-    model.advance(3_999)
+    model.advance(60_999)
     expect(model.snapshots()[0]?.phase).toBe('dwelling')
-    model.advance(4_000)
+    model.advance(61_000)
     expect(model.snapshots()[0]?.phase).toBe('disappearing')
-    model.advance(4_250)
+    model.advance(61_250)
     expect(model.snapshots()).toHaveLength(0)
   })
 
@@ -58,11 +58,11 @@ describe('spatial panel model', () => {
 
     model.advance(250)
     expect(model.snapshots()[0]?.phase).toBe('dwelling')
-    model.advance(3_249)
+    model.advance(60_249)
     expect(model.snapshots()[0]?.phase).toBe('dwelling')
-    model.advance(3_250)
+    model.advance(60_250)
     expect(model.snapshots()[0]?.phase).toBe('disappearing')
-    model.advance(3_500)
+    model.advance(60_500)
     expect(model.snapshots()).toHaveLength(0)
 
     model.upsert(panel({
@@ -117,5 +117,27 @@ describe('spatial panel model', () => {
     model.scroll('command:1', 10)
     expect(model.snapshots()[0]?.autoFollow).toBe(true)
     expect(model.snapshots()[0]?.scrollOffset).toBe(Number.POSITIVE_INFINITY)
+  })
+
+  it('bursts a manually dismissed panel and never resurrects it', () => {
+    const model = new SpatialPanelModel()
+    model.upsert(panel(), 0)
+    model.advance(250)
+
+    expect(model.dismiss('command:1', 500)).toBe(true)
+    expect(model.snapshots()[0]?.phase).toBe('bursting')
+    expect(model.upsert(panel({
+      text: 'late output delta'
+    }), 550)).toBe(null)
+    model.advance(624)
+    expect(model.snapshots()).toHaveLength(1)
+    model.advance(625)
+    expect(model.snapshots()).toHaveLength(0)
+
+    expect(model.upsert(panel({
+      status: 'completed',
+      text: 'completed after dismissal'
+    }), 700)).toBe(null)
+    expect(model.snapshots()).toHaveLength(0)
   })
 })

@@ -483,6 +483,12 @@ export class WorkspaceRuntime {
     this.emit()
   }
 
+  dismissPanel(panelId: string) {
+    if (this.panelModel.dismiss(panelId, this.now())) {
+      this.emit()
+    }
+  }
+
   async dispose() {
     this.stopTimers()
     this.releaseNotification?.()

@@ -40,8 +40,8 @@ pnpm --filter @codori/webxr dev
 
 - The room is approximately `10 m × 10 m`.
 - On the first valid `local-floor` viewer pose, the agent light is placed about `2.4 m` in front of the horizontal head direction and at a clamped eye height.
-- The light's scale and local perceived-intensity modulation are centrally bounded below 5%.
-- Assistant feedback uses deterministic, smoothly varying micro-pulses in the requested rapid range. The effect is local to the small agent light; there is no full-field flash or headset-wide bloom.
+- The agent light is a larger, semi-transparent cyan/amber/violet assembly of intersecting oval volumes that continuously morph and rotate around a `70–80%` opacity core.
+- Assistant feedback uses deterministic rapid micro-pulses with a seeded, smoothly varying amplitude envelope. Speaking scale can travel approximately `±20%`, then eases back to its resting size when the utterance is final. Local perceived-intensity modulation remains bounded below 5%.
 - Browser `prefers-reduced-motion` and the entry-screen reduced-effects control replace rapid motion with lower-amplitude, slower animation.
 - WebXR Layers and hand tracking are optional. Base rendering uses the normal Three.js projection path.
 
@@ -55,6 +55,7 @@ Controller:
 - select-drag on panel content: scroll without a visible scrollbar
 - thumbstick vertical axis over content: scroll
 - squeeze or the panel header/border: grab and move
+- while grabbed, select the `×` control below the panel: dismiss it with a `125 ms` expanding particle burst
 - release: keep the panel at its chosen position for this XR session
 
 Tracked hand:
@@ -65,11 +66,11 @@ Tracked hand:
 
 Native and synthesized primary actions are de-duplicated. Competing grabs have one deterministic owner, and input-source loss releases hover/grab state.
 
-Select the central light to start or stop the voice session. The world-space `Exit` control remains available below the light, and the 2D fallback remains available before immersive entry.
+Select the central light to start or stop the voice session. A door-sized rounded `Exit` surface sits on the `10 m × 10 m` room boundary, beyond the agent light along the initial view direction. The 2D fallback remains available before immersive entry.
 
 ## Panel semantics and caps
 
-Foreground command, file-change, MCP, dynamic-tool, and web-search panels stay visible while active, dwell for three seconds after terminal completion, then shrink and dispose.
+Foreground command, file-change, MCP, dynamic-tool, and web-search panels appear on `item/started`, update continuously from progress/output deltas, stay visible while active, dwell for one minute after terminal completion, then shrink and dispose. A manually dismissed panel does not reappear when late deltas arrive.
 
 Agent background-terminal panels come only from the authoritative paginated `thread/backgroundTerminals/list` response and remain until absent from a complete response or explicitly terminated. They are not the user-created `command/exec` workspace terminals.
 
@@ -84,6 +85,6 @@ Growing output follows the live tail until manual scrolling. Later deltas preser
 
 ## Current validation boundary
 
-Automated tests cover session options/failure states, deterministic light bounds and reduced effects, transcript generation and five-second visibility, panel retention/lifetime/layout/scroll state, input ownership and source loss, shared notification adapters, `/xr/` server routing, and package builds.
+Automated tests cover session options/failure states, deterministic light bounds and reduced effects, transcript generation plus 30-second visibility and 250 ms scale transitions, streaming panel lifecycle plus 60-second dwell and 125 ms forced dismissal, panel retention/layout/scroll state, input ownership and source loss, shared notification adapters, `/xr/` server routing, and package builds.
 
 Real headset validation is still required before making device-specific support or performance claims. Record the headset OS, browser version, optional features granted, target refresh rate, median frame time, sustained worst frame-time band, text legibility, and a 15-minute mixed voice/tool memory observation for each supported device/browser combination.
