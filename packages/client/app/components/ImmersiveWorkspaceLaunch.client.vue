@@ -55,7 +55,8 @@ onBeforeUnmount(() => {
   >
     <UButton
       :href="href"
-      icon="i-lucide-glasses"
+      external
+      icon="i-hugeicons-vr-glasses"
       color="neutral"
       variant="ghost"
       square
