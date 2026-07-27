@@ -7,7 +7,10 @@ import {
   requestImmersiveSession
 } from './xr-capability'
 import type { ImmersiveScene } from './immersive-scene'
-import { VoiceRuntime } from './voice-runtime'
+import {
+  resolveImmersiveVoiceActivity,
+  VoiceRuntime
+} from './voice-runtime'
 import { WorkspaceRuntime } from './workspace-runtime'
 import './style.css'
 
@@ -105,7 +108,7 @@ const updateVoiceUi = (snapshot: RealtimeConversationSnapshot) => {
   immersiveScene?.setActivity(
     snapshot.state === 'error'
       ? 'error'
-      : snapshot.activity
+      : resolveImmersiveVoiceActivity(snapshot)
   )
 
   if (snapshot.autoplayBlocked) {

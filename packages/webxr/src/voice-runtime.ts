@@ -4,6 +4,7 @@ import {
   createRealtimeConversationController,
   type RealtimeConversationSnapshot
 } from '@codori/client/shared/realtime'
+import type { RealtimeVisualActivity } from './light-model'
 
 export type VoiceRuntimeOptions = {
   client: CodexRpcClient
@@ -18,6 +19,22 @@ const voiceSessionActive = (snapshot: RealtimeConversationSnapshot) =>
   || snapshot.state === 'starting'
   || snapshot.state === 'connected'
   || snapshot.state === 'stopping'
+
+export const resolveImmersiveVoiceActivity = (
+  snapshot: RealtimeConversationSnapshot
+): RealtimeVisualActivity => {
+  if (snapshot.activity !== 'speaking') {
+    return snapshot.activity
+  }
+  const latestAssistant = [...snapshot.transcripts].reverse().find(segment =>
+    segment.generation === snapshot.generation
+    && segment.role === 'assistant'
+  )
+  if (!latestAssistant?.final) {
+    return 'speaking'
+  }
+  return snapshot.microphoneEnabled ? 'listening' : 'idle'
+}
 
 export class VoiceRuntime {
   private readonly controller

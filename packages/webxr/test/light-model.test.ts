@@ -5,7 +5,7 @@ import {
 } from '../src/light-model'
 
 describe('agent light model', () => {
-  it('is deterministic and keeps scale and local intensity excursions below five percent', () => {
+  it('is deterministic and bounds scale and local intensity excursions', () => {
     for (const activity of [
       'idle',
       'transcribing',
@@ -26,8 +26,8 @@ describe('agent light model', () => {
           seed: 103
         })
         expect(first).toEqual(second)
-        expect(first.scale).toBeGreaterThanOrEqual(0.95)
-        expect(first.scale).toBeLessThanOrEqual(1.05)
+        expect(first.scale).toBeGreaterThanOrEqual(0.8)
+        expect(first.scale).toBeLessThanOrEqual(1.2)
       }
     }
 
@@ -78,6 +78,24 @@ describe('agent light model', () => {
     const range = (values: number[]) =>
       Math.max(...values) - Math.min(...values)
     expect(range(reducedScales)).toBeLessThan(range(normalScales) * 0.5)
+  })
+
+  it('varies speaking scale broadly and returns near its resting size', () => {
+    const speakingScales = Array.from({ length: 2_400 }, (_, step) =>
+      sampleAgentLight({
+        activity: 'speaking',
+        timeSeconds: step / 240,
+        seed: 103
+      }).scale
+    )
+    expect(Math.max(...speakingScales) - Math.min(...speakingScales))
+      .toBeGreaterThan(0.28)
+
+    const animator = new AgentLightAnimator(103, 0.55)
+    animator.setActivity('speaking', 0)
+    animator.sample(1)
+    animator.setActivity('listening', 1)
+    expect(Math.abs(animator.sample(1.7).scale - 1)).toBeLessThan(0.01)
   })
 
   it('keeps assistant micro-pulse peaks in the requested rapid range', () => {

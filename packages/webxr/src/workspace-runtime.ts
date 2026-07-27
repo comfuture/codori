@@ -372,8 +372,7 @@ export class WorkspaceRuntime {
         break
       }
       case 'thread/realtime/transcript/done': {
-        const role = (notification.params as { role?: unknown }).role
-        this.activity = role === 'assistant' ? 'speaking' : 'listening'
+        this.activity = 'listening'
         break
       }
       case 'thread/realtime/error':
