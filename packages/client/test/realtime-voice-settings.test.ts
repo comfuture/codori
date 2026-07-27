@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 /* eslint-disable vue/one-component-per-file */
 import { mount } from '@vue/test-utils'
-import { defineComponent, h } from 'vue'
+import { defineComponent } from 'vue'
 import { describe, expect, it } from 'vitest'
-import RealtimeVoicePicker from '../app/components/RealtimeVoicePicker.vue'
+import RealtimeVoiceSettings from '../app/components/RealtimeVoiceSettings.vue'
 import type {
   RealtimeSessionKind,
   RealtimeSessionState,
@@ -13,18 +13,15 @@ import type {
 } from '../app/composables/useRealtimeConversation'
 import type { RealtimeVoice } from '../shared/generated/codex-app-server/RealtimeVoice'
 
-const UPopoverStub = defineComponent({
-  setup(_props, { slots }) {
-    return () => h('div', [
-      slots.default?.(),
-      slots.content?.()
-    ])
-  }
-})
-
 const ButtonStub = defineComponent({
   inheritAttrs: false,
-  template: '<button v-bind="$attrs"><slot /></button>'
+  props: {
+    label: {
+      type: String,
+      default: ''
+    }
+  },
+  template: '<button v-bind="$attrs">{{ label }}<slot /></button>'
 })
 
 const TooltipStub = defineComponent({
@@ -35,7 +32,11 @@ const IconStub = defineComponent({
   template: '<i />'
 })
 
-type PickerProps = {
+const BadgeStub = defineComponent({
+  template: '<span><slot /></span>'
+})
+
+type SettingsProps = {
   capability: RealtimeCapability
   catalog: RealtimeVoiceCatalog
   selectedVoice?: RealtimeVoice
@@ -46,10 +47,10 @@ type PickerProps = {
   previewStatus: RealtimeVoicePreviewStatus
   previewError: string | null
   activeElsewhere: boolean
-  hasMaterializedThread: boolean
+  hasWorkspaceContext: boolean
 }
 
-const baseProps: PickerProps = {
+const baseProps: SettingsProps = {
   capability: {
     status: 'available',
     message: 'Realtime voice is available.'
@@ -68,28 +69,28 @@ const baseProps: PickerProps = {
   previewStatus: 'idle' as const,
   previewError: null,
   activeElsewhere: false,
-  hasMaterializedThread: true
+  hasWorkspaceContext: true
 }
 
-const mountPicker = (props: Partial<PickerProps> = {}) =>
-  mount(RealtimeVoicePicker, {
+const mountSettings = (props: Partial<SettingsProps> = {}) =>
+  mount(RealtimeVoiceSettings, {
     props: {
       ...baseProps,
       ...props
     },
     global: {
       stubs: {
-        UPopover: UPopoverStub,
         UButton: ButtonStub,
         UTooltip: TooltipStub,
-        UIcon: IconStub
+        UIcon: IconStub,
+        UBadge: BadgeStub
       }
     }
   })
 
-describe('RealtimeVoicePicker', () => {
+describe('RealtimeVoiceSettings', () => {
   it('keeps the Codex setting distinct from the protocol default', async () => {
-    const wrapper = mountPicker()
+    const wrapper = mountSettings()
 
     expect(wrapper.text()).toContain('Use Codex setting')
     expect(wrapper.text()).toContain('cove')
@@ -114,7 +115,7 @@ describe('RealtimeVoicePicker', () => {
   })
 
   it('offers exact accessible preview controls without microphone fallback', async () => {
-    const wrapper = mountPicker()
+    const wrapper = mountSettings()
 
     await wrapper.get('button[aria-label="Preview voice juniper"]').trigger('click')
     expect(wrapper.emitted('preview')?.at(-1)).toEqual(['juniper'])
@@ -131,7 +132,7 @@ describe('RealtimeVoicePicker', () => {
   })
 
   it('preserves and explains an unavailable saved choice', () => {
-    const wrapper = mountPicker({
+    const wrapper = mountSettings({
       savedVoice: 'shimmer'
     })
 
@@ -141,8 +142,8 @@ describe('RealtimeVoicePicker', () => {
       .toBe(true)
   })
 
-  it('disables preview during a normal session and for provisional threads', async () => {
-    const wrapper = mountPicker({
+  it('disables preview during a normal session and without a remembered thread', async () => {
+    const wrapper = mountSettings({
       sessionKind: 'conversation',
       sessionState: 'connected'
     })
@@ -153,28 +154,28 @@ describe('RealtimeVoicePicker', () => {
     await wrapper.setProps({
       sessionKind: null,
       sessionState: 'idle',
-      hasMaterializedThread: false
+      hasWorkspaceContext: false
     })
     expect(wrapper.text()).toContain('Open an existing thread')
+    expect(wrapper.text()).toContain('will not create a thread')
     expect(wrapper.get('button[aria-label="Preview voice cove"]').attributes('disabled'))
       .toBeDefined()
   })
 
   it('explains why voice discovery is unavailable', () => {
-    const wrapper = mountPicker({
+    const wrapper = mountSettings({
       capability: {
         status: 'disabled',
         message: 'Experimental realtime voice is disabled in Codori.'
       }
     })
 
-    expect(wrapper.get('button[aria-label="Choose realtime voice"]').attributes('disabled'))
-      .toBeDefined()
     expect(wrapper.text()).toContain('disabled in Codori')
+    expect(wrapper.find('fieldset').exists()).toBe(false)
   })
 
   it('offers an explicit discovery retry and avoids a premature stale warning', async () => {
-    const loading = mountPicker({
+    const loading = mountSettings({
       catalog: {
         status: 'loading',
         voices: [],
@@ -185,7 +186,7 @@ describe('RealtimeVoicePicker', () => {
     })
     expect(loading.text()).not.toContain('not advertised')
 
-    const failed = mountPicker({
+    const failed = mountSettings({
       catalog: {
         status: 'error',
         voices: [],
