@@ -32,7 +32,7 @@ describe('spatial panel model', () => {
     const model = new SpatialPanelModel()
     model.upsert(panel(), 0)
     expect(model.snapshots()[0]?.phase).toBe('appearing')
-    model.advance(420)
+    model.advance(250)
     expect(model.snapshots()[0]?.phase).toBe('visible')
 
     model.upsert(panel({
@@ -45,7 +45,7 @@ describe('spatial panel model', () => {
     expect(model.snapshots()[0]?.phase).toBe('dwelling')
     model.advance(4_000)
     expect(model.snapshots()[0]?.phase).toBe('disappearing')
-    model.advance(4_420)
+    model.advance(4_250)
     expect(model.snapshots()).toHaveLength(0)
   })
 
@@ -56,13 +56,13 @@ describe('spatial panel model', () => {
       text: 'failed before the started notification arrived'
     }), 0)
 
-    model.advance(420)
+    model.advance(250)
     expect(model.snapshots()[0]?.phase).toBe('dwelling')
-    model.advance(3_419)
+    model.advance(3_249)
     expect(model.snapshots()[0]?.phase).toBe('dwelling')
-    model.advance(3_420)
+    model.advance(3_250)
     expect(model.snapshots()[0]?.phase).toBe('disappearing')
-    model.advance(3_840)
+    model.advance(3_500)
     expect(model.snapshots()).toHaveLength(0)
 
     model.upsert(panel({
@@ -85,19 +85,19 @@ describe('spatial panel model', () => {
 
     model.reconcileBackground([], 10_001)
     expect(model.snapshots()[0]?.phase).toBe('disappearing')
-    model.advance(10_421)
+    model.advance(10_251)
     expect(model.snapshots()).toHaveLength(0)
   })
 
   it('removes foreground panels when authoritative classification changes', () => {
     const model = new SpatialPanelModel()
     model.reconcileForeground([panel()], 0)
-    model.advance(420)
+    model.advance(250)
     expect(model.snapshots()[0]?.phase).toBe('visible')
 
     model.reconcileForeground([], 500)
     expect(model.snapshots()[0]?.phase).toBe('disappearing')
-    model.advance(920)
+    model.advance(750)
     expect(model.snapshots()).toHaveLength(0)
   })
 

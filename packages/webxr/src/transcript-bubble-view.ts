@@ -1,6 +1,30 @@
 import { Group } from 'three'
-import type { TranscriptBubbleSnapshot } from './transcript-bubble-model'
+import { TRANSCRIPT_ANIMATION_MS } from './config'
+import type {
+  TranscriptBubblePhase,
+  TranscriptBubbleSnapshot
+} from './transcript-bubble-model'
 import { CanvasTextSurface } from './text-surface'
+
+const easeOutCubic = (value: number) => 1 - ((1 - value) ** 3)
+
+export const resolveTranscriptBubbleScale = (
+  phase: TranscriptBubblePhase,
+  elapsedMs: number
+) => {
+  if (phase === 'hidden') {
+    return 0
+  }
+  if (phase === 'visible') {
+    return 1
+  }
+  const progress = Math.min(
+    1,
+    Math.max(0, elapsedMs) / TRANSCRIPT_ANIMATION_MS
+  )
+  const eased = easeOutCubic(progress)
+  return phase === 'appearing' ? eased : 1 - eased
+}
 
 export class TranscriptBubbleView {
   readonly group = new Group()
@@ -27,8 +51,15 @@ export class TranscriptBubbleView {
     this.group.add(this.surface.mesh)
   }
 
-  update(snapshot: TranscriptBubbleSnapshot) {
-    this.group.visible = snapshot.open && Boolean(snapshot.text)
+  update(snapshot: TranscriptBubbleSnapshot, now: number) {
+    const scale = resolveTranscriptBubbleScale(
+      snapshot.phase,
+      now - snapshot.phaseStartedAt
+    )
+    this.group.visible = snapshot.open
+      && Boolean(snapshot.text)
+      && scale > 0
+    this.group.scale.setScalar(Math.max(0.001, scale))
     if (snapshot.text === this.visibleText) {
       return
     }
