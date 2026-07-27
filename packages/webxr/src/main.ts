@@ -55,6 +55,21 @@ let returningTo2d = false
 let voiceRequested = false
 let lastWorkspaceError: string | null = null
 
+const disposeConnectedRuntimes = async () => {
+  releaseWorkspace?.()
+  releaseWorkspace = null
+  releaseVoice?.()
+  releaseVoice = null
+  const voice = voiceRuntime
+  const workspace = workspaceRuntime
+  voiceRuntime = null
+  workspaceRuntime = null
+  await Promise.allSettled([
+    voice?.dispose(),
+    workspace?.dispose()
+  ].filter((task): task is Promise<void> => Boolean(task)))
+}
+
 const sessionActive = (snapshot: RealtimeConversationSnapshot) =>
   snapshot.state === 'requesting-permission'
   || snapshot.state === 'creating-offer'
@@ -191,8 +206,9 @@ const startWorkspaceRuntime = async () => {
     })
     voiceRuntime = voice
     releaseVoice = voice.subscribe(updateVoiceUi)
-  })().catch((error) => {
+  })().catch(async (error) => {
     startingRuntime = null
+    await disposeConnectedRuntimes()
     throw error
   })
   return await startingRuntime
@@ -408,14 +424,7 @@ window.addEventListener('pagehide', () => {
   immersiveScene?.dispose()
   immersiveScene = null
   immersiveScenePromise = null
-  releaseWorkspace?.()
-  releaseWorkspace = null
-  releaseVoice?.()
-  releaseVoice = null
-  void voiceRuntime?.dispose()
-  voiceRuntime = null
-  void workspaceRuntime?.dispose()
-  workspaceRuntime = null
+  void disposeConnectedRuntimes()
 }, { once: true })
 
 showEntry()
