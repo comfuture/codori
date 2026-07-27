@@ -11,6 +11,12 @@ import {
   resolveRealtimeVoiceAvatarWidth,
   resolveRealtimeVoiceCompanionEntries
 } from '../utils/realtime-voice-companion'
+import {
+  createTranscriptVisibilityState,
+  expireTranscriptVisibility,
+  reconcileTranscriptVisibility,
+  type TranscriptVisibilityState
+} from '~~/shared/realtime-transcript'
 import type { ServerAvatarMetadata } from '~~/shared/server-avatar'
 
 const props = defineProps<{
@@ -27,7 +33,7 @@ const bubbleOpen = ref(false)
 const avatarWidth = ref(64)
 const latestAnnouncement = ref('')
 let closeTimer: ReturnType<typeof setTimeout> | null = null
-let closeGeneration = 0
+let visibilityState: TranscriptVisibilityState = createTranscriptVisibilityState(props.generation)
 let announcementGeneration = props.generation
 const announcedFinalSegments = new Set<number>()
 
@@ -63,7 +69,7 @@ const clearCloseTimer = () => {
 
 const closeBubble = () => {
   clearCloseTimer()
-  closeGeneration += 1
+  visibilityState = createTranscriptVisibilityState(props.generation)
   bubbleOpen.value = false
 }
 
@@ -75,25 +81,25 @@ const updateBubbleOpen = (open: boolean) => {
 
 watch(
   [active, () => props.generation, transcriptSignature],
-  ([isActive, generation, signature]) => {
+  ([isActive, generation]) => {
     clearCloseTimer()
-    const timerGeneration = ++closeGeneration
-    if (!isActive || !signature) {
-      bubbleOpen.value = false
+    visibilityState = reconcileTranscriptVisibility(visibilityState, {
+      active: isActive,
+      segments: props.transcripts,
+      generation,
+      roles: ['user', 'assistant'],
+      nowMs: Date.now()
+    })
+    bubbleOpen.value = visibilityState.visible
+    if (visibilityState.hideAtMs === null) {
       return
     }
 
-    bubbleOpen.value = true
     closeTimer = setTimeout(() => {
-      if (
-        timerGeneration === closeGeneration
-        && props.generation === generation
-        && active.value
-      ) {
-        bubbleOpen.value = false
-        closeTimer = null
-      }
-    }, 5000)
+      visibilityState = expireTranscriptVisibility(visibilityState, Date.now())
+      bubbleOpen.value = visibilityState.visible
+      closeTimer = null
+    }, Math.max(0, visibilityState.hideAtMs - Date.now()))
   },
   { immediate: true }
 )

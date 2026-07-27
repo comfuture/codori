@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { useRouter } from '#imports'
+import { useRoute, useRouter } from '#imports'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import WorkspaceFilesPanel from './WorkspaceFilesPanel.vue'
 import { useChats } from '../composables/useChats'
@@ -16,6 +16,7 @@ import {
 const props = defineProps<{
   chatId?: string | null
 }>()
+const route = useRoute()
 const router = useRouter()
 const {
   chats,
@@ -236,6 +237,12 @@ watch(
           </template>
           <template #right>
             <div class="flex items-center gap-1.5 lg:gap-2">
+              <ImmersiveWorkspaceLaunch
+                v-if="chatId && selectedChat?.threadId"
+                :workspace="{ kind: 'chat', id: chatId }"
+                :thread-id="selectedChat.threadId"
+                :return-to="route.fullPath"
+              />
               <WorkspaceFilesPanel
                 v-if="chatId"
                 :workspace="{ kind: 'chat', id: chatId }"
