@@ -1,0 +1,89 @@
+# `@codori/webxr`
+
+`@codori/webxr` is Codori's independently built immersive coding workspace. It uses native WebXR through Three.js and consumes the same headless RPC, realtime transcript, tool-item, background-terminal, ANSI, and workspace identity contracts as the normal `@codori/client` dashboard.
+
+The package is a progressive enhancement. The existing dashboard remains the primary fallback and is not mounted, scraped, or rasterized into the XR scene.
+
+## Requirements
+
+- A secure context. `https://` is required on a remote headset; the browser's `localhost` exception does not apply to a plain LAN IP.
+- A browser reporting `navigator.xr.isSessionSupported('immersive-vr')`.
+- A materialized Codori project or projectless-chat thread.
+- The Codori server started with realtime voice enabled if voice controls are required.
+
+The entry screen checks support without user-agent sniffing. `requestSession('immersive-vr')` and microphone access occur only after explicit user actions.
+
+## Development
+
+```bash
+pnpm --filter @codori/webxr dev
+pnpm --filter @codori/webxr lint
+pnpm --filter @codori/webxr typecheck
+pnpm --filter @codori/webxr test
+pnpm --filter @codori/webxr build
+```
+
+Vite serves the app with `/xr/` as its production base. The bundled Codori server serves the result at `/xr/`, including nested route fallback and `/xr/assets/*`.
+
+During local development, the non-immersive scene preview is exposed only by the Vite development build with `?debug=1`. It is a layout/input diagnostic, not a successful immersive session and is not offered by production builds.
+
+Vite proxies `/api` HTTP and WebSocket traffic to
+`http://127.0.0.1:4310` by default. Point it at another running Codori server
+when needed:
+
+```bash
+CODORI_WEBXR_DEV_SERVER=http://127.0.0.1:4311 \
+pnpm --filter @codori/webxr dev
+```
+
+## Scene and comfort
+
+- The room is approximately `10 m × 10 m`.
+- On the first valid `local-floor` viewer pose, the agent light is placed about `2.4 m` in front of the horizontal head direction and at a clamped eye height.
+- The light's scale and local perceived-intensity modulation are centrally bounded below 5%.
+- Assistant feedback uses deterministic, smoothly varying micro-pulses in the requested rapid range. The effect is local to the small agent light; there is no full-field flash or headset-wide bloom.
+- Browser `prefers-reduced-motion` and the entry-screen reduced-effects control replace rapid motion with lower-amplitude, slower animation.
+- WebXR Layers and hand tracking are optional. Base rendering uses the normal Three.js projection path.
+
+Users sensitive to motion or flicker should enable reduced effects before entering XR and exit immediately if uncomfortable.
+
+## Controls
+
+Controller:
+
+- target ray: hover and select controls or panel content
+- select-drag on panel content: scroll without a visible scrollbar
+- thumbstick vertical axis over content: scroll
+- squeeze or the panel header/border: grab and move
+- release: keep the panel at its chosen position for this XR session
+
+Tracked hand:
+
+- platform primary select: activate or scroll
+- index/thumb pinch: synthesized select/grab fallback when native select is not emitted
+- opening the pinch: release
+
+Native and synthesized primary actions are de-duplicated. Competing grabs have one deterministic owner, and input-source loss releases hover/grab state.
+
+The world-space `Start voice` / `Stop voice` and `Exit` controls remain available below the central light. The 2D fallback remains available before immersive entry.
+
+## Panel semantics and caps
+
+Foreground command, file-change, MCP, dynamic-tool, and web-search panels stay visible while active, dwell for three seconds after terminal completion, then shrink and dispose.
+
+Agent background-terminal panels come only from the authoritative paginated `thread/backgroundTerminals/list` response and remain until absent from a complete response or explicitly terminated. They are not the user-created `command/exec` workspace terminals.
+
+Resource caps:
+
+- 8 simultaneously rendered panels; deterministic overflow remains queued in the model
+- 32,000 retained output characters per panel with a visible truncation marker
+- 2,048 pixels maximum on either text-canvas edge
+- pooled light flare objects and no per-frame light-object allocation
+
+Growing output follows the live tail until manual scrolling. Later deltas preserve the manual reading position until the user returns to the tail.
+
+## Current validation boundary
+
+Automated tests cover session options/failure states, deterministic light bounds and reduced effects, transcript generation and five-second visibility, panel retention/lifetime/layout/scroll state, input ownership and source loss, shared notification adapters, `/xr/` server routing, and package builds.
+
+Real headset validation is still required before making device-specific support or performance claims. Record the headset OS, browser version, optional features granted, target refresh rate, median frame time, sustained worst frame-time band, text legibility, and a 15-minute mixed voice/tool memory observation for each supported device/browser combination.
