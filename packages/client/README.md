@@ -27,12 +27,14 @@ inactivity. The avatar stays visible for the session and is viewport-bounded to
 64–88 pixels wide instead of using the source sprite cell size.
 
 The composer keeps transient microphone, output, stop, and live-status
-controls. `/settings/voice` loads the runtime's V3-compatible voices from the
-most recently used materialized workspace. Its default omits the per-session
-voice override, while an explicit selection is persisted only in browser
-storage and applies to the next conversation. Receive-only previews are
-limited to existing threads, never request microphone access or create turns,
-and share the single global audio owner with normal realtime conversations.
+controls. `/settings/voice` lists Codex-compatible voices even without a
+materialized workspace. Its default omits the per-session voice override,
+while an explicit selection is persisted only in browser storage and applies
+to the next conversation. Nine compact Opus samples provide local previews
+without requesting microphone access or creating threads or turns. Voice
+instructions start from the root-level
+`experimental_realtime_ws_backend_prompt` Codex setting and can be overridden
+for this browser under `codori:realtime-voice-prompt:v1`.
 
 The application sidebar links to a routed Settings workspace. Notifications,
 Voice, and Backend have separate URLs, while `/settings` redirects to

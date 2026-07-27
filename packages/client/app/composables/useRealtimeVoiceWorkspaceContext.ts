@@ -5,6 +5,7 @@ export type RealtimeVoiceWorkspaceContext = {
   workspace: RpcWorkspace
   workspaceKey: string
   threadId: string
+  cwd: string | null
 }
 
 const rememberedContext = shallowRef<RealtimeVoiceWorkspaceContext | null>(null)
@@ -19,7 +20,8 @@ export const rememberRealtimeVoiceWorkspaceContext = (
   rememberedContext.value = {
     workspace: { ...context.workspace },
     workspaceKey: context.workspaceKey,
-    threadId: context.threadId
+    threadId: context.threadId,
+    cwd: context.cwd
   }
 }
 

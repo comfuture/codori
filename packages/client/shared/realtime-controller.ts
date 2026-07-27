@@ -103,6 +103,7 @@ const REPLACEMENT_CLOSE_TIMEOUT_MS = 1_500
 
 export type RealtimeConnectOptions = {
   voice?: RealtimeVoice
+  prompt?: string
   kind?: RealtimeSessionKind
   previewText?: string
   previewTimeoutMs?: number
@@ -1001,6 +1002,9 @@ export const createRealtimeConversationController = (
           outputModality: 'audio',
           version: 'v3',
           ...(connectOptions.voice ? { voice: connectOptions.voice } : {}),
+          ...(nextSessionKind === 'conversation' && connectOptions.prompt !== undefined
+            ? { prompt: connectOptions.prompt }
+            : {}),
           ...(nextSessionKind === 'preview'
             ? {
                 includeStartupContext: false,
