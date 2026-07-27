@@ -197,6 +197,93 @@ describe('immersive workspace runtime', () => {
     now = 3_000
     runtime.dismissPanel('command-1')
     expect(runtime.snapshot().panels[0]?.phase).toBe('bursting')
+
+    notificationListener({
+      method: 'item/started',
+      params: {
+        threadId,
+        turnId: 'turn-1',
+        startedAtMs: now,
+        item: {
+          type: 'fileChange',
+          id: 'file-1',
+          changes: [],
+          status: 'inProgress'
+        }
+      }
+    } as CodexRpcNotification)
+    expect(
+      runtime.snapshot().panels.filter(panel =>
+        panel.kind === 'file-change'
+      )
+    ).toHaveLength(0)
+
+    now = 3_100
+    notificationListener({
+      method: 'item/fileChange/patchUpdated',
+      params: {
+        threadId,
+        turnId: 'turn-1',
+        itemId: 'file-1',
+        changes: [{
+          path: 'src/app.ts',
+          kind: { type: 'update', move_path: null },
+          diff: '@@ -1 +1 @@\n-old\n+new'
+        }]
+      }
+    } as CodexRpcNotification)
+    expect(
+      runtime.snapshot().panels.filter(panel =>
+        panel.kind === 'file-change'
+      )
+    ).toEqual([expect.objectContaining({
+      id: 'file:src%2Fapp.ts',
+      sourceId: 'file-1',
+      title: 'src/app.ts',
+      text: '',
+      fileChange: expect.objectContaining({
+        kind: 'update'
+      })
+    })])
+
+    notificationListener({
+      method: 'item/started',
+      params: {
+        threadId,
+        turnId: 'turn-1',
+        startedAtMs: now,
+        item: {
+          type: 'fileChange',
+          id: 'file-2',
+          changes: [],
+          status: 'inProgress'
+        }
+      }
+    } as CodexRpcNotification)
+    now = 3_200
+    notificationListener({
+      method: 'item/fileChange/patchUpdated',
+      params: {
+        threadId,
+        turnId: 'turn-1',
+        itemId: 'file-2',
+        changes: [{
+          path: 'src/app.ts',
+          kind: { type: 'update', move_path: null },
+          diff: '@@ -1 +1 @@\n-new\n+newer'
+        }]
+      }
+    } as CodexRpcNotification)
+    const filePanels = runtime.snapshot().panels.filter(panel =>
+      panel.kind === 'file-change'
+    )
+    expect(filePanels).toHaveLength(1)
+    expect(filePanels[0]).toMatchObject({
+      id: 'file:src%2Fapp.ts',
+      sourceId: 'file-2',
+      phase: 'appearing',
+      fileTransitionStartedAt: 3_200
+    })
     await runtime.dispose()
   })
 })

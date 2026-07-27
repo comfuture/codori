@@ -5,6 +5,7 @@ import {
   type WebSearchStatus
 } from './codex-chat'
 import type { CodexRpcNotification } from './codex-rpc'
+import type { FileUpdateChange } from './generated/codex-app-server/v2/FileUpdateChange'
 import type { ThreadItem } from './generated/codex-app-server/v2/ThreadItem'
 
 export const DEFAULT_TOOL_OUTPUT_CHARACTER_LIMIT = 64 * 1024
@@ -38,6 +39,7 @@ export type ToolItemPresentation = {
   cwd: string | null
   exitCode: number | null
   truncated: boolean
+  fileChanges: FileUpdateChange[]
 }
 
 export type ToolItemState = {
@@ -138,6 +140,12 @@ const mergeCompletedToolData = (
   if (previous?.kind === 'file_change' && authoritative.kind === 'file_change') {
     return {
       ...authoritative,
+      item: {
+        ...authoritative.item,
+        changes: authoritative.item.changes.length > 0
+          ? authoritative.item.changes
+          : previous.item.changes
+      },
       liveOutput: previous.liveOutput
     }
   }
@@ -173,9 +181,25 @@ export const reduceToolItemDataNotification = (
     itemId?: string
     delta?: string
     message?: string
+    changes?: FileUpdateChange[]
   }
   if (!params.itemId) {
     return null
+  }
+
+  if (notification.method === 'item/fileChange/patchUpdated') {
+    const base = current?.kind === 'file_change'
+      ? current
+      : createFallbackFileChangeItemData(params.itemId)
+    return {
+      kind: 'file_change',
+      item: {
+        ...base.item,
+        changes: params.changes ?? base.item.changes,
+        status: 'inProgress'
+      },
+      liveOutput: base.liveOutput
+    }
   }
 
   if (notification.method === 'item/commandExecution/outputDelta') {
@@ -429,7 +453,13 @@ export const normalizeToolItemPresentation = (
     processId,
     cwd,
     exitCode,
-    truncated: bounded.truncated
+    truncated: bounded.truncated,
+    fileChanges: data.kind === 'file_change'
+      ? data.item.changes.map(change => ({
+          ...change,
+          kind: { ...change.kind }
+        }))
+      : []
   }
 }
 

@@ -96,7 +96,7 @@ const presentationKind = (
   }
 }
 
-const toolPanel = (
+const baseToolPanel = (
   presentation: ToolItemPresentation
 ): SpatialPanelInput => ({
   id: presentation.id,
@@ -108,6 +108,39 @@ const toolPanel = (
   exitCode: presentation.exitCode,
   background: false
 })
+
+const filePanelId = (path: string) =>
+  `file:${encodeURIComponent(path)}`
+
+const toolPanels = (
+  presentation: ToolItemPresentation
+): SpatialPanelInput[] => {
+  if (presentation.kind !== 'file_change') {
+    return [baseToolPanel(presentation)]
+  }
+  if (presentation.fileChanges.length === 0) {
+    return []
+  }
+  return presentation.fileChanges.map((change) => {
+    const movePath = change.kind.type === 'update'
+      ? change.kind.move_path
+      : null
+    const path = movePath || change.path
+    return {
+      ...baseToolPanel(presentation),
+      id: filePanelId(path),
+      sourceId: presentation.id,
+      title: path,
+      text: '',
+      fileChange: {
+        sourceId: presentation.id,
+        path,
+        kind: change.kind.type,
+        diff: change.diff
+      }
+    }
+  })
+}
 
 const backgroundPanel = (
   terminal: BackgroundTerminalModel,
@@ -293,10 +326,25 @@ export class WorkspaceRuntime {
     const backgroundItemIds = new Set(
       this.backgroundTerminals.map(terminal => terminal.itemId)
     )
+    const foregroundPanels: SpatialPanelInput[] = []
+    const latestFilePanels = new Map<string, SpatialPanelInput>()
+    for (const presentation of presentations) {
+      if (backgroundItemIds.has(presentation.id)) {
+        continue
+      }
+      for (const panel of toolPanels(presentation)) {
+        if (panel.fileChange) {
+          latestFilePanels.set(panel.id, panel)
+        } else {
+          foregroundPanels.push(panel)
+        }
+      }
+    }
     this.panelModel.reconcileForeground(
-      presentations
-        .filter(presentation => !backgroundItemIds.has(presentation.id))
-        .map(toolPanel),
+      [
+        ...foregroundPanels,
+        ...latestFilePanels.values()
+      ],
       now
     )
     this.syncBackgroundPanels(presentations, now)

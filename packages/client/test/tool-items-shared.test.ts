@@ -120,6 +120,43 @@ describe('shared tool notification reducer', () => {
     ])
   })
 
+  it('streams structured file patches before completion', () => {
+    let store = reduceToolItemNotification(
+      createToolItemStore(),
+      rpcNotification('item/started', {
+        threadId: 'thread-1',
+        item: {
+          type: 'fileChange',
+          id: 'file-1',
+          changes: [],
+          status: 'inProgress'
+        }
+      })
+    )
+    store = reduceToolItemNotification(
+      store,
+      rpcNotification('item/fileChange/patchUpdated', {
+        threadId: 'thread-1',
+        itemId: 'file-1',
+        changes: [{
+          path: 'src/app.ts',
+          kind: { type: 'update', move_path: null },
+          diff: '@@ -1 +1 @@\n-old\n+new'
+        }]
+      })
+    )
+
+    expect(normalizeToolItemPresentations(store)[0]).toMatchObject({
+      id: 'file-1',
+      title: 'src/app.ts',
+      status: 'running',
+      fileChanges: [{
+        path: 'src/app.ts',
+        kind: { type: 'update', move_path: null }
+      }]
+    })
+  })
+
   it('preserves latest output within a visible bounded tail', () => {
     const store = reduceToolItemNotification(createToolItemStore(), rpcNotification(
       'item/commandExecution/outputDelta',
