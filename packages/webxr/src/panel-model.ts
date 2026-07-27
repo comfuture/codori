@@ -4,6 +4,7 @@ import {
   PANEL_ANIMATION_MS,
   PANEL_FORCE_DISMISS_MS
 } from './config'
+import type { FilePanelChange } from './file-change-visual'
 
 export type SpatialPanelKind =
   | 'command'
@@ -36,6 +37,8 @@ export type SpatialPanelInput = {
   cwd?: string | null
   exitCode?: number | null
   background: boolean
+  sourceId?: string
+  fileChange?: FilePanelChange | null
 }
 
 export type SpatialPanelSnapshot = SpatialPanelInput & {
@@ -47,12 +50,26 @@ export type SpatialPanelSnapshot = SpatialPanelInput & {
   autoFollow: boolean
   userMoved: boolean
   slot: number | null
+  fileTransitionStartedAt: number
 }
 
 const isTerminalStatus = (status: SpatialPanelStatus) =>
   status === 'completed'
   || status === 'failed'
   || status === 'declined'
+
+const sourceKey = (input: Pick<SpatialPanelInput, 'id' | 'sourceId'>) =>
+  `${input.id}\u0000${input.sourceId ?? input.id}`
+
+const fileChangeSignature = (change?: FilePanelChange | null) =>
+  change
+    ? [
+        change.sourceId,
+        change.path,
+        change.kind,
+        change.diff
+      ].join('\u0000')
+    : ''
 
 export const retainBoundedOutput = (
   text: string,
@@ -89,15 +106,20 @@ export class SpatialPanelModel {
   private readonly manuallyDismissed = new Set<string>()
 
   upsert(input: SpatialPanelInput, now: number) {
-    if (this.manuallyDismissed.has(input.id)) {
+    const revisionKey = sourceKey(input)
+    if (this.manuallyDismissed.has(revisionKey)) {
       return null
     }
     const terminal = isTerminalStatus(input.status)
-    if (!input.background && terminal && this.retiredForeground.has(input.id)) {
+    if (
+      !input.background
+      && terminal
+      && this.retiredForeground.has(revisionKey)
+    ) {
       return null
     }
     if (input.background || !terminal) {
-      this.retiredForeground.delete(input.id)
+      this.retiredForeground.delete(revisionKey)
     }
     const retained = retainBoundedOutput(input.text)
     const existing = this.panels.get(input.id)
@@ -111,7 +133,8 @@ export class SpatialPanelModel {
         scrollOffset: Number.POSITIVE_INFINITY,
         autoFollow: true,
         userMoved: false,
-        slot: null
+        slot: null,
+        fileTransitionStartedAt: now
       }
       this.panels.set(input.id, panel)
       return { ...panel }
@@ -119,14 +142,23 @@ export class SpatialPanelModel {
 
     const nextTerminal = isTerminalStatus(input.status)
     const wasTerminal = isTerminalStatus(existing.status)
-    const phase = !input.background && nextTerminal && !wasTerminal
+    const sourceChanged = sourceKey(existing) !== revisionKey
+    const phase = sourceChanged && !input.background
+      ? nextTerminal
+        ? 'dwelling'
+        : existing.phase === 'appearing'
+          ? 'appearing'
+          : 'visible'
+      : !input.background && nextTerminal && !wasTerminal
       ? 'dwelling'
       : existing.phase === 'disappearing' && !nextTerminal
         ? 'appearing'
         : existing.phase
-    const phaseStartedAt = phase === existing.phase
-      ? existing.phaseStartedAt
-      : now
+    const phaseStartedAt = sourceChanged
+      ? now
+      : phase === existing.phase
+        ? existing.phaseStartedAt
+        : now
     const panel: SpatialPanelSnapshot = {
       ...existing,
       ...input,
@@ -136,7 +168,13 @@ export class SpatialPanelModel {
       phaseStartedAt,
       scrollOffset: existing.autoFollow
         ? Number.POSITIVE_INFINITY
-        : existing.scrollOffset
+        : existing.scrollOffset,
+      fileTransitionStartedAt: (
+        fileChangeSignature(existing.fileChange)
+        === fileChangeSignature(input.fileChange)
+      )
+        ? existing.fileTransitionStartedAt
+        : now
     }
     this.panels.set(input.id, panel)
     return { ...panel }
@@ -249,7 +287,7 @@ export class SpatialPanelModel {
     if (!panel || panel.phase === 'bursting') {
       return false
     }
-    this.manuallyDismissed.add(id)
+    this.manuallyDismissed.add(sourceKey(panel))
     this.panels.set(id, {
       ...panel,
       phase: 'bursting',
@@ -291,7 +329,7 @@ export class SpatialPanelModel {
       }
       if (panel.phase === 'disappearing' && age >= PANEL_ANIMATION_MS) {
         if (!panel.background && isTerminalStatus(panel.status)) {
-          this.retiredForeground.add(id)
+          this.retiredForeground.add(sourceKey(panel))
         }
         this.panels.delete(id)
       }

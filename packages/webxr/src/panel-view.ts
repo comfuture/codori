@@ -18,6 +18,7 @@ import {
   PANEL_FORCE_DISMISS_MS,
   PANEL_INITIAL_SIZE_METERS
 } from './config'
+import { resolveFileChangeFrame } from './file-change-visual'
 import type {
   SpatialPanelPhase,
   SpatialPanelSnapshot
@@ -152,6 +153,10 @@ export class SpatialPanelView {
 
   private grabbed = false
 
+  private lastRenderedContent = ''
+
+  private animationNow = 0
+
   constructor(snapshot: SpatialPanelSnapshot) {
     this.snapshot = snapshot
     this.group.name = `panel:${snapshot.id}`
@@ -250,23 +255,55 @@ export class SpatialPanelView {
 
   update(snapshot: SpatialPanelSnapshot) {
     this.snapshot = snapshot
-    const body = [
-      snapshot.cwd ? `cwd: ${snapshot.cwd}` : null,
-      snapshot.retainedText,
-      snapshot.exitCode == null ? null : `\nexit: ${snapshot.exitCode}`
-    ].filter((value): value is string => value != null).join('\n')
+    this.animationNow = Math.max(
+      this.animationNow,
+      snapshot.fileTransitionStartedAt
+    )
+    this.renderContent(this.animationNow)
+  }
+
+  private renderContent(now: number) {
+    const snapshot = this.snapshot
+    const body = snapshot.fileChange
+      ? resolveFileChangeFrame({
+          change: snapshot.fileChange,
+          elapsedMs: Math.max(
+            0,
+            now - snapshot.fileTransitionStartedAt
+          )
+        })
+      : [
+          snapshot.cwd ? `cwd: ${snapshot.cwd}` : null,
+          snapshot.retainedText,
+          snapshot.exitCode == null ? null : `\nexit: ${snapshot.exitCode}`
+        ].filter((value): value is string => value != null).join('\n')
+    const scrollLine = snapshot.fileChange || snapshot.autoFollow
+      ? undefined
+      : snapshot.scrollOffset
+    const signature = [
+      snapshot.title,
+      snapshot.status,
+      body,
+      scrollLine ?? ''
+    ].join('\u0000')
+    if (signature === this.lastRenderedContent) {
+      return
+    }
+    this.lastRenderedContent = signature
     this.surface.render({
       title: snapshot.title,
       status: statusLabel(snapshot.status),
       body,
       ansi: true,
-      scrollLine: snapshot.autoFollow
-        ? undefined
-        : snapshot.scrollOffset
+      scrollLine
     })
   }
 
   updateAnimation(now: number) {
+    this.animationNow = now
+    if (this.snapshot.fileChange) {
+      this.renderContent(now)
+    }
     const elapsed = Math.max(0, now - this.snapshot.phaseStartedAt)
     const visual = resolvePanelVisualState(
       this.snapshot.phase,

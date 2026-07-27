@@ -140,4 +140,33 @@ describe('spatial panel model', () => {
     }), 700)).toBe(null)
     expect(model.snapshots()).toHaveLength(0)
   })
+
+  it('reuses a file-path singleton for later edits after dismissal', () => {
+    const model = new SpatialPanelModel()
+    const filePanel = (sourceId: string): SpatialPanelInput => panel({
+      id: 'file:src%2Fapp.ts',
+      sourceId,
+      kind: 'file-change',
+      title: 'src/app.ts',
+      text: '',
+      fileChange: {
+        sourceId,
+        path: 'src/app.ts',
+        kind: 'update',
+        diff: '@@ -1 +1 @@\n-old\n+new'
+      }
+    })
+    model.upsert(filePanel('edit-1'), 0)
+    model.dismiss('file:src%2Fapp.ts', 300)
+    expect(model.upsert(filePanel('edit-1'), 310)).toBe(null)
+    model.advance(425)
+    expect(model.snapshots()).toHaveLength(0)
+
+    expect(model.upsert(filePanel('edit-2'), 500)).toMatchObject({
+      id: 'file:src%2Fapp.ts',
+      sourceId: 'edit-2',
+      phase: 'appearing'
+    })
+    expect(model.snapshots()).toHaveLength(1)
+  })
 })

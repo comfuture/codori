@@ -16,7 +16,8 @@ const snapshot = (id: string, background = false): SpatialPanelSnapshot => ({
   scrollOffset: Number.POSITIVE_INFINITY,
   autoFollow: true,
   userMoved: false,
-  slot: null
+  slot: null,
+  fileTransitionStartedAt: 0
 })
 
 describe('panel slot allocation', () => {
