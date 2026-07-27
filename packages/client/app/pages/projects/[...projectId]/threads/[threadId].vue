@@ -270,6 +270,12 @@ watch(
           </template>
           <template #right>
             <div class="flex items-center gap-1.5 lg:gap-2">
+              <ImmersiveWorkspaceLaunch
+                v-if="projectId && threadId"
+                :workspace="{ kind: 'project', id: projectId }"
+                :thread-id="threadId"
+                :return-to="route.fullPath"
+              />
               <WorkspaceFilesPanel
                 v-if="projectId"
                 :workspace="{ kind: 'project', id: projectId }"

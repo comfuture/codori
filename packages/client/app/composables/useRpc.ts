@@ -1,9 +1,12 @@
 import { useRuntimeConfig } from '#imports'
-import { encodeChatIdSegment, encodeProjectIdSegment } from '~~/shared/codori'
 import { CodexRpcClient } from '~~/shared/codex-rpc'
-import { resolveWsBase } from '~~/shared/network'
+import {
+  resolveWorkspaceRpcUrl,
+  workspaceKey,
+  type RpcWorkspace
+} from '~~/shared/workspace'
 
-export type RpcWorkspace = { kind: 'project', id: string } | { kind: 'chat', id: string }
+export type { RpcWorkspace } from '~~/shared/workspace'
 
 export type RpcWorkspaceClient = {
   workspace: RpcWorkspace
@@ -29,22 +32,16 @@ export const useRpc = () => {
   const runtimeConfig = useRuntimeConfig()
 
   const createWorkspaceClient = (workspace: RpcWorkspace) => {
-    const wsBase = resolveWsBase(
-      String(runtimeConfig.public.serverWsBase ?? ''),
-      String(runtimeConfig.public.serverBase ?? '')
-    )
-    const requestPath = workspace.kind === 'chat'
-      ? `/api/chats/${encodeChatIdSegment(workspace.id)}/rpc`
-      : `/api/projects/${encodeProjectIdSegment(workspace.id)}/rpc`
-    const url = new URL(
-      requestPath,
-      wsBase
-    ).toString()
+    const url = resolveWorkspaceRpcUrl({
+      workspace,
+      configuredWsBase: String(runtimeConfig.public.serverWsBase ?? ''),
+      configuredHttpBase: String(runtimeConfig.public.serverBase ?? '')
+    })
     return new CodexRpcClient(url)
   }
 
   const getWorkspaceClient = (workspace: RpcWorkspace) => {
-    const cacheKey = `${workspace.kind}:${workspace.id}`
+    const cacheKey = workspaceKey(workspace)
     const existing = clients.get(cacheKey)
     if (existing) {
       return existing.client

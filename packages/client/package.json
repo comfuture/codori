@@ -16,6 +16,21 @@
   "bugs": {
     "url": "https://github.com/comfuture/codori/issues"
   },
+  "exports": {
+    ".": "./nuxt.config.ts",
+    "./package.json": "./package.json",
+    "./shared/codex-rpc": "./shared/codex-rpc.ts",
+    "./shared/codex-chat": "./shared/codex-chat.ts",
+    "./shared/realtime": "./shared/realtime.ts",
+    "./shared/realtime-transcript": "./shared/realtime-transcript.ts",
+    "./shared/background-terminals": "./shared/background-terminals.ts",
+    "./shared/tool-items": "./shared/tool-items.ts",
+    "./shared/ansi-output": "./shared/ansi-output.ts",
+    "./shared/workspace": "./shared/workspace.ts",
+    "./shared/generated/codex-app-server": "./shared/generated/codex-app-server/index.ts",
+    "./shared/generated/codex-app-server/v2": "./shared/generated/codex-app-server/v2/index.ts",
+    "./shared/*": "./shared/*.ts"
+  },
   "keywords": [
     "codori",
     "codex",

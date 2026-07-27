@@ -10,11 +10,15 @@ import {
   upsertStreamingMessage,
   type ChatMessage,
   type ChatPart,
-  type FileChangeItem,
   type ItemData,
-  type McpToolCallItem,
   type WebSearchStatus
 } from '~~/shared/codex-chat'
+import {
+  createFallbackCommandItemData,
+  createFallbackFileChangeItemData,
+  createFallbackMcpToolItemData,
+  reduceToolItemDataNotification
+} from '~~/shared/tool-items'
 import {
   notificationTurnId,
   type CodexRpcNotification
@@ -74,22 +78,7 @@ const fallbackCommandMessage = (itemId: string): ChatMessage => ({
   pending: true,
   parts: [{
     type: ITEM_PART,
-    data: {
-      kind: 'command_execution',
-      item: {
-        type: 'commandExecution',
-        id: itemId,
-        command: 'Command',
-        cwd: '',
-        processId: null,
-        source: 'agent',
-        commandActions: [],
-        aggregatedOutput: '',
-        exitCode: null,
-        status: 'inProgress',
-        durationMs: null
-      }
-    }
+    data: createFallbackCommandItemData(itemId)
   }]
 })
 
@@ -99,16 +88,7 @@ const fallbackFileChangeMessage = (itemId: string): ChatMessage => ({
   pending: true,
   parts: [{
     type: ITEM_PART,
-    data: {
-      kind: 'file_change',
-      item: {
-        type: 'fileChange',
-        id: itemId,
-        changes: [],
-        status: 'inProgress'
-      },
-      liveOutput: ''
-    }
+    data: createFallbackFileChangeItemData(itemId)
   }]
 })
 
@@ -118,34 +98,9 @@ const fallbackMcpToolMessage = (itemId: string): ChatMessage => ({
   pending: true,
   parts: [{
     type: ITEM_PART,
-    data: {
-      kind: 'mcp_tool_call',
-      item: {
-        type: 'mcpToolCall',
-        id: itemId,
-        server: 'mcp',
-        tool: 'tool',
-        arguments: null,
-        appContext: null,
-        pluginId: null,
-        result: null,
-        error: null,
-        status: 'inProgress',
-        durationMs: null
-      },
-      progressMessages: []
-    }
+    data: createFallbackMcpToolItemData(itemId)
   }]
 })
-
-const fallbackCommandItemData = (itemId: string) =>
-  getFallbackItemData(fallbackCommandMessage(itemId)) as Extract<ItemData, { kind: 'command_execution' }>
-
-const fallbackFileChangeItemData = (itemId: string) =>
-  getFallbackItemData(fallbackFileChangeMessage(itemId)) as Extract<ItemData, { kind: 'file_change' }>
-
-const fallbackMcpToolItemData = (itemId: string) =>
-  getFallbackItemData(fallbackMcpToolMessage(itemId)) as Extract<ItemData, { kind: 'mcp_tool_call' }>
 
 export const useSubagentPanelsController = (options: UseSubagentPanelsControllerOptions) => {
   const subagentBootstrapPromises = new Map<string, Promise<void>>()
@@ -540,57 +495,32 @@ export const useSubagentPanelsController = (options: UseSubagentPanelsController
       }
       case 'item/commandExecution/outputDelta': {
         const params = notification.params as { itemId: string, delta: string }
-        const fallbackItem = fallbackCommandItemData(params.itemId)
-        updateSubagentItemPart(threadId, params.itemId, fallbackCommandMessage(params.itemId), (itemData) => ({
-          kind: 'command_execution',
-          item: {
-            ...(itemData.kind === 'command_execution' ? itemData.item : fallbackItem.item),
-            aggregatedOutput: `${(itemData.kind === 'command_execution' ? itemData.item.aggregatedOutput : '') ?? ''}${params.delta}`,
-            status: 'inProgress'
-          }
-        }))
+        updateSubagentItemPart(threadId, params.itemId, fallbackCommandMessage(params.itemId), itemData =>
+          reduceToolItemDataNotification(
+            itemData.kind === 'command_execution' ? itemData : undefined,
+            notification
+          ) ?? itemData
+        )
         return
       }
       case 'item/fileChange/outputDelta': {
         const params = notification.params as { itemId: string, delta: string }
-        const fallbackItem = fallbackFileChangeItemData(params.itemId)
-        updateSubagentItemPart(threadId, params.itemId, fallbackFileChangeMessage(params.itemId), (itemData) => {
-          const baseItem: FileChangeItem = itemData.kind === 'file_change'
-            ? itemData.item
-            : fallbackItem.item
-          const liveOutput = itemData.kind === 'file_change'
-            ? itemData.liveOutput
-            : fallbackItem.liveOutput
-          return {
-            kind: 'file_change',
-            item: {
-              ...baseItem,
-              status: 'inProgress'
-            },
-            liveOutput: `${liveOutput ?? ''}${params.delta}`
-          }
-        })
+        updateSubagentItemPart(threadId, params.itemId, fallbackFileChangeMessage(params.itemId), itemData =>
+          reduceToolItemDataNotification(
+            itemData.kind === 'file_change' ? itemData : undefined,
+            notification
+          ) ?? itemData
+        )
         return
       }
       case 'item/mcpToolCall/progress': {
         const params = notification.params as { itemId: string, message: string }
-        const fallbackItem = fallbackMcpToolItemData(params.itemId)
-        updateSubagentItemPart(threadId, params.itemId, fallbackMcpToolMessage(params.itemId), (itemData) => {
-          const baseItem: McpToolCallItem = itemData.kind === 'mcp_tool_call'
-            ? itemData.item
-            : fallbackItem.item
-          const progressMessages = itemData.kind === 'mcp_tool_call'
-            ? itemData.progressMessages
-            : fallbackItem.progressMessages
-          return {
-            kind: 'mcp_tool_call',
-            item: {
-              ...baseItem,
-              status: 'inProgress'
-            },
-            progressMessages: [...(progressMessages ?? []), params.message]
-          }
-        })
+        updateSubagentItemPart(threadId, params.itemId, fallbackMcpToolMessage(params.itemId), itemData =>
+          reduceToolItemDataNotification(
+            itemData.kind === 'mcp_tool_call' ? itemData : undefined,
+            notification
+          ) ?? itemData
+        )
         return
       }
       case 'turn/completed': {
