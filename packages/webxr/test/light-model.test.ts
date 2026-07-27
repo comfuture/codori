@@ -26,8 +26,8 @@ describe('agent light model', () => {
           seed: 103
         })
         expect(first).toEqual(second)
-        expect(first.scale).toBeGreaterThanOrEqual(0.8)
-        expect(first.scale).toBeLessThanOrEqual(1.2)
+        expect(first.scale).toBeGreaterThanOrEqual(0.9)
+        expect(first.scale).toBeLessThanOrEqual(1.1)
       }
     }
 
@@ -80,7 +80,7 @@ describe('agent light model', () => {
     expect(range(reducedScales)).toBeLessThan(range(normalScales) * 0.5)
   })
 
-  it('varies speaking scale broadly and returns near its resting size', () => {
+  it('keeps speaking scale within ten percent and returns near resting size', () => {
     const speakingScales = Array.from({ length: 2_400 }, (_, step) =>
       sampleAgentLight({
         activity: 'speaking',
@@ -89,7 +89,7 @@ describe('agent light model', () => {
       }).scale
     )
     expect(Math.max(...speakingScales) - Math.min(...speakingScales))
-      .toBeGreaterThan(0.28)
+      .toBeGreaterThan(0.14)
 
     const animator = new AgentLightAnimator(103, 0.55)
     animator.setActivity('speaking', 0)
@@ -98,7 +98,7 @@ describe('agent light model', () => {
     expect(Math.abs(animator.sample(1.7).scale - 1)).toBeLessThan(0.01)
   })
 
-  it('keeps assistant micro-pulse peaks in the requested rapid range', () => {
+  it('keeps assistant micro-pulse peaks near four hertz', () => {
     const durationSeconds = 4
     const sampleRate = 240
     const samples = Array.from(
@@ -118,8 +118,8 @@ describe('agent light model', () => {
         peaks += 1
       }
     }
-    expect(peaks / durationSeconds).toBeGreaterThanOrEqual(4)
-    expect(peaks / durationSeconds).toBeLessThanOrEqual(7)
+    expect(peaks / durationSeconds).toBeGreaterThanOrEqual(3.5)
+    expect(peaks / durationSeconds).toBeLessThanOrEqual(4.5)
   })
 
   it('cross-fades state changes instead of jumping', () => {

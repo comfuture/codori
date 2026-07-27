@@ -102,7 +102,7 @@ export const sampleAgentLight = (input: {
   } else if (input.activity === 'speaking') {
     const frequency = reduced
       ? 0.8
-      : 5.25
+      : 4
     const phase = input.timeSeconds * TAU * frequency
     const carrier = Math.sin(phase)
     const amplitude = 0.48 + (
