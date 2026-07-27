@@ -69,7 +69,7 @@ const rotationMatrix = new Matrix4()
 const thumbPosition = new Vector3()
 const indexPosition = new Vector3()
 const viewerPosition = new Vector3()
-const PANEL_GRAB_TAP_MAX_DISTANCE_METERS = 0.03
+const PANEL_GRAB_TAP_MAX_DISTANCE_METERS = 0.12
 
 export const isPanelGrabTap = (
   initialPosition: Vector3,

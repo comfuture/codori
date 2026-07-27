@@ -45,11 +45,11 @@ describe('panel interaction model', () => {
     const initial = new Vector3(0, 1, -2)
     expect(isPanelGrabTap(
       initial,
-      new Vector3(0.02, 1, -2)
+      new Vector3(0.08, 1, -2)
     )).toBe(true)
     expect(isPanelGrabTap(
       initial,
-      new Vector3(0.04, 1, -2)
+      new Vector3(0.14, 1, -2)
     )).toBe(false)
   })
 
