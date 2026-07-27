@@ -8,7 +8,7 @@ export const viewerFacingQuaternion = (
   objectPosition: Vector3,
   viewerPosition: Vector3
 ) => {
-  lookAtMatrix.lookAt(objectPosition, viewerPosition, worldUp)
+  lookAtMatrix.lookAt(viewerPosition, objectPosition, worldUp)
   return targetQuaternion.setFromRotationMatrix(lookAtMatrix)
 }
 

@@ -94,6 +94,15 @@ export class AgentLightView {
     this.innerMaterial
   )
 
+  readonly hitTarget = new Mesh(
+    new SphereGeometry(0.28, 20, 16),
+    new MeshBasicMaterial({
+      transparent: true,
+      opacity: 0,
+      depthWrite: false
+    })
+  )
+
   private readonly haloMaterial = new SpriteMaterial({
     map: this.glowTexture,
     color: '#77dcff',
@@ -126,6 +135,8 @@ export class AgentLightView {
 
   constructor() {
     this.group.name = 'agent-light'
+    this.hitTarget.name = 'agent-light-voice-toggle'
+    this.hitTarget.userData.action = 'toggle-voice'
     this.halo.scale.setScalar(1.35)
     this.rays.scale.setScalar(1.9)
     this.group.add(
@@ -133,6 +144,7 @@ export class AgentLightView {
       this.halo,
       this.core,
       this.inner,
+      this.hitTarget,
       this.localLight
     )
 
@@ -193,8 +205,10 @@ export class AgentLightView {
   dispose() {
     this.core.geometry.dispose()
     this.inner.geometry.dispose()
+    this.hitTarget.geometry.dispose()
     this.coreMaterial.dispose()
     this.innerMaterial.dispose()
+    this.hitTarget.material.dispose()
     this.haloMaterial.dispose()
     this.rayMaterial.dispose()
     for (const material of this.flareMaterials) {

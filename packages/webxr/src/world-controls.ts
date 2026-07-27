@@ -58,30 +58,15 @@ export class WorldControls {
 
   readonly hitTargets: Mesh[] = []
 
-  private voice = createControl('toggle-voice', 'Start voice', -0.36)
-
-  private exit = createControl('exit-xr', 'Exit', 0.36)
-
-  private voiceActive = false
+  private exit = createControl('exit-xr', 'Exit', 0)
 
   constructor() {
     this.group.name = 'world-controls'
-    this.group.add(this.voice.group, this.exit.group)
-    this.hitTargets.push(this.voice.hit, this.exit.hit)
-  }
-
-  setVoiceActive(active: boolean) {
-    if (active === this.voiceActive) {
-      return
-    }
-    this.voiceActive = active
-    this.voice.surface.render({
-      body: active ? 'Stop voice' : 'Start voice'
-    })
+    this.group.add(this.exit.group)
+    this.hitTargets.push(this.exit.hit)
   }
 
   dispose() {
-    this.voice.dispose()
     this.exit.dispose()
     this.hitTargets.length = 0
     this.group.clear()

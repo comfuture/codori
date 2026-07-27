@@ -32,7 +32,6 @@ const reducedEffects = requiredElement<HTMLInputElement>('reduced-effects')
 const canvas = requiredElement<HTMLCanvasElement>('xr-canvas')
 const sceneStatus = requiredElement<HTMLDivElement>('scene-status')
 const sceneControls = requiredElement<HTMLDivElement>('scene-controls')
-const voiceButton = requiredElement<HTMLButtonElement>('voice-toggle')
 const exitButton = requiredElement<HTMLButtonElement>('exit-xr')
 
 const route = parseImmersiveWorkspaceRoute(window.location.href)
@@ -102,13 +101,6 @@ const showEntry = () => {
 }
 
 const updateVoiceUi = (snapshot: RealtimeConversationSnapshot) => {
-  const active = sessionActive(snapshot)
-  voiceButton.textContent = snapshot.autoplayBlocked
-    ? 'Resume audio'
-    : active
-      ? 'Stop voice'
-      : 'Start voice'
-  immersiveScene?.setVoiceActive(active)
   immersiveScene?.setTranscript(snapshot.transcripts, snapshot.generation)
   immersiveScene?.setActivity(
     snapshot.state === 'error'
@@ -397,9 +389,6 @@ enterButton.addEventListener('click', () => {
 })
 retryButton.addEventListener('click', () => {
   void checkCapability()
-})
-voiceButton.addEventListener('click', () => {
-  void toggleVoice()
 })
 exitButton.addEventListener('click', () => {
   void exitImmersive()

@@ -65,7 +65,7 @@ Tracked hand:
 
 Native and synthesized primary actions are de-duplicated. Competing grabs have one deterministic owner, and input-source loss releases hover/grab state.
 
-The world-space `Start voice` / `Stop voice` and `Exit` controls remain available below the central light. The 2D fallback remains available before immersive entry.
+Select the central light to start or stop the voice session. The world-space `Exit` control remains available below the light, and the 2D fallback remains available before immersive entry.
 
 ## Panel semantics and caps
 
