@@ -23,7 +23,10 @@ describe('assistant transcript bubble model', () => {
       role: 'assistant',
       text: '안녕하세요 👋 `code`',
       final: false
-    }], 1, 1).text).toBe('안녕하세요 👋 `code`')
+    }], 1, 1)).toMatchObject({
+      text: '안녕하세요 👋 `code`',
+      final: false
+    })
   })
 
   it('holds for thirty seconds after final speech and then scales away', () => {
@@ -44,7 +47,10 @@ describe('assistant transcript bubble model', () => {
       ...segment,
       text: 'First delta',
       final: true
-    }], 1, 4_999).phase).toBe('visible')
+    }], 1, 4_999)).toMatchObject({
+      phase: 'visible',
+      final: true
+    })
     expect(model.current(34_998).phase).toBe('visible')
     expect(model.current(34_999)).toMatchObject({
       open: true,

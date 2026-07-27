@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { resolveTranscriptBubbleScale } from '../src/transcript-bubble-view'
+import {
+  resolveTranscriptBubbleScale,
+  shouldRenderTranscriptTexture
+} from '../src/transcript-bubble-view'
 
 describe('assistant transcript bubble animation', () => {
   it('scales in and out over a quarter second', () => {
@@ -10,5 +13,56 @@ describe('assistant transcript bubble animation', () => {
     expect(resolveTranscriptBubbleScale('visible', 10_000)).toBe(1)
     expect(resolveTranscriptBubbleScale('disappearing', 0)).toBe(1)
     expect(resolveTranscriptBubbleScale('disappearing', 250)).toBe(0)
+  })
+
+  it('limits partial transcript uploads to four hertz and renders finals immediately', () => {
+    const input = {
+      visibleText: 'Hello',
+      visibleGeneration: 1,
+      nextText: 'Hello world',
+      nextGeneration: 1,
+      final: false,
+      lastRenderedAt: 1_000
+    }
+    expect(shouldRenderTranscriptTexture({
+      ...input,
+      now: 1_249
+    })).toBe(false)
+    expect(shouldRenderTranscriptTexture({
+      ...input,
+      now: 1_250
+    })).toBe(true)
+    expect(shouldRenderTranscriptTexture({
+      ...input,
+      final: true,
+      now: 1_001
+    })).toBe(true)
+    expect(shouldRenderTranscriptTexture({
+      ...input,
+      nextText: input.visibleText,
+      final: true,
+      now: 1_250
+    })).toBe(false)
+  })
+
+  it('clears a previous generation and renders its first delta immediately', () => {
+    expect(shouldRenderTranscriptTexture({
+      visibleText: 'Previous answer',
+      visibleGeneration: 1,
+      nextText: '',
+      nextGeneration: 2,
+      final: false,
+      lastRenderedAt: 1_000,
+      now: 1_010
+    })).toBe(true)
+    expect(shouldRenderTranscriptTexture({
+      visibleText: '',
+      visibleGeneration: 2,
+      nextText: 'Next answer',
+      nextGeneration: 2,
+      final: false,
+      lastRenderedAt: Number.NEGATIVE_INFINITY,
+      now: 1_011
+    })).toBe(true)
   })
 })

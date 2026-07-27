@@ -22,6 +22,7 @@ export type TranscriptBubblePhase =
 export type TranscriptBubbleSnapshot = {
   open: boolean
   text: string
+  final: boolean
   generation: number
   segmentId: number | null
   changedAt: number
@@ -35,6 +36,8 @@ export class TranscriptBubbleModel {
 
   private text = ''
 
+  private final = false
+
   private segmentId: number | null = null
 
   private changedAt = 0
@@ -42,6 +45,10 @@ export class TranscriptBubbleModel {
   private phase: TranscriptBubblePhase = 'hidden'
 
   private phaseStartedAt = 0
+
+  private lastSegments: readonly TranscriptBubbleSegment[] | null = null
+
+  private lastGeneration: number | null = null
 
   private advancePhase(now: number) {
     if (
@@ -86,6 +93,14 @@ export class TranscriptBubbleModel {
     generation: number,
     now: number
   ): TranscriptBubbleSnapshot {
+    if (
+      this.lastSegments === segments
+      && this.lastGeneration === generation
+    ) {
+      return this.current(now)
+    }
+    this.lastSegments = segments
+    this.lastGeneration = generation
     const wasVisible = this.visibility.visible
     const generationChanged = this.visibility.generation !== generation
     const nextText = resolveCurrentAssistantTranscript(segments, generation)
@@ -110,6 +125,7 @@ export class TranscriptBubbleModel {
       || this.visibility.signature !== nextVisibility.signature
     ) {
       this.text = nextText
+      this.final = latestAssistant?.final ?? false
       this.segmentId = latestAssistant?.id ?? null
       this.changedAt = now
     }
@@ -133,16 +149,20 @@ export class TranscriptBubbleModel {
   reset(generation: number, now: number) {
     this.visibility = createTranscriptVisibilityState(generation)
     this.text = ''
+    this.final = false
     this.segmentId = null
     this.changedAt = now
     this.phase = 'hidden'
     this.phaseStartedAt = now
+    this.lastSegments = null
+    this.lastGeneration = null
   }
 
   private snapshot(): TranscriptBubbleSnapshot {
     return {
       open: this.phase !== 'hidden',
       text: this.text,
+      final: this.final,
       generation: this.visibility.generation,
       segmentId: this.segmentId,
       changedAt: this.changedAt,
