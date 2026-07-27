@@ -119,6 +119,64 @@ describe('spatial panel model', () => {
     expect(model.snapshots()[0]?.scrollOffset).toBe(Number.POSITIVE_INFINITY)
   })
 
+  it('restarts the one-minute dwell after every real interaction', () => {
+    const model = new SpatialPanelModel()
+    model.upsert(panel({
+      status: 'completed',
+      text: 'done',
+      exitCode: 0
+    }), 0)
+    model.advance(250)
+
+    expect(model.scroll('command:1', 1, 30_000)).toBe(true)
+    expect(model.snapshots()[0]).toMatchObject({
+      phase: 'dwelling',
+      phaseStartedAt: 30_000
+    })
+    model.advance(90_000)
+    expect(model.snapshots()[0]?.phase).toBe('disappearing')
+
+    model.markInteraction('command:1', {
+      userMoved: true
+    }, 90_100)
+    expect(model.snapshots()[0]).toMatchObject({
+      phase: 'dwelling',
+      phaseStartedAt: 90_100,
+      userMoved: true
+    })
+    model.advance(150_100)
+    expect(model.snapshots()[0]?.phase).toBe('disappearing')
+
+    expect(model.promote('command:1', 150_200)).toBe(true)
+    expect(model.snapshots()[0]).toMatchObject({
+      phase: 'dwelling',
+      phaseStartedAt: 150_200,
+      slot: 0,
+      userMoved: false
+    })
+  })
+
+  it('cycles a focused panel to the front and shifts earlier slots back', () => {
+    const model = new SpatialPanelModel()
+    for (let index = 0; index < 5; index += 1) {
+      model.upsert(panel({
+        id: `command:${index}`,
+        title: `Command ${index}`
+      }), 0)
+    }
+
+    expect(model.promote('command:3', 1_000)).toBe(true)
+    expect(Object.fromEntries(
+      model.snapshots().map(snapshot => [snapshot.id, snapshot.slot])
+    )).toEqual({
+      'command:0': 1,
+      'command:1': 2,
+      'command:2': 3,
+      'command:3': 0,
+      'command:4': null
+    })
+  })
+
   it('bursts a manually dismissed panel and never resurrects it', () => {
     const model = new SpatialPanelModel()
     model.upsert(panel(), 0)

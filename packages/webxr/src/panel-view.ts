@@ -28,6 +28,29 @@ import { CanvasTextSurface } from './text-surface'
 const easeOutCubic = (value: number) => 1 - ((1 - value) ** 3)
 const easeInCubic = (value: number) => value ** 3
 
+export const resolvePanelInteractionLayout = (
+  width: number,
+  height: number
+) => {
+  const inset = 0.035
+  const titleBarHeight = 0.2
+  const titleBarY = (height / 2) - (titleBarHeight / 2) - 0.025
+  const contentBottom = (-height / 2) + 0.025
+  const contentTop = titleBarY - (titleBarHeight / 2) - 0.012
+  return {
+    titleBar: {
+      width: width - (inset * 2),
+      height: titleBarHeight,
+      y: titleBarY
+    },
+    content: {
+      width: width - (inset * 2),
+      height: contentTop - contentBottom,
+      y: (contentTop + contentBottom) / 2
+    }
+  }
+}
+
 export type PanelVisualState = {
   normalizedScale: number
   burstScale: number
@@ -69,6 +92,12 @@ export const resolvePanelVisualState = (
   }
 }
 
+export const resolvePanelSlotTransition = (elapsedMs: number) =>
+  easeOutCubic(Math.min(
+    1,
+    Math.max(0, elapsedMs) / PANEL_ANIMATION_MS
+  ))
+
 const statusLabel = (status: SpatialPanelSnapshot['status']) =>
   status.replace('-', ' ')
 
@@ -85,22 +114,22 @@ export class SpatialPanelView {
 
   private readonly height = 0.92
 
-  private readonly shellMaterial = new MeshBasicMaterial({
-    color: '#071b2a',
+  private readonly titleBarMaterial = new MeshBasicMaterial({
+    color: '#0c3347',
     transparent: true,
-    opacity: 0.5,
+    opacity: 0.42,
     depthWrite: false
   })
 
-  private readonly shell = new Mesh(
+  private readonly titleBar = new Mesh(
     new RoundedBoxGeometry(
-      this.width,
-      this.height,
-      PANEL_DEPTH_METERS,
+      resolvePanelInteractionLayout(this.width, this.height).titleBar.width,
+      resolvePanelInteractionLayout(this.width, this.height).titleBar.height,
+      0.006,
       4,
-      0.065
+      0.045
     ),
-    this.shellMaterial
+    this.titleBarMaterial
   )
 
   private readonly surface = new CanvasTextSurface({
@@ -123,8 +152,9 @@ export class SpatialPanelView {
     border: 'rgba(77, 197, 226, 0.9)',
     color: '#bdf4ff',
     font: 'Inter, system-ui, sans-serif',
-    lineHeightPixels: 80,
-    paddingPixels: 82,
+    lineHeightPixels: 136,
+    paddingPixels: 60,
+    bodyFontSizePixels: 120,
     glow: true
   })
 
@@ -151,18 +181,38 @@ export class SpatialPanelView {
 
   private hovered = false
 
+  private grabHovered = false
+
   private grabbed = false
+
+  private titleBarOpacity = 0.42
 
   private lastRenderedContent = ''
 
   private animationNow = 0
 
+  private layoutPositionInitialized = false
+
+  private layoutAnimating = false
+
+  private readonly layoutFrom = new Vector3()
+
+  private readonly layoutTarget = new Vector3()
+
+  private layoutStartedAt = 0
+
   constructor(snapshot: SpatialPanelSnapshot) {
     this.snapshot = snapshot
     this.group.name = `panel:${snapshot.id}`
     this.group.userData.panelId = snapshot.id
+    const interactionLayout = resolvePanelInteractionLayout(
+      this.width,
+      this.height
+    )
     this.surface.mesh.position.z = (PANEL_DEPTH_METERS / 2) + 0.002
-    this.group.add(this.shell, this.surface.mesh)
+    this.titleBar.name = `panel-title-bar:${snapshot.id}`
+    this.titleBar.position.set(0, interactionLayout.titleBar.y, 0.002)
+    this.group.add(this.titleBar, this.surface.mesh)
     this.dismissSurface.render({ body: '×' })
 
     const invisibleMaterial = new MeshBasicMaterial({
@@ -171,19 +221,28 @@ export class SpatialPanelView {
       depthWrite: false
     })
     this.contentHit = new Mesh(
-      new BoxGeometry(this.width, this.height * 0.72, 0.06),
+      new BoxGeometry(
+        interactionLayout.content.width,
+        interactionLayout.content.height,
+        0.06
+      ),
       invisibleMaterial
     )
-    this.contentHit.position.y = -this.height * 0.11
+    this.contentHit.position.y = interactionLayout.content.y
     this.contentHit.userData = {
       panelId: snapshot.id,
       hitZone: 'content'
     }
     this.grabHit = new Mesh(
-      new BoxGeometry(this.width, this.height * 0.28, 0.075),
+      new BoxGeometry(
+        interactionLayout.titleBar.width,
+        interactionLayout.titleBar.height,
+        0.075
+      ),
       invisibleMaterial.clone()
     )
-    this.grabHit.position.y = this.height * 0.36
+    this.grabHit.name = `panel-title-bar-grab:${snapshot.id}`
+    this.grabHit.position.y = interactionLayout.titleBar.y
     this.grabHit.userData = {
       panelId: snapshot.id,
       hitZone: 'grab'
@@ -301,6 +360,19 @@ export class SpatialPanelView {
 
   updateAnimation(now: number) {
     this.animationNow = now
+    if (this.layoutAnimating) {
+      const progress = resolvePanelSlotTransition(
+        now - this.layoutStartedAt
+      )
+      this.group.position.lerpVectors(
+        this.layoutFrom,
+        this.layoutTarget,
+        progress
+      )
+      if (progress >= 1) {
+        this.layoutAnimating = false
+      }
+    }
     if (this.snapshot.fileChange) {
       this.renderContent(now)
     }
@@ -325,10 +397,7 @@ export class SpatialPanelView {
     )
     this.surface.material.opacity = visual.opacity
     this.dismissSurface.material.opacity = visual.opacity
-    this.shellMaterial.opacity = Math.min(
-      this.shellMaterial.opacity,
-      visual.opacity * 0.68
-    )
+    this.titleBarMaterial.opacity = this.titleBarOpacity * visual.opacity
     this.updateDismissParticles(visual.particleProgress)
   }
 
@@ -359,32 +428,76 @@ export class SpatialPanelView {
     )
   }
 
-  setInteraction(hovered: boolean, grabbed: boolean) {
-    if (hovered === this.hovered && grabbed === this.grabbed) {
+  setInteraction(
+    hovered: boolean,
+    grabbed: boolean,
+    grabHovered = false
+  ) {
+    if (
+      hovered === this.hovered
+      && grabbed === this.grabbed
+      && grabHovered === this.grabHovered
+    ) {
       return
     }
     this.hovered = hovered
     this.grabbed = grabbed
+    this.grabHovered = grabHovered
     this.dismissControl.visible = grabbed
       && this.snapshot.phase !== 'bursting'
     const color = grabbed
       ? new Color('#8cecff')
-      : hovered
+      : grabHovered
         ? new Color('#2abfe7')
-        : new Color('#071b2a')
-    this.shellMaterial.color.copy(color)
-    this.shellMaterial.opacity = grabbed ? 0.68 : hovered ? 0.58 : 0.5
+        : hovered
+          ? new Color('#184b62')
+          : new Color('#0c3347')
+    this.titleBarMaterial.color.copy(color)
+    this.titleBarOpacity = grabbed
+      ? 0.78
+      : grabHovered
+        ? 0.66
+        : hovered
+          ? 0.52
+          : 0.42
+    this.titleBarMaterial.opacity = this.titleBarOpacity
   }
 
   moveTo(position: Vector3) {
+    this.layoutPositionInitialized = true
+    this.layoutAnimating = false
+    this.layoutTarget.copy(position)
     this.group.position.copy(position)
+  }
+
+  placeInSlot(
+    position: { x: number, y: number, z: number },
+    now: number
+  ) {
+    if (!this.layoutPositionInitialized) {
+      this.layoutPositionInitialized = true
+      this.layoutTarget.set(position.x, position.y, position.z)
+      this.group.position.copy(this.layoutTarget)
+      return
+    }
+    if (
+      this.layoutTarget.x === position.x
+      && this.layoutTarget.y === position.y
+      && this.layoutTarget.z === position.z
+    ) {
+      return
+    }
+    this.layoutFrom.copy(this.group.position)
+    this.layoutTarget.set(position.x, position.y, position.z)
+    this.layoutStartedAt = now
+    this.layoutAnimating = true
   }
 
   dispose() {
     this.surface.dispose()
     this.dismissSurface.dispose()
-    this.shell.geometry.dispose()
-    this.shellMaterial.dispose()
+    this.titleBar.geometry.dispose()
+    this.titleBarMaterial.dispose()
     this.contentHit.geometry.dispose()
     if (Array.isArray(this.contentHit.material)) {
       this.contentHit.material.forEach(material => material.dispose())

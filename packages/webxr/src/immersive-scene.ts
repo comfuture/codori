@@ -33,6 +33,7 @@ import {
 import { allocatePanelSlots } from './panel-layout'
 import type { SpatialPanelSnapshot } from './panel-model'
 import { SpatialPanelView } from './panel-view'
+import { configureImmersiveRenderQuality } from './render-quality'
 import {
   TranscriptBubbleModel,
   type TranscriptBubbleSegment
@@ -46,7 +47,9 @@ export type ImmersiveSceneOptions = {
   reducedEffects: () => boolean
   onAction: (action: WorldControlAction) => void
   onPanelScroll: (panelId: string, deltaLines: number) => void
+  onPanelInteracted: (panelId: string) => void
   onPanelMoved: (panelId: string, position: Vector3) => void
+  onPanelFocused: (panelId: string) => void
   onPanelDismiss: (panelId: string) => void
 }
 
@@ -110,6 +113,7 @@ export class ImmersiveScene {
     this.renderer.outputColorSpace = SRGBColorSpace
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
     this.renderer.xr.enabled = true
+    configureImmersiveRenderQuality(this.renderer.xr)
     this.renderer.xr.setReferenceSpaceType('local-floor')
     this.timer.connect(document)
     this.scene.background = new Color('#01040a')
@@ -134,7 +138,9 @@ export class ImmersiveScene {
         ...this.controls.hitTargets
       ],
       onScroll: options.onPanelScroll,
+      onPanelInteracted: options.onPanelInteracted,
       onPanelMoved: options.onPanelMoved,
+      onPanelFocused: options.onPanelFocused,
       onPanelDismiss: options.onPanelDismiss,
       onAction: options.onAction
     })
@@ -270,6 +276,7 @@ export class ImmersiveScene {
   }
 
   private syncPanelViews() {
+    const layoutNow = performance.now()
     const liveIds = new Set(this.panelSnapshots.map(panel => panel.id))
     for (const [id, view] of this.panels.entries()) {
       if (!liveIds.has(id)) {
@@ -305,11 +312,7 @@ export class ImmersiveScene {
       view.group.visible = true
       view.update(snapshot)
       if (!snapshot.userMoved) {
-        view.group.position.set(
-          placement.position.x,
-          placement.position.y,
-          placement.position.z
-        )
+        view.placeInSlot(placement.position, layoutNow)
       }
     }
   }

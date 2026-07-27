@@ -27,6 +27,12 @@ Vite serves the app with `/xr/` as its production base. The bundled Codori serve
 
 During local development, the non-immersive scene preview is exposed only by the Vite development build with `?debug=1`. It is a layout/input diagnostic, not a successful immersive session and is not offered by production builds.
 
+Add `&kitchenSink=1` to render representative transcript, command, shell,
+file-change, tool, search, and background-terminal surfaces without connecting
+to a live workspace. This fixture is useful for browser-side text density,
+border, color, and layout comparisons; it does not reproduce headset
+framebuffer scaling or fixed foveation.
+
 Vite proxies `/api` HTTP and WebSocket traffic to
 `http://127.0.0.1:4310` by default. Point it at another running Codori server
 when needed:
@@ -41,8 +47,9 @@ pnpm --filter @codori/webxr dev
 - The room is approximately `10 m × 10 m`.
 - On the first valid `local-floor` viewer pose, the agent light is placed about `2.4 m` in front of the horizontal head direction and at a clamped eye height.
 - The agent light is a larger, semi-transparent cyan/amber/violet assembly of intersecting oval volumes that continuously morph and rotate around a `70–80%` opacity core.
-- Assistant feedback uses deterministic rapid micro-pulses with a seeded, smoothly varying amplitude envelope. Speaking scale can travel approximately `±20%`, then eases back to its resting size when the utterance is final. Local perceived-intensity modulation remains bounded below 5%.
+- Assistant feedback uses deterministic `4 Hz` micro-pulses with a seeded, smoothly varying amplitude envelope. Speaking scale can travel approximately `±10%`, then eases back to its resting size when the utterance is final. Local perceived-intensity modulation remains bounded below 5%.
 - Browser `prefers-reduced-motion` and the entry-screen reduced-effects control replace rapid motion with lower-amplitude, slower animation.
+- Immersive sessions disable fixed foveation and request a `1.25×` framebuffer scale before session attachment. Canvas text uses trilinear mipmaps and up to `8×` anisotropic filtering to reduce shimmer during head movement.
 - WebXR Layers and hand tracking are optional. Base rendering uses the normal Three.js projection path.
 
 Users sensitive to motion or flicker should enable reduced effects before entering XR and exit immediately if uncomfortable.
@@ -54,8 +61,10 @@ Controller:
 - target ray: hover and select controls or panel content
 - select-drag on panel content: scroll without a visible scrollbar
 - thumbstick vertical axis over content: scroll
-- squeeze or the panel header/border: grab and move
-- while grabbed, select the `×` control below the panel: dismiss it with a `125 ms` expanding particle burst
+- select-drag or pinch on the visible title bar: follow the pointer ray while preserving viewer distance
+- tap the visible title bar: cycle that panel into the front slot and smoothly shift earlier panels back
+- squeeze on the visible title bar: follow physical controller movement
+- while grabbed, select the enlarged `×` control below the panel: dismiss it with a `125 ms` expanding particle burst
 - release: keep the panel at its chosen position for this XR session
 
 Tracked hand:
@@ -70,7 +79,7 @@ Select the central light to start or stop the voice session. A door-sized rounde
 
 ## Panel semantics and caps
 
-Foreground command, file-change, MCP, dynamic-tool, and web-search panels appear on `item/started`, update continuously from progress/output deltas, stay visible while active, dwell for one minute after terminal completion, then shrink and dispose. A manually dismissed panel does not reappear when late deltas arrive.
+Foreground command, file-change, MCP, dynamic-tool, and web-search panels appear near the central field of view on `item/started`, update continuously from progress/output deltas, stay visible while active, dwell for one minute after terminal completion, then shrink and dispose. Scrolling, moving, or focusing a completed panel restarts that one-minute dwell. A manually dismissed panel does not reappear when late deltas arrive.
 
 Agent background-terminal panels come only from the authoritative paginated `thread/backgroundTerminals/list` response and remain until absent from a complete response or explicitly terminated. They are not the user-created `command/exec` workspace terminals.
 

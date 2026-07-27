@@ -40,6 +40,11 @@ const exitButton = requiredElement<HTMLButtonElement>('exit-xr')
 const route = parseImmersiveWorkspaceRoute(window.location.href)
 const returnTo = route?.returnTo ?? '/'
 continueLink.href = returnTo
+const searchParams = new URLSearchParams(window.location.search)
+const developmentDebug = import.meta.env.DEV
+  && searchParams.get('debug') === '1'
+const developmentKitchenSink = developmentDebug
+  && searchParams.get('kitchenSink') === '1'
 
 const reducedMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)')
 reducedEffects.checked = reducedMotionQuery.matches
@@ -153,8 +158,14 @@ const ensureScene = async () => {
           onPanelScroll: (panelId, deltaLines) => {
             workspaceRuntime?.scrollPanel(panelId, deltaLines)
           },
+          onPanelInteracted: (panelId) => {
+            workspaceRuntime?.touchPanel(panelId)
+          },
           onPanelMoved: (panelId) => {
             workspaceRuntime?.markPanelMoved(panelId)
+          },
+          onPanelFocused: (panelId) => {
+            workspaceRuntime?.focusPanel(panelId)
           },
           onPanelDismiss: (panelId) => {
             workspaceRuntime?.dismissPanel(panelId)
@@ -318,6 +329,19 @@ const enterImmersive = async () => {
 const enterDebugScene = async () => {
   showScene()
   const scene = await ensureScene()
+  if (developmentKitchenSink) {
+    const { createDevelopmentKitchenSink } = await import(
+      './development-kitchen-sink'
+    )
+    const fixture = createDevelopmentKitchenSink(performance.now())
+    scene.setActivity('speaking')
+    scene.setTranscript(fixture.transcripts, fixture.generation)
+    scene.setPanels(fixture.panels)
+    scene.setStatus(
+      'Kitchen sink · non-immersive texture and layout preview'
+    )
+    return
+  }
   scene.setStatus(
     'Non-immersive development preview. This is not an active WebXR session.'
   )
@@ -342,18 +366,18 @@ const checkCapability = async () => {
     return
   }
 
-  const debug = import.meta.env.DEV
-    && new URLSearchParams(window.location.search).get('debug') === '1'
-  if (debug) {
+  if (developmentDebug) {
     entryActions.hidden = false
     enterButton.hidden = false
-    enterButton.textContent = 'Open non-immersive preview'
+    enterButton.textContent = developmentKitchenSink
+      ? 'Open kitchen sink preview'
+      : 'Open non-immersive preview'
     enterButton.onclick = () => {
       void enterDebugScene()
     }
-    setEntryMessage(
-      'Development preview mode renders the spatial scene without claiming an immersive session.'
-    )
+    setEntryMessage(developmentKitchenSink
+      ? 'Kitchen sink preview renders representative XR text surfaces without claiming an immersive session.'
+      : 'Development preview mode renders the spatial scene without claiming an immersive session.')
     return
   }
 
