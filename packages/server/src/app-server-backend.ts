@@ -2,11 +2,12 @@ import { spawn } from 'node:child_process'
 import os from 'node:os'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
+import WebSocket from 'ws'
 import type {
   CodexDaemonTarget,
   RuntimeBackendFallbackReason
 } from './types.js'
-import { UnixJsonlTransport } from './unix-jsonl-transport.js'
+import { createUnixWebSocket } from './unix-websocket.js'
 
 const require = createRequire(import.meta.url)
 const DEFAULT_PROBE_TIMEOUT_MS = 2_000
@@ -153,6 +154,9 @@ const hasCompatibleRealtimeVoices = (value: unknown) => {
 const daemonProbeFailureReason = (
   error: unknown
 ): DaemonProbeFailure['reason'] => {
+  if (error instanceof TypeError) {
+    return 'daemon-unavailable'
+  }
   const code = (error as NodeJS.ErrnoException | null)?.code
   if (code === 'EACCES' || code === 'EPERM') {
     return 'permission-denied'
@@ -180,7 +184,7 @@ export const probeDaemonSocket = async (
     let settled = false
     let appServerVersion: string | null = null
     let timer: ReturnType<typeof setTimeout> | null = null
-    let transport: UnixJsonlTransport | null = null
+    let socket: WebSocket | null = null
 
     const finish = (result: DaemonProbeResult) => {
       if (settled) {
@@ -190,99 +194,106 @@ export const probeDaemonSocket = async (
       if (timer) {
         clearTimeout(timer)
       }
-      transport?.close()
+      if (
+        socket?.readyState === WebSocket.OPEN
+        || socket?.readyState === WebSocket.CONNECTING
+      ) {
+        socket.terminate()
+      }
       resolve(result)
     }
 
     try {
-      transport = new UnixJsonlTransport(socketPath, {
-        open: () => {
-          transport?.send(JSON.stringify({
-            id: 'codori-probe-initialize',
-            method: 'initialize',
-            params: {
-              clientInfo: {
-                name: 'codori',
-                version: '0.0.0'
-              },
-              capabilities: {
-                experimentalApi: true,
-                requestAttestation: false,
-                optOutNotificationMethods: null
-              }
+      socket = createUnixWebSocket(socketPath)
+      socket.once('open', () => {
+        socket?.send(JSON.stringify({
+          id: 'codori-probe-initialize',
+          method: 'initialize',
+          params: {
+            clientInfo: {
+              name: 'codori',
+              version: '0.0.0'
+            },
+            capabilities: {
+              experimentalApi: true,
+              requestAttestation: false,
+              optOutNotificationMethods: null
             }
-          }))
-        },
-        message: (raw) => {
-          let message: Record<string, unknown>
-          try {
-            const parsed = JSON.parse(raw.toString()) as unknown
-            if (!isRecord(parsed)) {
-              return
-            }
-            message = parsed
-          } catch {
+          }
+        }))
+      })
+      socket.on('message', (raw, isBinary) => {
+        if (isBinary) {
+          return
+        }
+        let message: Record<string, unknown>
+        try {
+          const parsed = JSON.parse(raw.toString()) as unknown
+          if (!isRecord(parsed)) {
             return
           }
+          message = parsed
+        } catch {
+          return
+        }
 
-          if (message.id === 'codori-probe-initialize') {
-            if (message.error) {
-              finish({ ready: false, reason: 'daemon-unready' })
-              return
-            }
-            const result = isRecord(message.result) ? message.result : null
-            appServerVersion = versionFromUserAgent(result?.userAgent)
-            transport?.send(JSON.stringify({ method: 'initialized' }))
-            if (!realtimeVoiceEnabled) {
-              finish({ ready: true, appServerVersion })
-              return
-            }
-            transport?.send(JSON.stringify({
-              id: 'codori-probe-features',
-              method: 'experimentalFeature/list',
-              params: {}
-            }))
-            return
-          }
-
-          if (message.id === 'codori-probe-features') {
-            if (message.error) {
-              finish({ ready: false, reason: 'incompatible-realtime' })
-              return
-            }
-            const result = isRecord(message.result) ? message.result : null
-            const data = Array.isArray(result?.data) ? result.data : []
-            const realtimeFeature = data.find((feature) =>
-              isRecord(feature) && feature.name === 'realtime_conversation'
-            )
-            if (!isRecord(realtimeFeature) || realtimeFeature.enabled !== true) {
-              finish({ ready: false, reason: 'incompatible-realtime' })
-              return
-            }
-            transport?.send(JSON.stringify({
-              id: 'codori-probe-realtime-voices',
-              method: 'thread/realtime/listVoices',
-              params: {}
-            }))
-            return
-          }
-
-          if (message.id === 'codori-probe-realtime-voices') {
-            finish(message.error || !hasCompatibleRealtimeVoices(message.result)
-              ? { ready: false, reason: 'incompatible-realtime' }
-              : { ready: true, appServerVersion })
-          }
-        },
-        error: (error) => {
-          finish({
-            ready: false,
-            reason: daemonProbeFailureReason(error)
-          })
-        },
-        close: () => {
-          if (!settled) {
+        if (message.id === 'codori-probe-initialize') {
+          if (message.error) {
             finish({ ready: false, reason: 'daemon-unready' })
+            return
           }
+          const result = isRecord(message.result) ? message.result : null
+          appServerVersion = versionFromUserAgent(result?.userAgent)
+          socket?.send(JSON.stringify({ method: 'initialized' }))
+          if (!realtimeVoiceEnabled) {
+            finish({ ready: true, appServerVersion })
+            return
+          }
+          socket?.send(JSON.stringify({
+            id: 'codori-probe-features',
+            method: 'experimentalFeature/list',
+            params: {}
+          }))
+          return
+        }
+
+        if (message.id === 'codori-probe-features') {
+          if (message.error) {
+            finish({ ready: false, reason: 'incompatible-realtime' })
+            return
+          }
+          const result = isRecord(message.result) ? message.result : null
+          const data = Array.isArray(result?.data) ? result.data : []
+          const realtimeFeature = data.find((feature) =>
+            isRecord(feature) && feature.name === 'realtime_conversation'
+          )
+          if (!isRecord(realtimeFeature) || realtimeFeature.enabled !== true) {
+            finish({ ready: false, reason: 'incompatible-realtime' })
+            return
+          }
+          socket?.send(JSON.stringify({
+            id: 'codori-probe-realtime-voices',
+            method: 'thread/realtime/listVoices',
+            params: {}
+          }))
+          return
+        }
+
+        if (message.id === 'codori-probe-realtime-voices') {
+          finish(message.error || !hasCompatibleRealtimeVoices(message.result)
+            ? { ready: false, reason: 'incompatible-realtime' }
+            : { ready: true, appServerVersion })
+        }
+      })
+      socket.once('error', (error) => {
+        finish({
+          ready: false,
+          reason: daemonProbeFailureReason(error)
+        })
+      })
+      socket.once('close', () => {
+        if (!settled) {
+          finish({ ready: false, reason: 'daemon-unready' })
         }
       })
     } catch (error) {
