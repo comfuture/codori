@@ -27,6 +27,7 @@ export type TextSurfaceOptions = {
   font: string
   lineHeightPixels: number
   paddingPixels: number
+  titleFontSizePixels?: number
   opacity?: number
   glow?: boolean
 }
@@ -170,6 +171,7 @@ export class CanvasTextSurface {
     this.options = {
       widthPixels: 1_536,
       heightPixels: 896,
+      titleFontSizePixels: 32,
       opacity: 1,
       glow: false,
       ...options
@@ -217,6 +219,7 @@ export class CanvasTextSurface {
       font,
       lineHeightPixels,
       paddingPixels,
+      titleFontSizePixels,
       glow
     } = this.options
     const context = this.context
@@ -235,7 +238,7 @@ export class CanvasTextSurface {
 
     let bodyTop = paddingPixels
     if (content.title || content.status) {
-      context.font = `600 32px ${font}`
+      context.font = `600 ${titleFontSizePixels}px ${font}`
       context.fillStyle = color
       context.textBaseline = 'top'
       context.fillText(
