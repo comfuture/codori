@@ -27,6 +27,7 @@ export type LightSample = {
   intensity: number
   scale: number
   flarePhase: number
+  motion: number
 }
 
 const TAU = Math.PI * 2
@@ -82,9 +83,12 @@ export const sampleAgentLight = (input: {
   const seed = input.seed ?? 0x103
   const mix = activityMix(input.activity)
   const reduced = Boolean(input.reducedEffects)
-  const scaleBound = reduced
+  const speakingScaleBound = reduced
     ? REDUCED_LIGHT_SCALE_EXCURSION
     : LIGHT_SCALE_EXCURSION
+  const scaleBound = input.activity === 'speaking'
+    ? speakingScaleBound
+    : speakingScaleBound * 0.12
   const intensityBound = reduced
     ? REDUCED_LIGHT_INTENSITY_EXCURSION
     : LIGHT_INTENSITY_EXCURSION
@@ -101,8 +105,20 @@ export const sampleAgentLight = (input: {
       : 5.25
     const phase = input.timeSeconds * TAU * frequency
     const carrier = Math.sin(phase)
-    const microNoise = (seededSmoothNoise(input.timeSeconds, seed + 97, 12) - 0.5) * 0.32
-    pulse = clamp((carrier * 0.78) + microNoise, -1, 1)
+    const amplitude = 0.48 + (
+      seededSmoothNoise(input.timeSeconds, seed + 41, 0.9) * 0.82
+    )
+    const microNoise = (
+      seededSmoothNoise(input.timeSeconds, seed + 97, 12) - 0.5
+    ) * 0.26
+    const scaleBias = (
+      seededSmoothNoise(input.timeSeconds, seed + 173, 2.1) - 0.5
+    ) * 0.34
+    pulse = clamp(
+      (carrier * amplitude) + microNoise + scaleBias,
+      -1,
+      1
+    )
   } else {
     pulse = Math.sin(input.timeSeconds * TAU * 0.18) * 0.24
   }
@@ -125,7 +141,12 @@ export const sampleAgentLight = (input: {
       1 - scaleBound,
       1 + scaleBound
     ),
-    flarePhase: (input.timeSeconds * (reduced ? 0.08 : 0.2)) % 1
+    flarePhase: (input.timeSeconds * (reduced ? 0.08 : 0.2)) % 1,
+    motion: reduced
+      ? 0.22
+      : input.activity === 'speaking'
+        ? 1
+        : 0.52
   }
 }
 
@@ -144,7 +165,8 @@ export const mixLightSamples = (
     saturation: mixNumber(from.saturation, to.saturation, eased),
     intensity: mixNumber(from.intensity, to.intensity, eased),
     scale: mixNumber(from.scale, to.scale, eased),
-    flarePhase: mixNumber(from.flarePhase, to.flarePhase, eased)
+    flarePhase: mixNumber(from.flarePhase, to.flarePhase, eased),
+    motion: mixNumber(from.motion, to.motion, eased)
   }
 }
 

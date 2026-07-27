@@ -74,7 +74,10 @@ vi.mock('@codori/client/shared/realtime', () => ({
   })
 }))
 
-import { VoiceRuntime } from '../src/voice-runtime'
+import {
+  resolveImmersiveVoiceActivity,
+  VoiceRuntime
+} from '../src/voice-runtime'
 
 describe('voice runtime', () => {
   beforeEach(() => {
@@ -92,6 +95,30 @@ describe('voice runtime', () => {
     controllerFixture.stop.mockResolvedValue(undefined)
     controllerFixture.setOutputMuted.mockReset()
     controllerFixture.setCapability.mockReset()
+  })
+
+  it('returns the orb to listening after the assistant utterance is final', () => {
+    const speaking = {
+      ...snapshot('connected'),
+      activity: 'speaking' as const,
+      microphoneEnabled: true,
+      transcripts: [{
+        id: 1,
+        generation: 1,
+        role: 'assistant' as const,
+        text: 'Finished response',
+        final: true
+      }]
+    }
+
+    expect(resolveImmersiveVoiceActivity(speaking)).toBe('listening')
+    expect(resolveImmersiveVoiceActivity({
+      ...speaking,
+      transcripts: [{
+        ...speaking.transcripts[0]!,
+        final: false
+      }]
+    })).toBe('speaking')
   })
 
   it('enables the microphone after an idle capability refresh connects', async () => {
