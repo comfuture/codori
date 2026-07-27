@@ -1350,6 +1350,10 @@ export const createHttpServer = async (
         })
       }
 
+      if (requestPath === '/xr' || requestPath.startsWith('/xr/')) {
+        return reply.type('text/html').sendFile('xr/index.html')
+      }
+
       return reply.type('text/html').sendFile('index.html')
     })
   }

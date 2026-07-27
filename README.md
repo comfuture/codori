@@ -90,7 +90,7 @@ Then open:
 http://127.0.0.1:4310
 ```
 
-Codori now serves the dashboard UI, REST API, and WebSocket proxy from the same origin. Choose a discovered Git project, then start a new thread or resume an older one.
+Codori now serves the dashboard UI, immersive WebXR workspace, REST API, and WebSocket proxy from the same origin. Choose a discovered Git project, then start a new thread or resume an older one.
 
 Codori also mirrors the avatar selected by the remote Codex host. Built-in pets
 and custom manifests under `~/.codex/pets` are resolved on the server, while the
@@ -124,6 +124,26 @@ workspace with directly loadable sections:
 
 `/settings` redirects to Notifications. The settings navigation includes a
 safe return to the app route from which it was opened.
+
+### Immersive WebXR workspace
+
+Codori serves the independently built `@codori/webxr` application under
+`/xr/`. Its Vite assets remain under `/xr/assets/`, and nested immersive routes
+fall back to the WebXR entry document without changing the dashboard fallback
+or any `/api/*` REST and WebSocket route.
+
+Open a materialized project or chat thread in the dashboard and use its
+immersive launch action. The WebXR entry gate checks browser support and still
+requires an explicit user action before requesting an `immersive-vr` session.
+Unsupported browsers and users who choose **Continue in 2D** remain in the
+normal dashboard.
+
+Remote HMD access requires a secure HTTPS origin for both WebXR and microphone
+access. Plain HTTP is suitable only for browser secure-context exceptions such
+as localhost; a LAN address such as `http://192.168.x.x` is not sufficient.
+Use a private HTTPS ingress such as Tailscale Serve and keep the existing
+Codori security boundary in mind: the immersive application reuses the same
+same-origin `/api/*` routes and does not add authentication.
 
 ## Remote Access
 
@@ -212,6 +232,14 @@ Run the client UI in development:
 pnpm --filter @codori/client dev
 ```
 
+Run the immersive WebXR UI in development:
+
+```bash
+pnpm dev:webxr
+```
+
+The production WebXR build uses `/xr/` as its asset base.
+
 Regenerate the app-server protocol bindings with the Codex version pinned by the server package:
 
 ```bash
@@ -228,13 +256,16 @@ CODORI_SERVER_WS_BASE=wss://my-codori-host.your-tailnet.ts.net \
 pnpm --filter @codori/client dev
 ```
 
-Run a local Codori server with the freshly built client bundle:
+Run a local Codori server with the freshly built dashboard and WebXR bundles:
 
 ```bash
 pnpm run:local
 ```
 
-This rebuilds the client and server first, then serves Codori on `http://127.0.0.1:4310` with the repository parent directory as the project root.
+This rebuilds the dashboard, WebXR application, and server first, then serves
+Codori on `http://127.0.0.1:4310` with the repository parent directory as the
+project root. The dashboard is available at `/` and the immersive entry at
+`/xr/`.
 
 Build the workspace:
 
@@ -244,14 +275,14 @@ pnpm build
 
 ## Release
 
-Codori publishes `@codori/client` and `@codori/server` from GitHub Actions when a GitHub release is published.
+Codori publishes `@codori/client`, `@codori/webxr`, and `@codori/server` from GitHub Actions when a GitHub release is published.
 
 Trusted publishing setup is required once per package on npm:
 
 1. Open the npm package settings for `@codori/client`.
 2. Add a Trusted Publisher for GitHub Actions.
 3. Set the GitHub owner to `comfuture`, repository to `codori`, and workflow filename to `publish-release.yml`.
-4. Repeat the same setup for `@codori/server`.
+4. Repeat the same setup for `@codori/webxr` and `@codori/server`.
 
 The workflow uses npm trusted publishing with GitHub OIDC, so no long-lived npm automation token is required once that relationship is configured.
 
@@ -260,16 +291,17 @@ Release flow:
 1. Bump the workspace and package versions together.
 2. Push the commit to GitHub.
 3. Create and publish a GitHub release with the matching tag, for example `v0.0.5`.
-4. GitHub Actions runs `.github/workflows/publish-release.yml` and publishes both npm packages.
+4. GitHub Actions runs `.github/workflows/publish-release.yml` and publishes all three npm packages.
 
 The release workflow checks that the Git tag matches the workspace version and skips packages that were already published, so rerunning the workflow is safe after partial failures.
 
 ## Monorepo Structure
 
-This repository is a pnpm workspace with two packages:
+This repository is a pnpm workspace with three packages:
 
 - `@codori/server`: project discovery, runtime management, CLI, REST API, WebSocket proxy, and bundled static UI serving
 - `@codori/client`: Nuxt + Nuxt UI dashboard for project browsing and Codex chat
+- `@codori/webxr`: Vite + Three.js immersive workspace served under `/xr/`
 
 See [docs/prd.md](/Users/comfuture/Project/codori/docs/prd.md) for the detailed product specification.
 

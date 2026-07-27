@@ -36,7 +36,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json && node ./scripts/sync-client-bundle.mjs",
     "lint": "eslint src test --ext .ts",
-    "prepack": "pnpm --dir ../client build && pnpm run build",
+    "prepack": "pnpm --dir ../client build && pnpm --dir ../webxr build && pnpm run build",
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run"
   },

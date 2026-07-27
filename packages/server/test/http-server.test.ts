@@ -683,6 +683,9 @@ describe('createHttpServer', () => {
     const bundleDir = mkdtempSync(join(os.tmpdir(), 'codori-ui-'))
     writeFileSync(join(bundleDir, 'index.html'), '<html><body>codori ui</body></html>')
     writeFileSync(join(bundleDir, 'asset.txt'), 'static asset')
+    mkdirSync(join(bundleDir, 'xr', 'assets'), { recursive: true })
+    writeFileSync(join(bundleDir, 'xr', 'index.html'), '<html><body>immersive codori</body></html>')
+    writeFileSync(join(bundleDir, 'xr', 'assets', 'scene.js'), 'immersive asset')
 
     const app = await createHttpServer(createManager(), {
       clientBundleDir: bundleDir
@@ -720,6 +723,35 @@ describe('createHttpServer', () => {
     expect(assetResponse.statusCode).toBe(200)
     expect(assetResponse.body).toBe('static asset')
 
+    const xrIndexResponse = await app.inject({
+      method: 'GET',
+      url: '/xr/'
+    })
+    expect(xrIndexResponse.statusCode).toBe(200)
+    expect(xrIndexResponse.body).toContain('immersive codori')
+
+    const xrNoTrailingSlashResponse = await app.inject({
+      method: 'GET',
+      url: '/xr'
+    })
+    expect(xrNoTrailingSlashResponse.statusCode).toBe(200)
+    expect(xrNoTrailingSlashResponse.body).toContain('immersive codori')
+
+    const xrNestedRouteResponse = await app.inject({
+      method: 'GET',
+      url: '/xr/projects/demo/threads/thread-1'
+    })
+    expect(xrNestedRouteResponse.statusCode).toBe(200)
+    expect(xrNestedRouteResponse.body).toContain('immersive codori')
+
+    const xrAssetResponse = await app.inject({
+      method: 'GET',
+      url: '/xr/assets/scene.js'
+    })
+    expect(xrAssetResponse.statusCode).toBe(200)
+    expect(xrAssetResponse.body).toBe('immersive asset')
+    expect(xrAssetResponse.headers['cache-control']).toBe(assetResponse.headers['cache-control'])
+
     const missingAssetResponse = await app.inject({
       method: 'GET',
       url: '/missing.css?v=1',
@@ -732,6 +764,45 @@ describe('createHttpServer', () => {
       error: {
         code: 'NOT_FOUND',
         message: 'Asset not found.'
+      }
+    })
+
+    const missingXrAssetResponse = await app.inject({
+      method: 'GET',
+      url: '/xr/assets/missing.js?v=1',
+      headers: {
+        accept: '*/*'
+      }
+    })
+    expect(missingXrAssetResponse.statusCode).toBe(404)
+    expect(missingXrAssetResponse.json()).toEqual({
+      error: {
+        code: 'NOT_FOUND',
+        message: 'Asset not found.'
+      }
+    })
+
+    const apiResponse = await app.inject({
+      method: 'GET',
+      url: '/api/projects'
+    })
+    expect(apiResponse.statusCode).toBe(200)
+    expect(apiResponse.json()).toEqual({
+      projects: [createProjectRecord()]
+    })
+
+    const missingApiResponse = await app.inject({
+      method: 'GET',
+      url: '/api/not-found',
+      headers: {
+        accept: 'text/html'
+      }
+    })
+    expect(missingApiResponse.statusCode).toBe(404)
+    expect(missingApiResponse.json()).toEqual({
+      error: {
+        code: 'NOT_FOUND',
+        message: 'Route not found.'
       }
     })
   })

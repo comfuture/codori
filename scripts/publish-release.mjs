@@ -1,4 +1,5 @@
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
@@ -9,6 +10,7 @@ const rootDir = path.resolve(__dirname, '..');
 
 const packageDirs = [
   path.join(rootDir, 'packages/client'),
+  path.join(rootDir, 'packages/webxr'),
   path.join(rootDir, 'packages/server'),
 ];
 
@@ -57,6 +59,31 @@ async function packageVersionExists(name, version) {
   });
 }
 
+async function packWorkspacePackage(packageDir) {
+  const packDir = await mkdtemp(path.join(tmpdir(), 'codori-release-'));
+  try {
+    await run(
+      'pnpm',
+      ['pack', '--pack-destination', packDir],
+      { cwd: packageDir },
+    );
+    const archives = (await readdir(packDir))
+      .filter((entry) => entry.endsWith('.tgz'));
+    if (archives.length !== 1) {
+      throw new Error(
+        `Expected one packed archive for ${packageDir}, received ${archives.length}`,
+      );
+    }
+    return {
+      archivePath: path.join(packDir, archives[0]),
+      dispose: () => rm(packDir, { recursive: true, force: true }),
+    };
+  } catch (error) {
+    await rm(packDir, { recursive: true, force: true });
+    throw error;
+  }
+}
+
 async function main() {
   const rootPackage = await readJson(path.join(rootDir, 'package.json'));
   const releaseTag = tagArg ?? process.env.GITHUB_REF_NAME ?? '';
@@ -88,7 +115,12 @@ async function main() {
     }
 
     console.log(`Publishing ${packageJson.name}@${packageJson.version}...`);
-    await run('npx', npmPublishArgs, { cwd: packageDir });
+    const packed = await packWorkspacePackage(packageDir);
+    try {
+      await run('npx', [...npmPublishArgs, packed.archivePath], { cwd: rootDir });
+    } finally {
+      await packed.dispose();
+    }
   }
 }
 

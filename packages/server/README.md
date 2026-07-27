@@ -1,6 +1,8 @@
 # @codori/server
 
-Codori server for Git project discovery, Codex app-server backend selection, fallback lifecycle management, and bundled dashboard serving.
+Codori server for Git project discovery, Codex app-server backend selection,
+fallback lifecycle management, and bundled dashboard and immersive WebXR
+serving.
 
 ## Usage
 
@@ -17,7 +19,17 @@ Or point it at a different root explicitly:
 npx @codori/server --root ~/Project --host 127.0.0.1 --port 4310
 ```
 
-The server serves the dashboard UI, REST API, and websocket proxy from the same origin.
+The server serves the dashboard UI, immersive WebXR workspace, REST API, and
+websocket proxy from the same origin. The dashboard remains at `/`; the
+independently built `@codori/webxr` application is bundled under `/xr/`.
+Static WebXR assets use `/xr/assets/`, while unknown nested `/xr/*` navigation
+routes fall back to the WebXR entry document before the existing dashboard SPA
+fallback. Missing asset requests and `/api/*` routes never fall through to
+either application.
+
+The immersive application reuses the existing same-origin project/chat REST
+and WebSocket routes. Codori does not add a separate WebXR RPC surface or
+authentication boundary.
 
 The WebSocket proxy also resolves the Codex avatar selected on the remote host.
 It supports Codex built-in pets, `~/.codex/pets/<id>/pet.json`, and legacy
@@ -37,6 +49,13 @@ service. A newly started daemon or managed fallback enables
 `realtime_conversation`; an already-running incompatible daemon is not
 restarted and causes a safe managed fallback. Codori does not edit
 `~/.codex/config.toml`.
+
+WebXR and remote microphone access require a secure context. Localhost may use
+the browser's secure-context exception, but a headset opening a plain LAN HTTP
+address cannot enter immersive VR or start realtime voice. For remote HMD use,
+put Codori behind a private HTTPS ingress such as Tailscale Serve. Codori still
+has no built-in authentication, so do not expose that ingress publicly without
+an appropriate access-control layer.
 
 ## App-server backend selection
 
