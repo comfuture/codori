@@ -56,6 +56,7 @@ export type WorkspaceRuntimeSnapshot = {
 
 export type WorkspaceRuntimeOptions = {
   identity: WorkspaceIdentity
+  client?: CodexRpcClient
   wsBase?: string | null
   httpBase?: string | null
   now?: () => number
@@ -177,11 +178,13 @@ export class WorkspaceRuntime {
       ?? globalThis.setInterval.bind(globalThis)
     this.clearInterval = options.clearInterval
       ?? globalThis.clearInterval.bind(globalThis)
-    this.client = new CodexRpcClient(resolveWorkspaceRpcUrl({
-      workspace: options.identity.workspace,
-      configuredWsBase: options.wsBase,
-      configuredHttpBase: options.httpBase
-    }))
+    this.client = options.client ?? new CodexRpcClient(
+      resolveWorkspaceRpcUrl({
+        workspace: options.identity.workspace,
+        configuredWsBase: options.wsBase,
+        configuredHttpBase: options.httpBase
+      })
+    )
   }
 
   subscribe(listener: (snapshot: WorkspaceRuntimeSnapshot) => void) {

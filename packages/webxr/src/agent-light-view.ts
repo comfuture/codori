@@ -36,10 +36,37 @@ const createGlowTexture = () => {
   return new CanvasTexture(canvas)
 }
 
+const createRayTexture = () => {
+  const canvas = document.createElement('canvas')
+  canvas.width = 256
+  canvas.height = 256
+  const context = canvas.getContext('2d')
+  if (!context) {
+    throw new Error('Could not create the light ray texture.')
+  }
+  context.translate(128, 128)
+  for (let index = 0; index < 24; index += 1) {
+    const angle = (index / 24) * Math.PI * 2
+    const length = index % 3 === 0 ? 112 : 82
+    const gradient = context.createLinearGradient(18, 0, length, 0)
+    gradient.addColorStop(0, 'rgba(121,226,255,0.24)')
+    gradient.addColorStop(0.62, 'rgba(94,202,255,0.08)')
+    gradient.addColorStop(1, 'rgba(0,0,0,0)')
+    context.save()
+    context.rotate(angle)
+    context.fillStyle = gradient
+    context.fillRect(18, -0.8, length - 18, 1.6)
+    context.restore()
+  }
+  return new CanvasTexture(canvas)
+}
+
 export class AgentLightView {
   readonly group = new Group()
 
   private readonly glowTexture = createGlowTexture()
+
+  private readonly rayTexture = createRayTexture()
 
   private readonly coreMaterial = new MeshBasicMaterial({
     color: '#91edff',
@@ -79,6 +106,18 @@ export class AgentLightView {
 
   private readonly halo = new Sprite(this.haloMaterial)
 
+  private readonly rayMaterial = new SpriteMaterial({
+    map: this.rayTexture,
+    color: '#72ddff',
+    transparent: true,
+    opacity: 0.2,
+    blending: AdditiveBlending,
+    depthWrite: false,
+    depthTest: true
+  })
+
+  private readonly rays = new Sprite(this.rayMaterial)
+
   private readonly localLight = new PointLight('#7adfff', 1.2, 2.5, 2)
 
   private readonly flareSprites: Sprite[] = []
@@ -88,7 +127,14 @@ export class AgentLightView {
   constructor() {
     this.group.name = 'agent-light'
     this.halo.scale.setScalar(1.35)
-    this.group.add(this.halo, this.core, this.inner, this.localLight)
+    this.rays.scale.setScalar(1.9)
+    this.group.add(
+      this.rays,
+      this.halo,
+      this.core,
+      this.inner,
+      this.localLight
+    )
 
     for (let index = 0; index < 7; index += 1) {
       const material = new SpriteMaterial({
@@ -119,6 +165,11 @@ export class AgentLightView {
     this.innerMaterial.opacity = 0.42 + (sample.intensity * 0.2)
     this.haloMaterial.color.copy(mixedColor)
     this.haloMaterial.opacity = 0.38 + (sample.intensity * 0.28)
+    this.rayMaterial.color.copy(mixedColor)
+    this.rayMaterial.opacity = 0.08 + (sample.intensity * 0.12)
+    this.rayMaterial.rotation = (
+      sample.flarePhase * Math.PI * 2
+    ) + (timeSeconds * 0.025)
     this.localLight.color.copy(mixedColor)
     this.localLight.intensity = sample.intensity * 1.4
     this.group.scale.setScalar(sample.scale)
@@ -145,10 +196,12 @@ export class AgentLightView {
     this.coreMaterial.dispose()
     this.innerMaterial.dispose()
     this.haloMaterial.dispose()
+    this.rayMaterial.dispose()
     for (const material of this.flareMaterials) {
       material.dispose()
     }
     this.glowTexture.dispose()
+    this.rayTexture.dispose()
     this.group.clear()
   }
 }

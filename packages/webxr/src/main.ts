@@ -47,6 +47,7 @@ let immersiveScenePromise: Promise<ImmersiveScene> | null = null
 let workspaceRuntime: WorkspaceRuntime | null = null
 let voiceRuntime: VoiceRuntime | null = null
 let activeSession: XRSession | null = null
+let releaseSessionListeners: (() => void) | null = null
 let releaseWorkspace: (() => void) | null = null
 let releaseVoice: (() => void) | null = null
 let startingRuntime: Promise<void> | null = null
@@ -222,9 +223,34 @@ const returnTo2d = () => {
 }
 
 const handleSessionEnded = () => {
+  releaseSessionListeners?.()
+  releaseSessionListeners = null
   activeSession = null
   workspaceRuntime?.setSuspended(true)
   returnTo2d()
+}
+
+const bindSessionListeners = (session: XRSession) => {
+  releaseSessionListeners?.()
+  const handleEnd = () => {
+    handleSessionEnded()
+  }
+  const handleVisibility = () => {
+    workspaceRuntime?.setSuspended(
+      document.hidden || session.visibilityState === 'hidden'
+    )
+  }
+  session.addEventListener('end', handleEnd)
+  session.addEventListener('visibilitychange', handleVisibility)
+  let released = false
+  releaseSessionListeners = () => {
+    if (released) {
+      return
+    }
+    released = true
+    session.removeEventListener('end', handleEnd)
+    session.removeEventListener('visibilitychange', handleVisibility)
+  }
 }
 
 const exitImmersive = async () => {
@@ -245,18 +271,23 @@ const enterImmersive = async () => {
       xr: navigator.xr
     })
     activeSession = session
-    session.addEventListener('end', handleSessionEnded, { once: true })
-    session.addEventListener('visibilitychange', () => {
-      workspaceRuntime?.setSuspended(
-        document.hidden || session.visibilityState === 'hidden'
-      )
-    })
+    bindSessionListeners(session)
     showScene()
     const scene = await ensureScene()
     await scene.setSession(session)
     await startWorkspaceRuntime()
   } catch (error) {
+    const failedSession = activeSession
+    releaseSessionListeners?.()
+    releaseSessionListeners = null
     activeSession = null
+    if (failedSession) {
+      try {
+        await failedSession.end()
+      } catch {
+        // Preserve the original entry failure below.
+      }
+    }
     showEntry()
     entryActions.hidden = false
     retryButton.hidden = false
@@ -366,6 +397,14 @@ document.addEventListener('visibilitychange', () => {
   )
 })
 window.addEventListener('pagehide', () => {
+  returningTo2d = true
+  const session = activeSession
+  releaseSessionListeners?.()
+  releaseSessionListeners = null
+  activeSession = null
+  if (session) {
+    void session.end().catch(() => {})
+  }
   immersiveScene?.dispose()
   immersiveScene = null
   immersiveScenePromise = null
