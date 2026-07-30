@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
+  PANEL_CONTROL_DEPTH_METERS,
+  PANEL_CONTROL_RADIUS_METERS,
+  PANEL_CONTROL_SIZE_METERS,
   resolvePanelHeight,
+  resolvePanelControlLayout,
   resolvePanelInteractionLayout,
   resolvePanelSlotTransition,
   resolvePanelVisualState
@@ -17,7 +21,7 @@ describe('spatial panel visual states', () => {
       .toBeGreaterThan(resolvePanelHeight('a'.repeat(300)))
   })
 
-  it('limits the grab target to the visible text-surface header', () => {
+  it('keeps the compact visible header separate from scrollable content', () => {
     const layout = resolvePanelInteractionLayout(1.55, 0.92)
     const titleBottom = layout.titleBar.y - (layout.titleBar.height / 2)
     const contentTop = layout.content.y + (layout.content.height / 2)
@@ -27,6 +31,16 @@ describe('spatial panel visual states', () => {
       height: 0.11
     })
     expect(contentTop).toBeLessThan(titleBottom)
+  })
+
+  it('places compact, thick controls side by side above the top-right edge', () => {
+    const layout = resolvePanelControlLayout(1.55, 0.92)
+    expect(layout.dismiss.x).toBeGreaterThan(layout.drag.x)
+    expect(layout.dismiss.y).toBeGreaterThan(0.92 / 2)
+    expect(layout.drag.y).toBe(layout.dismiss.y)
+    expect(PANEL_CONTROL_RADIUS_METERS)
+      .toBeLessThan(PANEL_CONTROL_SIZE_METERS / 4)
+    expect(PANEL_CONTROL_DEPTH_METERS).toBeGreaterThan(0.02)
   })
 
   it('uses a 250ms standard scale transition', () => {

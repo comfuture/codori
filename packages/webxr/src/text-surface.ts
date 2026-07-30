@@ -33,7 +33,10 @@ export type TextSurfaceOptions = {
   titleFontSizePixels?: number
   opacity?: number
   glow?: boolean
+  radiusPixels?: number
 }
+
+export type TextSurfaceIcon = 'close' | 'drag'
 
 export type TextSurfaceContent = {
   title?: string
@@ -42,6 +45,7 @@ export type TextSurfaceContent = {
   scrollLine?: number
   ansi?: boolean
   active?: boolean
+  icon?: TextSurfaceIcon
 }
 
 export type TextSurfaceSize = {
@@ -242,6 +246,7 @@ export class CanvasTextSurface {
       titleFontSizePixels: 32,
       opacity: 1,
       glow: false,
+      radiusPixels: 42,
       ...options
     }
     this.canvas = document.createElement('canvas')
@@ -326,12 +331,20 @@ export class CanvasTextSurface {
       paddingPixels,
       bodyFontSizePixels,
       titleFontSizePixels,
-      glow
+      glow,
+      radiusPixels
     } = this.options
     const active = content.active === true
     const context = this.context
     context.clearRect(0, 0, width, height)
-    roundedRect(context, 3, 3, width - 6, height - 6, 42)
+    roundedRect(
+      context,
+      3,
+      3,
+      width - 6,
+      height - 6,
+      radiusPixels
+    )
     context.fillStyle = background
     context.fill()
     const strokeColor = active ? '#8cecff' : border
@@ -343,6 +356,47 @@ export class CanvasTextSurface {
     }
     context.stroke()
     context.shadowBlur = 0
+
+    if (content.icon) {
+      context.fillStyle = color
+      context.strokeStyle = color
+      context.lineCap = 'round'
+      context.lineJoin = 'round'
+      if (glow) {
+        context.shadowBlur = 14
+        context.shadowColor = color
+      }
+      const centerX = width / 2
+      const centerY = height / 2
+      if (content.icon === 'close') {
+        const extent = Math.min(width, height) * 0.18
+        context.lineWidth = Math.max(8, Math.min(width, height) * 0.07)
+        context.beginPath()
+        context.moveTo(centerX - extent, centerY - extent)
+        context.lineTo(centerX + extent, centerY + extent)
+        context.moveTo(centerX + extent, centerY - extent)
+        context.lineTo(centerX - extent, centerY + extent)
+        context.stroke()
+      } else {
+        const xOffset = Math.min(width, height) * 0.105
+        const yOffset = Math.min(width, height) * 0.14
+        const radius = Math.min(width, height) * 0.033
+        for (const x of [centerX - xOffset, centerX + xOffset]) {
+          for (const y of [
+            centerY - yOffset,
+            centerY,
+            centerY + yOffset
+          ]) {
+            context.beginPath()
+            context.arc(x, y, radius, 0, Math.PI * 2)
+            context.fill()
+          }
+        }
+      }
+      context.shadowBlur = 0
+      this.texture.needsUpdate = true
+      return
+    }
 
     let bodyTop = paddingPixels
     if (content.title || content.status) {
