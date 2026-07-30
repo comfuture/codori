@@ -61,8 +61,8 @@ Controller:
 - target ray: hover and select controls or panel content
 - select-drag on panel content: scroll without a visible scrollbar
 - thumbstick vertical axis over content: scroll
-- select-drag, pinch, or squeeze on the six-dot drag button above the active panel's top-right edge: move it while preserving viewer distance for ray input or following physical controller movement for squeeze
-- tap the drag button: pull a distant panel along its current sight line to a `1.8 m` reading distance without pushing an already-close panel away
+- select-drag, pinch, or squeeze on either the full-width `0.11 m` title header or the separate six-dot drag button above the active panel's top-right edge: move it while preserving viewer distance for ray input or following physical controller movement for squeeze
+- tap the title header or drag button: pull a distant panel along its current sight line to a `1.8 m` reading distance without pushing an already-close panel away
 - selecting a panel keeps it active after release, with a thicker cyan outline and stronger glow; selecting another panel transfers active state and selecting empty space clears it
 - select the vector close-icon button beside the drag button: dismiss the active panel with a `125 ms` expanding particle burst
 - release: keep the panel at its chosen position for this XR session
