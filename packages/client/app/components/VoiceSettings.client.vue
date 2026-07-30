@@ -10,7 +10,9 @@ import { resolveApiUrl, shouldUseServerProxy } from '~~/shared/network'
 import { selectRealtimeVoicePreviewSource } from '~~/shared/realtime-voice-preview'
 import {
   resolveConfiguredRealtimeVoicePrompt,
-  resolveRealtimeVoiceOverride,
+  resolveRealtimeVoiceOverride
+} from '~~/shared/realtime-voice-settings'
+import {
   useRealtimeVoicePreference,
   useRealtimeVoicePromptPreference
 } from '../composables/useRealtimeVoicePreference'

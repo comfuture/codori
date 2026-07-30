@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   createRealtimeVoicePromptPreference,
-  createRealtimeVoicePreference,
+  createRealtimeVoicePreference
+} from '../app/composables/useRealtimeVoicePreference'
+import {
   DEFAULT_REALTIME_VOICE_PROMPT,
   REALTIME_VOICE_CONFIG_PROMPT_KEY,
   REALTIME_VOICE_PREFERENCE_KEY,
@@ -10,7 +12,7 @@ import {
   resolveRealtimeVoiceOverride,
   resolveRealtimeVoicePreviewText,
   resolveRealtimeVoiceStartPrompt
-} from '../app/composables/useRealtimeVoicePreference'
+} from '../shared/realtime-voice-settings'
 
 describe('realtime voice preference', () => {
   it('uses a language-independent default voice prompt', () => {

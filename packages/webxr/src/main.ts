@@ -220,7 +220,8 @@ const startWorkspaceRuntime = async () => {
 
     const voice = new VoiceRuntime({
       client: runtime.client,
-      threadId: route.identity.threadId
+      threadId: route.identity.threadId,
+      cwd: runtime.snapshot().thread?.cwd ?? null
     })
     voiceRuntime = voice
     releaseVoice = voice.subscribe(updateVoiceUi)

@@ -86,12 +86,14 @@ import {
   useSharedRealtimeConversation
 } from '../composables/useSharedRealtimeConversation'
 import {
-  resolveConfiguredRealtimeVoicePrompt,
-  resolveRealtimeVoiceOverride,
-  resolveRealtimeVoiceStartPrompt,
   useRealtimeVoicePreference,
   useRealtimeVoicePromptPreference
 } from '../composables/useRealtimeVoicePreference'
+import {
+  resolveConfiguredRealtimeVoicePrompt,
+  resolveRealtimeVoiceOverride,
+  resolveRealtimeVoiceStartPrompt
+} from '~~/shared/realtime-voice-settings'
 import { useRealtimeVoiceCapabilityLifecycle } from '../composables/useRealtimeVoiceCapabilityLifecycle'
 import { rememberRealtimeVoiceWorkspaceContext } from '../composables/useRealtimeVoiceWorkspaceContext'
 import { sortSidebarProjects } from '../utils/project-sidebar-order'
