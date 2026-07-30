@@ -304,6 +304,9 @@ const enterImmersive = async () => {
     await coordinateRealtimeAutoStart({
       prepare: startWorkspaceRuntime,
       isCurrent: () => activeSession === session,
+      beforeStart: () => {
+        scene.awakenAgent()
+      },
       start: async () => {
         if (!voiceRuntime) {
           throw new Error('The voice runtime did not initialize.')

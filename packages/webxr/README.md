@@ -77,6 +77,8 @@ Native and synthesized primary actions are de-duplicated. Competing grabs have o
 
 Immersive entry starts the realtime voice session automatically after at least `500 ms` and as soon as the workspace runtime is ready. Selecting the central light remains an explicit stop/restart control. A door-sized rounded `Exit` surface sits on the `10 m × 10 m` room boundary, beyond the agent light along the initial view direction. The 2D fallback remains available before immersive entry.
 
+While realtime startup is pending, the agent light remains dormant at `86%` scale, `72%` intensity, and nearly zero lens flare. Startup triggers a `160 ms` flare ignition followed by an `850 ms` settle into the current activity state. Reduced-effects mode uses a smaller scale excursion and lower flare peak.
+
 ## Panel semantics and caps
 
 Foreground command, file-change, MCP, dynamic-tool, and web-search panels appear near the central field of view on `item/started`, update continuously from progress/output deltas, stay visible while active, dwell for one minute after terminal completion, then shrink and dispose. Four screen-space anchors each have a front/back depth pair: when a new panel reaches an occupied anchor, the existing panel eases `0.55 m` back and the new panel opens in front. Scrolling, moving, or focusing a completed panel restarts that one-minute dwell. A manually dismissed panel does not reappear when late deltas arrive.

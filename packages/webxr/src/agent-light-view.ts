@@ -398,9 +398,15 @@ export class AgentLightView {
       ) + spec.phase
     }
     this.haloMaterial.color.copy(mixedColor)
-    this.haloMaterial.opacity = 0.38 + (sample.intensity * 0.28)
+    this.haloMaterial.opacity = Math.min(
+      1,
+      (0.38 + (sample.intensity * 0.28)) * sample.flareIntensity
+    )
     this.rayMaterial.color.copy(mixedColor)
-    this.rayMaterial.opacity = 0.08 + (sample.intensity * 0.12)
+    this.rayMaterial.opacity = Math.min(
+      1,
+      (0.08 + (sample.intensity * 0.12)) * sample.flareIntensity
+    )
     this.rayMaterial.rotation = (
       sample.flarePhase * Math.PI * 2
     ) + (timeSeconds * 0.025)
@@ -419,8 +425,13 @@ export class AgentLightView {
         Math.sin((phase * 1.3) - (timeSeconds * 0.05)) * radius * 0.62,
         Math.sin(phase) * 0.08
       )
-      this.flareMaterials[index]!.opacity =
-        0.09 + (sample.intensity * (0.08 + ((index % 3) * 0.025)))
+      this.flareMaterials[index]!.opacity = Math.min(
+        1,
+        (
+          0.09
+          + (sample.intensity * (0.08 + ((index % 3) * 0.025)))
+        ) * sample.flareIntensity
+      )
     }
   }
 
