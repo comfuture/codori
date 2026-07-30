@@ -56,6 +56,43 @@ const clampCanvasSize = (value: number) =>
 const defaultSegmenter = typeof Intl.Segmenter === 'function'
   ? new Intl.Segmenter(undefined, { granularity: 'word' })
   : null
+const graphemeSegmenter = typeof Intl.Segmenter === 'function'
+  ? new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+  : null
+
+type TextMeasurer = Pick<CanvasRenderingContext2D, 'measureText'>
+
+export const truncateCanvasText = (
+  context: TextMeasurer,
+  text: string,
+  maximumWidth: number
+) => {
+  if (maximumWidth <= 0) {
+    return ''
+  }
+  if (context.measureText(text).width <= maximumWidth) {
+    return text
+  }
+  const ellipsis = '…'
+  if (context.measureText(ellipsis).width > maximumWidth) {
+    return ''
+  }
+  const graphemes = graphemeSegmenter
+    ? [...graphemeSegmenter.segment(text)].map(segment => segment.segment)
+    : [...text]
+  let low = 0
+  let high = graphemes.length
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2)
+    const candidate = graphemes.slice(0, middle).join('') + ellipsis
+    if (context.measureText(candidate).width <= maximumWidth) {
+      low = middle
+    } else {
+      high = middle - 1
+    }
+  }
+  return graphemes.slice(0, low).join('').trimEnd() + ellipsis
+}
 
 export const wrapCanvasText = (
   context: CanvasRenderingContext2D,
@@ -309,21 +346,48 @@ export class CanvasTextSurface {
       context.font = `600 ${titleFontSizePixels}px ${font}`
       context.fillStyle = color
       context.textBaseline = 'top'
-      context.fillText(
-        content.title ?? '',
-        paddingPixels,
-        paddingPixels,
-        width - (paddingPixels * 2) - 220
+      const statusWidth = content.status ? 210 : 0
+      const titleWidth = Math.max(
+        0,
+        width - (paddingPixels * 2) - statusWidth - (
+          content.status ? 10 : 0
+        )
       )
+      const title = truncateCanvasText(
+        context,
+        content.title ?? '',
+        titleWidth
+      )
+      context.save()
+      context.beginPath()
+      context.rect(
+        paddingPixels,
+        paddingPixels,
+        titleWidth,
+        titleFontSizePixels + 8
+      )
+      context.clip()
+      context.fillText(title, paddingPixels, paddingPixels)
+      context.restore()
       if (content.status) {
+        const status = truncateCanvasText(
+          context,
+          content.status,
+          statusWidth
+        )
         context.textAlign = 'right'
         context.fillStyle = border
-        context.fillText(
-          content.status,
-          width - paddingPixels,
+        context.save()
+        context.beginPath()
+        context.rect(
+          width - paddingPixels - statusWidth,
           paddingPixels,
-          210
+          statusWidth,
+          titleFontSizePixels + 8
         )
+        context.clip()
+        context.fillText(status, width - paddingPixels, paddingPixels)
+        context.restore()
         context.textAlign = 'left'
       }
       bodyTop += 52
