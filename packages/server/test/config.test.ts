@@ -32,7 +32,7 @@ describe('resolveConfig', () => {
       sweepIntervalMs: 60 * 1000
     })
     expect(config.realtimeVoice).toEqual({
-      enabled: false
+      enabled: true
     })
   })
 

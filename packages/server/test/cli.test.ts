@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import { join } from 'node:path'
 import { PassThrough } from 'node:stream'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { CLI_USAGE, isCliEntrypointPath, runCli } from '../src/cli.js'
 
 const createOutput = () => {
@@ -30,6 +30,7 @@ describe('cli service commands', () => {
     expect(stdout.read()).toContain('codori install-service')
     expect(CLI_USAGE).toContain('npx @codori/server <command>')
     expect(CLI_USAGE).toContain('--experimental-realtime-voice')
+    expect(CLI_USAGE).toContain('--tailscale-serve')
   })
 
   it('rejects the runtime-only realtime flag for installed service commands', async () => {
@@ -38,6 +39,14 @@ describe('cli service commands', () => {
       '--experimental-realtime-voice',
       '--yes'
     ])).rejects.toThrow(/realtimeVoice\.enabled in ~\/\.codori\/config\.json/)
+  })
+
+  it('rejects tailscale serve for installed service commands', async () => {
+    await expect(runCli([
+      'install-service',
+      '--tailscale-serve',
+      '--yes'
+    ])).rejects.toThrow(/available only for a direct `serve` launch/)
   })
 
   it('treats setup-service as an alias for install-service', async () => {
@@ -83,5 +92,96 @@ describe('cli service commands', () => {
     symlinkSync(realPath, symlinkPath)
 
     expect(isCliEntrypointPath(symlinkPath, new URL(`file://${realPath}`).href)).toBe(true)
+  })
+
+  it('rejects a non-loopback host with tailscale serve', async () => {
+    await expect(runCli([
+      '--root',
+      '/tmp/projects',
+      '--host',
+      '0.0.0.0',
+      '--tailscale-serve'
+    ])).rejects.toThrow(/requires --host 127\.0\.0\.1/)
+  })
+
+  it('configures tailscale serve after starting a loopback server', async () => {
+    const stdout = createOutput()
+    const app = {
+      close: vi.fn(),
+      ready: vi.fn()
+    }
+    const manager = {
+      config: {
+        root: '/tmp/projects',
+        server: {
+          host: '127.0.0.1',
+          port: 4310
+        },
+        realtimeVoice: {
+          enabled: true
+        }
+      }
+    }
+    const createRuntimeManager = vi.fn(() => manager)
+    const configureTailscaleServe = vi.fn().mockResolvedValue({
+      url: 'https://codori-host.example.ts.net/',
+      alreadyConfigured: false
+    })
+
+    await runCli([
+      '--root',
+      '/tmp/projects',
+      '--tailscale-serve'
+    ], {
+      stdout: stdout.stream,
+      createRuntimeManager: createRuntimeManager as never,
+      startHttpServer: vi.fn(async () => app) as never,
+      configureTailscaleServe
+    })
+
+    expect(createRuntimeManager).toHaveBeenCalledWith({
+      configOverrides: {
+        root: '/tmp/projects',
+        host: '127.0.0.1',
+        port: undefined,
+        realtimeVoiceEnabled: undefined
+      }
+    })
+    expect(configureTailscaleServe).toHaveBeenCalledWith(4310, undefined)
+    expect(app.close).not.toHaveBeenCalled()
+    expect(app.ready).toHaveBeenCalled()
+    expect(stdout.read()).toContain('Codori listening on http://127.0.0.1:4310')
+    expect(stdout.read()).toContain(
+      'Tailscale Serve configured: https://codori-host.example.ts.net/'
+    )
+  })
+
+  it('closes the server when tailscale serve setup fails', async () => {
+    const app = {
+      close: vi.fn(),
+      ready: vi.fn()
+    }
+    const manager = {
+      config: {
+        root: '/tmp/projects',
+        server: {
+          host: '127.0.0.1',
+          port: 4310
+        }
+      }
+    }
+
+    await expect(runCli([
+      '--root',
+      '/tmp/projects',
+      '--tailscale-serve'
+    ], {
+      createRuntimeManager: vi.fn(() => manager) as never,
+      startHttpServer: vi.fn(async () => app) as never,
+      configureTailscaleServe: vi.fn().mockRejectedValue(new Error('serve failed'))
+    })).rejects.toThrow('serve failed')
+
+    expect(app.close).toHaveBeenCalled()
+    expect(app.ready).not.toHaveBeenCalled()
   })
 })
