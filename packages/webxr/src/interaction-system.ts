@@ -258,7 +258,10 @@ export class ImmersiveInteractionSystem {
       if (!panel.group.visible) {
         continue
       }
-      targets.push(panel.contentHit, panel.grabHit)
+      targets.push(panel.contentHit)
+      if (panel.grabHit.visible && panel.grabHit.parent?.visible) {
+        targets.push(panel.grabHit)
+      }
       if (panel.dismissHit.visible && panel.dismissHit.parent?.visible) {
         targets.push(panel.dismissHit)
       }

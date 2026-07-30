@@ -35,6 +35,27 @@ const PANEL_MAX_SURFACE_HEIGHT_PIXELS = 896
 const PANEL_BODY_COLUMNS = 72
 const PANEL_CHROME_PIXELS = 160
 const PANEL_LINE_HEIGHT_PIXELS = 36
+export const PANEL_CONTROL_SIZE_METERS = 0.15
+export const PANEL_CONTROL_DEPTH_METERS = 0.028
+export const PANEL_CONTROL_RADIUS_METERS = 0.022
+const PANEL_CONTROL_GAP_METERS = 0.02
+
+export const resolvePanelControlLayout = (
+  width: number,
+  height: number
+) => {
+  const dismissX = (width / 2) - (PANEL_CONTROL_SIZE_METERS / 2)
+  return {
+    dismiss: {
+      x: dismissX,
+      y: (height / 2) + (PANEL_CONTROL_SIZE_METERS / 2) + 0.01
+    },
+    drag: {
+      x: dismissX - PANEL_CONTROL_SIZE_METERS - PANEL_CONTROL_GAP_METERS,
+      y: (height / 2) + (PANEL_CONTROL_SIZE_METERS / 2) + 0.01
+    }
+  }
+}
 
 const displayColumns = (text: string) => [...text].reduce(
   (columns, character) => columns + (
@@ -182,8 +203,8 @@ export class SpatialPanelView {
   })
 
   private readonly dismissSurface = new CanvasTextSurface({
-    widthMeters: 0.16,
-    heightMeters: 0.16,
+    widthMeters: 0.13,
+    heightMeters: 0.13,
     widthPixels: 192,
     heightPixels: 192,
     background: 'rgba(5, 24, 36, 0.9)',
@@ -193,10 +214,63 @@ export class SpatialPanelView {
     lineHeightPixels: 92,
     paddingPixels: 44,
     bodyFontSizePixels: 84,
-    glow: true
+    glow: true,
+    radiusPixels: 22
+  })
+
+  private readonly dragSurface = new CanvasTextSurface({
+    widthMeters: 0.13,
+    heightMeters: 0.13,
+    widthPixels: 192,
+    heightPixels: 192,
+    background: 'rgba(5, 24, 36, 0.92)',
+    border: 'rgba(77, 197, 226, 0.9)',
+    color: '#bdf4ff',
+    font: 'Inter, system-ui, sans-serif',
+    lineHeightPixels: 92,
+    paddingPixels: 44,
+    bodyFontSizePixels: 84,
+    glow: true,
+    radiusPixels: 22
   })
 
   private readonly dismissControl = new Group()
+
+  private readonly dragControl = new Group()
+
+  private readonly dismissButtonMaterial = new MeshBasicMaterial({
+    color: '#0b4058',
+    transparent: true,
+    opacity: 0.96
+  })
+
+  private readonly dragButtonMaterial = new MeshBasicMaterial({
+    color: '#0b4058',
+    transparent: true,
+    opacity: 0.96
+  })
+
+  private readonly dismissButton = new Mesh(
+    new RoundedBoxGeometry(
+      PANEL_CONTROL_SIZE_METERS,
+      PANEL_CONTROL_SIZE_METERS,
+      PANEL_CONTROL_DEPTH_METERS,
+      4,
+      PANEL_CONTROL_RADIUS_METERS
+    ),
+    this.dismissButtonMaterial
+  )
+
+  private readonly dragButton = new Mesh(
+    new RoundedBoxGeometry(
+      PANEL_CONTROL_SIZE_METERS,
+      PANEL_CONTROL_SIZE_METERS,
+      PANEL_CONTROL_DEPTH_METERS,
+      4,
+      PANEL_CONTROL_RADIUS_METERS
+    ),
+    this.dragButtonMaterial
+  )
 
   private readonly particleOrigins: Float32Array
 
@@ -253,7 +327,14 @@ export class SpatialPanelView {
     this.titleBar.name = `panel-title-bar:${snapshot.id}`
     this.titleBar.position.set(0, interactionLayout.titleBar.y, 0.002)
     this.group.add(this.titleBar, this.surface.mesh)
-    this.dismissSurface.render({ body: '×' })
+    this.dismissSurface.mesh.position.z = (
+      PANEL_CONTROL_DEPTH_METERS / 2
+    ) + 0.001
+    this.dragSurface.mesh.position.z = (
+      PANEL_CONTROL_DEPTH_METERS / 2
+    ) + 0.001
+    this.dismissSurface.render({ body: '', icon: 'close' })
+    this.dragSurface.render({ body: '', icon: 'drag' })
 
     const invisibleMaterial = new MeshBasicMaterial({
       transparent: true,
@@ -275,20 +356,24 @@ export class SpatialPanelView {
     }
     this.grabHit = new Mesh(
       new BoxGeometry(
-        interactionLayout.titleBar.width,
-        interactionLayout.titleBar.height,
+        PANEL_CONTROL_SIZE_METERS + 0.02,
+        PANEL_CONTROL_SIZE_METERS + 0.02,
         0.075
       ),
       invisibleMaterial.clone()
     )
-    this.grabHit.name = `panel-title-bar-grab:${snapshot.id}`
-    this.grabHit.position.y = interactionLayout.titleBar.y
+    this.grabHit.name = `panel-drag-control:${snapshot.id}`
+    this.grabHit.position.z = 0.01
     this.grabHit.userData = {
       panelId: snapshot.id,
       hitZone: 'grab'
     }
     this.dismissHit = new Mesh(
-      new BoxGeometry(0.19, 0.19, 0.08),
+      new BoxGeometry(
+        PANEL_CONTROL_SIZE_METERS + 0.02,
+        PANEL_CONTROL_SIZE_METERS + 0.02,
+        0.08
+      ),
       invisibleMaterial.clone()
     )
     this.dismissHit.position.z = 0.01
@@ -297,15 +382,19 @@ export class SpatialPanelView {
       hitZone: 'dismiss'
     }
     this.dismissControl.name = `panel-dismiss:${snapshot.id}`
-    this.dismissControl.position.set(
-      (this.width / 2) - 0.08,
-      (-this.height / 2) - 0.1,
-      0.025
-    )
+    this.dragControl.name = `panel-drag:${snapshot.id}`
+    this.positionActiveControls()
     this.dismissControl.visible = false
+    this.dragControl.visible = false
     this.dismissControl.add(
+      this.dismissButton,
       this.dismissSurface.mesh,
       this.dismissHit
+    )
+    this.dragControl.add(
+      this.dragButton,
+      this.dragSurface.mesh,
+      this.grabHit
     )
 
     const particleCount = 28
@@ -345,8 +434,8 @@ export class SpatialPanelView {
     this.particles.visible = false
     this.group.add(
       this.contentHit,
-      this.grabHit,
       this.dismissControl,
+      this.dragControl,
       this.particles
     )
     this.update(snapshot)
@@ -438,18 +527,7 @@ export class SpatialPanelView {
       0.06
     )
     this.contentHit.position.y = interactionLayout.content.y
-    this.grabHit.geometry.dispose()
-    this.grabHit.geometry = new BoxGeometry(
-      interactionLayout.titleBar.width,
-      interactionLayout.titleBar.height,
-      0.075
-    )
-    this.grabHit.position.y = interactionLayout.titleBar.y
-    this.dismissControl.position.set(
-      (this.width / 2) - 0.08,
-      (-this.height / 2) - 0.1,
-      0.025
-    )
+    this.positionActiveControls()
 
     const position = this.particleGeometry.getAttribute('position')
     for (let index = 0; index < position.count; index += 1) {
@@ -462,6 +540,20 @@ export class SpatialPanelView {
       position.setXYZ(index, x, y, this.particleOrigins[offset + 2]!)
     }
     position.needsUpdate = true
+  }
+
+  private positionActiveControls() {
+    const layout = resolvePanelControlLayout(this.width, this.height)
+    this.dismissControl.position.set(
+      layout.dismiss.x,
+      layout.dismiss.y,
+      0.025
+    )
+    this.dragControl.position.set(
+      layout.drag.x,
+      layout.drag.y,
+      0.025
+    )
   }
 
   updateAnimation(now: number) {
@@ -555,6 +647,8 @@ export class SpatialPanelView {
     this.active = active
     this.dismissControl.visible = active
       && this.snapshot.phase !== 'bursting'
+    this.dragControl.visible = active
+      && this.snapshot.phase !== 'bursting'
     const color = grabbed
       ? new Color('#8cecff')
       : grabHovered
@@ -571,6 +665,18 @@ export class SpatialPanelView {
           ? 0.52
           : 0.42
     this.titleBarMaterial.opacity = this.titleBarOpacity
+    this.dragButtonMaterial.color.set(
+      grabbed
+        ? '#37c7ea'
+        : grabHovered
+          ? '#1a8cab'
+          : '#0b4058'
+    )
+    this.dragButtonMaterial.opacity = grabbed
+      ? 1
+      : grabHovered
+        ? 0.98
+        : 0.96
     if (activeChanged) {
       this.renderContent(this.animationNow)
     }
@@ -609,6 +715,7 @@ export class SpatialPanelView {
   dispose() {
     this.surface.dispose()
     this.dismissSurface.dispose()
+    this.dragSurface.dispose()
     this.titleBar.geometry.dispose()
     this.titleBarMaterial.dispose()
     this.contentHit.geometry.dispose()
@@ -629,6 +736,10 @@ export class SpatialPanelView {
     } else {
       this.dismissHit.material.dispose()
     }
+    this.dismissButton.geometry.dispose()
+    this.dismissButtonMaterial.dispose()
+    this.dragButton.geometry.dispose()
+    this.dragButtonMaterial.dispose()
     this.particleGeometry.dispose()
     this.particleMaterial.dispose()
     this.group.clear()

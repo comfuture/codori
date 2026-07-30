@@ -43,7 +43,7 @@ describe('panel interaction model', () => {
     expect(second.x).toBeGreaterThan(first.x)
   })
 
-  it('treats only a small title-bar movement as a focus tap', () => {
+  it('treats only a small drag-handle movement as a focus tap', () => {
     const initial = new Vector3(0, 1, -2)
     expect(isPanelGrabTap(
       initial,
