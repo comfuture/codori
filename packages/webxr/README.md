@@ -79,6 +79,8 @@ Immersive entry starts the realtime voice session automatically after at least `
 
 While realtime startup is pending, the agent light remains dormant at `86%` scale, `72%` intensity, and nearly zero lens flare. Startup triggers a `160 ms` flare ignition followed by an `850 ms` settle into the current activity state. Reduced-effects mode uses a smaller scale excursion and lower flare peak.
 
+Web Audio synthesizes a short rising-and-settling awakening tone with a subtle echo, plus a quieter sub-`120 ms` panel-appearance tone. Multiple panels created in one synchronization batch produce one softly amplified cue instead of overlapping sounds. Run `pnpm --filter @codori/webxr render:sfx-previews -- <output-directory>` to render listenable WAV previews from the same canonical sound plans.
+
 ## Panel semantics and caps
 
 Foreground command, file-change, MCP, dynamic-tool, and web-search panels appear near the central field of view on `item/started`, update continuously from progress/output deltas, stay visible while active, dwell for one minute after terminal completion, then shrink and dispose. Four screen-space anchors each have a front/back depth pair: when a new panel reaches an occupied anchor, the existing panel eases `0.55 m` back and the new panel opens in front. Scrolling, moving, or focusing a completed panel restarts that one-minute dwell. A manually dismissed panel does not reappear when late deltas arrive.
