@@ -6,12 +6,17 @@ import { parseArgs } from 'node:util'
 import { asErrorMessage, CodoriError } from './errors.js'
 import { startHttpServer } from './http-server.js'
 import { createRuntimeManager } from './process-manager.js'
+import { DEFAULT_SERVER_HOST } from './config.js'
 import {
   installService,
   restartService,
   uninstallService,
   type ServiceCommandDependencies
 } from './service.js'
+import {
+  configureTailscaleServe,
+  type TailscaleServeResult
+} from './tailscale-serve.js'
 import type { ProjectStatusRecord, StartProjectResult } from './types.js'
 
 type CliOptionValues = {
@@ -23,6 +28,16 @@ type CliOptionValues = {
   yes?: boolean
   help?: boolean
   'experimental-realtime-voice'?: boolean
+  'tailscale-serve'?: boolean
+}
+
+export type CliDependencies = ServiceCommandDependencies & {
+  createRuntimeManager?: typeof createRuntimeManager
+  startHttpServer?: typeof startHttpServer
+  configureTailscaleServe?: (
+    port: number,
+    runCommand?: ServiceCommandDependencies['runCommand']
+  ) => Promise<TailscaleServeResult>
 }
 
 const printJson = (value: unknown) => {
@@ -71,6 +86,9 @@ const optionConfig = {
   'experimental-realtime-voice': {
     type: 'boolean' as const
   },
+  'tailscale-serve': {
+    type: 'boolean' as const
+  },
   help: {
     type: 'boolean' as const,
     short: 'h'
@@ -112,6 +130,7 @@ export const CLI_USAGE = [
   '  --scope <user|system>',
   '  --yes',
   '  --experimental-realtime-voice',
+  '  --tailscale-serve',
   '  --json',
   '  --help',
   '',
@@ -190,7 +209,7 @@ const executeServiceCommand = async (
 
 export const runCli = async (
   argv: string[] = process.argv.slice(2),
-  dependencies: ServiceCommandDependencies = {}
+  dependencies: CliDependencies = {}
 ) => {
   const parsed = parseArgs({
     args: argv,
@@ -211,10 +230,16 @@ export const runCli = async (
     || command === 'restart-service'
     || command === 'uninstall-service'
   ) {
+    if (values['tailscale-serve']) {
+      throw new CodoriError(
+        'INVALID_CONFIG',
+        '--tailscale-serve is available only for a direct `serve` launch.'
+      )
+    }
     if (values['experimental-realtime-voice']) {
       throw new CodoriError(
         'INVALID_CONFIG',
-        'Installed services must enable experimental realtime voice with realtimeVoice.enabled in ~/.codori/config.json.'
+        'Installed services configure experimental realtime voice with realtimeVoice.enabled in ~/.codori/config.json. It is enabled by default.'
       )
     }
     await executeServiceCommand(command, values, dependencies)
@@ -223,7 +248,10 @@ export const runCli = async (
 
   switch (command) {
     case 'list': {
-      const manager = createRuntimeManager({
+      if (values['tailscale-serve']) {
+        throw new CodoriError('INVALID_CONFIG', '--tailscale-serve is available only for the serve command.')
+      }
+      const manager = (dependencies.createRuntimeManager ?? createRuntimeManager)({
         configOverrides: {
           root: resolveCliRoot(values.root),
           host: values.host,
@@ -241,7 +269,10 @@ export const runCli = async (
       return
     }
     case 'status': {
-      const manager = createRuntimeManager({
+      if (values['tailscale-serve']) {
+        throw new CodoriError('INVALID_CONFIG', '--tailscale-serve is available only for the serve command.')
+      }
+      const manager = (dependencies.createRuntimeManager ?? createRuntimeManager)({
         configOverrides: {
           root: resolveCliRoot(values.root),
           host: values.host,
@@ -269,7 +300,10 @@ export const runCli = async (
       return
     }
     case 'start': {
-      const manager = createRuntimeManager({
+      if (values['tailscale-serve']) {
+        throw new CodoriError('INVALID_CONFIG', '--tailscale-serve is available only for the serve command.')
+      }
+      const manager = (dependencies.createRuntimeManager ?? createRuntimeManager)({
         configOverrides: {
           root: resolveCliRoot(values.root),
           host: values.host,
@@ -290,7 +324,10 @@ export const runCli = async (
       return
     }
     case 'stop': {
-      const manager = createRuntimeManager({
+      if (values['tailscale-serve']) {
+        throw new CodoriError('INVALID_CONFIG', '--tailscale-serve is available only for the serve command.')
+      }
+      const manager = (dependencies.createRuntimeManager ?? createRuntimeManager)({
         configOverrides: {
           root: resolveCliRoot(values.root),
           host: values.host,
@@ -311,18 +348,46 @@ export const runCli = async (
       return
     }
     case 'serve': {
-      const manager = createRuntimeManager({
+      const tailscaleServe = values['tailscale-serve'] ?? false
+      if (tailscaleServe && values.host && values.host !== DEFAULT_SERVER_HOST) {
+        throw new CodoriError(
+          'INVALID_CONFIG',
+          `--tailscale-serve requires --host ${DEFAULT_SERVER_HOST}; remove the conflicting --host value.`
+        )
+      }
+
+      const manager = (dependencies.createRuntimeManager ?? createRuntimeManager)({
         configOverrides: {
           root: resolveCliRoot(values.root),
-          host: values.host,
+          host: tailscaleServe ? DEFAULT_SERVER_HOST : values.host,
           port: coercePort(values.port),
           realtimeVoiceEnabled: values['experimental-realtime-voice']
         }
       })
-      const app = await startHttpServer(manager)
-      process.stdout.write(`Running codori server with project root directory: ${manager.config.root}\n`)
-      process.stdout.write(`Codori listening on http://${manager.config.server.host}:${manager.config.server.port}\n`)
-      process.stdout.write('Private tunnel is not included. Expose Codori through your own network layer such as Tailscale or Cloudflare Tunnel when you need remote access.\n')
+      const app = await (dependencies.startHttpServer ?? startHttpServer)(manager)
+      const stdout = dependencies.stdout ?? process.stdout
+
+      let serveResult: TailscaleServeResult | null = null
+      if (tailscaleServe) {
+        try {
+          serveResult = await (
+            dependencies.configureTailscaleServe
+            ?? configureTailscaleServe
+          )(manager.config.server.port, dependencies.runCommand)
+        } catch (error) {
+          await Promise.resolve(app.close()).catch(() => {})
+          throw error
+        }
+      }
+
+      stdout.write(`Running codori server with project root directory: ${manager.config.root}\n`)
+      stdout.write(`Codori listening on http://${manager.config.server.host}:${manager.config.server.port}\n`)
+      if (serveResult) {
+        const action = serveResult.alreadyConfigured ? 'reusing' : 'configured'
+        stdout.write(`Tailscale Serve ${action}: ${serveResult.url}\n`)
+      } else {
+        stdout.write('Private HTTPS is not enabled. Re-run with --tailscale-serve to configure private Tailscale Serve access.\n')
+      }
       await app.ready()
       return
     }

@@ -126,7 +126,7 @@ export const resolveConfig = (
     'idleShutdown.sweepIntervalMs'
   )
   const realtimeVoiceEnabled = ensureValidBoolean(
-    overrides.realtimeVoiceEnabled ?? fileConfig.realtimeVoice?.enabled ?? false,
+    overrides.realtimeVoiceEnabled ?? fileConfig.realtimeVoice?.enabled ?? true,
     'realtimeVoice.enabled'
   )
 
