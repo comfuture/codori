@@ -14,16 +14,76 @@ export type PanelPlacement = {
   overflow: boolean
 }
 
+export type NewPanelSlotAssignment = {
+  slot: number
+  displaced: {
+    id: string
+    slot: number
+  } | null
+}
+
 const slots: SpatialPoint[] = [
-  { x: -1.25, y: 1.45, z: 0.15 },
-  { x: 1.25, y: 1.45, z: 0.15 },
-  { x: -1.45, y: 1.15, z: -0.35 },
-  { x: 1.45, y: 1.15, z: -0.35 },
-  { x: -1.15, y: 2.2, z: -0.2 },
-  { x: 1.15, y: 2.2, z: -0.2 },
-  { x: -1.55, y: 2.05, z: -0.95 },
-  { x: 1.55, y: 2.05, z: -0.95 }
+  { x: -1.1, y: 1.35, z: 0.2 },
+  { x: 1.1, y: 1.35, z: 0.2 },
+  { x: -1.1, y: 2.2, z: 0 },
+  { x: 1.1, y: 2.2, z: 0 },
+  { x: -1.2, y: 1.38, z: -0.35 },
+  { x: 1.2, y: 1.38, z: -0.35 },
+  { x: -1.2, y: 2.23, z: -0.55 },
+  { x: 1.2, y: 2.23, z: -0.55 }
 ]
+
+const frontSlots = [0, 1, 2, 3] as const
+
+export const assignNewPanelToFrontSlot = (
+  panels: readonly SpatialPanelSnapshot[]
+): NewPanelSlotAssignment | null => {
+  const occupantBySlot = new Map(
+    panels
+      .filter(panel =>
+        !panel.userMoved
+        && panel.slot != null
+        && panel.slot >= 0
+        && panel.slot < slots.length
+      )
+      .map(panel => [panel.slot!, panel])
+  )
+  const emptyAnchor = frontSlots.find(frontSlot =>
+    !occupantBySlot.has(frontSlot)
+    && !occupantBySlot.has(frontSlot + frontSlots.length)
+  )
+  if (emptyAnchor != null) {
+    return {
+      slot: emptyAnchor,
+      displaced: null
+    }
+  }
+
+  const openFront = frontSlots.find(frontSlot =>
+    !occupantBySlot.has(frontSlot)
+  )
+  if (openFront != null) {
+    return {
+      slot: openFront,
+      displaced: null
+    }
+  }
+
+  for (const frontSlot of frontSlots) {
+    const backSlot = frontSlot + frontSlots.length
+    const occupant = occupantBySlot.get(frontSlot)
+    if (occupant && !occupantBySlot.has(backSlot)) {
+      return {
+        slot: frontSlot,
+        displaced: {
+          id: occupant.id,
+          slot: backSlot
+        }
+      }
+    }
+  }
+  return null
+}
 
 export const allocatePanelSlots = (
   panels: readonly SpatialPanelSnapshot[],

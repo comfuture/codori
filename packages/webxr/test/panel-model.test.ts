@@ -193,6 +193,26 @@ describe('spatial panel model', () => {
     ).every(snapshot => snapshot.position === null)).toBe(true)
   })
 
+  it('opens a new panel in front of a nearby existing panel', () => {
+    const model = new SpatialPanelModel()
+    for (let index = 0; index < 5; index += 1) {
+      model.upsert(panel({
+        id: `command:${index}`,
+        title: `Command ${index}`
+      }), index)
+    }
+
+    expect(Object.fromEntries(
+      model.snapshots().map(snapshot => [snapshot.id, snapshot.slot])
+    )).toEqual({
+      'command:0': 4,
+      'command:1': 1,
+      'command:2': 2,
+      'command:3': 3,
+      'command:4': 0
+    })
+  })
+
   it('bursts a manually dismissed panel and never resurrects it', () => {
     const model = new SpatialPanelModel()
     model.upsert(panel(), 0)
