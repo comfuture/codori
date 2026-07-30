@@ -203,4 +203,22 @@ describe('agent light model', () => {
     )
     expect(awake.flareIntensity).toBe(1)
   })
+
+  it('can re-arm and replay awakening after returning to the dormant state', () => {
+    const animator = new AgentLightAnimator(103, 0)
+    animator.enterDormant()
+    animator.awaken(1)
+    animator.sample(
+      1
+      + AGENT_AWAKENING_FLARE_RISE_SECONDS
+      + AGENT_AWAKENING_SETTLE_SECONDS
+    )
+
+    animator.enterDormant()
+    expect(animator.sample(5).flareIntensity).toBeLessThan(0.1)
+    animator.awaken(5)
+    expect(animator.sample(
+      5 + AGENT_AWAKENING_FLARE_RISE_SECONDS
+    ).flareIntensity).toBeGreaterThan(3)
+  })
 })

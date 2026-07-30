@@ -257,6 +257,10 @@ export class ImmersiveScene {
     this.activity = activity
   }
 
+  prepareAgentAwakening() {
+    this.lightAnimator.enterDormant()
+  }
+
   awakenAgent() {
     this.lightAnimator.awaken(this.animationTimeSeconds)
   }
