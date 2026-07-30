@@ -231,7 +231,19 @@ const toggleVoice = async () => {
   }
   voiceRequested = true
   try {
-    await voiceRuntime.toggle()
+    const snapshot = voiceRuntime.getSnapshot()
+    if (snapshot.autoplayBlocked) {
+      await voiceRuntime.toggle()
+      return
+    }
+    if (sessionActive(snapshot)) {
+      await voiceRuntime.stop()
+      immersiveScene?.prepareAgentAwakening()
+      return
+    }
+    immersiveScene?.prepareAgentAwakening()
+    immersiveScene?.awakenAgent()
+    await voiceRuntime.start()
   } catch (error) {
     setSceneStatus(
       error instanceof Error ? error.message : String(error),
