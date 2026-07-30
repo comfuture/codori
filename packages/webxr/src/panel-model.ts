@@ -5,7 +5,10 @@ import {
   PANEL_FORCE_DISMISS_MS
 } from './config'
 import type { FilePanelChange } from './file-change-visual'
-import type { SpatialPoint } from './panel-layout'
+import {
+  assignNewPanelToFrontSlot,
+  type SpatialPoint
+} from './panel-layout'
 
 export type SpatialPanelKind =
   | 'command'
@@ -126,6 +129,16 @@ export class SpatialPanelModel {
     const retained = retainBoundedOutput(input.text)
     const existing = this.panels.get(input.id)
     if (!existing) {
+      const assignment = assignNewPanelToFrontSlot(this.snapshots())
+      if (assignment?.displaced) {
+        const displaced = this.panels.get(assignment.displaced.id)
+        if (displaced) {
+          this.panels.set(displaced.id, {
+            ...displaced,
+            slot: assignment.displaced.slot
+          })
+        }
+      }
       const panel: SpatialPanelSnapshot = {
         ...input,
         retainedText: retained.text,
@@ -136,7 +149,7 @@ export class SpatialPanelModel {
         autoFollow: true,
         userMoved: false,
         position: null,
-        slot: null,
+        slot: assignment?.slot ?? null,
         fileTransitionStartedAt: now
       }
       this.panels.set(input.id, panel)
@@ -276,7 +289,10 @@ export class SpatialPanelModel {
       userMoved: input.userMoved ?? panel.userMoved,
       position: input.position
         ? { ...input.position }
-        : panel.position
+        : panel.position,
+      slot: input.userMoved && input.position
+        ? null
+        : panel.slot
     })
     return true
   }

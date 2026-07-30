@@ -79,7 +79,7 @@ Select the central light to start or stop the voice session. A door-sized rounde
 
 ## Panel semantics and caps
 
-Foreground command, file-change, MCP, dynamic-tool, and web-search panels appear near the central field of view on `item/started`, update continuously from progress/output deltas, stay visible while active, dwell for one minute after terminal completion, then shrink and dispose. Scrolling, moving, or focusing a completed panel restarts that one-minute dwell. A manually dismissed panel does not reappear when late deltas arrive.
+Foreground command, file-change, MCP, dynamic-tool, and web-search panels appear near the central field of view on `item/started`, update continuously from progress/output deltas, stay visible while active, dwell for one minute after terminal completion, then shrink and dispose. Four screen-space anchors each have a front/back depth pair: when a new panel reaches an occupied anchor, the existing panel eases `0.55 m` back and the new panel opens in front. Scrolling, moving, or focusing a completed panel restarts that one-minute dwell. A manually dismissed panel does not reappear when late deltas arrive.
 
 Agent background-terminal panels come only from the authoritative paginated `thread/backgroundTerminals/list` response and remain until absent from a complete response or explicitly terminated. They are not the user-created `command/exec` workspace terminals.
 
