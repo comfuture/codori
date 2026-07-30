@@ -12,6 +12,7 @@ import {
   ImmersiveInteractionSystem,
   isPanelGrabTap,
   resolveFocusedPanelPosition,
+  resolveRayPanelPosition,
   resolveRayGrabPosition
 } from '../src/interaction-system'
 import { PanelInteractionModel } from '../src/panel-interaction'
@@ -65,6 +66,29 @@ describe('panel interaction model', () => {
 
     const close = new Vector3(0.4, 1.5, -1.2)
     expect(resolveFocusedPanelPosition(viewer, close)).toEqual(close)
+  })
+
+  it('tracks content scrolling at the ray intersection instead of controller height', () => {
+    const panel = new Group()
+    panel.position.set(0, 1, -2)
+    panel.updateMatrixWorld(true)
+
+    const lower = resolveRayPanelPosition(
+      new Ray(
+        new Vector3(0, 1, 0),
+        new Vector3(0, 0, -1)
+      ),
+      panel
+    )!
+    const higher = resolveRayPanelPosition(
+      new Ray(
+        new Vector3(0, 1, 0),
+        new Vector3(0, 0.1, -1).normalize()
+      ),
+      panel
+    )!
+    expect(lower.y).toBeCloseTo(1)
+    expect(higher.y).toBeCloseTo(1.2)
   })
 
   it('separates content selection from grab zones', () => {

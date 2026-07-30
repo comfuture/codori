@@ -5,6 +5,8 @@ import {
   Matrix4,
   Mesh,
   MeshBasicMaterial,
+  Plane,
+  Quaternion,
   Raycaster,
   type Ray,
   Sphere,
@@ -70,6 +72,10 @@ const thumbPosition = new Vector3()
 const indexPosition = new Vector3()
 const viewerPosition = new Vector3()
 const focusedPanelDirection = new Vector3()
+const panelPlane = new Plane()
+const panelPlaneNormal = new Vector3()
+const panelPlanePosition = new Vector3()
+const panelPlaneQuaternion = new Quaternion()
 const PANEL_GRAB_TAP_MAX_DISTANCE_METERS = 0.12
 const PANEL_FOCUSED_DISTANCE_METERS = 1.8
 
@@ -106,6 +112,24 @@ export const resolveFocusedPanelPosition = (
     focusedPanelDirection.divideScalar(distance),
     PANEL_FOCUSED_DISTANCE_METERS
   )
+}
+
+export const resolveRayPanelPosition = (
+  ray: Ray,
+  panel: Object3D,
+  target = new Vector3()
+) => {
+  panel.getWorldPosition(panelPlanePosition)
+  panel.getWorldQuaternion(panelPlaneQuaternion)
+  panelPlaneNormal
+    .set(0, 0, 1)
+    .applyQuaternion(panelPlaneQuaternion)
+    .normalize()
+  panelPlane.setFromNormalAndCoplanarPoint(
+    panelPlaneNormal,
+    panelPlanePosition
+  )
+  return ray.intersectPlane(panelPlane, target)
 }
 
 export class ImmersiveInteractionSystem {
@@ -309,8 +333,7 @@ export class ImmersiveInteractionSystem {
       this.options.onPanelInteracted(hit.panelId)
     }
     runtime.selecting = true
-    runtime.targetRay.getWorldPosition(sourcePosition)
-    runtime.lastPointerY = sourcePosition.y
+    runtime.lastPointerY = intersection?.point.y ?? 0
     if (hit?.zone === 'grab') {
       this.handleGrabStart(runtime, native ? 'select' : 'pinch')
     }
@@ -473,14 +496,25 @@ export class ImmersiveInteractionSystem {
 
       const sourceState = this.model.snapshot().sources.get(runtime.id)
       if (sourceState?.selected?.zone === 'content' && runtime.selecting) {
-        runtime.targetRay.getWorldPosition(sourcePosition)
-        const delta = runtime.lastPointerY - sourcePosition.y
-        if (Math.abs(delta) > 0.0025) {
+        const panel = this.options.getPanels().get(
+          sourceState.selected.panelId
+        )
+        const pointer = panel
+          ? resolveRayPanelPosition(
+              this.raycaster.ray,
+              panel.contentHit,
+              sourcePosition
+            )
+          : null
+        const delta = pointer
+          ? runtime.lastPointerY - pointer.y
+          : 0
+        if (pointer && Math.abs(delta) > 0.0025) {
           this.options.onScroll(
             sourceState.selected.panelId,
             delta * 42
           )
-          runtime.lastPointerY = sourcePosition.y
+          runtime.lastPointerY = pointer.y
         }
       }
 
