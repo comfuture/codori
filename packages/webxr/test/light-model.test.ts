@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
+  AGENT_AWAKENING_FLARE_RISE_SECONDS,
+  AGENT_AWAKENING_SETTLE_SECONDS,
   AgentLightAnimator,
+  applyAgentAwakening,
   sampleAgentLight
 } from '../src/light-model'
 
@@ -133,5 +136,71 @@ describe('agent light model', () => {
     expect(start.coolMix).toBeCloseTo(before.coolMix)
     expect(middle.coolMix).toBeLessThan(start.coolMix)
     expect(end.warmMix).toBeGreaterThan(end.coolMix)
+  })
+
+  it('starts dim and small, flashes, then settles into the current state', () => {
+    const baseline = sampleAgentLight({
+      activity: 'idle',
+      timeSeconds: 0.5,
+      seed: 103
+    })
+    const dormant = applyAgentAwakening(baseline, null)
+    const peak = applyAgentAwakening(
+      baseline,
+      AGENT_AWAKENING_FLARE_RISE_SECONDS
+    )
+    const settled = applyAgentAwakening(
+      baseline,
+      AGENT_AWAKENING_FLARE_RISE_SECONDS
+        + AGENT_AWAKENING_SETTLE_SECONDS
+    )
+
+    expect(dormant.scale).toBeLessThan(baseline.scale * 0.9)
+    expect(dormant.intensity).toBeLessThan(baseline.intensity * 0.75)
+    expect(dormant.flareIntensity).toBeLessThan(0.1)
+    expect(peak.scale).toBeGreaterThan(baseline.scale)
+    expect(peak.flareIntensity).toBeGreaterThan(3)
+    expect(settled).toEqual(baseline)
+  })
+
+  it('reduces the awakening flash when reduced effects are enabled', () => {
+    const baseline = sampleAgentLight({
+      activity: 'idle',
+      timeSeconds: 0.5,
+      seed: 103,
+      reducedEffects: true
+    })
+    const normal = applyAgentAwakening(
+      baseline,
+      AGENT_AWAKENING_FLARE_RISE_SECONDS
+    )
+    const reduced = applyAgentAwakening(
+      baseline,
+      AGENT_AWAKENING_FLARE_RISE_SECONDS,
+      true
+    )
+    expect(reduced.flareIntensity).toBeLessThan(normal.flareIntensity)
+    expect(reduced.scale - baseline.scale)
+      .toBeLessThan(normal.scale - baseline.scale)
+  })
+
+  it('holds the dormant state until awakening is explicitly triggered', () => {
+    const animator = new AgentLightAnimator(103, 0)
+    animator.enterDormant()
+    const dormant = animator.sample(10)
+    expect(dormant.flareIntensity).toBeLessThan(0.1)
+
+    animator.awaken(10)
+    const peak = animator.sample(
+      10 + AGENT_AWAKENING_FLARE_RISE_SECONDS
+    )
+    expect(peak.flareIntensity).toBeGreaterThan(3)
+
+    const awake = animator.sample(
+      10
+      + AGENT_AWAKENING_FLARE_RISE_SECONDS
+      + AGENT_AWAKENING_SETTLE_SECONDS
+    )
+    expect(awake.flareIntensity).toBe(1)
   })
 })

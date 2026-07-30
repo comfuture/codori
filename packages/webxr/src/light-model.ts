@@ -27,10 +27,13 @@ export type LightSample = {
   intensity: number
   scale: number
   flarePhase: number
+  flareIntensity: number
   motion: number
 }
 
 const TAU = Math.PI * 2
+export const AGENT_AWAKENING_FLARE_RISE_SECONDS = 0.16
+export const AGENT_AWAKENING_SETTLE_SECONDS = 0.85
 
 const clamp = (value: number, minimum: number, maximum: number) =>
   Math.min(maximum, Math.max(minimum, value))
@@ -142,6 +145,7 @@ export const sampleAgentLight = (input: {
       1 + scaleBound
     ),
     flarePhase: (input.timeSeconds * (reduced ? 0.08 : 0.2)) % 1,
+    flareIntensity: 1,
     motion: reduced
       ? 0.22
       : input.activity === 'speaking'
@@ -166,7 +170,75 @@ export const mixLightSamples = (
     intensity: mixNumber(from.intensity, to.intensity, eased),
     scale: mixNumber(from.scale, to.scale, eased),
     flarePhase: mixNumber(from.flarePhase, to.flarePhase, eased),
+    flareIntensity: mixNumber(
+      from.flareIntensity,
+      to.flareIntensity,
+      eased
+    ),
     motion: mixNumber(from.motion, to.motion, eased)
+  }
+}
+
+type AwakeningMultipliers = {
+  intensity: number
+  scale: number
+  flareIntensity: number
+}
+
+const awakeningMultipliers = (
+  elapsedSeconds: number | null,
+  reducedEffects: boolean
+): AwakeningMultipliers => {
+  const dormant = reducedEffects
+    ? { intensity: 0.84, scale: 0.94, flareIntensity: 0.08 }
+    : { intensity: 0.72, scale: 0.86, flareIntensity: 0.04 }
+  if (elapsedSeconds == null || elapsedSeconds <= 0) {
+    return dormant
+  }
+  const peak = reducedEffects
+    ? { intensity: 1.12, scale: 1.015, flareIntensity: 1.6 }
+    : { intensity: 1.38, scale: 1.06, flareIntensity: 3.2 }
+  if (elapsedSeconds < AGENT_AWAKENING_FLARE_RISE_SECONDS) {
+    const progress = smoothstep(
+      elapsedSeconds / AGENT_AWAKENING_FLARE_RISE_SECONDS
+    )
+    return {
+      intensity: mixNumber(dormant.intensity, peak.intensity, progress),
+      scale: mixNumber(dormant.scale, peak.scale, progress),
+      flareIntensity: mixNumber(
+        dormant.flareIntensity,
+        peak.flareIntensity,
+        progress
+      )
+    }
+  }
+  const progress = smoothstep(
+    (
+      elapsedSeconds - AGENT_AWAKENING_FLARE_RISE_SECONDS
+    ) / AGENT_AWAKENING_SETTLE_SECONDS
+  )
+  return {
+    intensity: mixNumber(peak.intensity, 1, progress),
+    scale: mixNumber(peak.scale, 1, progress),
+    flareIntensity: mixNumber(peak.flareIntensity, 1, progress)
+  }
+}
+
+export const applyAgentAwakening = (
+  sample: LightSample,
+  elapsedSeconds: number | null,
+  reducedEffects = false
+): LightSample => {
+  const multipliers = awakeningMultipliers(
+    elapsedSeconds,
+    reducedEffects
+  )
+  return {
+    ...sample,
+    intensity: sample.intensity * multipliers.intensity,
+    scale: sample.scale * multipliers.scale,
+    flareIntensity: sample.flareIntensity
+      * multipliers.flareIntensity
   }
 }
 
@@ -176,6 +248,10 @@ export class AgentLightAnimator {
   private previousActivity: RealtimeVisualActivity = 'idle'
 
   private transitionStartedAt = 0
+
+  private awakening: 'awake' | 'dormant' | 'awakening' = 'awake'
+
+  private awakeningStartedAt = 0
 
   constructor(
     private readonly seed = 0x103,
@@ -189,6 +265,22 @@ export class AgentLightAnimator {
     this.previousActivity = this.activity
     this.activity = activity
     this.transitionStartedAt = timeSeconds
+  }
+
+  enterDormant() {
+    this.awakening = 'dormant'
+  }
+
+  awaken(timeSeconds: number) {
+    if (this.awakening !== 'dormant') {
+      return
+    }
+    this.awakening = 'awakening'
+    this.awakeningStartedAt = timeSeconds
+  }
+
+  resetAwakening() {
+    this.awakening = 'awake'
   }
 
   sample(timeSeconds: number, reducedEffects = false) {
@@ -207,6 +299,25 @@ export class AgentLightAnimator {
       seed: this.seed,
       reducedEffects
     })
-    return mixLightSamples(previous, current, progress)
+    const sample = mixLightSamples(previous, current, progress)
+    if (this.awakening === 'awake') {
+      return sample
+    }
+    if (this.awakening === 'dormant') {
+      return applyAgentAwakening(sample, null, reducedEffects)
+    }
+    const elapsed = Math.max(
+      0,
+      timeSeconds - this.awakeningStartedAt
+    )
+    if (
+      elapsed
+      >= AGENT_AWAKENING_FLARE_RISE_SECONDS
+        + AGENT_AWAKENING_SETTLE_SECONDS
+    ) {
+      this.awakening = 'awake'
+      return sample
+    }
+    return applyAgentAwakening(sample, elapsed, reducedEffects)
   }
 }

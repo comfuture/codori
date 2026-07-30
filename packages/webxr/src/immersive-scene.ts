@@ -93,6 +93,8 @@ export class ImmersiveScene {
 
   private activity: RealtimeVisualActivity = 'idle'
 
+  private animationTimeSeconds = 0
+
   private transcriptSegments: TranscriptBubbleSegment[] = []
 
   private transcriptGeneration = 0
@@ -255,6 +257,10 @@ export class ImmersiveScene {
     this.activity = activity
   }
 
+  awakenAgent() {
+    this.lightAnimator.awaken(this.animationTimeSeconds)
+  }
+
   setTranscript(
     segments: readonly TranscriptBubbleSegment[],
     generation: number
@@ -331,6 +337,9 @@ export class ImmersiveScene {
   async setSession(session: XRSession | null) {
     if (session) {
       this.placedFromViewer = false
+      this.lightAnimator.enterDormant()
+    } else {
+      this.lightAnimator.resetAwakening()
     }
     await this.renderer.xr.setSession(session)
   }
@@ -341,6 +350,7 @@ export class ImmersiveScene {
     }
     this.timer.update(timestamp)
     const timeSeconds = this.timer.getElapsed()
+    this.animationTimeSeconds = timeSeconds
     const deltaSeconds = Math.min(0.1, this.timer.getDelta())
     this.lightAnimator.setActivity(this.activity, timeSeconds)
     this.agentLight.update(
