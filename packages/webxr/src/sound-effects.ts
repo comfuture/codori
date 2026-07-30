@@ -3,6 +3,8 @@ import soundEffectPlans from './sound-effect-plans.json'
 export type SoundEffectTone = {
   wave: OscillatorType
   delaySeconds: number
+  attackSeconds?: number
+  frequencyEasing?: 'easeOutCubic'
   startFrequency: number
   peakFrequency: number
   peakSeconds: number
@@ -14,6 +16,8 @@ export type SoundEffectPlan = {
   durationSeconds: number
   attackSeconds: number
   releaseStartSeconds: number
+  releaseEasing?: 'slowStart'
+  frequencyEndSeconds?: number
   peakGain: number
   echoDelaySeconds: number
   echoFeedback: number
@@ -23,6 +27,34 @@ export type SoundEffectPlan = {
 
 const awakeningPlan = soundEffectPlans.awakening as SoundEffectPlan
 const panelAppearPlan = soundEffectPlans.panelAppear as SoundEffectPlan
+
+const easeOutCubic = (progress: number) =>
+  1 - ((1 - progress) ** 3)
+
+const createFrequencyCurve = (
+  startFrequency: number,
+  endFrequency: number
+) => {
+  const curve = new Float32Array(96)
+  for (let index = 0; index < curve.length; index += 1) {
+    const progress = index / (curve.length - 1)
+    const eased = easeOutCubic(progress)
+    curve[index] = startFrequency * (
+      (endFrequency / startFrequency) ** eased
+    )
+  }
+  return curve
+}
+
+const createReleaseCurve = (peakGain: number) => {
+  const curve = new Float32Array(96)
+  for (let index = 0; index < curve.length; index += 1) {
+    const progress = index / (curve.length - 1)
+    const remaining = 1 - (progress ** 3)
+    curve[index] = 0.0001 + ((peakGain - 0.0001) * remaining)
+  }
+  return curve
+}
 
 export const resolveAwakeningSoundPlan = (): SoundEffectPlan => ({
   ...awakeningPlan,
@@ -96,7 +128,15 @@ export class ImmersiveSoundEffects {
       plan.peakGain,
       start + plan.releaseStartSeconds
     )
-    master.gain.exponentialRampToValueAtTime(0.0001, end)
+    if (plan.releaseEasing === 'slowStart') {
+      master.gain.setValueCurveAtTime(
+        createReleaseCurve(plan.peakGain),
+        start + plan.releaseStartSeconds,
+        plan.durationSeconds - plan.releaseStartSeconds
+      )
+    } else {
+      master.gain.exponentialRampToValueAtTime(0.0001, end)
+    }
     master.connect(context.destination)
 
     const cleanupNodes: AudioNode[] = [master]
@@ -140,15 +180,45 @@ export class ImmersiveSoundEffects {
         tone.startFrequency,
         toneStart
       )
-      oscillator.frequency.exponentialRampToValueAtTime(
-        tone.peakFrequency,
-        start + tone.peakSeconds
-      )
-      oscillator.frequency.exponentialRampToValueAtTime(
-        tone.endFrequency,
-        end
-      )
-      voice.gain.setValueAtTime(tone.gain, toneStart)
+      if (tone.frequencyEasing === 'easeOutCubic') {
+        const frequencyEnd = start + (
+          plan.frequencyEndSeconds ?? plan.durationSeconds
+        )
+        oscillator.frequency.setValueCurveAtTime(
+          createFrequencyCurve(
+            tone.startFrequency,
+            tone.endFrequency
+          ),
+          toneStart,
+          frequencyEnd - toneStart
+        )
+      } else if (
+        tone.peakSeconds >= plan.durationSeconds
+        || tone.peakFrequency === tone.endFrequency
+      ) {
+        oscillator.frequency.exponentialRampToValueAtTime(
+          tone.endFrequency,
+          end
+        )
+      } else {
+        oscillator.frequency.exponentialRampToValueAtTime(
+          tone.peakFrequency,
+          start + tone.peakSeconds
+        )
+        oscillator.frequency.exponentialRampToValueAtTime(
+          tone.endFrequency,
+          end
+        )
+      }
+      if (tone.attackSeconds && tone.attackSeconds > 0) {
+        voice.gain.setValueAtTime(0.0001, toneStart)
+        voice.gain.exponentialRampToValueAtTime(
+          tone.gain,
+          toneStart + tone.attackSeconds
+        )
+      } else {
+        voice.gain.setValueAtTime(tone.gain, toneStart)
+      }
       oscillator.connect(voice)
       voice.connect(master)
       cleanupNodes.push(oscillator, voice)

@@ -9,11 +9,21 @@ const sampleRate = 48_000
 const interpolateFrequency = (from, to, progress) =>
   from * ((to / from) ** Math.min(1, Math.max(0, progress)))
 
+const easeOutCubic = progress => 1 - ((1 - progress) ** 3)
+
 const waveSample = (wave, phase) => {
   const sine = Math.sin(phase)
-  return wave === 'triangle'
-    ? (2 / Math.PI) * Math.asin(sine)
-    : sine
+  if (wave === 'triangle') {
+    return (2 / Math.PI) * Math.asin(sine)
+  }
+  if (wave === 'square') {
+    return sine >= 0 ? 1 : -1
+  }
+  if (wave === 'sawtooth') {
+    const cycle = phase / (Math.PI * 2)
+    return 2 * (cycle - Math.floor(cycle + 0.5))
+  }
+  return sine
 }
 
 const envelopeAt = (plan, time) => {
@@ -31,7 +41,51 @@ const envelopeAt = (plan, time) => {
   ) / (
     plan.durationSeconds - plan.releaseStartSeconds
   )
+  if (plan.releaseEasing === 'slowStart') {
+    return plan.peakGain * (1 - (release ** 3))
+  }
   return plan.peakGain * ((1 - release) ** 2.4)
+}
+
+const frequencyAt = (plan, tone, time, toneTime) => {
+  if (tone.frequencyEasing === 'easeOutCubic') {
+    const frequencyEnd = (
+      plan.frequencyEndSeconds ?? plan.durationSeconds
+    )
+    const activeDuration = frequencyEnd - tone.delaySeconds
+    return interpolateFrequency(
+      tone.startFrequency,
+      tone.endFrequency,
+      easeOutCubic(Math.min(1, toneTime / activeDuration))
+    )
+  }
+  if (
+    tone.peakSeconds >= plan.durationSeconds
+    || tone.peakFrequency === tone.endFrequency
+  ) {
+    const activeDuration = plan.durationSeconds - tone.delaySeconds
+    return interpolateFrequency(
+      tone.startFrequency,
+      tone.endFrequency,
+      toneTime / activeDuration
+    )
+  }
+  if (time <= tone.peakSeconds) {
+    return interpolateFrequency(
+      tone.startFrequency,
+      tone.peakFrequency,
+      toneTime / (tone.peakSeconds - tone.delaySeconds)
+    )
+  }
+  return interpolateFrequency(
+    tone.peakFrequency,
+    tone.endFrequency,
+    (
+      time - tone.peakSeconds
+    ) / (
+      plan.durationSeconds - tone.peakSeconds
+    )
+  )
 }
 
 const renderPlan = (plan) => {
@@ -54,23 +108,16 @@ const renderPlan = (plan) => {
       if (toneTime < 0 || time >= plan.durationSeconds) {
         continue
       }
-      const frequency = time <= tone.peakSeconds
-        ? interpolateFrequency(
-            tone.startFrequency,
-            tone.peakFrequency,
-            toneTime / (tone.peakSeconds - tone.delaySeconds)
-          )
-        : interpolateFrequency(
-            tone.peakFrequency,
-            tone.endFrequency,
-            (
-              time - tone.peakSeconds
-            ) / (
-              plan.durationSeconds - tone.peakSeconds
-            )
-          )
+      const frequency = frequencyAt(plan, tone, time, toneTime)
       phases[index] += (Math.PI * 2 * frequency) / sampleRate
-      dry += waveSample(tone.wave, phases[index]) * tone.gain
+      const toneAttack = tone.attackSeconds && tone.attackSeconds > 0
+        ? Math.min(1, toneTime / tone.attackSeconds)
+        : 1
+      dry += (
+        waveSample(tone.wave, phases[index])
+        * tone.gain
+        * toneAttack
+      )
     }
     dry *= envelopeAt(plan, time)
 
