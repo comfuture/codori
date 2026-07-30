@@ -51,6 +51,7 @@ export type ImmersiveSceneOptions = {
   onPanelMoved: (panelId: string, position: Vector3) => void
   onPanelFocused: (panelId: string, position: Vector3) => void
   onPanelDismiss: (panelId: string) => void
+  onPanelAppeared: (panelCount: number) => void
 }
 
 const viewerPosition = new Vector3()
@@ -287,6 +288,7 @@ export class ImmersiveScene {
 
   private syncPanelViews() {
     const layoutNow = performance.now()
+    let appearedPanelCount = 0
     const liveIds = new Set(this.panelSnapshots.map(panel => panel.id))
     for (const [id, view] of this.panels.entries()) {
       if (!liveIds.has(id)) {
@@ -318,6 +320,7 @@ export class ImmersiveScene {
         view = new SpatialPanelView(snapshot)
         this.panels.set(snapshot.id, view)
         this.world.add(view.group)
+        appearedPanelCount += 1
       }
       view.group.visible = true
       view.update(snapshot)
@@ -327,6 +330,9 @@ export class ImmersiveScene {
           : placement.position,
         layoutNow
       )
+    }
+    if (appearedPanelCount > 0) {
+      this.options.onPanelAppeared(appearedPanelCount)
     }
   }
 

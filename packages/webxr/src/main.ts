@@ -12,6 +12,7 @@ import {
   VoiceRuntime
 } from './voice-runtime'
 import { coordinateRealtimeAutoStart } from './realtime-auto-start'
+import { ImmersiveSoundEffects } from './sound-effects'
 import { WorkspaceRuntime } from './workspace-runtime'
 import './style.css'
 
@@ -46,6 +47,10 @@ const developmentDebug = import.meta.env.DEV
   && searchParams.get('debug') === '1'
 const developmentKitchenSink = developmentDebug
   && searchParams.get('kitchenSink') === '1'
+const soundEffects = new ImmersiveSoundEffects()
+window.addEventListener('pagehide', () => {
+  void soundEffects.dispose()
+}, { once: true })
 
 const reducedMotionQuery = window.matchMedia('(prefers-reduced-motion: reduce)')
 reducedEffects.checked = reducedMotionQuery.matches
@@ -170,6 +175,9 @@ const ensureScene = async () => {
           },
           onPanelDismiss: (panelId) => {
             workspaceRuntime?.dismissPanel(panelId)
+          },
+          onPanelAppeared: (panelCount) => {
+            soundEffects.playPanelAppear(panelCount)
           }
         })
         return immersiveScene
@@ -241,8 +249,10 @@ const toggleVoice = async () => {
       immersiveScene?.prepareAgentAwakening()
       return
     }
+    await soundEffects.unlock()
     immersiveScene?.prepareAgentAwakening()
     immersiveScene?.awakenAgent()
+    soundEffects.playAwakening()
     await voiceRuntime.start()
   } catch (error) {
     setSceneStatus(
@@ -304,10 +314,12 @@ const enterImmersive = async () => {
   retryButton.hidden = true
   setEntryMessage('Requesting an immersive session…')
   try {
+    const soundUnlock = soundEffects.unlock()
     const session = await requestImmersiveSession({
       secureContext: window.isSecureContext,
       xr: navigator.xr
     })
+    await soundUnlock
     activeSession = session
     bindSessionListeners(session)
     showScene()
@@ -318,6 +330,7 @@ const enterImmersive = async () => {
       isCurrent: () => activeSession === session,
       beforeStart: () => {
         scene.awakenAgent()
+        soundEffects.playAwakening()
       },
       start: async () => {
         if (!voiceRuntime) {

@@ -1,0 +1,69 @@
+{
+  "awakening": {
+    "durationSeconds": 0.72,
+    "attackSeconds": 0.045,
+    "releaseStartSeconds": 0.3,
+    "peakGain": 0.085,
+    "echoDelaySeconds": 0.085,
+    "echoFeedback": 0.2,
+    "echoWetGain": 0.22,
+    "tones": [
+      {
+        "wave": "sine",
+        "delaySeconds": 0,
+        "startFrequency": 180,
+        "peakFrequency": 620,
+        "peakSeconds": 0.32,
+        "endFrequency": 360,
+        "gain": 1
+      },
+      {
+        "wave": "sine",
+        "delaySeconds": 0.012,
+        "startFrequency": 274,
+        "peakFrequency": 930,
+        "peakSeconds": 0.34,
+        "endFrequency": 540,
+        "gain": 0.28
+      },
+      {
+        "wave": "triangle",
+        "delaySeconds": 0,
+        "startFrequency": 96,
+        "peakFrequency": 286,
+        "peakSeconds": 0.38,
+        "endFrequency": 170,
+        "gain": 0.16
+      }
+    ]
+  },
+  "panelAppear": {
+    "durationSeconds": 0.105,
+    "attackSeconds": 0.012,
+    "releaseStartSeconds": 0.035,
+    "peakGain": 0.04,
+    "echoDelaySeconds": 0,
+    "echoFeedback": 0,
+    "echoWetGain": 0,
+    "tones": [
+      {
+        "wave": "sine",
+        "delaySeconds": 0,
+        "startFrequency": 620,
+        "peakFrequency": 980,
+        "peakSeconds": 0.052,
+        "endFrequency": 760,
+        "gain": 1
+      },
+      {
+        "wave": "sine",
+        "delaySeconds": 0.006,
+        "startFrequency": 940,
+        "peakFrequency": 1380,
+        "peakSeconds": 0.055,
+        "endFrequency": 1040,
+        "gain": 0.2
+      }
+    ]
+  }
+}
