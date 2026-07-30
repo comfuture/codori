@@ -182,17 +182,17 @@ export class SpatialPanelView {
   })
 
   private readonly dismissSurface = new CanvasTextSurface({
-    widthMeters: 0.24,
-    heightMeters: 0.24,
-    widthPixels: 256,
-    heightPixels: 256,
+    widthMeters: 0.16,
+    heightMeters: 0.16,
+    widthPixels: 192,
+    heightPixels: 192,
     background: 'rgba(5, 24, 36, 0.9)',
     border: 'rgba(77, 197, 226, 0.9)',
     color: '#bdf4ff',
     font: 'Inter, system-ui, sans-serif',
-    lineHeightPixels: 136,
-    paddingPixels: 60,
-    bodyFontSizePixels: 120,
+    lineHeightPixels: 92,
+    paddingPixels: 44,
+    bodyFontSizePixels: 84,
     glow: true
   })
 
@@ -222,6 +222,8 @@ export class SpatialPanelView {
   private grabHovered = false
 
   private grabbed = false
+
+  private active = false
 
   private titleBarOpacity = 0.42
 
@@ -286,7 +288,7 @@ export class SpatialPanelView {
       hitZone: 'grab'
     }
     this.dismissHit = new Mesh(
-      new BoxGeometry(0.27, 0.27, 0.08),
+      new BoxGeometry(0.19, 0.19, 0.08),
       invisibleMaterial.clone()
     )
     this.dismissHit.position.z = 0.01
@@ -296,8 +298,8 @@ export class SpatialPanelView {
     }
     this.dismissControl.name = `panel-dismiss:${snapshot.id}`
     this.dismissControl.position.set(
-      0,
-      (-this.height / 2) - 0.16,
+      (this.width / 2) - 0.08,
+      (-this.height / 2) - 0.1,
       0.025
     )
     this.dismissControl.visible = false
@@ -384,7 +386,8 @@ export class SpatialPanelView {
       snapshot.title,
       snapshot.status,
       body,
-      scrollLine ?? ''
+      scrollLine ?? '',
+      this.active
     ].join('\u0000')
     if (signature === this.lastRenderedContent) {
       return
@@ -395,7 +398,8 @@ export class SpatialPanelView {
       status: statusLabel(snapshot.status),
       body,
       ansi: true,
-      scrollLine
+      scrollLine,
+      active: this.active
     })
   }
 
@@ -441,7 +445,11 @@ export class SpatialPanelView {
       0.075
     )
     this.grabHit.position.y = interactionLayout.titleBar.y
-    this.dismissControl.position.y = (-this.height / 2) - 0.16
+    this.dismissControl.position.set(
+      (this.width / 2) - 0.08,
+      (-this.height / 2) - 0.1,
+      0.025
+    )
 
     const position = this.particleGeometry.getAttribute('position')
     for (let index = 0; index < position.count; index += 1) {
@@ -529,19 +537,23 @@ export class SpatialPanelView {
   setInteraction(
     hovered: boolean,
     grabbed: boolean,
-    grabHovered = false
+    grabHovered = false,
+    active = false
   ) {
     if (
       hovered === this.hovered
       && grabbed === this.grabbed
       && grabHovered === this.grabHovered
+      && active === this.active
     ) {
       return
     }
+    const activeChanged = active !== this.active
     this.hovered = hovered
     this.grabbed = grabbed
     this.grabHovered = grabHovered
-    this.dismissControl.visible = grabbed
+    this.active = active
+    this.dismissControl.visible = active
       && this.snapshot.phase !== 'bursting'
     const color = grabbed
       ? new Color('#8cecff')
@@ -559,6 +571,9 @@ export class SpatialPanelView {
           ? 0.52
           : 0.42
     this.titleBarMaterial.opacity = this.titleBarOpacity
+    if (activeChanged) {
+      this.renderContent(this.animationNow)
+    }
   }
 
   moveTo(position: Vector3) {

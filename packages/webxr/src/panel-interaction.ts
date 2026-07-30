@@ -16,6 +16,7 @@ export type InteractionSourceState = {
 export type InteractionSnapshot = {
   sources: ReadonlyMap<InteractionSourceId, InteractionSourceState>
   grabOwners: ReadonlyMap<string, InteractionSourceId>
+  activePanelId: string | null
 }
 
 const createSourceState = (): InteractionSourceState => ({
@@ -29,6 +30,8 @@ export class PanelInteractionModel {
   private readonly sources = new Map<InteractionSourceId, InteractionSourceState>()
 
   private readonly grabOwners = new Map<string, InteractionSourceId>()
+
+  private activePanelId: string | null = null
 
   private source(id: InteractionSourceId) {
     const existing = this.sources.get(id)
@@ -59,6 +62,7 @@ export class PanelInteractionModel {
       source.lastNativeSelectAt = now
     }
     source.selected = hit
+    this.activePanelId = hit?.panelId ?? null
     return Boolean(hit)
   }
 
@@ -81,6 +85,7 @@ export class PanelInteractionModel {
     this.releaseGrab(sourceId)
     source.grabbedPanelId = hit.panelId
     this.grabOwners.set(hit.panelId, sourceId)
+    this.activePanelId = hit.panelId
     return true
   }
 
@@ -112,6 +117,18 @@ export class PanelInteractionModel {
         this.releaseGrab(sourceId)
       }
     }
+    if (this.activePanelId === panelId) {
+      this.activePanelId = null
+    }
+  }
+
+  reconcilePanels(panelIds: ReadonlySet<string>) {
+    if (
+      this.activePanelId
+      && !panelIds.has(this.activePanelId)
+    ) {
+      this.activePanelId = null
+    }
   }
 
   snapshot(): InteractionSnapshot {
@@ -120,12 +137,14 @@ export class PanelInteractionModel {
         id,
         { ...source }
       ])),
-      grabOwners: new Map(this.grabOwners)
+      grabOwners: new Map(this.grabOwners),
+      activePanelId: this.activePanelId
     }
   }
 
   clear() {
     this.sources.clear()
     this.grabOwners.clear()
+    this.activePanelId = null
   }
 }
