@@ -1,11 +1,22 @@
 import { describe, expect, it } from 'vitest'
 import {
+  resolvePanelHeight,
   resolvePanelInteractionLayout,
   resolvePanelSlotTransition,
   resolvePanelVisualState
 } from '../src/panel-view'
 
 describe('spatial panel visual states', () => {
+  it('shrinks short output while keeping the current size as the maximum', () => {
+    expect(resolvePanelHeight('done')).toBe(0.44)
+    expect(resolvePanelHeight(
+      Array.from({ length: 8 }, (_, index) => `line ${index}`).join('\n')
+    )).toBeGreaterThan(0.44)
+    expect(resolvePanelHeight('output\n'.repeat(40))).toBe(0.92)
+    expect(resolvePanelHeight('한'.repeat(300)))
+      .toBeGreaterThan(resolvePanelHeight('a'.repeat(300)))
+  })
+
   it('gives the visible title bar a broad, non-overlapping grab target', () => {
     const layout = resolvePanelInteractionLayout(1.55, 0.92)
     const titleBottom = layout.titleBar.y - (layout.titleBar.height / 2)
