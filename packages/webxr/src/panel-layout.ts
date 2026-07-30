@@ -14,11 +14,6 @@ export type PanelPlacement = {
   overflow: boolean
 }
 
-export type PanelSlotAssignment = {
-  id: string
-  slot: number
-}
-
 const slots: SpatialPoint[] = [
   { x: -1.25, y: 1.45, z: 0.15 },
   { x: 1.25, y: 1.45, z: 0.15 },
@@ -76,29 +71,4 @@ export const allocatePanelSlots = (
   }
 
   return placements
-}
-
-export const promotePanelToFrontSlots = (
-  panels: readonly SpatialPanelSnapshot[],
-  panelId: string
-): PanelSlotAssignment[] => {
-  const placements = allocatePanelSlots(
-    panels,
-    { x: 0, y: 0, z: 0 }
-  ).filter(placement => !placement.overflow)
-  const selected = placements.find(placement => placement.id === panelId)
-  if (!selected) {
-    return []
-  }
-  return placements
-    .filter(placement =>
-      placement.id === panelId
-      || placement.slot < selected.slot
-    )
-    .map(placement => ({
-      id: placement.id,
-      slot: placement.id === panelId
-        ? 0
-        : placement.slot + 1
-    }))
 }

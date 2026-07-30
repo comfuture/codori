@@ -43,6 +43,7 @@ import {
   type SpatialPanelStatus
 } from './panel-model'
 import type { RealtimeVisualActivity } from './light-model'
+import type { SpatialPoint } from './panel-layout'
 
 export type WorkspaceRuntimeSnapshot = {
   connection: CodexRpcConnectionState
@@ -531,16 +532,17 @@ export class WorkspaceRuntime {
     }
   }
 
-  markPanelMoved(panelId: string) {
+  markPanelMoved(panelId: string, position: SpatialPoint) {
     if (this.panelModel.markInteraction(panelId, {
-      userMoved: true
+      userMoved: true,
+      position
     }, this.now())) {
       this.emit()
     }
   }
 
-  focusPanel(panelId: string) {
-    if (this.panelModel.promote(panelId, this.now())) {
+  focusPanel(panelId: string, position: SpatialPoint) {
+    if (this.panelModel.focus(panelId, position, this.now())) {
       this.emit()
     }
   }

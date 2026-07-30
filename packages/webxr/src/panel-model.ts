@@ -5,7 +5,7 @@ import {
   PANEL_FORCE_DISMISS_MS
 } from './config'
 import type { FilePanelChange } from './file-change-visual'
-import { promotePanelToFrontSlots } from './panel-layout'
+import type { SpatialPoint } from './panel-layout'
 
 export type SpatialPanelKind =
   | 'command'
@@ -50,6 +50,7 @@ export type SpatialPanelSnapshot = SpatialPanelInput & {
   scrollOffset: number
   autoFollow: boolean
   userMoved: boolean
+  position: SpatialPoint | null
   slot: number | null
   fileTransitionStartedAt: number
 }
@@ -134,6 +135,7 @@ export class SpatialPanelModel {
         scrollOffset: Number.POSITIVE_INFINITY,
         autoFollow: true,
         userMoved: false,
+        position: null,
         slot: null,
         fileTransitionStartedAt: now
       }
@@ -235,6 +237,7 @@ export class SpatialPanelModel {
     scrollOffset?: number
     returnToLiveTail?: boolean
     userMoved?: boolean
+    position?: SpatialPoint
   }, now?: number) {
     const panel = this.panels.get(id)
     if (!panel) {
@@ -270,7 +273,10 @@ export class SpatialPanelModel {
       scrollOffset: autoFollow
         ? Number.POSITIVE_INFINITY
         : input.scrollOffset ?? panel.scrollOffset,
-      userMoved: input.userMoved ?? panel.userMoved
+      userMoved: input.userMoved ?? panel.userMoved,
+      position: input.position
+        ? { ...input.position }
+        : panel.position
     })
     return true
   }
@@ -296,23 +302,11 @@ export class SpatialPanelModel {
       : { scrollOffset: next }, now)
   }
 
-  promote(id: string, now: number) {
-    const assignments = promotePanelToFrontSlots(this.snapshots(), id)
-    if (assignments.length === 0) {
-      return false
-    }
-    for (const assignment of assignments) {
-      const panel = this.panels.get(assignment.id)
-      if (panel) {
-        this.panels.set(assignment.id, {
-          ...panel,
-          slot: assignment.slot,
-          userMoved: false
-        })
-      }
-    }
-    this.markInteraction(id, {}, now)
-    return true
+  focus(id: string, position: SpatialPoint, now: number) {
+    return this.markInteraction(id, {
+      userMoved: true,
+      position
+    }, now)
   }
 
   assignSlot(id: string, slot: number) {

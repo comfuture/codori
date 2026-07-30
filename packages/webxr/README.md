@@ -62,7 +62,7 @@ Controller:
 - select-drag on panel content: scroll without a visible scrollbar
 - thumbstick vertical axis over content: scroll
 - select-drag or pinch on the visible title bar: follow the pointer ray while preserving viewer distance
-- tap the visible title bar: cycle that panel into the front slot and smoothly shift earlier panels back
+- tap the visible title bar: pull a distant panel along its current sight line to a `1.8 m` reading distance without pushing an already-close panel away
 - squeeze on the visible title bar: follow physical controller movement
 - while grabbed, select the enlarged `×` control below the panel: dismiss it with a `125 ms` expanding particle burst
 - release: keep the panel at its chosen position for this XR session
