@@ -1,17 +1,33 @@
 import type { ServerCapabilitiesResponse } from '@codori/client/shared/codori'
 import type { CodexRpcClient } from '@codori/client/shared/codex-rpc'
+import type {
+  ConfigReadParams,
+  ConfigReadResponse
+} from '@codori/client/shared/generated/codex-app-server/v2'
 import {
   createRealtimeConversationController,
   type RealtimeConversationSnapshot
 } from '@codori/client/shared/realtime'
+import {
+  readRealtimeVoiceSettings,
+  resolveConfiguredRealtimeVoicePrompt,
+  resolveRealtimeVoiceOverride,
+  resolveRealtimeVoiceStartPrompt,
+  type RealtimeVoiceSettingsStorage
+} from '@codori/client/shared/realtime-voice-settings'
 import type { RealtimeVisualActivity } from './light-model'
 
 export type VoiceRuntimeOptions = {
   client: CodexRpcClient
   threadId: string
+  cwd?: string | null
+  storage?: RealtimeVoiceSettingsStorage | null
   capabilitiesUrl?: string
   fetch?: typeof globalThis.fetch
+  configReadTimeoutMs?: number
 }
+
+const DEFAULT_CONFIG_READ_TIMEOUT_MS = 5_000
 
 const voiceSessionActive = (snapshot: RealtimeConversationSnapshot) =>
   snapshot.state === 'requesting-permission'
@@ -34,6 +50,38 @@ export const resolveImmersiveVoiceActivity = (
     return 'speaking'
   }
   return snapshot.microphoneEnabled ? 'listening' : 'idle'
+}
+
+const resolveBrowserStorage = (): RealtimeVoiceSettingsStorage | null => {
+  if (typeof window === 'undefined') {
+    return null
+  }
+  try {
+    return window.localStorage
+  } catch {
+    return null
+  }
+}
+
+const withTimeout = async <Result>(
+  operation: Promise<Result>,
+  timeoutMs: number
+): Promise<Result> => {
+  let timeoutId: ReturnType<typeof globalThis.setTimeout> | undefined
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<never>((_resolve, reject) => {
+        timeoutId = globalThis.setTimeout(() => {
+          reject(new Error('Timed out reading realtime voice configuration.'))
+        }, timeoutMs)
+      })
+    ])
+  } finally {
+    if (timeoutId !== undefined) {
+      globalThis.clearTimeout(timeoutId)
+    }
+  }
 }
 
 export class VoiceRuntime {
@@ -91,6 +139,30 @@ export class VoiceRuntime {
     return this.snapshot
   }
 
+  private async resolveStartPrompt(localOverride: string | null) {
+    if (localOverride !== null) {
+      return localOverride
+    }
+    try {
+      const response = await withTimeout(
+        this.options.client.request<ConfigReadResponse>(
+          'config/read',
+          {
+            includeLayers: false,
+            cwd: this.options.cwd ?? null
+          } satisfies ConfigReadParams
+        ),
+        this.options.configReadTimeoutMs ?? DEFAULT_CONFIG_READ_TIMEOUT_MS
+      )
+      return resolveRealtimeVoiceStartPrompt({
+        configuredPrompt: resolveConfiguredRealtimeVoicePrompt(response.config),
+        localOverride: null
+      })
+    } catch {
+      return undefined
+    }
+  }
+
   async start() {
     if (this.snapshot.autoplayBlocked) {
       await this.controller.setOutputMuted(false)
@@ -122,8 +194,24 @@ export class VoiceRuntime {
         this.pendingMicrophone = false
         return
       }
+      const settings = readRealtimeVoiceSettings(
+        this.options.storage === undefined
+          ? resolveBrowserStorage()
+          : this.options.storage
+      )
+      const catalog = await this.controller.refreshVoiceCatalog(true)
+      const voice = resolveRealtimeVoiceOverride({
+        advertisedVoices: catalog.voices,
+        savedVoice: settings.savedVoice
+      })
+      const prompt = await this.resolveStartPrompt(
+        settings.localPromptOverride
+      )
       this.pendingMicrophone = true
-      await this.controller.connect(this.options.threadId)
+      await this.controller.connect(this.options.threadId, {
+        ...(voice !== undefined ? { voice } : {}),
+        ...(prompt !== undefined ? { prompt } : {})
+      })
     } catch (error) {
       this.pendingMicrophone = false
       this.controller.setCapability({

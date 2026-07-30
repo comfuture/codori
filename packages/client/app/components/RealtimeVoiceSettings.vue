@@ -8,8 +8,8 @@ import type {
   RealtimeVoiceCatalog,
   RealtimeVoicePreviewStatus
 } from '../composables/useRealtimeConversation'
-import { REALTIME_VOICE_OPTIONS } from '../composables/useRealtimeVoicePreference'
 import { REALTIME_VOICE_PREVIEW_VOICES } from '~~/shared/realtime-voice-preview'
+import { REALTIME_VOICE_OPTIONS } from '~~/shared/realtime-voice-settings'
 
 const props = defineProps<{
   capability: RealtimeCapability

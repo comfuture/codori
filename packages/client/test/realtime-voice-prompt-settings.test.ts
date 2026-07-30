@@ -4,7 +4,7 @@ import { mount } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
 import { describe, expect, it } from 'vitest'
 import RealtimeVoicePromptSettings from '../app/components/RealtimeVoicePromptSettings.vue'
-import { DEFAULT_REALTIME_VOICE_PROMPT } from '../app/composables/useRealtimeVoicePreference'
+import { DEFAULT_REALTIME_VOICE_PROMPT } from '../shared/realtime-voice-settings'
 
 const TextareaStub = defineComponent({
   props: {

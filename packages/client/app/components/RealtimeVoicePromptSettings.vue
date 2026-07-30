@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { DEFAULT_REALTIME_VOICE_PROMPT } from '../composables/useRealtimeVoicePreference'
+import { DEFAULT_REALTIME_VOICE_PROMPT } from '~~/shared/realtime-voice-settings'
 
 const props = defineProps<{
   configuredPrompt: string | null
