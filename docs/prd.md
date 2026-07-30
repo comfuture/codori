@@ -9,7 +9,9 @@ Codori is a self-hosted remote coding control plane for Codex app-server.
   chat workspaces, preferring the first-party remote-control daemon and
   managing a fallback process only when required.
 - `@codori/client` provides a browser UI for browsing projects, activating/stopping project workspaces, listing prior Codex threads, starting new threads, and resuming prior threads.
-- Codori does not provide a private network tunnel. Users must expose the service through their own network layer such as Tailscale or Cloudflare Tunnel.
+- Codori does not provide a private network tunnel. For direct launches it can
+  configure a loopback-backed Tailscale Serve mapping after the user has
+  connected the host to a tailnet.
 
 ## 2. Goals
 
@@ -23,7 +25,9 @@ Codori is a self-hosted remote coding control plane for Codex app-server.
 ## 3. Non-Goals
 
 - No built-in authentication or identity layer in v1.
-- No tunnel, reverse proxy, or ingress automation in v1.
+- No general tunnel/provider abstraction, public ingress, Funnel, or
+  Codori-hosted relay in v1. The narrow `--tailscale-serve` direct-launch
+  helper is the only ingress automation.
 - No multi-root support in v1.
 - No Codori-owned thread database in v1.
 - No direct browser connection to raw app-server ports.
@@ -37,7 +41,8 @@ Primary user:
 Expected usage:
 
 1. User runs `codori serve --root ~/Project`.
-2. User exposes the service with an external private network solution if remote access is required.
+2. For private remote access, the user may run with `--tailscale-serve` on a
+   host that is already connected to Tailscale.
 3. User opens the Codori dashboard.
 4. User chooses a project from the sidebar.
 5. Codori starts the shared Codex app-server on demand if necessary.
@@ -68,6 +73,9 @@ Config shape:
     "enabled": true,
     "timeoutMs": 1800000,
     "sweepIntervalMs": 60000
+  },
+  "realtimeVoice": {
+    "enabled": true
   }
 }
 ```
@@ -79,6 +87,8 @@ Rules:
 - `idleShutdown.enabled` controls whether the idle shared runtime is reaped automatically.
 - `idleShutdown.timeoutMs` defines the inactivity window before the shared runtime becomes eligible for automatic stop.
 - `idleShutdown.sweepIntervalMs` defines how often Codori evaluates the shared runtime for idle cleanup.
+- `realtimeVoice.enabled` defaults to `true`; setting it to `false` opts out of
+  the experimental realtime capability.
 - Invalid config should produce a startup error with a precise message.
 
 ## 6. Project Discovery
@@ -383,8 +393,13 @@ Required states:
 
 Required messaging:
 
-- Server startup CLI output must explicitly state that Codori does not provide a private tunnel.
-- The note should recommend user-managed solutions such as Tailscale or Cloudflare Tunnel.
+- A normal server launch must explain that private HTTPS is not active and name
+  `--tailscale-serve` as the supported private Tailscale setup path.
+- A `--tailscale-serve` launch must print the verified private MagicDNS HTTPS
+  URL and whether the exact mapping was configured or reused.
+- The integration must keep the Codori origin on `127.0.0.1`, refuse existing
+  root/Funnel conflicts on HTTPS port 443, and never invoke Funnel or a broad
+  Serve reset.
 
 ## 11. Client Thread Behavior
 
