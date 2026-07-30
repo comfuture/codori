@@ -13,7 +13,11 @@ It is designed for people who keep many Git repositories under one parent direct
 - connect to the first-party Codex remote-control daemon, or start a compatible fallback only when needed
 - continue previous Codex threads in that same project context
 
-Codori is intentionally small. It manages project runtimes and gives you a UI. It does not try to become your VPN, ingress proxy, auth platform, or deployment layer.
+Codori is intentionally small. It manages project runtimes and gives you a UI.
+It does not try to become your VPN, general ingress proxy, auth platform, or
+deployment layer. The direct server command includes one narrow Tailscale Serve
+helper for private HTTPS; Tailscale still owns connectivity, certificates,
+MagicDNS, and tailnet access control.
 
 Codori follows a few hard constraints:
 
@@ -60,17 +64,20 @@ Codori listening on http://127.0.0.1:4310
 
 By default this binds Codori to `127.0.0.1:4310`. `--host` and `--port` are optional. Use `--root` whenever you want to override the current directory and point Codori at another parent directory.
 
-Experimental realtime voice is disabled by default. Enable it for a directly launched Codori runtime with:
+Experimental realtime voice is enabled by default for direct launches and
+installed services. The existing compatibility flag remains accepted:
 
 ```bash
 npx @codori/server --root ~/Project --experimental-realtime-voice
 ```
 
-This flag requires the selected backend to expose the upstream
+Realtime voice requires the selected backend to expose the upstream
 `realtime_conversation` feature and V3 voice discovery. Codori asks a newly
 started remote-control daemon to enable that feature; if an existing daemon is
 incompatible, Codori leaves it untouched and uses the managed app-server
-fallback instead. The flag does not modify `~/.codex/config.toml`.
+fallback instead. Codori does not modify `~/.codex/config.toml`. To opt out,
+set `"realtimeVoice": { "enabled": false }` in `~/.codori/config.json` and
+restart Codori.
 
 If you need different bind settings:
 
@@ -148,74 +155,78 @@ same-origin `/api/*` routes and does not add authentication.
 
 ## Remote Access
 
-Codori does not create private connectivity on its own. Typical patterns are:
+Codori does not create private connectivity on its own. Tailscale must already
+be installed, running, and joined to a tailnet. Typical patterns are:
 
 - access over a Tailscale tailnet
 - access through another tunnel you manage yourself
 
-### Option 1: Tailscale MagicDNS
+### Option 1: Tailscale Serve (recommended)
 
-According to Tailscale's current MagicDNS documentation, MagicDNS gives each node a machine name and a fully-qualified tailnet DNS name under `.ts.net`, and short hostnames usually work inside the same tailnet. Source: [MagicDNS](https://tailscale.com/kb/1081/magicdns/).
-
-Example:
-
-1. Run Codori on a host in your tailnet:
+Start Codori and configure persistent private HTTPS in one command:
 
 ```bash
-npx @codori/server --host "$(tailscale ip -4 | head -n1)" --port 4310
+npx @codori/server --root ~/Project --tailscale-serve
 ```
 
-Binding to the Tailscale IP is a better default than `0.0.0.0` when the service only needs to be reachable from the tailnet.
-
-2. From another machine in the same tailnet, connect to either:
-
-```text
-http://my-codori-host:4310
-```
-
-or the full MagicDNS name:
-
-```text
-http://my-codori-host.your-tailnet.ts.net:4310
-```
-
-This is the simplest option when you are comfortable exposing the Codori HTTP server directly inside your private tailnet.
-
-### Option 2: Tailscale Serve
-
-Tailscale's current Serve documentation says `tailscale serve` can publish a local HTTP service securely to other devices in the same tailnet, and recent CLI syntax changed in Tailscale 1.52+. Sources: [tailscale serve command](https://tailscale.com/kb/1242/tailscale-serve), [Tailscale Serve](https://tailscale.com/docs/features/tailscale-serve).
-
-Typical flow:
-
-1. Bind Codori locally on the host:
+This mode forces the Codori origin to `127.0.0.1`, inspects the existing
+structured Serve status, and then configures:
 
 ```bash
-npx @codori/server --root ~/Project
+tailscale serve --bg --yes --https=443 http://127.0.0.1:4310
 ```
 
-2. Publish it to your tailnet with Tailscale Serve:
-
-```bash
-tailscale serve --https=443 http://127.0.0.1:4310
-```
-
-3. Check status:
-
-```bash
-tailscale serve status
-```
-
-4. Open it from another tailnet device:
+Codori prints the resulting private MagicDNS URL:
 
 ```text
 https://my-codori-host.your-tailnet.ts.net/
 ```
 
-5. Remove the serve configuration when no longer needed:
+The option is idempotent when that exact root proxy already exists. It fails
+without changing Tailscale when port 443 has a conflicting root mapping, a
+foreground listener, Funnel exposure, or a non-HTTPS listener. Codori never
+runs `tailscale serve reset` and does not remove unrelated path handlers.
+
+Tailscale Serve is private to the tailnet, uses tailnet access-control rules,
+and provisions TLS for the MagicDNS name. Codori still has no built-in
+authentication, so restrict tailnet access to trusted operators. Tailscale
+Funnel and public exposure are outside this command's contract and require the
+future application-authentication boundary tracked in issue #77.
+
+To remove the root mapping later, use targeted cleanup:
 
 ```bash
-tailscale serve reset
+tailscale serve --https=443 off
 ```
+
+The background mapping persists across Codori and Tailscale restarts. When
+Codori is stopped, the URL remains configured but its loopback backend is
+unavailable until Codori starts again.
+
+Current behavior and syntax are documented by Tailscale in
+[Tailscale Serve](https://tailscale.com/docs/features/tailscale-serve) and the
+[Serve CLI reference](https://tailscale.com/docs/reference/tailscale-cli/serve).
+
+### Option 2: Direct tailnet HTTP
+
+If secure-context features such as WebXR and remote microphone access are not
+needed, Codori can instead bind directly to the current node's Tailscale IPv4:
+
+```bash
+npx @codori/server --host "$(tailscale ip -4 | head -n1)" --port 4310
+```
+
+From another device in the same tailnet, open the short or fully qualified
+MagicDNS name:
+
+```text
+http://my-codori-host:4310
+http://my-codori-host.your-tailnet.ts.net:4310
+```
+
+This opens Codori on the Tailscale interface rather than every network
+interface, but plain remote HTTP is not a browser secure context. Prefer
+`--tailscale-serve` for realtime voice and WebXR.
 
 ## Development
 
@@ -333,14 +344,20 @@ Example:
     "sweepIntervalMs": 60000
   },
   "realtimeVoice": {
-    "enabled": false
+    "enabled": true
   }
 }
 ```
 
 `idleShutdown.enabled` can disable automatic cleanup entirely. When enabled, `timeoutMs` controls how long a runtime may stay inactive before Codori stops it, and `sweepIntervalMs` controls how often the server checks for idle runtimes.
 
-`realtimeVoice.enabled` is the persistent opt-in for an installed Codori service. Restart the service after changing it. Realtime voice is experimental and requires a supported ChatGPT-authenticated Codex runtime plus browser microphone access on localhost or a secure HTTPS origin. Codori uses browser-owned WebRTC signaling through app-server; it does not ask for an OpenAI API key and does not use the direct Realtime WebSocket transport.
+`realtimeVoice.enabled` defaults to `true` for direct launches and installed
+services. Set it to `false` to opt out and restart the service after changing
+it. Realtime voice is experimental and requires a supported
+ChatGPT-authenticated Codex runtime plus browser microphone access on localhost
+or a secure HTTPS origin. Codori uses browser-owned WebRTC signaling through
+app-server; it does not ask for an OpenAI API key and does not use the direct
+Realtime WebSocket transport.
 
 ### Push-to-talk voice sessions
 
@@ -466,12 +483,14 @@ When you open a stopped project and start chatting, Codori ensures the shared ap
 - Provides bounded, read-only workspace file navigation and local file preview.
 - Proxies browser WebSocket traffic for each project or chat workspace to the shared app-server.
 - Serves the built dashboard bundle from the same origin as the management API.
+- Optionally configures private, loopback-backed Tailscale Serve HTTPS for a
+  direct server launch.
 
 ## What Codori Does Not Do
 
 Codori v1 does not provide:
 
-- a private tunnel
+- a general tunnel/provider abstraction
 - public ingress
 - built-in authentication
 - SSO
@@ -479,7 +498,9 @@ Codori v1 does not provide:
 - a separate Codori-owned thread database
 - file create, edit, rename, move, or delete operations
 
-If you want to access Codori from another machine, you must provide your own private network path with something like Tailscale or Cloudflare Tunnel.
+If you want to access Codori from another machine, you must still provide the
+private network itself. `--tailscale-serve` can configure HTTPS only after the
+host is already connected to Tailscale.
 
 ## CLI Usage
 
@@ -512,7 +533,8 @@ npx @codori/server status codori --root ~/Project
 Notes:
 
 - Tailscale Serve is for private tailnet access, not public internet access.
-- Serve may prompt you to enable HTTPS certificates for the tailnet if that prerequisite is not already satisfied.
+- `--tailscale-serve` fails with the Tailscale diagnostic when HTTPS or another
+  tailnet prerequisite needs attention.
 - If you want public exposure instead, that is a different problem and should be handled deliberately with a public ingress layer.
 
 ## Security Notes
@@ -528,7 +550,7 @@ For most users, the cleanest setup is:
 
 1. Run Codori on a workstation or home server that already has your repositories.
 2. Join that host and your laptop to the same Tailscale tailnet.
-3. Use MagicDNS with a private port if plain tailnet HTTP is enough.
-4. Use `tailscale serve` if you want a stable HTTPS URL inside the tailnet.
+3. Run `npx @codori/server --root ~/Project --tailscale-serve`.
+4. Open the private MagicDNS HTTPS URL printed by Codori.
 
 Codori stays focused on coding workflows. Networking remains explicit and under your control.

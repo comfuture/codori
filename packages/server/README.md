@@ -42,9 +42,10 @@ remote-control daemon and the managed app-server fallback. A separate global
 `codex` installation is not required. Set `CODORI_CODEX_BIN` to an executable
 path to opt into a custom runtime.
 
-Experimental realtime voice is disabled by default. For a direct launch, opt
-in with `--experimental-realtime-voice`. For an installed service, set
-`realtimeVoice.enabled` to `true` in `~/.codori/config.json` and restart the
+Experimental realtime voice is enabled by default. The existing
+`--experimental-realtime-voice` flag remains accepted for compatibility. To
+opt out for direct launches or an installed service, set
+`realtimeVoice.enabled` to `false` in `~/.codori/config.json` and restart the
 service. A newly started daemon or managed fallback enables
 `realtime_conversation`; an already-running incompatible daemon is not
 restarted and causes a safe managed fallback. Codori does not edit
@@ -56,6 +57,40 @@ address cannot enter immersive VR or start realtime voice. For remote HMD use,
 put Codori behind a private HTTPS ingress such as Tailscale Serve. Codori still
 has no built-in authentication, so do not expose that ingress publicly without
 an appropriate access-control layer.
+
+## Private Tailscale Serve
+
+On a machine that is already connected to Tailscale, a direct launch can bind
+Codori to loopback and configure persistent private HTTPS in one command:
+
+```bash
+npx @codori/server --root ~/Project --tailscale-serve
+```
+
+Codori inspects `tailscale serve status --json`, refuses to replace a
+conflicting HTTPS root or Funnel listener, starts the HTTP origin only on
+`127.0.0.1`, and applies:
+
+```bash
+tailscale serve --bg --yes --https=443 http://127.0.0.1:4310
+```
+
+After verifying the structured status, Codori prints the private
+`https://<machine>.<tailnet>.ts.net/` URL. The same mapping is reused on later
+launches. Unrelated path handlers are preserved; Codori never runs
+`tailscale serve reset`.
+
+The background Serve mapping persists when Codori exits. Remove the root
+mapping explicitly when it is no longer needed:
+
+```bash
+tailscale serve --https=443 off
+```
+
+This mode is tailnet-only and relies on Tailscale membership and access-control
+rules. It does not enable Funnel, provide Codori-owned authentication, or
+support public exposure. Installed-service integration remains separate from
+this direct-launch option.
 
 ## App-server backend selection
 
