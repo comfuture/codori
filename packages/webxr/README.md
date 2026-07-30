@@ -79,7 +79,7 @@ Immersive entry starts the realtime voice session automatically after at least `
 
 While realtime startup is pending, the agent light remains dormant at `86%` scale, `72%` intensity, and nearly zero lens flare. Startup triggers a `160 ms` flare ignition followed by an `850 ms` settle into the current activity state. Reduced-effects mode uses a smaller scale excursion and lower flare peak.
 
-Web Audio synthesizes a short rising-and-settling awakening tone with a subtle echo, plus a quieter sub-`120 ms` panel-appearance tone. Multiple panels created in one synchronization batch produce one softly amplified cue instead of overlapping sounds. Run `pnpm --filter @codori/webxr render:sfx-previews -- <output-directory>` to render listenable WAV previews from the same canonical sound plans.
+Web Audio synthesizes a one-second agent-awakening cue whose low mechanical chord clusters and softer upper harmonics beat against each other while their pitch rises on an ease-out curve for `700 ms`, followed by a `300 ms` fade whose cubic curve preserves the initial resonance before dropping away. Panel appearance uses a separate `250 ms` cue that blends an immediate low body with delayed, beating high harmonics. Multiple panels created in one synchronization batch produce one softly amplified cue instead of overlapping sounds. Run `pnpm --filter @codori/webxr render:sfx-previews -- <output-directory>` to render listenable WAV previews from the same canonical sound plans.
 
 ## Panel semantics and caps
 
