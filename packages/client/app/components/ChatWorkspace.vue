@@ -508,12 +508,16 @@ const connectRealtimeVoice = async () => {
     await realtimeVoice.refreshVoiceCatalog(true)
     let startPrompt: string | undefined
     try {
-      const configResponse = await getRuntimeClient().request<ConfigReadResponse>(
-        'config/read',
-        {
-          includeLayers: false,
-          cwd: selectedProject.value?.projectPath ?? null
-        } satisfies ConfigReadParams
+      const configResponse = await withPromptControlsTimeout(
+        getRuntimeClient().request<ConfigReadResponse>(
+          'config/read',
+          {
+            includeLayers: false,
+            cwd: selectedProject.value?.projectPath ?? null
+          } satisfies ConfigReadParams
+        ),
+        'voice prompt configuration',
+        5_000
       )
       startPrompt = resolveRealtimeVoiceStartPrompt({
         configuredPrompt: resolveConfiguredRealtimeVoicePrompt(configResponse.config),

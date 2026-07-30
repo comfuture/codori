@@ -33,8 +33,10 @@ const hasChanges = computed(() =>
   draft.value.trim() !== effectivePrompt.value
 )
 
-watch(effectivePrompt, (prompt) => {
-  draft.value = prompt
+watch(effectivePrompt, (prompt, previousPrompt) => {
+  if (draft.value === previousPrompt) {
+    draft.value = prompt
+  }
 })
 
 const save = () => {
