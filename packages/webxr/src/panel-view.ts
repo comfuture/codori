@@ -71,7 +71,7 @@ export const resolvePanelInteractionLayout = (
   height: number
 ) => {
   const inset = 0.035
-  const titleBarHeight = 0.2
+  const titleBarHeight = 0.11
   const titleBarY = (height / 2) - (titleBarHeight / 2) - 0.025
   const contentBottom = (-height / 2) + 0.025
   const contentTop = titleBarY - (titleBarHeight / 2) - 0.012
