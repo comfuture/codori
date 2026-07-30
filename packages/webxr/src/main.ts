@@ -161,11 +161,11 @@ const ensureScene = async () => {
           onPanelInteracted: (panelId) => {
             workspaceRuntime?.touchPanel(panelId)
           },
-          onPanelMoved: (panelId) => {
-            workspaceRuntime?.markPanelMoved(panelId)
+          onPanelMoved: (panelId, position) => {
+            workspaceRuntime?.markPanelMoved(panelId, position)
           },
-          onPanelFocused: (panelId) => {
-            workspaceRuntime?.focusPanel(panelId)
+          onPanelFocused: (panelId, position) => {
+            workspaceRuntime?.focusPanel(panelId, position)
           },
           onPanelDismiss: (panelId) => {
             workspaceRuntime?.dismissPanel(panelId)

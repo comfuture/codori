@@ -49,7 +49,7 @@ export type ImmersiveSceneOptions = {
   onPanelScroll: (panelId: string, deltaLines: number) => void
   onPanelInteracted: (panelId: string) => void
   onPanelMoved: (panelId: string, position: Vector3) => void
-  onPanelFocused: (panelId: string) => void
+  onPanelFocused: (panelId: string, position: Vector3) => void
   onPanelDismiss: (panelId: string) => void
 }
 
@@ -311,9 +311,12 @@ export class ImmersiveScene {
       }
       view.group.visible = true
       view.update(snapshot)
-      if (!snapshot.userMoved) {
-        view.placeInSlot(placement.position, layoutNow)
-      }
+      view.placeInSlot(
+        snapshot.userMoved && snapshot.position
+          ? snapshot.position
+          : placement.position,
+        layoutNow
+      )
     }
   }
 

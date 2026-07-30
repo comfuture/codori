@@ -24,6 +24,7 @@ const panel = (
   scrollOffset: Number.POSITIVE_INFINITY,
   autoFollow: true,
   userMoved: false,
+  position: null,
   slot,
   fileTransitionStartedAt: now - 1_000
 })

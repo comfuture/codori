@@ -147,16 +147,24 @@ describe('spatial panel model', () => {
     model.advance(150_100)
     expect(model.snapshots()[0]?.phase).toBe('disappearing')
 
-    expect(model.promote('command:1', 150_200)).toBe(true)
+    expect(model.focus('command:1', {
+      x: 0.25,
+      y: 1.5,
+      z: -1.75
+    }, 150_200)).toBe(true)
     expect(model.snapshots()[0]).toMatchObject({
       phase: 'dwelling',
       phaseStartedAt: 150_200,
-      slot: 0,
-      userMoved: false
+      userMoved: true,
+      position: {
+        x: 0.25,
+        y: 1.5,
+        z: -1.75
+      }
     })
   })
 
-  it('cycles a focused panel to the front and shifts earlier slots back', () => {
+  it('persists the focused reading position without moving other panels', () => {
     const model = new SpatialPanelModel()
     for (let index = 0; index < 5; index += 1) {
       model.upsert(panel({
@@ -165,16 +173,24 @@ describe('spatial panel model', () => {
       }), 0)
     }
 
-    expect(model.promote('command:3', 1_000)).toBe(true)
-    expect(Object.fromEntries(
-      model.snapshots().map(snapshot => [snapshot.id, snapshot.slot])
-    )).toEqual({
-      'command:0': 1,
-      'command:1': 2,
-      'command:2': 3,
-      'command:3': 0,
-      'command:4': null
+    expect(model.focus('command:3', {
+      x: 0.6,
+      y: 1.4,
+      z: -1.6
+    }, 1_000)).toBe(true)
+    expect(model.snapshots().find(
+      snapshot => snapshot.id === 'command:3'
+    )).toMatchObject({
+      userMoved: true,
+      position: {
+        x: 0.6,
+        y: 1.4,
+        z: -1.6
+      }
     })
+    expect(model.snapshots().filter(
+      snapshot => snapshot.id !== 'command:3'
+    ).every(snapshot => snapshot.position === null)).toBe(true)
   })
 
   it('bursts a manually dismissed panel and never resurrects it', () => {

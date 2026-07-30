@@ -11,6 +11,7 @@ import {
 import {
   ImmersiveInteractionSystem,
   isPanelGrabTap,
+  resolveFocusedPanelPosition,
   resolveRayGrabPosition
 } from '../src/interaction-system'
 import { PanelInteractionModel } from '../src/panel-interaction'
@@ -51,6 +52,19 @@ describe('panel interaction model', () => {
       initial,
       new Vector3(0.14, 1, -2)
     )).toBe(false)
+  })
+
+  it('pulls distant panels to reading distance without pushing close panels away', () => {
+    const viewer = new Vector3(0, 1.65, 0)
+    const distant = resolveFocusedPanelPosition(
+      viewer,
+      new Vector3(0.9, 1.65, -2.7)
+    )
+    expect(distant.distanceTo(viewer)).toBeCloseTo(1.8)
+    expect(distant.x).toBeGreaterThan(0)
+
+    const close = new Vector3(0.4, 1.5, -1.2)
+    expect(resolveFocusedPanelPosition(viewer, close)).toEqual(close)
   })
 
   it('separates content selection from grab zones', () => {

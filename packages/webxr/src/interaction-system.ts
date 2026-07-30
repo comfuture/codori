@@ -57,7 +57,7 @@ export type InteractionSystemOptions = {
   onScroll: (panelId: string, deltaLines: number) => void
   onPanelInteracted: (panelId: string) => void
   onPanelMoved: (panelId: string, position: Vector3) => void
-  onPanelFocused: (panelId: string) => void
+  onPanelFocused: (panelId: string, position: Vector3) => void
   onPanelDismiss: (panelId: string) => void
   onAction: (action: WorldControlAction) => void
 }
@@ -69,7 +69,9 @@ const rotationMatrix = new Matrix4()
 const thumbPosition = new Vector3()
 const indexPosition = new Vector3()
 const viewerPosition = new Vector3()
+const focusedPanelDirection = new Vector3()
 const PANEL_GRAB_TAP_MAX_DISTANCE_METERS = 0.12
+const PANEL_FOCUSED_DISTANCE_METERS = 1.8
 
 export const isPanelGrabTap = (
   initialPosition: Vector3,
@@ -85,6 +87,25 @@ export const resolveRayGrabPosition = (
 ) => {
   const intersection = ray.intersectSphere(sphere, target)
   return intersection?.add(offset) ?? null
+}
+
+export const resolveFocusedPanelPosition = (
+  viewer: Vector3,
+  panel: Vector3,
+  target = new Vector3()
+) => {
+  focusedPanelDirection.subVectors(panel, viewer)
+  const distance = focusedPanelDirection.length()
+  if (
+    distance <= PANEL_FOCUSED_DISTANCE_METERS
+    || distance < Number.EPSILON
+  ) {
+    return target.copy(panel)
+  }
+  return target.copy(viewer).addScaledVector(
+    focusedPanelDirection.divideScalar(distance),
+    PANEL_FOCUSED_DISTANCE_METERS
+  )
 }
 
 export class ImmersiveInteractionSystem {
@@ -353,7 +374,15 @@ export class ImmersiveInteractionSystem {
           )
           && !runtime.grabMoved
         ) {
-          this.options.onPanelFocused(grabbedPanelId)
+          this.options.renderer.xr.getCamera()
+            .getWorldPosition(viewerPosition)
+          this.options.onPanelFocused(
+            grabbedPanelId,
+            resolveFocusedPanelPosition(
+              viewerPosition,
+              panel.group.position
+            )
+          )
         } else {
           this.options.onPanelMoved(
             grabbedPanelId,
