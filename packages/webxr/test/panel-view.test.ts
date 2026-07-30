@@ -17,14 +17,14 @@ describe('spatial panel visual states', () => {
       .toBeGreaterThan(resolvePanelHeight('a'.repeat(300)))
   })
 
-  it('gives the visible title bar a broad, non-overlapping grab target', () => {
+  it('limits the grab target to the visible text-surface header', () => {
     const layout = resolvePanelInteractionLayout(1.55, 0.92)
     const titleBottom = layout.titleBar.y - (layout.titleBar.height / 2)
     const contentTop = layout.content.y + (layout.content.height / 2)
 
     expect(layout.titleBar).toMatchObject({
       width: 1.48,
-      height: 0.2
+      height: 0.11
     })
     expect(contentTop).toBeLessThan(titleBottom)
   })
