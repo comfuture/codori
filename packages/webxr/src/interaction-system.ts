@@ -302,6 +302,7 @@ export class ImmersiveInteractionSystem {
       return
     }
     if (!this.model.selectStart(runtime.id, hit, now, native)) {
+      this.refreshPanelInteraction()
       return
     }
     if (hit) {
@@ -435,8 +436,10 @@ export class ImmersiveInteractionSystem {
   }
 
   private refreshPanelInteraction() {
+    const panels = this.options.getPanels()
+    this.model.reconcilePanels(new Set(panels.keys()))
     const snapshot = this.model.snapshot()
-    for (const [panelId, panel] of this.options.getPanels().entries()) {
+    for (const [panelId, panel] of panels.entries()) {
       const sourceStates = [...snapshot.sources.values()]
       const hovered = sourceStates.some(
         source => source.hover?.panelId === panelId
@@ -446,7 +449,12 @@ export class ImmersiveInteractionSystem {
         && source.hover.zone === 'grab'
       )
       const grabbed = snapshot.grabOwners.has(panelId)
-      panel.setInteraction(hovered, grabbed, grabHovered)
+      panel.setInteraction(
+        hovered,
+        grabbed,
+        grabHovered,
+        snapshot.activePanelId === panelId
+      )
     }
   }
 

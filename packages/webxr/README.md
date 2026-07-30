@@ -64,7 +64,8 @@ Controller:
 - select-drag or pinch on the compact `0.11 m` visible title header: follow the pointer ray while preserving viewer distance
 - tap the visible title bar: pull a distant panel along its current sight line to a `1.8 m` reading distance without pushing an already-close panel away
 - squeeze on the visible title bar: follow physical controller movement
-- while grabbed, select the enlarged `×` control below the panel: dismiss it with a `125 ms` expanding particle burst
+- selecting a panel keeps it active after release, with a thicker cyan outline and stronger glow; selecting another panel transfers active state and selecting empty space clears it
+- select the compact `×` control below the active panel's right edge: dismiss it with a `125 ms` expanding particle burst
 - release: keep the panel at its chosen position for this XR session
 
 Tracked hand:

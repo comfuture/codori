@@ -78,6 +78,28 @@ describe('panel interaction model', () => {
       zone: 'content'
     }, 0)).toBe(true)
     expect(model.snapshot().sources.get('left')?.selected?.zone).toBe('content')
+    expect(model.snapshot().activePanelId).toBe('panel-1')
+  })
+
+  it('keeps the last selection active until another panel or empty space is selected', () => {
+    const model = new PanelInteractionModel()
+    model.selectStart('left', {
+      panelId: 'panel-1',
+      zone: 'content'
+    }, 0)
+    model.selectEnd('left')
+    model.hover('left', null)
+    expect(model.snapshot().activePanelId).toBe('panel-1')
+
+    model.selectStart('left', {
+      panelId: 'panel-2',
+      zone: 'grab'
+    }, 300)
+    expect(model.snapshot().activePanelId).toBe('panel-2')
+
+    model.selectEnd('left')
+    model.selectStart('left', null, 600)
+    expect(model.snapshot().activePanelId).toBe(null)
   })
 
   it('resolves competing grabs deterministically and releases on source loss', () => {
@@ -179,5 +201,6 @@ describe('panel interaction model', () => {
       grabbedPanelId: null
     })
     expect(model.snapshot().sources.get('right')?.hover).toBe(null)
+    expect(model.snapshot().activePanelId).toBe(null)
   })
 })

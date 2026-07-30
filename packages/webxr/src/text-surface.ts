@@ -41,6 +41,7 @@ export type TextSurfaceContent = {
   body: string
   scrollLine?: number
   ansi?: boolean
+  active?: boolean
 }
 
 export type TextSurfaceSize = {
@@ -327,16 +328,18 @@ export class CanvasTextSurface {
       titleFontSizePixels,
       glow
     } = this.options
+    const active = content.active === true
     const context = this.context
     context.clearRect(0, 0, width, height)
     roundedRect(context, 3, 3, width - 6, height - 6, 42)
     context.fillStyle = background
     context.fill()
-    context.lineWidth = 4
-    context.strokeStyle = border
-    if (glow) {
-      context.shadowBlur = 22
-      context.shadowColor = border
+    const strokeColor = active ? '#8cecff' : border
+    context.lineWidth = active ? 10 : 4
+    context.strokeStyle = strokeColor
+    if (glow || active) {
+      context.shadowBlur = active ? 44 : 22
+      context.shadowColor = strokeColor
     }
     context.stroke()
     context.shadowBlur = 0
