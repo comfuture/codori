@@ -27,6 +27,44 @@ import { CanvasTextSurface } from './text-surface'
 
 const easeOutCubic = (value: number) => 1 - ((1 - value) ** 3)
 const easeInCubic = (value: number) => value ** 3
+const PANEL_WIDTH_METERS = 1.55
+const PANEL_MAX_HEIGHT_METERS = 0.92
+const PANEL_MIN_HEIGHT_METERS = 0.44
+const PANEL_MAX_SURFACE_HEIGHT_METERS = PANEL_MAX_HEIGHT_METERS - 0.035
+const PANEL_MAX_SURFACE_HEIGHT_PIXELS = 896
+const PANEL_BODY_COLUMNS = 72
+const PANEL_CHROME_PIXELS = 160
+const PANEL_LINE_HEIGHT_PIXELS = 36
+
+const displayColumns = (text: string) => [...text].reduce(
+  (columns, character) => columns + (
+    (character.codePointAt(0) ?? 0) > 0xff ? 2 : 1
+  ),
+  0
+)
+
+export const resolvePanelHeight = (body: string) => {
+  const lines = body.split('\n').reduce(
+    (count, line) => count + Math.max(
+      1,
+      Math.ceil(displayColumns(line) / PANEL_BODY_COLUMNS)
+    ),
+    0
+  )
+  const desiredPixels = Math.min(
+    PANEL_MAX_SURFACE_HEIGHT_PIXELS,
+    PANEL_CHROME_PIXELS + (
+      Math.max(1, lines) * PANEL_LINE_HEIGHT_PIXELS
+    )
+  )
+  const desiredMeters = (
+    desiredPixels / PANEL_MAX_SURFACE_HEIGHT_PIXELS
+  ) * PANEL_MAX_SURFACE_HEIGHT_METERS + 0.035
+  return Math.min(
+    PANEL_MAX_HEIGHT_METERS,
+    Math.max(PANEL_MIN_HEIGHT_METERS, desiredMeters)
+  )
+}
 
 export const resolvePanelInteractionLayout = (
   width: number,
@@ -110,9 +148,9 @@ export class SpatialPanelView {
 
   readonly dismissHit: Mesh
 
-  private readonly width = 1.55
+  private readonly width = PANEL_WIDTH_METERS
 
-  private readonly height = 0.92
+  private height = PANEL_MAX_HEIGHT_METERS
 
   private readonly titleBarMaterial = new MeshBasicMaterial({
     color: '#0c3347',
@@ -336,6 +374,9 @@ export class SpatialPanelView {
           snapshot.retainedText,
           snapshot.exitCode == null ? null : `\nexit: ${snapshot.exitCode}`
         ].filter((value): value is string => value != null).join('\n')
+    this.resizeHeight(resolvePanelHeight(
+      snapshot.fileChange?.diff ?? body
+    ))
     const scrollLine = snapshot.fileChange || snapshot.autoFollow
       ? undefined
       : snapshot.scrollOffset
@@ -356,6 +397,63 @@ export class SpatialPanelView {
       ansi: true,
       scrollLine
     })
+  }
+
+  private resizeHeight(height: number) {
+    if (Math.abs(this.height - height) < 0.001) {
+      return
+    }
+    this.height = height
+    const interactionLayout = resolvePanelInteractionLayout(
+      this.width,
+      this.height
+    )
+    const surfaceHeight = this.height - 0.035
+    this.surface.resize({
+      widthMeters: this.width - 0.035,
+      heightMeters: surfaceHeight,
+      widthPixels: 1_536,
+      heightPixels: Math.round(
+        PANEL_MAX_SURFACE_HEIGHT_PIXELS
+        * (surfaceHeight / PANEL_MAX_SURFACE_HEIGHT_METERS)
+      )
+    })
+    this.titleBar.geometry.dispose()
+    this.titleBar.geometry = new RoundedBoxGeometry(
+      interactionLayout.titleBar.width,
+      interactionLayout.titleBar.height,
+      0.006,
+      4,
+      0.045
+    )
+    this.titleBar.position.y = interactionLayout.titleBar.y
+    this.contentHit.geometry.dispose()
+    this.contentHit.geometry = new BoxGeometry(
+      interactionLayout.content.width,
+      interactionLayout.content.height,
+      0.06
+    )
+    this.contentHit.position.y = interactionLayout.content.y
+    this.grabHit.geometry.dispose()
+    this.grabHit.geometry = new BoxGeometry(
+      interactionLayout.titleBar.width,
+      interactionLayout.titleBar.height,
+      0.075
+    )
+    this.grabHit.position.y = interactionLayout.titleBar.y
+    this.dismissControl.position.y = (-this.height / 2) - 0.16
+
+    const position = this.particleGeometry.getAttribute('position')
+    for (let index = 0; index < position.count; index += 1) {
+      const angle = (index / position.count) * Math.PI * 2
+      const offset = index * 3
+      const x = Math.cos(angle) * (this.width / 2)
+      const y = Math.sin(angle) * (this.height / 2)
+      this.particleOrigins[offset] = x
+      this.particleOrigins[offset + 1] = y
+      position.setXYZ(index, x, y, this.particleOrigins[offset + 2]!)
+    }
+    position.needsUpdate = true
   }
 
   updateAnimation(now: number) {

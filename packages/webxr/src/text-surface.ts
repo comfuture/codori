@@ -43,6 +43,13 @@ export type TextSurfaceContent = {
   ansi?: boolean
 }
 
+export type TextSurfaceSize = {
+  widthMeters: number
+  heightMeters: number
+  widthPixels?: number
+  heightPixels?: number
+}
+
 const clampCanvasSize = (value: number) =>
   Math.max(64, Math.min(MAX_PANEL_CANVAS_EDGE, Math.round(value)))
 
@@ -223,6 +230,45 @@ export class CanvasTextSurface {
       this.material
     )
     this.render({ body: '' })
+  }
+
+  resize(size: TextSurfaceSize) {
+    if (this.disposed) {
+      return
+    }
+    const widthPixels = clampCanvasSize(
+      size.widthPixels ?? this.canvas.width
+    )
+    const heightPixels = clampCanvasSize(
+      size.heightPixels ?? this.canvas.height
+    )
+    const pixelSizeChanged = (
+      this.canvas.width !== widthPixels
+      || this.canvas.height !== heightPixels
+    )
+    const meterSizeChanged = (
+      this.options.widthMeters !== size.widthMeters
+      || this.options.heightMeters !== size.heightMeters
+    )
+    if (!pixelSizeChanged && !meterSizeChanged) {
+      return
+    }
+    this.options.widthMeters = size.widthMeters
+    this.options.heightMeters = size.heightMeters
+    this.options.widthPixels = widthPixels
+    this.options.heightPixels = heightPixels
+    if (pixelSizeChanged) {
+      this.canvas.width = widthPixels
+      this.canvas.height = heightPixels
+    }
+    if (meterSizeChanged) {
+      this.mesh.geometry.dispose()
+      this.mesh.geometry = new PlaneGeometry(
+        size.widthMeters,
+        size.heightMeters
+      )
+    }
+    this.texture.needsUpdate = true
   }
 
   render(content: TextSurfaceContent) {
