@@ -84,6 +84,39 @@ describe('RealtimeVoicePromptSettings', () => {
     expect(wrapper.emitted('save')?.at(-1)).toEqual(['Browser prompt'])
   })
 
+  it('preserves edits made while config.toml is loading', async () => {
+    const wrapper = mountSettings({
+      configuredPrompt: null,
+      promptOverride: null,
+      loading: true
+    })
+
+    await wrapper.get('textarea').setValue('Draft typed during loading')
+    await wrapper.setProps({
+      configuredPrompt: 'Configured prompt',
+      loading: false
+    })
+
+    expect((wrapper.get('textarea').element as HTMLTextAreaElement).value)
+      .toBe('Draft typed during loading')
+  })
+
+  it('synchronizes an untouched draft after config.toml loads', async () => {
+    const wrapper = mountSettings({
+      configuredPrompt: null,
+      promptOverride: null,
+      loading: true
+    })
+
+    await wrapper.setProps({
+      configuredPrompt: 'Configured prompt',
+      loading: false
+    })
+
+    expect((wrapper.get('textarea').element as HTMLTextAreaElement).value)
+      .toBe('Configured prompt')
+  })
+
   it('clears a browser override back to the configured prompt', async () => {
     const wrapper = mountSettings({
       configuredPrompt: 'Configured prompt',
