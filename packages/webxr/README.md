@@ -75,7 +75,7 @@ Tracked hand:
 
 Native and synthesized primary actions are de-duplicated. Competing grabs have one deterministic owner, and input-source loss releases hover/grab state.
 
-Select the central light to start or stop the voice session. A door-sized rounded `Exit` surface sits on the `10 m × 10 m` room boundary, beyond the agent light along the initial view direction. The 2D fallback remains available before immersive entry.
+Immersive entry starts the realtime voice session automatically after at least `500 ms` and as soon as the workspace runtime is ready. Selecting the central light remains an explicit stop/restart control. A door-sized rounded `Exit` surface sits on the `10 m × 10 m` room boundary, beyond the agent light along the initial view direction. The 2D fallback remains available before immersive entry.
 
 ## Panel semantics and caps
 

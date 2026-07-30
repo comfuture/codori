@@ -179,4 +179,19 @@ describe('voice runtime', () => {
     expect(controllerFixture.setMicrophoneEnabled).toHaveBeenCalledWith(true)
     await runtime.dispose()
   })
+
+  it('does not stop or reconnect an already active session when auto-start repeats', async () => {
+    controllerFixture.current = snapshot('connected')
+    const runtime = new VoiceRuntime({
+      client: {} as CodexRpcClient,
+      threadId: 'thread-1',
+      fetch: vi.fn()
+    })
+
+    await runtime.start()
+
+    expect(controllerFixture.connect).not.toHaveBeenCalled()
+    expect(controllerFixture.stop).not.toHaveBeenCalled()
+    await runtime.dispose()
+  })
 })

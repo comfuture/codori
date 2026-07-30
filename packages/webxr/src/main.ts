@@ -11,6 +11,7 @@ import {
   resolveImmersiveVoiceActivity,
   VoiceRuntime
 } from './voice-runtime'
+import { coordinateRealtimeAutoStart } from './realtime-auto-start'
 import { WorkspaceRuntime } from './workspace-runtime'
 import './style.css'
 
@@ -300,7 +301,23 @@ const enterImmersive = async () => {
     showScene()
     const scene = await ensureScene()
     await scene.setSession(session)
-    await startWorkspaceRuntime()
+    await coordinateRealtimeAutoStart({
+      prepare: startWorkspaceRuntime,
+      isCurrent: () => activeSession === session,
+      start: async () => {
+        if (!voiceRuntime) {
+          throw new Error('The voice runtime did not initialize.')
+        }
+        voiceRequested = true
+        await voiceRuntime.start()
+      },
+      onStartError: (error) => {
+        setSceneStatus(
+          error instanceof Error ? error.message : String(error),
+          true
+        )
+      }
+    })
   } catch (error) {
     const failedSession = activeSession
     releaseSessionListeners?.()

@@ -91,14 +91,12 @@ export class VoiceRuntime {
     return this.snapshot
   }
 
-  async toggle() {
+  async start() {
     if (this.snapshot.autoplayBlocked) {
       await this.controller.setOutputMuted(false)
       return
     }
     if (voiceSessionActive(this.snapshot)) {
-      this.pendingMicrophone = false
-      await this.controller.stop()
       return
     }
 
@@ -134,6 +132,18 @@ export class VoiceRuntime {
       })
       throw error
     }
+  }
+
+  async toggle() {
+    if (
+      !this.snapshot.autoplayBlocked
+      && voiceSessionActive(this.snapshot)
+    ) {
+      this.pendingMicrophone = false
+      await this.controller.stop()
+      return
+    }
+    await this.start()
   }
 
   async stop() {
