@@ -167,6 +167,8 @@ export class SpatialPanelView {
 
   readonly grabHit: Mesh
 
+  readonly titleGrabHit: Mesh
+
   readonly dismissHit: Mesh
 
   private readonly width = PANEL_WIDTH_METERS
@@ -354,6 +356,20 @@ export class SpatialPanelView {
       panelId: snapshot.id,
       hitZone: 'content'
     }
+    this.titleGrabHit = new Mesh(
+      new BoxGeometry(
+        interactionLayout.titleBar.width,
+        interactionLayout.titleBar.height,
+        0.075
+      ),
+      invisibleMaterial.clone()
+    )
+    this.titleGrabHit.name = `panel-title-bar-grab:${snapshot.id}`
+    this.titleGrabHit.position.y = interactionLayout.titleBar.y
+    this.titleGrabHit.userData = {
+      panelId: snapshot.id,
+      hitZone: 'grab'
+    }
     this.grabHit = new Mesh(
       new BoxGeometry(
         PANEL_CONTROL_SIZE_METERS + 0.02,
@@ -434,6 +450,7 @@ export class SpatialPanelView {
     this.particles.visible = false
     this.group.add(
       this.contentHit,
+      this.titleGrabHit,
       this.dismissControl,
       this.dragControl,
       this.particles
@@ -527,6 +544,13 @@ export class SpatialPanelView {
       0.06
     )
     this.contentHit.position.y = interactionLayout.content.y
+    this.titleGrabHit.geometry.dispose()
+    this.titleGrabHit.geometry = new BoxGeometry(
+      interactionLayout.titleBar.width,
+      interactionLayout.titleBar.height,
+      0.075
+    )
+    this.titleGrabHit.position.y = interactionLayout.titleBar.y
     this.positionActiveControls()
 
     const position = this.particleGeometry.getAttribute('position')
@@ -729,6 +753,12 @@ export class SpatialPanelView {
       this.grabHit.material.forEach(material => material.dispose())
     } else {
       this.grabHit.material.dispose()
+    }
+    this.titleGrabHit.geometry.dispose()
+    if (Array.isArray(this.titleGrabHit.material)) {
+      this.titleGrabHit.material.forEach(material => material.dispose())
+    } else {
+      this.titleGrabHit.material.dispose()
     }
     this.dismissHit.geometry.dispose()
     if (Array.isArray(this.dismissHit.material)) {
