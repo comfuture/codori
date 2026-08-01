@@ -530,6 +530,24 @@ npx @codori/server status --root ~/Project
 npx @codori/server status codori --root ~/Project
 ```
 
+Register Codori as a background service:
+
+```bash
+npx @codori/server service install
+npx @codori/server service start --root ~/Project
+npx @codori/server service stop --root ~/Project
+npx @codori/server service status --root ~/Project
+npx @codori/server service uninstall --root ~/Project
+```
+
+A user-scoped install uses a launchd agent on macOS, a systemd user unit on
+Linux, and a Task Scheduler logon task on Windows. `--scope system` registers a
+machine-wide equivalent and requires elevation. The served project root can be
+changed at runtime from Settings → Workspace, and the most recently served
+directory is reused the next time the service starts. See
+[packages/server/README.md](packages/server/README.md) for the platform details,
+root persistence, and update behavior.
+
 Notes:
 
 - Tailscale Serve is for private tailnet access, not public internet access.

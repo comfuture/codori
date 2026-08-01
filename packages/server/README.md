@@ -144,23 +144,28 @@ socket access is unavailable, the managed fallback is the supported behavior.
 Use the npm package invocation as the canonical entrypoint:
 
 ```bash
-npx @codori/server install-service
+npx @codori/server service install
 ```
 
 The installed binary form is equivalent once the package is on your `PATH`:
 
 ```bash
-codori install-service
+codori service install
 ```
 
 Available service lifecycle commands:
 
 ```bash
-npx @codori/server install-service
-npx @codori/server setup-service
-npx @codori/server restart-service --root ~/Project/codori
-npx @codori/server uninstall-service --root ~/Project/codori
+codori service install
+codori service start --root ~/Project/codori
+codori service stop --root ~/Project/codori
+codori service restart --root ~/Project/codori
+codori service status --root ~/Project/codori
+codori service uninstall --root ~/Project/codori
 ```
+
+The earlier `install-service`, `setup-service`, `restart-service`, and
+`uninstall-service` commands remain accepted as aliases.
 
 The installer resolves missing `--root`, `--host`, and `--port` values interactively. If Tailscale is installed and running, the first tailnet IPv4 address becomes the default host. Otherwise the default host is `0.0.0.0`, and Codori prints a warning because that can expose the service without authentication unless you already have a firewall or private network boundary in place.
 
@@ -168,10 +173,56 @@ By default Codori installs a user-scoped service:
 
 - macOS: `~/Library/LaunchAgents`
 - Linux: `~/.config/systemd/user`
+- Windows: a Task Scheduler logon task under the `\Codori\` folder
 
-Use `--scope system` for a machine-wide service. If elevated privileges are required, Codori stops before writing files and prints the exact `sudo npx @codori/server ...` command to re-run.
+Use `--scope system` for a machine-wide service. A system scope registers a
+launchd daemon in `/Library/LaunchDaemons`, a systemd unit in
+`/etc/systemd/system`, or a Windows boot task running as `SYSTEM`. If elevated
+privileges are required, Codori stops before writing files and prints the exact
+command to re-run: `sudo npx @codori/server ...` on macOS and Linux, or the same
+command from an Administrator terminal on Windows.
 
-`restart-service` regenerates the launcher script and service definition before restarting. That keeps the service aligned with the current `node` and `npx` paths after package updates.
+`service restart` regenerates the launcher script and service definition before restarting. That keeps the service aligned with the current `node` and `npx` paths after package updates.
+
+### Windows notes
+
+Windows registration uses Task Scheduler rather than the Service Control
+Manager. `sc.exe` expects a real service executable that calls
+`StartServiceCtrlDispatcher`, so a plain Node process registered that way fails
+to start. A user-scoped install creates a logon task at least-privilege level and
+needs no administrator rights. Because Windows has no direct equivalent of
+launchd `KeepAlive` or systemd `Restart=always`, the generated task definition
+carries restart-on-failure settings and no execution time limit.
+
+## Project Root
+
+A service serves one project root. Change it from Settings → Workspace, or with
+the API directly:
+
+```bash
+curl -X PATCH http://127.0.0.1:4310/api/config/root \
+  -H 'content-type: application/json' \
+  -d '{"root":"/Users/you/Project"}'
+```
+
+The change applies to the running server immediately, so project discovery
+re-reads the new directory without a restart. Project runtimes already started
+under the previous root keep running until they idle out or are stopped.
+
+The value is persisted to `root` in `~/.codori/config.json`, and the most
+recently served directory is recorded in `~/.codori/last-root.json`. A registered
+service that starts without an explicit `--root` adopts that remembered
+directory.
+
+## Updates
+
+When a registered service starts, Codori checks the npm registry for a newer
+`@codori/server` release and runs that bundle for the launch. This startup
+adoption is silent.
+
+While the service runs, Codori re-checks periodically. A newer release found
+mid-session only enables the Update affordance in the dashboard; applying it
+restarts the service, so it always waits for an explicit confirmation.
 
 For the full project overview and remote access notes, see the repository README:
 [https://github.com/comfuture/codori](https://github.com/comfuture/codori)
