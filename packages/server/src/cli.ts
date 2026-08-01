@@ -15,6 +15,8 @@ import {
   statusService,
   stopService,
   uninstallService,
+  CODORI_SERVICE_HOME_ENV,
+  CODORI_SERVICE_INSTALL_ROOT_ENV,
   type ServiceCommandDependencies
 } from './service.js'
 import {
@@ -129,12 +131,21 @@ export const resolveServeRoot = (
   }
 
   const env = options.env ?? process.env
+  // A system-scoped service can run as a different account than the installer.
+  const homeDir = options.homeDir ?? env[CODORI_SERVICE_HOME_ENV]?.trim()
   // Only a managed service adopts the remembered root; a manual `serve` in a
-  // directory should keep behaving like the current working directory.
+  // directory should keep behaving like the current working directory. The
+  // remembered root wins over the install-time root so a Settings change
+  // survives a restart.
   if (env.CODORI_SERVICE_MANAGED === '1') {
-    const lastRoot = (options.lastRoot ?? resolveLastServiceRoot)(options.homeDir)
+    const lastRoot = (options.lastRoot ?? resolveLastServiceRoot)(homeDir)
     if (lastRoot) {
       return lastRoot
+    }
+
+    const installRoot = env[CODORI_SERVICE_INSTALL_ROOT_ENV]?.trim()
+    if (installRoot) {
+      return installRoot
     }
   }
 
@@ -296,6 +307,14 @@ const execAdoptedPackage = (argv: string[]) => async (specifier: string) => {
 
     child.once('error', reject)
     child.once('exit', (code) => {
+      // A nonzero exit means the newer bundle did not serve. Rejecting lets the
+      // caller fall back to the installed bundle instead of reporting a
+      // successful adoption and leaving the supervisor with nothing serving.
+      if (code !== 0) {
+        reject(new Error(`Adopted @codori/server exited with code ${code ?? 'null'}.`))
+        return
+      }
+
       process.exitCode = code ?? 0
       resolvePromise()
     })
@@ -537,7 +556,8 @@ export const runCli = async (
         configOverrides: {
           root: resolveServeRoot(values.root, {
             homeDir: dependencies.homeDir,
-            cwd: dependencies.cwd
+            cwd: dependencies.cwd,
+            env: dependencies.env
           }),
           host: tailscaleServe ? DEFAULT_SERVER_HOST : values.host,
           port: coercePort(values.port),
@@ -564,7 +584,11 @@ export const runCli = async (
       const app = await (dependencies.startHttpServer ?? startHttpServer)(manager)
       const stdout = stdoutStream
 
-      writeLastServiceRoot(manager.config.root, dependencies.homeDir)
+      writeLastServiceRoot(
+        manager.config.root,
+        dependencies.homeDir
+        ?? (dependencies.env ?? process.env)[CODORI_SERVICE_HOME_ENV]?.trim()
+      )
 
       let serveResult: TailscaleServeResult | null = null
       if (tailscaleServe) {

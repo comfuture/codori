@@ -188,6 +188,25 @@ describe('startup update adoption', () => {
     expect(execPackage).not.toHaveBeenCalled()
   })
 
+  it('falls back to the installed bundle when adoption fails', async () => {
+    // A rejecting execPackage must not propagate out of the startup check, or a
+    // supervised service restart-loops with nothing serving.
+    const execPackage = vi.fn(async () => {
+      throw new Error('npx could not download the package')
+    })
+
+    const result = await checkStartupUpdate({
+      env: SERVICE_ENV,
+      fetchImpl: createRegistryFetch(NEWER_SERVER_VERSION) as unknown as typeof fetch,
+      execPackage
+    })
+
+    expect(execPackage).toHaveBeenCalled()
+    expect(result.adopted).toBe(false)
+    expect(result.updateAvailable).toBe(true)
+    expect(result.reason).toBe('exec-unavailable')
+  })
+
   it('never re-adopts inside an already adopted launch', async () => {
     const execPackage = vi.fn(async () => undefined)
     const fetchImpl = createRegistryFetch(NEWER_SERVER_VERSION)
@@ -233,6 +252,8 @@ describe('platform update command', () => {
     expect(command.args[3]).toContain('timeout /t 1 /nobreak')
     expect(command.args[3]).toContain('service restart')
     expect(command.args[3]).toContain('"C:\\Projects"')
+    // A SYSTEM-run task must keep the installer's metadata home.
+    expect(command.args[3]).toContain('set "CODORI_SERVICE_HOME=C:\\Users\\test"')
   })
 })
 
