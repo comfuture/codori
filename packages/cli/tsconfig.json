@@ -6,6 +6,11 @@
       "node"
     ]
   },
+  "references": [
+    {
+      "path": "../server/tsconfig.build.json"
+    }
+  ],
   "include": [
     "src/**/*.ts"
   ]
