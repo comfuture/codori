@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { spawn } from 'node:child_process'
 import { realpathSync } from 'node:fs'
 import { resolve as resolvePath } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -20,6 +21,11 @@ import {
   configureTailscaleServe,
   type TailscaleServeResult
 } from './tailscale-serve.js'
+import {
+  checkStartupUpdate,
+  CODORI_STARTUP_UPDATE_APPLIED_ENV,
+  type StartupUpdateResult
+} from './service-update.js'
 import type { ProjectStatusRecord, StartProjectResult } from './types.js'
 
 type CliOptionValues = {
@@ -41,6 +47,7 @@ export type CliDependencies = ServiceCommandDependencies & {
     port: number,
     runCommand?: ServiceCommandDependencies['runCommand']
   ) => Promise<TailscaleServeResult>
+  checkStartupUpdate?: typeof checkStartupUpdate
 }
 
 const printJson = (value: unknown) => {
@@ -267,6 +274,54 @@ export const resolveServiceCliAction = (
   return 'uninstall'
 }
 
+/**
+ * Replaces this launch with the newer published bundle by running it through
+ * npx and forwarding the original argv. The current process exits with the
+ * child's code, so the OS service manager keeps supervising one process.
+ */
+const execAdoptedPackage = (argv: string[]) => async (specifier: string) => {
+  await new Promise<void>((resolvePromise, reject) => {
+    const child = spawn(
+      process.platform === 'win32' ? 'npx.cmd' : 'npx',
+      ['--yes', specifier, 'serve', ...argv],
+      {
+        env: {
+          ...process.env,
+          [CODORI_STARTUP_UPDATE_APPLIED_ENV]: '1'
+        },
+        stdio: 'inherit',
+        windowsHide: true
+      }
+    )
+
+    child.once('error', reject)
+    child.once('exit', (code) => {
+      process.exitCode = code ?? 0
+      resolvePromise()
+    })
+  })
+}
+
+const describeStartupUpdate = (result: StartupUpdateResult) => {
+  if (!result.checked) {
+    return null
+  }
+
+  if (result.adopted) {
+    return `Adopted @codori/server ${result.latestVersion} for this launch (was ${result.installedVersion}).`
+  }
+
+  if (result.reason === 'registry-unavailable') {
+    return 'Could not reach the npm registry to check for a newer @codori/server bundle.'
+  }
+
+  if (result.updateAvailable) {
+    return `@codori/server ${result.latestVersion} is available but could not be adopted automatically.`
+  }
+
+  return null
+}
+
 const executeServiceCommand = async (
   action: ServiceCliAction,
   values: CliOptionValues,
@@ -489,8 +544,25 @@ export const runCli = async (
           realtimeVoiceEnabled: values['experimental-realtime-voice']
         }
       })
+      const stdoutStream = dependencies.stdout ?? process.stdout
+
+      // A registered service checks npm before binding so a restarted service
+      // picks up a newer published bundle for this launch.
+      const startupUpdate = await (dependencies.checkStartupUpdate ?? checkStartupUpdate)({
+        execPackage: execAdoptedPackage(argv.filter(entry => entry !== 'serve'))
+      })
+      const startupUpdateMessage = describeStartupUpdate(startupUpdate)
+      if (startupUpdateMessage) {
+        stdoutStream.write(`${startupUpdateMessage}\n`)
+      }
+
+      // The adopted bundle served this launch, so this process is done.
+      if (startupUpdate.adopted) {
+        return
+      }
+
       const app = await (dependencies.startHttpServer ?? startHttpServer)(manager)
-      const stdout = dependencies.stdout ?? process.stdout
+      const stdout = stdoutStream
 
       writeLastServiceRoot(manager.config.root, dependencies.homeDir)
 

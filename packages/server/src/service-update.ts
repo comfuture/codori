@@ -23,6 +23,8 @@ export type ServiceUpdateStatus = {
 export type ServiceUpdateController = {
   getStatus: () => Promise<ServiceUpdateStatus>
   requestUpdate: () => Promise<ServiceUpdateStatus>
+  startPolling: () => void
+  stopPolling: () => void
 }
 
 export type ServiceUpdateControllerOptions = {
@@ -34,6 +36,8 @@ export type ServiceUpdateControllerOptions = {
   fetchImpl?: typeof fetch
   cacheTtlMs?: number
   registryTimeoutMs?: number
+  platform?: NodeJS.Platform
+  pollIntervalMs?: number
   spawnUpdateProcess?: (command: string, args: string[], options: { env: NodeJS.ProcessEnv }) => Promise<void>
 }
 
@@ -50,6 +54,13 @@ type ServiceRuntimeContext = {
 const PACKAGE_MANIFEST_PATH = fileURLToPath(new URL('../package.json', import.meta.url))
 const UPDATE_CHECK_TTL_MS = 5 * 60 * 1_000
 const REGISTRY_TIMEOUT_MS = 3_000
+const UPDATE_POLL_INTERVAL_MS = 60 * 60 * 1_000
+
+/**
+ * Set on the re-executed child so an adopted bundle never checks again and
+ * re-execs in a loop.
+ */
+export const CODORI_STARTUP_UPDATE_APPLIED_ENV = 'CODORI_STARTUP_UPDATE_APPLIED'
 
 const shellEscape = (value: string) => `'${value.replaceAll("'", "'\"'\"'")}'`
 
@@ -71,6 +82,8 @@ const readPackageManifest = (): PackageManifest => {
 }
 
 const CURRENT_PACKAGE = readPackageManifest()
+
+export const getCurrentServerPackage = () => ({ ...CURRENT_PACKAGE })
 
 const DISABLED_STATUS: ServiceUpdateStatus = {
   enabled: false,
@@ -178,6 +191,50 @@ const createUpdateScript = (
   ].join('; ')
 }
 
+export const createUpdateCommand = (
+  runtime: ServiceRuntimeContext,
+  options: {
+    root: string
+    npxPath: string
+    homeDir: string
+    platform: NodeJS.Platform
+  }
+): { command: string, args: string[] } => {
+  const metadataDirectory = getServiceMetadataDirectory(runtime.installId, options.homeDir)
+  const updateLogPath = join(metadataDirectory, 'update.log')
+
+  if (options.platform === 'win32') {
+    // cmd.exe has no `sleep`, and the delay lets this response flush before the
+    // service restarts underneath it.
+    const restart = [
+      'call',
+      `"${options.npxPath}"`,
+      '--yes',
+      `"${CURRENT_PACKAGE.name}@latest"`,
+      'service',
+      'restart',
+      '--root',
+      `"${options.root}"`,
+      '--scope',
+      `"${runtime.scope}"`,
+      '--yes',
+      '>>',
+      `"${updateLogPath}"`,
+      '2>&1'
+    ].join(' ')
+
+    return {
+      command: 'cmd.exe',
+      args: ['/d', '/s', '/c', `timeout /t 1 /nobreak > nul & ${restart}`]
+    }
+  }
+
+  return {
+    command: '/bin/sh',
+    args: ['-lc', createUpdateScript(runtime, options)]
+  }
+}
+
 const defaultSpawnUpdateProcess = async (
   command: string,
   args: string[],
@@ -199,6 +256,98 @@ const defaultSpawnUpdateProcess = async (
   })
 }
 
+export type StartupUpdateResult = {
+  checked: boolean
+  installedVersion: string
+  latestVersion: string | null
+  updateAvailable: boolean
+  adopted: boolean
+  reason: 'not-service-managed' | 'up-to-date' | 'registry-unavailable' | 'adopted' | 'exec-unavailable'
+}
+
+export type StartupUpdateOptions = {
+  env?: NodeJS.ProcessEnv
+  fetchImpl?: typeof fetch
+  registryTimeoutMs?: number
+  execPackage?: (specifier: string) => Promise<void>
+}
+
+/**
+ * Checked before the HTTP listener binds. When a registered service starts on an
+ * older bundle than npm publishes, the newer version is fetched so this launch
+ * serves it. Startup adoption is silent by design; only a mid-session update
+ * asks the user before restarting.
+ */
+export const checkStartupUpdate = async (
+  options: StartupUpdateOptions = {}
+): Promise<StartupUpdateResult> => {
+  const env = options.env ?? process.env
+  const installedVersion = CURRENT_PACKAGE.version
+  const runtime = resolveServiceRuntimeContext(env)
+
+  // A launch that is already the product of an adoption must not adopt again.
+  if (!runtime || env[CODORI_STARTUP_UPDATE_APPLIED_ENV] === '1') {
+    return {
+      checked: false,
+      installedVersion,
+      latestVersion: null,
+      updateAvailable: false,
+      adopted: false,
+      reason: 'not-service-managed'
+    }
+  }
+
+  const latestVersion = await fetchLatestPackageVersion(
+    options.fetchImpl ?? fetch,
+    options.registryTimeoutMs ?? REGISTRY_TIMEOUT_MS
+  ).catch(() => null)
+
+  if (latestVersion === null) {
+    return {
+      checked: true,
+      installedVersion,
+      latestVersion: null,
+      updateAvailable: false,
+      adopted: false,
+      reason: 'registry-unavailable'
+    }
+  }
+
+  const updateAvailable = comparePackageVersions(latestVersion, installedVersion) > 0
+  if (!updateAvailable) {
+    return {
+      checked: true,
+      installedVersion,
+      latestVersion,
+      updateAvailable: false,
+      adopted: false,
+      reason: 'up-to-date'
+    }
+  }
+
+  if (!options.execPackage) {
+    return {
+      checked: true,
+      installedVersion,
+      latestVersion,
+      updateAvailable: true,
+      adopted: false,
+      reason: 'exec-unavailable'
+    }
+  }
+
+  await options.execPackage(`${CURRENT_PACKAGE.name}@${latestVersion}`)
+
+  return {
+    checked: true,
+    installedVersion,
+    latestVersion,
+    updateAvailable: true,
+    adopted: true,
+    reason: 'adopted'
+  }
+}
+
 export const createServiceUpdateController = (
   options: ServiceUpdateControllerOptions
 ): ServiceUpdateController => {
@@ -209,6 +358,8 @@ export const createServiceUpdateController = (
   const fetchImpl = options.fetchImpl ?? fetch
   const cacheTtlMs = options.cacheTtlMs ?? UPDATE_CHECK_TTL_MS
   const registryTimeoutMs = options.registryTimeoutMs ?? REGISTRY_TIMEOUT_MS
+  const platform = options.platform ?? process.platform
+  const pollIntervalMs = options.pollIntervalMs ?? UPDATE_POLL_INTERVAL_MS
   const spawnUpdateProcess = options.spawnUpdateProcess ?? defaultSpawnUpdateProcess
   const runtime = resolveServiceRuntimeContext(env)
 
@@ -216,6 +367,7 @@ export const createServiceUpdateController = (
   let cachedStatus: ServiceUpdateStatus | null = null
   let cachedAt = 0
   let pendingStatus: Promise<ServiceUpdateStatus> | null = null
+  let pollTimer: NodeJS.Timeout | null = null
 
   const resolveStatus = async () => {
     if (!runtime) {
@@ -256,6 +408,28 @@ export const createServiceUpdateController = (
 
   return {
     getStatus: async () => await resolveStatus(),
+    startPolling: () => {
+      if (!runtime || pollTimer) {
+        return
+      }
+
+      pollTimer = setInterval(() => {
+        // Expire the cache so the interval performs a real registry check, then
+        // surface the result through the existing status endpoint. Discovering an
+        // update here never restarts the service on its own.
+        cachedAt = 0
+        void resolveStatus().catch(() => {})
+      }, pollIntervalMs)
+      pollTimer.unref?.()
+    },
+    stopPolling: () => {
+      if (!pollTimer) {
+        return
+      }
+
+      clearInterval(pollTimer)
+      pollTimer = null
+    },
     requestUpdate: async () => {
       if (!runtime) {
         throw new CodoriError(
@@ -279,13 +453,14 @@ export const createServiceUpdateController = (
         )
       }
 
-      const script = createUpdateScript(runtime, {
+      const updateCommand = createUpdateCommand(runtime, {
         root: options.root,
         npxPath,
-        homeDir
+        homeDir,
+        platform
       })
 
-      await spawnUpdateProcess('/bin/sh', ['-lc', script], { env })
+      await spawnUpdateProcess(updateCommand.command, updateCommand.args, { env })
       updating = true
 
       cachedStatus = {

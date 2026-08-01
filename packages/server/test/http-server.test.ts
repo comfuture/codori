@@ -517,7 +517,9 @@ describe('createHttpServer', () => {
         updating: true,
         installedVersion: '0.0.3',
         latestVersion: '0.0.4'
-      })
+      }),
+      startPolling: () => {},
+      stopPolling: () => {}
     }
     const app = await createHttpServer(createManager(), {
       serviceUpdateController
