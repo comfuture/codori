@@ -25,20 +25,37 @@ const createOutput = () => {
 }
 
 describe('cli service commands', () => {
-  it('prints canonical package invocation in the help text', async () => {
+  it('leads the help text with the installed binary and global install', async () => {
     const stdout = createOutput()
 
     await runCli(['--help'], {
       stdout: stdout.stream
     })
 
-    expect(stdout.read()).toContain('npx @codori/server service install')
-    expect(stdout.read()).toContain('codori service install')
+    const help = stdout.read()
+    // The installed binary is the documented primary entrypoint.
+    expect(help).toContain('npm install -g codori')
+    expect(help).toContain('codori <command> [options]')
+    expect(help).toContain('codori service install')
+    // Running without installing stays documented as the alternative.
+    expect(help).toContain('npx @codori/server <command> [options]')
+    // Each command carries a description rather than a bare name.
+    expect(help).toContain('Stop the workspace runtime for one project.')
     // The legacy aliases stay discoverable so existing docs keep working.
-    expect(stdout.read()).toContain('install-service')
-    expect(CLI_USAGE).toContain('npx @codori/server <command>')
+    expect(help).toContain('install-service')
     expect(CLI_USAGE).toContain('--experimental-realtime-voice')
     expect(CLI_USAGE).toContain('--tailscale-serve')
+  })
+
+  it('renders help without ANSI escapes for a non-tty stream', async () => {
+    const stdout = createOutput()
+
+    await runCli(['--help'], {
+      stdout: stdout.stream
+    })
+
+    // eslint-disable-next-line no-control-regex
+    expect(stdout.read()).not.toMatch(/\u001B\[/)
   })
 
   it('rejects the runtime-only realtime flag for installed service commands', async () => {
@@ -166,7 +183,7 @@ describe('cli service commands', () => {
       stdout: stdout.stream
     })
 
-    expect(stdout.read()).toContain('Usage:')
+    expect(stdout.read()).toContain('Usage')
     expect(stdout.read()).toContain('restart-service')
   })
 
@@ -188,6 +205,85 @@ describe('cli service commands', () => {
       '0.0.0.0',
       '--tailscale-serve'
     ])).rejects.toThrow(/requires --host 127\.0\.0\.1/)
+  })
+
+  it('explains an empty project root instead of printing nothing', async () => {
+    const stdout = createOutput()
+    const manager = {
+      config: { root: '/tmp/empty-root' },
+      listProjectStatuses: () => []
+    }
+
+    await runCli(['list', '--root', '/tmp/empty-root'], {
+      stdout: stdout.stream,
+      createRuntimeManager: vi.fn(() => manager) as never
+    })
+
+    // A silent exit 0 was indistinguishable from a failure.
+    expect(stdout.read()).toContain('No Git projects were found under /tmp/empty-root')
+    expect(stdout.read()).toContain('direct .git child')
+  })
+
+  it('renders discovered projects as an aligned table', async () => {
+    const stdout = createOutput()
+    const manager = {
+      config: { root: '/tmp/projects' },
+      listProjectStatuses: () => [
+        { projectId: 'codori', status: 'running', port: 46001, pid: 4242 },
+        { projectId: 'team/api', status: 'stopped' }
+      ]
+    }
+
+    await runCli(['list', '--root', '/tmp/projects'], {
+      stdout: stdout.stream,
+      createRuntimeManager: vi.fn(() => manager) as never
+    })
+
+    const output = stdout.read()
+    expect(output).toContain('2 projects under /tmp/projects')
+    expect(output).toContain('PROJECT')
+    expect(output).toContain('codori')
+    expect(output).toContain('46001')
+    // The old tab-separated record shape is gone.
+    expect(output).not.toContain('\t')
+  })
+
+  it('keeps --json output free of styling and prose', async () => {
+    const stdout = createOutput()
+    const statuses = [
+      { projectId: 'codori', status: 'running', port: 46001, pid: 4242 }
+    ]
+    const manager = {
+      config: { root: '/tmp/projects' },
+      listProjectStatuses: () => statuses
+    }
+
+    await runCli(['list', '--root', '/tmp/projects', '--json'], {
+      stdout: stdout.stream,
+      createRuntimeManager: vi.fn(() => manager) as never
+    })
+
+    const output = stdout.read()
+    // eslint-disable-next-line no-control-regex
+    expect(output).not.toMatch(/\u001B\[/)
+    expect(JSON.parse(output)).toEqual(statuses)
+  })
+
+  it('surfaces a per-project error as a warning under the table', async () => {
+    const stdout = createOutput()
+    const manager = {
+      config: { root: '/tmp/projects' },
+      listProjectStatuses: () => [
+        { projectId: 'codori', status: 'error', error: 'runtime file was stale' }
+      ]
+    }
+
+    await runCli(['status', '--root', '/tmp/projects'], {
+      stdout: stdout.stream,
+      createRuntimeManager: vi.fn(() => manager) as never
+    })
+
+    expect(stdout.read()).toContain('codori: runtime file was stale')
   })
 
   it('configures tailscale serve after starting a loopback server', async () => {
@@ -269,5 +365,51 @@ describe('cli service commands', () => {
 
     expect(app.close).toHaveBeenCalled()
     expect(app.ready).not.toHaveBeenCalled()
+  })
+
+  it('omits the tailscale advisory for a loopback serve launch', async () => {
+    const stdout = createOutput()
+    const app = { close: vi.fn(), ready: vi.fn() }
+    const manager = {
+      config: {
+        root: '/tmp/projects',
+        server: { host: '127.0.0.1', port: 4310 }
+      }
+    }
+
+    await runCli(['serve', '--root', '/tmp/projects'], {
+      stdout: stdout.stream,
+      createRuntimeManager: vi.fn(() => manager) as never,
+      startHttpServer: vi.fn(async () => app) as never,
+      checkStartupUpdate: vi.fn(async () => ({ checked: false, adopted: false })) as never
+    })
+
+    const output = stdout.read()
+    expect(output).toContain('Codori listening on http://127.0.0.1:4310')
+    expect(output).toContain('root')
+    // A loopback launch cannot benefit from the hint, so it must stay quiet.
+    expect(output).not.toContain('--tailscale-serve to configure')
+    expect(output).not.toContain('Private HTTPS is not enabled')
+  })
+
+  it('keeps the https hint for a non-loopback serve launch', async () => {
+    const stdout = createOutput()
+    const app = { close: vi.fn(), ready: vi.fn() }
+    const manager = {
+      config: {
+        root: '/tmp/projects',
+        server: { host: '0.0.0.0', port: 4310 }
+      }
+    }
+
+    await runCli(['serve', '--root', '/tmp/projects', '--host', '0.0.0.0'], {
+      stdout: stdout.stream,
+      createRuntimeManager: vi.fn(() => manager) as never,
+      startHttpServer: vi.fn(async () => app) as never,
+      checkStartupUpdate: vi.fn(async () => ({ checked: false, adopted: false })) as never
+    })
+
+    // A remote-reachable bind is the case where HTTPS actually matters.
+    expect(stdout.read()).toContain('--tailscale-serve for private HTTPS')
   })
 })

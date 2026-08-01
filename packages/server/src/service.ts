@@ -12,6 +12,7 @@ import {
 import os from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { createInterface } from 'node:readline/promises'
+import { createCliUi } from './cli-ui.js'
 import {
   createDarwinServiceDefinition,
   createLinuxServiceDefinition,
@@ -255,10 +256,6 @@ const findFirstIpv4 = (values: unknown) => {
   return null
 }
 
-const writeLine = (stream: NodeJS.WritableStream, message: string) => {
-  stream.write(`${message}\n`)
-}
-
 const getCurrentUserId = () => (typeof process.getuid === 'function' ? process.getuid() : 0)
 
 /**
@@ -341,8 +338,11 @@ const buildCanonicalInvocation = (
   }
 ) => {
   // Keep literal command words unquoted so the printed command can be pasted
-  // directly; only quote values that may contain spaces.
-  const parts: string[] = ['npx', '@codori/server', ...toCanonicalCommandWords(command)]
+  // directly; only quote values that may contain spaces. The printed form uses
+  // the installed `codori` binary because that is the documented entrypoint;
+  // the launcher scripts written to disk keep using `npx @codori/server` so
+  // already-installed services stay valid.
+  const parts: string[] = ['codori', ...toCanonicalCommandWords(command)]
   if (options.root) {
     parts.push('--root', maybeQuote(options.root))
   }
@@ -404,7 +404,7 @@ const loadServiceMetadata = (root: string, homeDir = os.homedir()) => {
   if (!existsSync(metadataPath)) {
     throw new CodoriError(
       'SERVICE_NOT_INSTALLED',
-      `No service metadata was found for ${resolve(root)}. Install it first with npx @codori/server install-service.`
+      `No service metadata was found for ${resolve(root)}. Install it first with codori service install.`
     )
   }
 
@@ -761,7 +761,7 @@ const resolvePromptedHost = async (
 ) => {
   const hostDefault = await resolveHostPromptDefault(host, runCommand)
   if (hostDefault.warning) {
-    writeLine(stdout, `Warning: ${hostDefault.warning}`)
+    createCliUi({ stream: stdout }).warn(`Warning: ${hostDefault.warning}`)
   }
 
   if (host || yes) {
@@ -830,13 +830,16 @@ const printInstallSummary = (
     launcherPath: string
   }
 ) => {
-  writeLine(stdout, 'Service installation summary:')
-  writeLine(stdout, `  root: ${summary.root}`)
-  writeLine(stdout, `  host: ${summary.host}`)
-  writeLine(stdout, `  port: ${summary.port}`)
-  writeLine(stdout, `  scope: ${summary.scope}`)
-  writeLine(stdout, `  launcher: ${summary.launcherPath}`)
-  writeLine(stdout, `  service file: ${summary.serviceFilePath}`)
+  const ui = createCliUi({ stream: stdout })
+  ui.heading('Service installation summary:')
+  ui.keyValues([
+    ['root', summary.root],
+    ['host', summary.host],
+    ['port', String(summary.port)],
+    ['scope', summary.scope],
+    ['launcher', summary.launcherPath],
+    ['service file', summary.serviceFilePath]
+  ])
 }
 
 const createOperationMetadata = (
