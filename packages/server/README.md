@@ -4,19 +4,33 @@ Codori server for Git project discovery, Codex app-server backend selection,
 fallback lifecycle management, and bundled dashboard and immersive WebXR
 serving.
 
+This package owns the Codori CLI implementation and output. Most users should
+install the separate [`codori`](https://www.npmjs.com/package/codori) package,
+which provides the `codori` command as a thin launcher over this one:
+
+```bash
+npm install -g codori
+codori serve --root ~/Project
+```
+
+Running this package directly stays fully supported and behaves identically.
+Its own binary is named `codori-server` so a global install of both packages
+cannot collide on the `codori` name; `npx @codori/server` resolves that binary
+automatically.
+
 ## Usage
 
 Run Codori from the directory that contains your Git projects:
 
 ```bash
 cd ~/Project
-npx @codori/server
+npx @codori/server serve
 ```
 
 Or point it at a different root explicitly:
 
 ```bash
-npx @codori/server --root ~/Project --host 127.0.0.1 --port 4310
+npx @codori/server serve --root ~/Project --host 127.0.0.1 --port 4310
 ```
 
 The server serves the dashboard UI, immersive WebXR workspace, REST API, and
@@ -64,7 +78,7 @@ On a machine that is already connected to Tailscale, a direct launch can bind
 Codori to loopback and configure persistent private HTTPS in one command:
 
 ```bash
-npx @codori/server --root ~/Project --tailscale-serve
+codori serve --root ~/Project --tailscale-serve
 ```
 
 Codori inspects `tailscale serve status --json`, refuses to replace a
@@ -141,16 +155,16 @@ socket access is unavailable, the managed fallback is the supported behavior.
 
 ## Service Installation
 
-Use the npm package invocation as the canonical entrypoint:
-
-```bash
-npx @codori/server service install
-```
-
-The installed binary form is equivalent once the package is on your `PATH`:
+Use the installed `codori` command as the canonical entrypoint:
 
 ```bash
 codori service install
+```
+
+The package invocation is equivalent when nothing is installed globally:
+
+```bash
+npx @codori/server service install
 ```
 
 Available service lifecycle commands:
@@ -179,7 +193,7 @@ Use `--scope system` for a machine-wide service. A system scope registers a
 launchd daemon in `/Library/LaunchDaemons`, a systemd unit in
 `/etc/systemd/system`, or a Windows boot task running as `SYSTEM`. If elevated
 privileges are required, Codori stops before writing files and prints the exact
-command to re-run: `sudo npx @codori/server ...` on macOS and Linux, or the same
+command to re-run: `sudo codori service ...` on macOS and Linux, or the same
 command from an Administrator terminal on Windows.
 
 `service restart` regenerates the launcher script and service definition before restarting. That keeps the service aligned with the current `node` and `npx` paths after package updates.

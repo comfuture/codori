@@ -33,6 +33,29 @@ Codori follows a few hard constraints:
 
 The server package includes a matching Codex CLI runtime, so a separate host-global `codex` installation is not required. Codori first asks that runtime for its Unix-socket remote-control daemon and otherwise starts the existing managed TCP fallback. Set `CODORI_CODEX_BIN` to an executable path only when you intentionally want to override the bundled runtime.
 
+## Install
+
+```bash
+npm install -g codori
+```
+
+This installs the `codori` command, which is the primary way to run and manage
+Codori. Check the available commands at any time:
+
+```bash
+codori --help
+```
+
+If you would rather not install anything, every command also works through
+`npx @codori/server`:
+
+```bash
+npx @codori/server serve --root ~/Project
+```
+
+The two forms share one implementation, so behavior and options are identical.
+The examples below use the installed `codori` command.
+
 ## Usage
 
 The normal flow is simple:
@@ -45,21 +68,23 @@ The normal flow is simple:
 Start the Codori management server:
 
 ```bash
-npx @codori/server --root ~/Project
+codori serve --root ~/Project
 ```
 
 If you do not pass `--root`, Codori uses the current working directory as the project root:
 
 ```bash
 cd ~/Project
-npx @codori/server
+codori serve
 ```
 
 On startup Codori prints the directory it selected, for example:
 
 ```text
-Running codori server with project root directory: /Users/comfuture/Project
-Codori listening on http://127.0.0.1:4310
+✔ Codori listening on http://127.0.0.1:4310
+  root       /Users/comfuture/Project
+  dashboard  http://127.0.0.1:4310/
+  immersive  http://127.0.0.1:4310/xr/
 ```
 
 By default this binds Codori to `127.0.0.1:4310`. `--host` and `--port` are optional. Use `--root` whenever you want to override the current directory and point Codori at another parent directory.
@@ -68,7 +93,7 @@ Experimental realtime voice is enabled by default for direct launches and
 installed services. The existing compatibility flag remains accepted:
 
 ```bash
-npx @codori/server --root ~/Project --experimental-realtime-voice
+codori serve --root ~/Project --experimental-realtime-voice
 ```
 
 Realtime voice requires the selected backend to expose the upstream
@@ -82,13 +107,13 @@ restart Codori.
 If you need different bind settings:
 
 ```bash
-npx @codori/server --root ~/Project --host 0.0.0.0 --port 4310
+codori serve --root ~/Project --host 0.0.0.0 --port 4310
 ```
 
 If you are exposing Codori only inside a Tailscale tailnet, prefer binding to the machine's Tailscale IP instead of `0.0.0.0` so the server is not opened on every network interface:
 
 ```bash
-npx @codori/server --host "$(tailscale ip -4 | head -n1)" --port 4310
+codori serve --host "$(tailscale ip -4 | head -n1)" --port 4310
 ```
 
 Then open:
@@ -166,7 +191,7 @@ be installed, running, and joined to a tailnet. Typical patterns are:
 Start Codori and configure persistent private HTTPS in one command:
 
 ```bash
-npx @codori/server --root ~/Project --tailscale-serve
+codori serve --root ~/Project --tailscale-serve
 ```
 
 This mode forces the Codori origin to `127.0.0.1`, inspects the existing
@@ -213,7 +238,7 @@ If secure-context features such as WebXR and remote microphone access are not
 needed, Codori can instead bind directly to the current node's Tailscale IPv4:
 
 ```bash
-npx @codori/server --host "$(tailscale ip -4 | head -n1)" --port 4310
+codori serve --host "$(tailscale ip -4 | head -n1)" --port 4310
 ```
 
 From another device in the same tailnet, open the short or fully qualified
@@ -287,14 +312,14 @@ pnpm build
 
 ## Release
 
-Codori publishes `@codori/client`, `@codori/webxr`, and `@codori/server` from GitHub Actions when a GitHub release is published.
+Codori publishes `@codori/client`, `@codori/webxr`, `@codori/server`, and `codori` from GitHub Actions when a GitHub release is published.
 
 Trusted publishing setup is required once per package on npm:
 
 1. Open the npm package settings for `@codori/client`.
 2. Add a Trusted Publisher for GitHub Actions.
 3. Set the GitHub owner to `comfuture`, repository to `codori`, and workflow filename to `publish-release.yml`.
-4. Repeat the same setup for `@codori/webxr` and `@codori/server`.
+4. Repeat the same setup for `@codori/webxr`, `@codori/server`, and `codori`.
 
 The workflow uses npm trusted publishing with GitHub OIDC, so no long-lived npm automation token is required once that relationship is configured.
 
@@ -303,17 +328,23 @@ Release flow:
 1. Bump the workspace and package versions together.
 2. Push the commit to GitHub.
 3. Create and publish a GitHub release with the matching tag, for example `v0.0.5`.
-4. GitHub Actions runs `.github/workflows/publish-release.yml` and publishes all three npm packages.
+4. GitHub Actions runs `.github/workflows/publish-release.yml` and publishes all four npm packages.
 
-The release workflow checks that the Git tag matches the workspace version and skips packages that were already published, so rerunning the workflow is safe after partial failures.
+The release workflow checks that the Git tag matches the workspace version and skips packages that were already published, so rerunning the workflow is safe after partial failures. `codori` is packed last because it depends on `@codori/server` at the same version.
 
 ## Monorepo Structure
 
-This repository is a pnpm workspace with three packages:
+This repository is a pnpm workspace with four published packages:
 
+- `codori`: the installable `codori` command, a thin launcher over `@codori/server`
 - `@codori/server`: project discovery, runtime management, CLI, REST API, WebSocket proxy, and bundled static UI serving
 - `@codori/client`: Nuxt + Nuxt UI dashboard for project browsing and Codex chat
 - `@codori/webxr`: Vite + Three.js immersive workspace served under `/xr/`
+
+`@codori/server` owns all CLI behavior and output. The `codori` package only
+provides the binary, so the installed command and `npx @codori/server` cannot
+drift apart. `@codori/server` still ships its own `codori-server` binary, which
+is what `npx @codori/server` runs.
 
 See [docs/prd.md](/Users/comfuture/Project/codori/docs/prd.md) for the detailed product specification.
 
@@ -504,40 +535,57 @@ host is already connected to Tailscale.
 
 ## CLI Usage
 
+All commands are available as `codori <command>` after a global install, or as
+`npx @codori/server <command>` without installing. Run `codori --help` for the
+grouped command, option, and example reference.
+
 List discovered projects:
 
 ```bash
-npx @codori/server list --root ~/Project
-npx @codori/server list --root ~/Project --json
+codori list --root ~/Project
+codori list --root ~/Project --json
 ```
+
+Formatted output uses an aligned table, and `--json` emits plain, parseable JSON
+with no color or spinner output so it stays safe to pipe:
+
+```text
+2 projects under /Users/comfuture/Project
+  PROJECT   STATUS   PORT   PID
+  codori    running  46001  4242
+  team/api  stopped  -      -
+```
+
+Color is used only when the terminal supports it. `NO_COLOR`, `TERM=dumb`, a
+piped stream, and `--json` all produce plain text.
 
 Start a project workspace runtime:
 
 ```bash
-npx @codori/server start codori --root ~/Project
+codori start codori --root ~/Project
 ```
 
 Stop a project workspace runtime:
 
 ```bash
-npx @codori/server stop codori --root ~/Project
+codori stop codori --root ~/Project
 ```
 
 Inspect runtime status:
 
 ```bash
-npx @codori/server status --root ~/Project
-npx @codori/server status codori --root ~/Project
+codori status --root ~/Project
+codori status codori --root ~/Project
 ```
 
 Register Codori as a background service:
 
 ```bash
-npx @codori/server service install
-npx @codori/server service start --root ~/Project
-npx @codori/server service stop --root ~/Project
-npx @codori/server service status --root ~/Project
-npx @codori/server service uninstall --root ~/Project
+codori service install
+codori service start --root ~/Project
+codori service stop --root ~/Project
+codori service status --root ~/Project
+codori service uninstall --root ~/Project
 ```
 
 A user-scoped install uses a launchd agent on macOS, a systemd user unit on
@@ -568,7 +616,7 @@ For most users, the cleanest setup is:
 
 1. Run Codori on a workstation or home server that already has your repositories.
 2. Join that host and your laptop to the same Tailscale tailnet.
-3. Run `npx @codori/server --root ~/Project --tailscale-serve`.
+3. Run `codori serve --root ~/Project --tailscale-serve`.
 4. Open the private MagicDNS HTTPS URL printed by Codori.
 
 Codori stays focused on coding workflows. Networking remains explicit and under your control.
