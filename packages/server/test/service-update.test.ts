@@ -1,9 +1,12 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   comparePackageVersions,
-  createServiceUpdateController
+  checkStartupUpdate,
+  CODORI_STARTUP_UPDATE_APPLIED_ENV,
+  createServiceUpdateController,
+  createUpdateCommand
 } from '../src/service-update.js'
 import {
   CODORI_SERVICE_INSTALL_ID_ENV,
@@ -116,5 +119,170 @@ describe('service update controller', () => {
     )
     expect(status.updating).toBe(true)
     expect(status.updateAvailable).toBe(true)
+  })
+})
+
+const SERVICE_ENV = {
+  [CODORI_SERVICE_MANAGED_ENV]: '1',
+  [CODORI_SERVICE_INSTALL_ID_ENV]: 'abc123def456',
+  [CODORI_SERVICE_SCOPE_ENV]: 'user'
+}
+
+const createRegistryFetch = (version: string) => vi.fn(async () => ({
+  ok: true,
+  json: async () => ({ version })
+} as Response))
+
+describe('startup update adoption', () => {
+  it('skips the check when the launch is not service-managed', async () => {
+    const fetchImpl = vi.fn()
+    const result = await checkStartupUpdate({
+      env: {},
+      fetchImpl: fetchImpl as unknown as typeof fetch
+    })
+
+    expect(result.checked).toBe(false)
+    expect(result.reason).toBe('not-service-managed')
+    expect(fetchImpl).not.toHaveBeenCalled()
+  })
+
+  it('adopts a newer published bundle before serving', async () => {
+    const execPackage = vi.fn(async () => undefined)
+    const result = await checkStartupUpdate({
+      env: SERVICE_ENV,
+      fetchImpl: createRegistryFetch(NEWER_SERVER_VERSION) as unknown as typeof fetch,
+      execPackage
+    })
+
+    expect(result.adopted).toBe(true)
+    expect(result.reason).toBe('adopted')
+    expect(result.latestVersion).toBe(NEWER_SERVER_VERSION)
+    expect(execPackage).toHaveBeenCalledWith(`@codori/server@${NEWER_SERVER_VERSION}`)
+  })
+
+  it('does not adopt when the installed bundle is current', async () => {
+    const execPackage = vi.fn(async () => undefined)
+    const result = await checkStartupUpdate({
+      env: SERVICE_ENV,
+      fetchImpl: createRegistryFetch(CURRENT_SERVER_VERSION) as unknown as typeof fetch,
+      execPackage
+    })
+
+    expect(result.adopted).toBe(false)
+    expect(result.reason).toBe('up-to-date')
+    expect(execPackage).not.toHaveBeenCalled()
+  })
+
+  it('serves the installed bundle when the registry is unreachable', async () => {
+    const execPackage = vi.fn(async () => undefined)
+    const result = await checkStartupUpdate({
+      env: SERVICE_ENV,
+      fetchImpl: vi.fn(async () => {
+        throw new Error('offline')
+      }) as unknown as typeof fetch,
+      execPackage
+    })
+
+    expect(result.reason).toBe('registry-unavailable')
+    expect(result.adopted).toBe(false)
+    expect(execPackage).not.toHaveBeenCalled()
+  })
+
+  it('never re-adopts inside an already adopted launch', async () => {
+    const execPackage = vi.fn(async () => undefined)
+    const fetchImpl = createRegistryFetch(NEWER_SERVER_VERSION)
+    const result = await checkStartupUpdate({
+      env: {
+        ...SERVICE_ENV,
+        [CODORI_STARTUP_UPDATE_APPLIED_ENV]: '1'
+      },
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      execPackage
+    })
+
+    expect(result.checked).toBe(false)
+    expect(execPackage).not.toHaveBeenCalled()
+    expect(fetchImpl).not.toHaveBeenCalled()
+  })
+})
+
+describe('platform update command', () => {
+  it('uses a POSIX shell on unix', () => {
+    const command = createUpdateCommand({ installId: 'abc', scope: 'user' }, {
+      root: '/tmp/demo',
+      npxPath: '/opt/node/bin/npx',
+      homeDir: '/tmp/home',
+      platform: 'darwin'
+    })
+
+    expect(command.command).toBe('/bin/sh')
+    expect(command.args[0]).toBe('-lc')
+  })
+
+  it('uses cmd.exe with a timeout delay on windows', () => {
+    const command = createUpdateCommand({ installId: 'abc', scope: 'user' }, {
+      root: 'C:\\Projects',
+      npxPath: 'C:\\Program Files\\nodejs\\npx.cmd',
+      homeDir: 'C:\\Users\\test',
+      platform: 'win32'
+    })
+
+    expect(command.command).toBe('cmd.exe')
+    expect(command.args.slice(0, 3)).toEqual(['/d', '/s', '/c'])
+    // cmd.exe has no `sleep`.
+    expect(command.args[3]).toContain('timeout /t 1 /nobreak')
+    expect(command.args[3]).toContain('service restart')
+    expect(command.args[3]).toContain('"C:\\Projects"')
+  })
+})
+
+describe('periodic update polling', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('re-checks the registry on an interval without restarting the service', async () => {
+    vi.useFakeTimers()
+    const fetchImpl = createRegistryFetch(NEWER_SERVER_VERSION)
+    const spawnUpdateProcess = vi.fn(async () => undefined)
+    const controller = createServiceUpdateController({
+      root: '/tmp/demo',
+      env: SERVICE_ENV,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      pollIntervalMs: 1_000,
+      spawnUpdateProcess
+    })
+
+    await controller.getStatus()
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+
+    controller.startPolling()
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(fetchImpl).toHaveBeenCalledTimes(2)
+
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(fetchImpl).toHaveBeenCalledTimes(3)
+
+    // Discovering an update must never restart on its own.
+    expect(spawnUpdateProcess).not.toHaveBeenCalled()
+
+    controller.stopPolling()
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(fetchImpl).toHaveBeenCalledTimes(3)
+  })
+
+  it('does not poll when the launch is not service-managed', async () => {
+    vi.useFakeTimers()
+    const fetchImpl = createRegistryFetch(NEWER_SERVER_VERSION)
+    const controller = createServiceUpdateController({
+      root: '/tmp/demo',
+      env: {},
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      pollIntervalMs: 1_000
+    })
+
+    controller.startPolling()
+    await vi.advanceTimersByTimeAsync(5_000)
+    expect(fetchImpl).not.toHaveBeenCalled()
   })
 })

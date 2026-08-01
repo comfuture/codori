@@ -1,13 +1,22 @@
 <script setup lang="ts">
 import { useRoute } from '#imports'
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useProjects } from '../composables/useProjects'
 import { DEFAULT_SETTINGS_ROUTE } from '~~/shared/settings'
 
 const route = useRoute()
 const sidebarCollapsed = ref(false)
 const commandPaletteOpen = ref(false)
-const { serviceUpdate, serviceUpdatePending, triggerServiceUpdate } = useProjects()
+const {
+  serviceUpdate,
+  serviceUpdatePending,
+  refreshServiceUpdate,
+  triggerServiceUpdate
+} = useProjects()
+const serviceUpdateConfirmOpen = ref(false)
+
+const SERVICE_UPDATE_POLL_INTERVAL_MS = 15 * 60 * 1000
+let serviceUpdateTimer: ReturnType<typeof setInterval> | null = null
 
 const showServiceUpdateButton = computed(() =>
   serviceUpdate.value.enabled && (serviceUpdate.value.updateAvailable || serviceUpdate.value.updating)
@@ -27,9 +36,41 @@ const serviceUpdateTooltip = computed(() => {
     : `Update @codori/server ${serviceUpdate.value.installedVersion} -> ${serviceUpdate.value.latestVersion}`
 })
 
-const handleServiceUpdate = async () => {
+const serviceUpdateConfirmDescription = computed(() => {
+  if (!serviceUpdate.value.installedVersion || !serviceUpdate.value.latestVersion) {
+    return 'A newer @codori/server package is available.'
+  }
+
+  return `@codori/server ${serviceUpdate.value.latestVersion} is available. This service is running ${serviceUpdate.value.installedVersion}.`
+})
+
+// An update found mid-session only enables this button. Restarting the service
+// interrupts running work, so it always waits for an explicit confirmation.
+const handleServiceUpdate = () => {
+  if (serviceUpdate.value.updating) {
+    return
+  }
+  serviceUpdateConfirmOpen.value = true
+}
+
+const confirmServiceUpdate = async () => {
+  serviceUpdateConfirmOpen.value = false
   await triggerServiceUpdate()
 }
+
+onMounted(() => {
+  void refreshServiceUpdate()
+  serviceUpdateTimer = setInterval(() => {
+    void refreshServiceUpdate()
+  }, SERVICE_UPDATE_POLL_INTERVAL_MS)
+})
+
+onBeforeUnmount(() => {
+  if (serviceUpdateTimer) {
+    clearInterval(serviceUpdateTimer)
+    serviceUpdateTimer = null
+  }
+})
 
 const sidebarUi = computed(() =>
   sidebarCollapsed.value
@@ -152,6 +193,38 @@ const settingsRoute = computed(() => ({
     </UDashboardSidebar>
 
     <GlobalCommandPalette v-model:open="commandPaletteOpen" />
+
+    <UModal
+      v-model:open="serviceUpdateConfirmOpen"
+      title="Restart Codori to update?"
+    >
+      <template #body>
+        <p class="text-sm leading-6 text-muted">
+          {{ serviceUpdateConfirmDescription }}
+        </p>
+        <p class="mt-3 text-sm leading-6 text-muted">
+          The registered service restarts to apply the update. Running work is interrupted, and
+          this page reconnects once the new bundle is serving.
+        </p>
+      </template>
+
+      <template #footer>
+        <div class="flex w-full justify-end gap-2">
+          <UButton
+            color="neutral"
+            variant="ghost"
+            label="Not now"
+            @click="serviceUpdateConfirmOpen = false"
+          />
+          <UButton
+            color="primary"
+            label="Update and restart"
+            :loading="serviceUpdatePending"
+            @click="confirmServiceUpdate"
+          />
+        </div>
+      </template>
+    </UModal>
 
     <slot />
   </UDashboardGroup>

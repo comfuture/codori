@@ -1407,10 +1407,11 @@ export const startHttpServer = async (manager: RuntimeManagerLike = createRuntim
   if (!manager.config) {
     throw new CodoriError('INVALID_CONFIG', 'Manager config is required to start the HTTP server.')
   }
+  const serviceUpdateController = createServiceUpdateController({
+    root: manager.config.root
+  })
   const app = await createHttpServer(manager, {
-    serviceUpdateController: createServiceUpdateController({
-      root: manager.config.root
-    })
+    serviceUpdateController
   })
   await app.listen({
     host: manager.config.server.host,
@@ -1422,5 +1423,13 @@ export const startHttpServer = async (manager: RuntimeManagerLike = createRuntim
     await app.close()
     throw error
   }
+
+  // Keep looking for newer published bundles while the service runs. Discovering
+  // one only enables the update affordance; it never restarts on its own.
+  serviceUpdateController.startPolling()
+  app.addHook('onClose', async () => {
+    serviceUpdateController.stopPolling()
+  })
+
   return app
 }

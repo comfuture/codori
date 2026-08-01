@@ -126,6 +126,17 @@ export const useProjects = () => {
       ?? null
   }
 
+  const refreshServiceUpdate = async () => {
+    try {
+      const response = await $fetch<ServiceUpdateResponse>(toApiUrl('/service/update'))
+      serviceUpdate.value = response.serviceUpdate
+      return response.serviceUpdate
+    } catch {
+      // A failed check should never disrupt the session.
+      return serviceUpdate.value
+    }
+  }
+
   const triggerServiceUpdate = async () => {
     if (serviceUpdatePending.value || serviceUpdate.value.updating) {
       return serviceUpdate.value
@@ -157,6 +168,7 @@ export const useProjects = () => {
     error,
     pendingProjectId,
     refreshProjects,
+    refreshServiceUpdate,
     triggerServiceUpdate,
     cloneProject,
     startProject,
