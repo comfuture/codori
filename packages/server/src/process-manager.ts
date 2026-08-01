@@ -10,7 +10,12 @@ import { createRequire } from 'node:module'
 import os from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { resolveConfig } from './config.js'
+import {
+  resolveConfig,
+  resolveLastServiceRoot,
+  writeLastServiceRoot,
+  writeProjectRoot
+} from './config.js'
 import { CodoriError } from './errors.js'
 import { cloneProjectIntoRoot } from './git.js'
 import { findAvailablePort } from './ports.js'
@@ -170,11 +175,13 @@ const spawnDetached = async (command: string, args: string[], cwd: string) =>
   })
 
 export class RuntimeManager {
-  readonly config: CodoriConfig
+  config: CodoriConfig
 
   readonly store: RuntimeStore
 
   private readonly documentsDir: string
+
+  private readonly homeDir: string | undefined
 
   private readonly commandFactory: CommandFactory
 
@@ -205,6 +212,7 @@ export class RuntimeManager {
   constructor(options: RuntimeManagerOptions = {}) {
     this.config = options.config ?? resolveConfig(options.configOverrides, options.homeDir)
     this.store = new RuntimeStore(options.homeDir)
+    this.homeDir = options.homeDir
     this.documentsDir = options.documentsDir ?? join(options.homeDir ?? os.homedir(), 'Documents')
     this.commandFactory = options.commandFactory
       ?? ((port) => resolveCodexCommand(port, undefined, this.config.realtimeVoice.enabled))
@@ -231,6 +239,26 @@ export class RuntimeManager {
 
   listProjects() {
     return scanProjects(this.config.root)
+  }
+
+  /**
+   * Repoints project discovery at a new root and persists it so the next
+   * service start adopts the same directory. Running project runtimes are left
+   * alone; they keep serving until they idle out or are stopped explicitly.
+   */
+  setProjectRoot(root: string) {
+    const resolvedRoot = writeProjectRoot(root, this.homeDir)
+    this.config = {
+      ...this.config,
+      root: resolvedRoot
+    }
+    writeLastServiceRoot(resolvedRoot, this.homeDir)
+
+    return resolvedRoot
+  }
+
+  getLastProjectRoot() {
+    return resolveLastServiceRoot(this.homeDir)
   }
 
   private getChatsRoot() {

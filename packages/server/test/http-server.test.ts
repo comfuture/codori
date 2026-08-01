@@ -555,6 +555,71 @@ describe('createHttpServer', () => {
     })
   })
 
+  it('reads and changes the served project root', async () => {
+    const nextRoot = mkdtempSync(join(os.tmpdir(), 'codori-next-root-'))
+    tempDirs.push(nextRoot)
+
+    let currentRoot = '/tmp/original-root'
+    let lastRoot: string | null = null
+    const app = await createHttpServer(createManager({
+      config: {
+        root: currentRoot
+      } as RuntimeManagerLike['config'],
+      setProjectRoot: (root: string) => {
+        currentRoot = root
+        lastRoot = root
+        return root
+      },
+      getLastProjectRoot: () => lastRoot
+    }))
+    startedApps.push(app)
+
+    const readResponse = await app.inject({
+      method: 'GET',
+      url: '/api/config/root'
+    })
+    expect(readResponse.statusCode).toBe(200)
+    expect(readResponse.json()).toEqual({
+      projectRoot: {
+        root: '/tmp/original-root',
+        lastRoot: null
+      }
+    })
+
+    const patchResponse = await app.inject({
+      method: 'PATCH',
+      url: '/api/config/root',
+      payload: {
+        root: nextRoot
+      }
+    })
+    expect(patchResponse.statusCode).toBe(200)
+    expect(patchResponse.json()).toEqual({
+      projectRoot: {
+        root: nextRoot,
+        lastRoot: nextRoot
+      }
+    })
+  })
+
+  it('rejects a blank project root change', async () => {
+    const app = await createHttpServer(createManager({
+      setProjectRoot: (root: string) => root
+    }))
+    startedApps.push(app)
+
+    const response = await app.inject({
+      method: 'PATCH',
+      url: '/api/config/root',
+      payload: {
+        root: '   '
+      }
+    })
+
+    expect(response.statusCode).toBe(400)
+    expect(response.json().error.code).toBe('MISSING_ROOT')
+  })
+
   it('lists local git branches for a project', async () => {
     const projectPath = createGitRepo()
     const app = await createHttpServer(createManager({

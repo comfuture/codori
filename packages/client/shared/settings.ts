@@ -13,6 +13,11 @@ export const SETTINGS_SECTIONS = [
     label: 'Backend',
     icon: 'i-lucide-server',
     path: '/settings/backend'
+  },
+  {
+    label: 'Workspace',
+    icon: 'i-lucide-folder-tree',
+    path: '/settings/workspace'
   }
 ] as const
 

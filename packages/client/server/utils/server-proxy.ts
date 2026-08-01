@@ -13,7 +13,7 @@ export const proxyServerRequest = async <T>(
   event: H3Event,
   path: string,
   options: {
-    method?: 'DELETE' | 'GET' | 'POST'
+    method?: 'DELETE' | 'GET' | 'PATCH' | 'POST'
     body?: unknown
   } = {}
 ) => {

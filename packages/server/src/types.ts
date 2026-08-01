@@ -38,6 +38,13 @@ export type ServerCapabilitiesResponse = {
   }
 }
 
+export type ProjectRootResponse = {
+  projectRoot: {
+    root: string
+    lastRoot: string | null
+  }
+}
+
 export type ProjectRecord = {
   id: string
   path: string
