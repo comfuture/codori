@@ -58,6 +58,44 @@ describe('cli service commands', () => {
     expect(stdout.read()).not.toMatch(/\u001B\[/)
   })
 
+  it('shows help for a bare invocation instead of starting a server', async () => {
+    const stdout = createOutput()
+    const startHttpServer = vi.fn()
+
+    await runCli([], {
+      stdout: stdout.stream,
+      startHttpServer: startHttpServer as never
+    })
+
+    expect(stdout.read()).toContain('Usage')
+    expect(stdout.read()).toContain('npm install -g codori')
+    // A first-time user must not accidentally bind a server.
+    expect(startHttpServer).not.toHaveBeenCalled()
+  })
+
+  it('still defaults to serve when only flags are passed', async () => {
+    const stdout = createOutput()
+    const app = { close: vi.fn(), ready: vi.fn() }
+    const startHttpServer = vi.fn(async () => app)
+    const manager = {
+      config: {
+        root: '/tmp/projects',
+        server: { host: '127.0.0.1', port: 4310 }
+      }
+    }
+
+    // The documented `npx @codori/server --root ~/Project` form has no command.
+    await runCli(['--root', '/tmp/projects'], {
+      stdout: stdout.stream,
+      createRuntimeManager: vi.fn(() => manager) as never,
+      startHttpServer: startHttpServer as never,
+      checkStartupUpdate: vi.fn(async () => ({ checked: false, adopted: false })) as never
+    })
+
+    expect(startHttpServer).toHaveBeenCalled()
+    expect(stdout.read()).toContain('Codori listening on http://127.0.0.1:4310')
+  })
+
   it('rejects the runtime-only realtime flag for installed service commands', async () => {
     await expect(runCli([
       'install-service',

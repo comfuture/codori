@@ -427,7 +427,11 @@ export const runCli = async (
     plain: json
   })
 
-  if (values.help) {
+  // A bare `codori` shows help rather than silently starting a server, so a
+  // first-time user discovers the command surface. An invocation that passes
+  // flags but no command still defaults to `serve`, which keeps the previously
+  // documented `npx @codori/server --root ~/Project` form working.
+  if (values.help || argv.length === 0) {
     printUsage(ui)
     return
   }
