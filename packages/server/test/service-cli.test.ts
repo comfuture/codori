@@ -3,6 +3,7 @@ import os from 'node:os'
 import { join } from 'node:path'
 import { PassThrough } from 'node:stream'
 import { describe, expect, it } from 'vitest'
+import { resolveLastServiceRoot, writeLastServiceRoot } from '../src/config.js'
 import {
   installService,
   restartService,
@@ -219,6 +220,46 @@ describe('service lifecycle orchestration', () => {
     expect(removed.metadata.serviceName).toBe(installed.metadata.serviceName)
     expect(commands).toContain(`schtasks /Delete /TN ${installed.metadata.serviceName} /F`)
     expect(existsSync(join(homeDir, '.codori', 'services', installed.metadata.installId))).toBe(false)
+  })
+
+  it('keeps a Settings-changed root across restart and start', async () => {
+    const homeDir = mkdtempSync(join(os.tmpdir(), 'codori-home-'))
+    const installRoot = mkdtempSync(join(os.tmpdir(), 'codori-root-a-'))
+    const changedRoot = mkdtempSync(join(os.tmpdir(), 'codori-root-b-'))
+    mkdirSync(join(installRoot, '.git'), { recursive: true })
+    mkdirSync(join(changedRoot, '.git'), { recursive: true })
+
+    const dependencies = {
+      homeDir,
+      cwd: installRoot,
+      platform: 'darwin' as NodeJS.Platform,
+      nodePath: '/opt/node/bin/node',
+      npxPath: '/opt/node/bin/npx',
+      runCommand: async () => ({ exitCode: 0, stdout: '', stderr: '' }),
+      stdout: createOutput().stream
+    }
+
+    await installService({
+      root: installRoot,
+      host: '127.0.0.1',
+      yes: true
+    }, dependencies)
+
+    expect(resolveLastServiceRoot(homeDir)).toBe(installRoot)
+
+    // Settings changed the served root to B while the service was running.
+    writeLastServiceRoot(changedRoot, homeDir)
+
+    // A lifecycle command still targets the install-time root A, but must not
+    // revert the remembered root back to A.
+    await restartService({ root: installRoot, yes: true }, dependencies)
+    expect(resolveLastServiceRoot(homeDir)).toBe(changedRoot)
+
+    await stopService({ root: installRoot, yes: true }, dependencies)
+    expect(resolveLastServiceRoot(homeDir)).toBe(changedRoot)
+
+    await startService({ root: installRoot, yes: true }, dependencies)
+    expect(resolveLastServiceRoot(homeDir)).toBe(changedRoot)
   })
 
   it('prints a runnable canonical command when elevation is missing', async () => {
