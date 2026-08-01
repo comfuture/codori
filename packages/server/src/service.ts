@@ -1134,6 +1134,10 @@ export const installService = async (
       (command, result) => shouldIgnoreCommandFailure('install', metadata, command) && result.exitCode !== 0
     )
     writeServiceMetadata(metadata, homeDir)
+    // Install is the only lifecycle command that seeds the remembered root.
+    // `restart`, `start`, and `stop` must never write it, because `metadata.root`
+    // is the install-time directory and would revert a root changed from
+    // Settings. The running server records subsequent roots itself.
     writeLastServiceRoot(metadata.root, homeDir)
 
     return {
@@ -1186,7 +1190,6 @@ export const restartService = async (
     const definition = resolveServiceDefinition(metadata, homeDir)
     writeLauncherAndServiceFiles(metadata, definition, homeDir, nodePath, npxPath)
     await runCommandSequence(resolveServiceCommands('restart', metadata, definition), runCommand)
-    writeLastServiceRoot(metadata.root, homeDir)
 
     return {
       action: 'restart',
@@ -1307,10 +1310,6 @@ const runLifecycleAction = async (
       runCommand,
       (command, result) => shouldIgnoreCommandFailure(action, metadata, command) && result.exitCode !== 0
     )
-
-    if (action === 'start') {
-      writeLastServiceRoot(metadata.root, homeDir)
-    }
 
     return {
       action,
