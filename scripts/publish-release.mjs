@@ -12,6 +12,9 @@ const packageDirs = [
   path.join(rootDir, 'packages/client'),
   path.join(rootDir, 'packages/webxr'),
   path.join(rootDir, 'packages/server'),
+  // The CLI depends on @codori/server, so it is packed last to keep the
+  // published dependency available first.
+  path.join(rootDir, 'packages/cli'),
 ];
 
 const cliArgs = new Set(process.argv.slice(2));

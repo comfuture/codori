@@ -8,6 +8,11 @@ import { asErrorMessage, CodoriError } from './errors.js'
 import { startHttpServer } from './http-server.js'
 import { createRuntimeManager } from './process-manager.js'
 import { DEFAULT_SERVER_HOST, resolveLastServiceRoot, writeLastServiceRoot } from './config.js'
+import { createCliUi, type CliUi } from './cli-ui.js'
+import {
+  CLI_BINARY,
+  renderCliHelp
+} from './cli-help.js'
 import {
   installService,
   restartService,
@@ -28,7 +33,7 @@ import {
   CODORI_STARTUP_UPDATE_APPLIED_ENV,
   type StartupUpdateResult
 } from './service-update.js'
-import type { ProjectStatusRecord, StartProjectResult } from './types.js'
+import type { ProjectStatusRecord } from './types.js'
 
 type CliOptionValues = {
   root?: string
@@ -52,28 +57,36 @@ export type CliDependencies = ServiceCommandDependencies & {
   checkStartupUpdate?: typeof checkStartupUpdate
 }
 
-const printJson = (value: unknown) => {
-  process.stdout.write(`${JSON.stringify(value, null, 2)}\n`)
+/**
+ * JSON output bypasses the presentation layer entirely so a piped consumer
+ * receives exactly one parseable document with no ANSI or spinner bytes.
+ */
+const printJson = (value: unknown, stdout: NodeJS.WritableStream) => {
+  stdout.write(`${JSON.stringify(value, null, 2)}\n`)
 }
 
-const printStatuses = (records: ProjectStatusRecord[]) => {
-  for (const record of records) {
-    const runtimeDetails = [
-      record.status,
-      record.port ? `port=${record.port}` : null,
-      record.pid ? `pid=${record.pid}` : null
-    ].filter(Boolean).join(' ')
+const printStatuses = (records: ProjectStatusRecord[], ui: CliUi) => {
+  if (records.length === 0) {
+    ui.info('No project workspace runtimes are currently tracked.')
+    ui.muted(`  Run \`${CLI_BINARY} list\` to see discovered projects, or start one with \`${CLI_BINARY} start <projectId>\`.`)
+    return
+  }
 
-    process.stdout.write(`${record.projectId}\t${runtimeDetails}\n`)
+  ui.table(
+    ['project', 'status', 'port', 'pid'],
+    records.map(record => [
+      ui.bold(record.projectId),
+      ui.statusLabel(record.status),
+      record.port ? String(record.port) : ui.dim('-'),
+      record.pid ? String(record.pid) : ui.dim('-')
+    ])
+  )
+
+  for (const record of records) {
     if (record.error) {
-      process.stdout.write(`  error: ${record.error}\n`)
+      ui.warn(`${record.projectId}: ${record.error}`)
     }
   }
-}
-
-const printStartResult = (result: StartProjectResult) => {
-  const action = result.reusedExisting ? 'reused' : 'started'
-  process.stdout.write(`${result.projectId}\t${action}\tport=${result.port}\tpid=${result.pid}\n`)
 }
 
 const optionConfig = {
@@ -152,58 +165,31 @@ export const resolveServeRoot = (
   return options.cwd ?? process.cwd()
 }
 
-export const CLI_USAGE = [
-  'Usage:',
-  '  npx @codori/server <command> [projectId] [options]',
-  '  codori <command> [projectId] [options]',
-  '',
-  'Runtime commands:',
-  '  serve',
-  '  list',
-  '  status [projectId]',
-  '  start <projectId>',
-  '  stop <projectId>',
-  '',
-  'Service commands:',
-  '  service install',
-  '  service start',
-  '  service stop',
-  '  service restart',
-  '  service status',
-  '  service uninstall',
-  '',
-  'Service command aliases (deprecated):',
-  '  install-service',
-  '  setup-service',
-  '  restart-service',
-  '  uninstall-service',
-  '',
-  'Options:',
-  '  --root <path>',
-  '  --host <host>',
-  '  --port <port>',
-  '  --scope <user|system>',
-  '  --yes',
-  '  --experimental-realtime-voice',
-  '  --tailscale-serve',
-  '  --json',
-  '  --help',
-  '',
-  'Canonical service examples:',
-  '  npx @codori/server service install',
-  '  npx @codori/server service start --root ~/Project/codori',
-  '  npx @codori/server service stop --root ~/Project/codori',
-  '  npx @codori/server service uninstall --root ~/Project/codori',
-  '',
-  'Installed binary examples:',
-  '  codori service install',
-  '  codori service start',
-  '  codori service stop',
-  '  codori service uninstall'
-].join('\n')
+/**
+ * Plain-text rendering of the help body.
+ *
+ * This is produced by running the same renderer used for terminal output
+ * against a plain, buffered stream, so the styled and unstyled forms can never
+ * drift apart. It stays exported as a stable, styling-free surface for tests and
+ * for callers that want the help text as a string.
+ */
+export const renderCliUsageText = () => {
+  const lines: string[] = []
+  const buffer: NodeJS.WritableStream = {
+    write: (chunk: string) => {
+      lines.push(chunk)
+      return true
+    }
+  } as unknown as NodeJS.WritableStream
 
-const printUsage = (stdout: NodeJS.WritableStream = process.stdout) => {
-  stdout.write(`${CLI_USAGE}\n`)
+  renderCliHelp(createCliUi({ stream: buffer, env: {}, plain: true }))
+  return lines.join('').trimEnd()
+}
+
+export const CLI_USAGE = renderCliUsageText()
+
+const printUsage = (ui: CliUi) => {
+  renderCliHelp(ui)
 }
 
 export const resolveCliEntrypointPath = (value: string | undefined) => {
@@ -289,6 +275,11 @@ export const resolveServiceCliAction = (
  * Replaces this launch with the newer published bundle by running it through
  * npx and forwarding the original argv. The current process exits with the
  * child's code, so the OS service manager keeps supervising one process.
+ *
+ * `npx --yes @codori/server serve` keeps resolving even though this package's
+ * bin is named `codori-server`: npx runs a package's only bin regardless of
+ * name. The `codori` bin belongs to the separate `codori` launcher package so
+ * a global install of both cannot collide.
  */
 const execAdoptedPackage = (argv: string[]) => async (specifier: string) => {
   await new Promise<void>((resolvePromise, reject) => {
@@ -344,7 +335,8 @@ const describeStartupUpdate = (result: StartupUpdateResult) => {
 const executeServiceCommand = async (
   action: ServiceCliAction,
   values: CliOptionValues,
-  dependencies: ServiceCommandDependencies = {}
+  dependencies: ServiceCommandDependencies = {},
+  ui: CliUi
 ) => {
   const stdout = dependencies.stdout ?? process.stdout
   const options = {
@@ -358,7 +350,8 @@ const executeServiceCommand = async (
   switch (action) {
     case 'install': {
       const result = await installService(options, dependencies)
-      stdout.write(`Installed service ${result.metadata.serviceName}\n`)
+      ui.success(`Installed service ${ui.bold(result.metadata.serviceName)}`)
+      ui.muted(`  Manage it with \`${CLI_BINARY} service status\` or \`${CLI_BINARY} service stop\`.`)
       return
     }
     case 'restart': {
@@ -367,7 +360,7 @@ const executeServiceCommand = async (
         scope: values.scope,
         yes: values.yes ?? false
       }, dependencies)
-      stdout.write(`Restarted service ${result.metadata.serviceName}\n`)
+      ui.success(`Restarted service ${ui.bold(result.metadata.serviceName)}`)
       return
     }
     case 'start': {
@@ -376,7 +369,7 @@ const executeServiceCommand = async (
         scope: values.scope,
         yes: values.yes ?? false
       }, dependencies)
-      stdout.write(`Started service ${result.metadata.serviceName}\n`)
+      ui.success(`Started service ${ui.bold(result.metadata.serviceName)}`)
       return
     }
     case 'stop': {
@@ -385,7 +378,7 @@ const executeServiceCommand = async (
         scope: values.scope,
         yes: values.yes ?? false
       }, dependencies)
-      stdout.write(`Stopped service ${result.metadata.serviceName}\n`)
+      ui.success(`Stopped service ${ui.bold(result.metadata.serviceName)}`)
       return
     }
     case 'status': {
@@ -394,7 +387,13 @@ const executeServiceCommand = async (
         scope: values.scope,
         yes: values.yes ?? false
       }, dependencies)
-      stdout.write(`${result.metadata.serviceName}\n${result.status ?? ''}\n`)
+      ui.heading(result.metadata.serviceName)
+      const status = result.status?.trim()
+      if (status) {
+        stdout.write(`${status}\n`)
+      } else {
+        ui.muted('  No status detail was reported by the platform service manager.')
+      }
       return
     }
     case 'uninstall': {
@@ -402,7 +401,7 @@ const executeServiceCommand = async (
         root: values.root,
         yes: values.yes ?? false
       }, dependencies)
-      stdout.write(`Removed service ${result.metadata.serviceName}\n`)
+      ui.success(`Removed service ${ui.bold(result.metadata.serviceName)}`)
     }
   }
 }
@@ -419,8 +418,17 @@ export const runCli = async (
 
   const values = parsed.values as CliOptionValues
   const [command = 'serve', maybeProjectId] = parsed.positionals
+  const stdoutStream = dependencies.stdout ?? process.stdout
+  const json = values.json ?? false
+  // `--json` forces plain mode so a machine consumer never receives styling.
+  const ui = createCliUi({
+    stream: stdoutStream,
+    env: dependencies.env,
+    plain: json
+  })
+
   if (values.help) {
-    printUsage(dependencies.stdout ?? process.stdout)
+    printUsage(ui)
     return
   }
 
@@ -438,7 +446,7 @@ export const runCli = async (
         'Installed services configure experimental realtime voice with realtimeVoice.enabled in ~/.codori/config.json. It is enabled by default.'
       )
     }
-    await executeServiceCommand(serviceAction, values, dependencies)
+    await executeServiceCommand(serviceAction, values, dependencies, ui)
     return
   }
 
@@ -455,13 +463,21 @@ export const runCli = async (
           realtimeVoiceEnabled: values['experimental-realtime-voice']
         }
       })
-      const json = values.json ?? false
       const statuses = manager.listProjectStatuses()
       if (json) {
-        printJson(statuses)
-      } else {
-        printStatuses(statuses)
+        printJson(statuses, stdoutStream)
+        return
       }
+
+      if (statuses.length === 0) {
+        ui.info(`No Git projects were found under ${ui.bold(manager.config.root)}.`)
+        ui.muted('  Codori treats any descendant directory with a direct .git child as a project.')
+        ui.muted(`  Point it elsewhere with \`${CLI_BINARY} list --root <path>\`.`)
+        return
+      }
+
+      ui.line(`${ui.bold(String(statuses.length))} ${statuses.length === 1 ? 'project' : 'projects'} under ${ui.dim(manager.config.root)}`)
+      printStatuses(statuses, ui)
       return
     }
     case 'status': {
@@ -476,23 +492,29 @@ export const runCli = async (
           realtimeVoiceEnabled: values['experimental-realtime-voice']
         }
       })
-      const json = values.json ?? false
       if (maybeProjectId) {
         const status = manager.getProjectStatus(maybeProjectId)
         if (json) {
-          printJson(status)
+          printJson(status, stdoutStream)
         } else {
-          printStatuses([status])
+          printStatuses([status], ui)
         }
         return
       }
 
       const statuses = manager.listProjectStatuses()
       if (json) {
-        printJson(statuses)
-      } else {
-        printStatuses(statuses)
+        printJson(statuses, stdoutStream)
+        return
       }
+
+      if (statuses.length === 0) {
+        ui.info(`No Git projects were found under ${ui.bold(manager.config.root)}.`)
+        ui.muted(`  Point Codori at another directory with \`${CLI_BINARY} status --root <path>\`.`)
+        return
+      }
+
+      printStatuses(statuses, ui)
       return
     }
     case 'start': {
@@ -507,16 +529,25 @@ export const runCli = async (
           realtimeVoiceEnabled: values['experimental-realtime-voice']
         }
       })
-      const json = values.json ?? false
       if (!maybeProjectId) {
         throw new CodoriError('MISSING_PROJECT_ID', 'The start command requires a project id.')
       }
-      const result = await manager.startProject(maybeProjectId)
       if (json) {
-        printJson(result)
-      } else {
-        printStartResult(result)
+        printJson(await manager.startProject(maybeProjectId), stdoutStream)
+        return
       }
+
+      // Starting a workspace runtime waits on process spawn and port
+      // allocation, so it is the one runtime command worth a spinner.
+      const result = await ui.task(
+        `Starting ${maybeProjectId}`,
+        () => manager.startProject(maybeProjectId),
+        value => `${value.reusedExisting ? 'Reused' : 'Started'} ${maybeProjectId}`
+      )
+      ui.keyValues([
+        ['port', String(result.port)],
+        ['pid', String(result.pid)]
+      ])
       return
     }
     case 'stop': {
@@ -531,15 +562,21 @@ export const runCli = async (
           realtimeVoiceEnabled: values['experimental-realtime-voice']
         }
       })
-      const json = values.json ?? false
       if (!maybeProjectId) {
         throw new CodoriError('MISSING_PROJECT_ID', 'The stop command requires a project id.')
       }
-      const result = await manager.stopProject(maybeProjectId)
       if (json) {
-        printJson(result)
-      } else {
-        printStatuses([result])
+        printJson(await manager.stopProject(maybeProjectId), stdoutStream)
+        return
+      }
+
+      const result = await ui.task(
+        `Stopping ${maybeProjectId}`,
+        () => manager.stopProject(maybeProjectId),
+        () => `Stopped ${maybeProjectId}`
+      )
+      if (result.error) {
+        ui.warn(result.error)
       }
       return
     }
@@ -564,7 +601,6 @@ export const runCli = async (
           realtimeVoiceEnabled: values['experimental-realtime-voice']
         }
       })
-      const stdoutStream = dependencies.stdout ?? process.stdout
 
       // A registered service checks npm before binding so a restarted service
       // picks up a newer published bundle for this launch.
@@ -573,7 +609,7 @@ export const runCli = async (
       })
       const startupUpdateMessage = describeStartupUpdate(startupUpdate)
       if (startupUpdateMessage) {
-        stdoutStream.write(`${startupUpdateMessage}\n`)
+        ui.info(startupUpdateMessage)
       }
 
       // The adopted bundle served this launch, so this process is done.
@@ -582,7 +618,6 @@ export const runCli = async (
       }
 
       const app = await (dependencies.startHttpServer ?? startHttpServer)(manager)
-      const stdout = stdoutStream
 
       writeLastServiceRoot(
         manager.config.root,
@@ -603,19 +638,30 @@ export const runCli = async (
         }
       }
 
-      stdout.write(`Running codori server with project root directory: ${manager.config.root}\n`)
-      stdout.write(`Codori listening on http://${manager.config.server.host}:${manager.config.server.port}\n`)
+      const localUrl = `http://${manager.config.server.host}:${manager.config.server.port}`
+      ui.success(`Codori listening on ${ui.url(localUrl)}`)
       if (serveResult) {
         const action = serveResult.alreadyConfigured ? 'reusing' : 'configured'
-        stdout.write(`Tailscale Serve ${action}: ${serveResult.url}\n`)
-      } else {
-        stdout.write('Private HTTPS is not enabled. Re-run with --tailscale-serve to configure private Tailscale Serve access.\n')
+        ui.success(`Tailscale Serve ${action}: ${ui.url(serveResult.url)}`)
+      }
+
+      ui.keyValues([
+        ['root', manager.config.root],
+        ['dashboard', `${localUrl}/`],
+        ['immersive', `${localUrl}/xr/`]
+      ])
+
+      // The Tailscale hint used to print on every launch. It is only actionable
+      // when the operator asked for a non-loopback bind, which is the case where
+      // a plain HTTP origin actually blocks WebXR and microphone access.
+      if (!serveResult && manager.config.server.host !== DEFAULT_SERVER_HOST) {
+        ui.muted('  Remote browsers need HTTPS for WebXR and voice. Re-run with --tailscale-serve for private HTTPS.')
       }
       await app.ready()
       return
     }
     default:
-      printUsage(dependencies.stdout ?? process.stdout)
+      printUsage(ui)
   }
 }
 

@@ -1,14 +1,14 @@
 {
-  "name": "codori",
+  "name": "codori-workspace",
   "private": true,
   "version": "0.10.0",
   "packageManager": "pnpm@10.33.2",
   "scripts": {
-    "build": "pnpm --filter @codori/client build && pnpm --filter @codori/webxr build && pnpm --filter @codori/server build",
+    "build": "pnpm --filter @codori/client build && pnpm --filter @codori/webxr build && pnpm --filter @codori/server build && pnpm --filter codori build",
     "dev": "pnpm --filter @codori/client dev",
     "dev:webxr": "pnpm --filter @codori/webxr dev",
     "generate:codex-types": "node ./scripts/generate-codex-types.mjs",
-    "run:local": "pnpm build && node packages/server/dist/cli.js serve --root .. --host 127.0.0.1 --experimental-realtime-voice",
+    "run:local": "pnpm build && node packages/cli/dist/cli.js serve --root .. --host 127.0.0.1 --experimental-realtime-voice",
     "lint": "pnpm -r --if-present lint",
     "release:publish": "node ./scripts/publish-release.mjs",
     "typecheck": "pnpm -r --if-present typecheck",
