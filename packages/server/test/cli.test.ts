@@ -3,7 +3,13 @@ import os from 'node:os'
 import { join } from 'node:path'
 import { PassThrough } from 'node:stream'
 import { describe, expect, it, vi } from 'vitest'
-import { CLI_USAGE, isCliEntrypointPath, runCli } from '../src/cli.js'
+import {
+  CLI_USAGE,
+  isCliEntrypointPath,
+  resolveServeRoot,
+  resolveServiceCliAction,
+  runCli
+} from '../src/cli.js'
 
 const createOutput = () => {
   const stream = new PassThrough()
@@ -26,8 +32,10 @@ describe('cli service commands', () => {
       stdout: stdout.stream
     })
 
-    expect(stdout.read()).toContain('npx @codori/server install-service')
-    expect(stdout.read()).toContain('codori install-service')
+    expect(stdout.read()).toContain('npx @codori/server service install')
+    expect(stdout.read()).toContain('codori service install')
+    // The legacy aliases stay discoverable so existing docs keep working.
+    expect(stdout.read()).toContain('install-service')
     expect(CLI_USAGE).toContain('npx @codori/server <command>')
     expect(CLI_USAGE).toContain('--experimental-realtime-voice')
     expect(CLI_USAGE).toContain('--tailscale-serve')
@@ -39,6 +47,61 @@ describe('cli service commands', () => {
       '--experimental-realtime-voice',
       '--yes'
     ])).rejects.toThrow(/realtimeVoice\.enabled in ~\/\.codori\/config\.json/)
+  })
+
+  it('maps service subcommands and legacy aliases to one action set', () => {
+    expect(resolveServiceCliAction('service', 'install')).toBe('install')
+    expect(resolveServiceCliAction('service', 'setup')).toBe('install')
+    expect(resolveServiceCliAction('service', 'start')).toBe('start')
+    expect(resolveServiceCliAction('service', 'stop')).toBe('stop')
+    expect(resolveServiceCliAction('service', 'restart')).toBe('restart')
+    expect(resolveServiceCliAction('service', 'status')).toBe('status')
+    expect(resolveServiceCliAction('service', 'uninstall')).toBe('uninstall')
+
+    expect(resolveServiceCliAction('install-service', undefined)).toBe('install')
+    expect(resolveServiceCliAction('setup-service', undefined)).toBe('install')
+    expect(resolveServiceCliAction('restart-service', undefined)).toBe('restart')
+    expect(resolveServiceCliAction('uninstall-service', undefined)).toBe('uninstall')
+
+    // Project-scoped runtime verbs must not be captured as service actions.
+    expect(resolveServiceCliAction('start', 'my-project')).toBeNull()
+    expect(resolveServiceCliAction('stop', 'my-project')).toBeNull()
+    expect(resolveServiceCliAction('serve', undefined)).toBeNull()
+  })
+
+  it('rejects a bare or unknown service subcommand', () => {
+    expect(() => resolveServiceCliAction('service', undefined))
+      .toThrow(/requires one of install, start, stop, restart, status, or uninstall/)
+    expect(() => resolveServiceCliAction('service', 'reload'))
+      .toThrow(/Unknown service subcommand "reload"/)
+  })
+
+  it('adopts the remembered root only for a managed service launch', () => {
+    const lastRoot = () => '/remembered/root'
+
+    expect(resolveServeRoot(undefined, {
+      env: { CODORI_SERVICE_MANAGED: '1' },
+      cwd: '/cwd',
+      lastRoot
+    })).toBe('/remembered/root')
+
+    expect(resolveServeRoot(undefined, {
+      env: {},
+      cwd: '/cwd',
+      lastRoot
+    })).toBe('/cwd')
+
+    expect(resolveServeRoot('/explicit', {
+      env: { CODORI_SERVICE_MANAGED: '1' },
+      cwd: '/cwd',
+      lastRoot
+    })).toBe('/explicit')
+
+    expect(resolveServeRoot(undefined, {
+      env: { CODORI_SERVICE_MANAGED: '1' },
+      cwd: '/cwd',
+      lastRoot: () => null
+    })).toBe('/cwd')
   })
 
   it('rejects tailscale serve for installed service commands', async () => {

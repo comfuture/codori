@@ -6,10 +6,13 @@ import { parseArgs } from 'node:util'
 import { asErrorMessage, CodoriError } from './errors.js'
 import { startHttpServer } from './http-server.js'
 import { createRuntimeManager } from './process-manager.js'
-import { DEFAULT_SERVER_HOST } from './config.js'
+import { DEFAULT_SERVER_HOST, resolveLastServiceRoot, writeLastServiceRoot } from './config.js'
 import {
   installService,
   restartService,
+  startService,
+  statusService,
+  stopService,
   uninstallService,
   type ServiceCommandDependencies
 } from './service.js'
@@ -105,6 +108,32 @@ const coercePort = (value: string | undefined) => {
 
 const resolveCliRoot = (value: string | undefined) => value ?? process.cwd()
 
+export const resolveServeRoot = (
+  value: string | undefined,
+  options: {
+    env?: NodeJS.ProcessEnv
+    homeDir?: string
+    cwd?: string
+    lastRoot?: (homeDir?: string) => string | null
+  } = {}
+) => {
+  if (value) {
+    return value
+  }
+
+  const env = options.env ?? process.env
+  // Only a managed service adopts the remembered root; a manual `serve` in a
+  // directory should keep behaving like the current working directory.
+  if (env.CODORI_SERVICE_MANAGED === '1') {
+    const lastRoot = (options.lastRoot ?? resolveLastServiceRoot)(options.homeDir)
+    if (lastRoot) {
+      return lastRoot
+    }
+  }
+
+  return options.cwd ?? process.cwd()
+}
+
 export const CLI_USAGE = [
   'Usage:',
   '  npx @codori/server <command> [projectId] [options]',
@@ -118,6 +147,14 @@ export const CLI_USAGE = [
   '  stop <projectId>',
   '',
   'Service commands:',
+  '  service install',
+  '  service start',
+  '  service stop',
+  '  service restart',
+  '  service status',
+  '  service uninstall',
+  '',
+  'Service command aliases (deprecated):',
   '  install-service',
   '  setup-service',
   '  restart-service',
@@ -135,13 +172,16 @@ export const CLI_USAGE = [
   '  --help',
   '',
   'Canonical service examples:',
-  '  npx @codori/server install-service',
-  '  npx @codori/server restart-service --root ~/Project/codori',
-  '  npx @codori/server uninstall-service --root ~/Project/codori',
+  '  npx @codori/server service install',
+  '  npx @codori/server service start --root ~/Project/codori',
+  '  npx @codori/server service stop --root ~/Project/codori',
+  '  npx @codori/server service uninstall --root ~/Project/codori',
   '',
   'Installed binary examples:',
-  '  codori install-service',
-  '  codori restart-service --root ~/Project/codori'
+  '  codori service install',
+  '  codori service start',
+  '  codori service stop',
+  '  codori service uninstall'
 ].join('\n')
 
 const printUsage = (stdout: NodeJS.WritableStream = process.stdout) => {
@@ -167,8 +207,68 @@ export const isCliEntrypointPath = (argvPath: string | undefined, moduleUrl: str
   return entryPath !== null && entryPath === modulePath
 }
 
+const LEGACY_SERVICE_COMMANDS = new Set([
+  'install-service',
+  'setup-service',
+  'restart-service',
+  'uninstall-service'
+])
+
+const SERVICE_SUBCOMMANDS = new Set([
+  'install',
+  'setup',
+  'start',
+  'stop',
+  'restart',
+  'status',
+  'uninstall'
+])
+
+export type ServiceCliAction
+  = 'install'
+  | 'start'
+  | 'stop'
+  | 'restart'
+  | 'status'
+  | 'uninstall'
+
+export const resolveServiceCliAction = (
+  command: string,
+  subcommand: string | undefined
+): ServiceCliAction | null => {
+  if (command === 'service') {
+    if (!subcommand) {
+      throw new CodoriError(
+        'MISSING_SERVICE_SUBCOMMAND',
+        'The service command requires one of install, start, stop, restart, status, or uninstall.'
+      )
+    }
+
+    if (!SERVICE_SUBCOMMANDS.has(subcommand)) {
+      throw new CodoriError(
+        'UNKNOWN_SERVICE_SUBCOMMAND',
+        `Unknown service subcommand "${subcommand}". Expected install, start, stop, restart, status, or uninstall.`
+      )
+    }
+
+    return subcommand === 'setup' ? 'install' : subcommand as ServiceCliAction
+  }
+
+  if (!LEGACY_SERVICE_COMMANDS.has(command)) {
+    return null
+  }
+
+  if (command === 'install-service' || command === 'setup-service') {
+    return 'install'
+  }
+  if (command === 'restart-service') {
+    return 'restart'
+  }
+  return 'uninstall'
+}
+
 const executeServiceCommand = async (
-  command: 'install-service' | 'setup-service' | 'restart-service' | 'uninstall-service',
+  action: ServiceCliAction,
   values: CliOptionValues,
   dependencies: ServiceCommandDependencies = {}
 ) => {
@@ -181,14 +281,13 @@ const executeServiceCommand = async (
     yes: values.yes ?? false
   }
 
-  switch (command) {
-    case 'install-service':
-    case 'setup-service': {
+  switch (action) {
+    case 'install': {
       const result = await installService(options, dependencies)
       stdout.write(`Installed service ${result.metadata.serviceName}\n`)
       return
     }
-    case 'restart-service': {
+    case 'restart': {
       const result = await restartService({
         root: values.root,
         scope: values.scope,
@@ -197,7 +296,34 @@ const executeServiceCommand = async (
       stdout.write(`Restarted service ${result.metadata.serviceName}\n`)
       return
     }
-    case 'uninstall-service': {
+    case 'start': {
+      const result = await startService({
+        root: values.root,
+        scope: values.scope,
+        yes: values.yes ?? false
+      }, dependencies)
+      stdout.write(`Started service ${result.metadata.serviceName}\n`)
+      return
+    }
+    case 'stop': {
+      const result = await stopService({
+        root: values.root,
+        scope: values.scope,
+        yes: values.yes ?? false
+      }, dependencies)
+      stdout.write(`Stopped service ${result.metadata.serviceName}\n`)
+      return
+    }
+    case 'status': {
+      const result = await statusService({
+        root: values.root,
+        scope: values.scope,
+        yes: values.yes ?? false
+      }, dependencies)
+      stdout.write(`${result.metadata.serviceName}\n${result.status ?? ''}\n`)
+      return
+    }
+    case 'uninstall': {
       const result = await uninstallService({
         root: values.root,
         yes: values.yes ?? false
@@ -224,12 +350,8 @@ export const runCli = async (
     return
   }
 
-  if (
-    command === 'install-service'
-    || command === 'setup-service'
-    || command === 'restart-service'
-    || command === 'uninstall-service'
-  ) {
+  const serviceAction = resolveServiceCliAction(command, maybeProjectId)
+  if (serviceAction) {
     if (values['tailscale-serve']) {
       throw new CodoriError(
         'INVALID_CONFIG',
@@ -242,7 +364,7 @@ export const runCli = async (
         'Installed services configure experimental realtime voice with realtimeVoice.enabled in ~/.codori/config.json. It is enabled by default.'
       )
     }
-    await executeServiceCommand(command, values, dependencies)
+    await executeServiceCommand(serviceAction, values, dependencies)
     return
   }
 
@@ -358,7 +480,10 @@ export const runCli = async (
 
       const manager = (dependencies.createRuntimeManager ?? createRuntimeManager)({
         configOverrides: {
-          root: resolveCliRoot(values.root),
+          root: resolveServeRoot(values.root, {
+            homeDir: dependencies.homeDir,
+            cwd: dependencies.cwd
+          }),
           host: tailscaleServe ? DEFAULT_SERVER_HOST : values.host,
           port: coercePort(values.port),
           realtimeVoiceEnabled: values['experimental-realtime-voice']
@@ -366,6 +491,8 @@ export const runCli = async (
       })
       const app = await (dependencies.startHttpServer ?? startHttpServer)(manager)
       const stdout = dependencies.stdout ?? process.stdout
+
+      writeLastServiceRoot(manager.config.root, dependencies.homeDir)
 
       let serveResult: TailscaleServeResult | null = null
       if (tailscaleServe) {

@@ -11,6 +11,7 @@ export type ServiceUnitDefinition = {
   serviceName: string
   serviceFilePath: string
   serviceFileContents: string
+  serviceFileEncoding?: BufferEncoding
 }
 
 export type ServiceUnitInput = {
@@ -21,6 +22,7 @@ export type ServiceUnitInput = {
   metadataDirectory: string
   homeDir?: string
   userId?: number
+  userName?: string
 }
 
 const renderLaunchdArray = (values: string[]) =>
@@ -42,6 +44,11 @@ const getLaunchctlDomain = (scope: ServiceScope, userId = getCurrentUserId()) =>
 const getSystemdPrefix = (scope: ServiceScope) =>
   scope === 'system' ? [] : ['--user']
 
+const WINDOWS_SYSTEM_ACCOUNT_SID = 'S-1-5-18'
+
+const getCurrentUserName = (env: NodeJS.ProcessEnv = process.env) =>
+  env.USERNAME?.trim() || env.USER?.trim() || ''
+
 const quoteSystemdPathValue = (value: string) =>
   `"${value
     .replaceAll('\\', '\\\\')
@@ -52,7 +59,7 @@ const quoteSystemdExecValue = (value: string) =>
   quoteSystemdPathValue(value).replaceAll('$', '$$$$')
 
 export const resolveServicePlatform = (platform = process.platform): ServicePlatform => {
-  if (platform === 'darwin' || platform === 'linux') {
+  if (platform === 'darwin' || platform === 'linux' || platform === 'win32') {
     return platform
   }
 
@@ -62,6 +69,8 @@ export const resolveServicePlatform = (platform = process.platform): ServicePlat
 export const getDarwinServiceName = (installId: string) => `io.codori.server.${installId}`
 
 export const getLinuxServiceName = (installId: string) => `codori-${installId}.service`
+
+export const getWindowsServiceName = (installId: string) => `Codori\\codori-${installId}`
 
 export const renderLaunchdPlist = ({ serviceName, launcherPath, root, metadataDirectory }: Omit<ServiceUnitDefinition, 'serviceFilePath' | 'serviceFileContents'> & {
   launcherPath: string
@@ -159,6 +168,196 @@ export const createLinuxServiceDefinition = ({
   }
 }
 
+export const renderWindowsTaskXml = ({
+  serviceName,
+  launcherPath,
+  root,
+  scope,
+  principalId
+}: {
+  serviceName: string
+  launcherPath: string
+  root: string
+  scope: ServiceScope
+  principalId: string
+}) => {
+  const principal = scope === 'system'
+    ? [
+        `      <UserId>${escapeXml(WINDOWS_SYSTEM_ACCOUNT_SID)}</UserId>`,
+        '      <RunLevel>HighestAvailable</RunLevel>'
+      ]
+    : [
+        `      <UserId>${escapeXml(principalId)}</UserId>`,
+        '      <LogonType>InteractiveToken</LogonType>',
+        '      <RunLevel>LeastPrivilege</RunLevel>'
+      ]
+
+  const trigger = scope === 'system'
+    ? [
+        '    <BootTrigger>',
+        '      <Enabled>true</Enabled>',
+        '    </BootTrigger>'
+      ]
+    : [
+        '    <LogonTrigger>',
+        '      <Enabled>true</Enabled>',
+        `      <UserId>${escapeXml(principalId)}</UserId>`,
+        '    </LogonTrigger>'
+      ]
+
+  return [
+    '<?xml version="1.0" encoding="UTF-16"?>',
+    '<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">',
+    '  <RegistrationInfo>',
+    `    <Description>Codori service (${escapeXml(serviceName)})</Description>`,
+    '  </RegistrationInfo>',
+    '  <Triggers>',
+    ...trigger,
+    '  </Triggers>',
+    '  <Principals>',
+    '    <Principal id="Author">',
+    ...principal,
+    '    </Principal>',
+    '  </Principals>',
+    '  <Settings>',
+    '    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>',
+    '    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>',
+    '    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>',
+    '    <AllowHardTerminate>true</AllowHardTerminate>',
+    '    <StartWhenAvailable>true</StartWhenAvailable>',
+    '    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>',
+    '    <IdleSettings>',
+    '      <StopOnIdleEnd>false</StopOnIdleEnd>',
+    '      <RestartOnIdle>false</RestartOnIdle>',
+    '    </IdleSettings>',
+    '    <AllowStartOnDemand>true</AllowStartOnDemand>',
+    '    <Enabled>true</Enabled>',
+    '    <Hidden>false</Hidden>',
+    '    <RunOnlyIfIdle>false</RunOnlyIfIdle>',
+    '    <DisallowStartOnRemoteAppSession>false</DisallowStartOnRemoteAppSession>',
+    '    <UseUnifiedSchedulingEngine>true</UseUnifiedSchedulingEngine>',
+    '    <WakeToRun>false</WakeToRun>',
+    '    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>',
+    '    <Priority>7</Priority>',
+    '    <RestartOnFailure>',
+    '      <Interval>PT1M</Interval>',
+    '      <Count>999</Count>',
+    '    </RestartOnFailure>',
+    '  </Settings>',
+    '  <Actions Context="Author">',
+    '    <Exec>',
+    `      <Command>${escapeXml(launcherPath)}</Command>`,
+    `      <WorkingDirectory>${escapeXml(root)}</WorkingDirectory>`,
+    '    </Exec>',
+    '  </Actions>',
+    '</Task>'
+  ].join('\r\n')
+}
+
+export const createWindowsServiceDefinition = ({
+  installId,
+  scope,
+  launcherPath,
+  root,
+  metadataDirectory,
+  userName = getCurrentUserName()
+}: ServiceUnitInput): ServiceUnitDefinition => {
+  const serviceName = getWindowsServiceName(installId)
+  const principalId = scope === 'system' ? WINDOWS_SYSTEM_ACCOUNT_SID : userName
+
+  if (scope === 'user' && !principalId) {
+    throw new Error('Unable to resolve the current Windows user for a user-scoped Codori service.')
+  }
+
+  return {
+    serviceName,
+    serviceFilePath: join(metadataDirectory, 'service-task.xml'),
+    serviceFileContents: renderWindowsTaskXml({
+      serviceName,
+      launcherPath,
+      root,
+      scope,
+      principalId
+    }),
+    serviceFileEncoding: 'utf16le'
+  }
+}
+
+export const getWindowsInstallCommands = (
+  definition: ServiceUnitDefinition,
+  scope: ServiceScope
+): ServiceCommand[] => [
+  {
+    command: 'schtasks',
+    args: ['/Delete', '/TN', definition.serviceName, '/F']
+  },
+  {
+    command: 'schtasks',
+    args: ['/Create', '/TN', definition.serviceName, '/XML', definition.serviceFilePath, '/F']
+  },
+  ...(scope === 'system' ? [] : [{
+    command: 'schtasks',
+    args: ['/Run', '/TN', definition.serviceName]
+  }])
+]
+
+export const getWindowsStartCommands = (
+  definition: ServiceUnitDefinition
+): ServiceCommand[] => [
+  {
+    command: 'schtasks',
+    args: ['/Run', '/TN', definition.serviceName]
+  }
+]
+
+export const getWindowsStopCommands = (
+  definition: ServiceUnitDefinition
+): ServiceCommand[] => [
+  {
+    command: 'schtasks',
+    args: ['/End', '/TN', definition.serviceName]
+  }
+]
+
+export const getWindowsRestartCommands = (
+  definition: ServiceUnitDefinition
+): ServiceCommand[] => [
+  {
+    command: 'schtasks',
+    args: ['/Create', '/TN', definition.serviceName, '/XML', definition.serviceFilePath, '/F']
+  },
+  {
+    command: 'schtasks',
+    args: ['/End', '/TN', definition.serviceName]
+  },
+  {
+    command: 'schtasks',
+    args: ['/Run', '/TN', definition.serviceName]
+  }
+]
+
+export const getWindowsUninstallCommands = (
+  definition: ServiceUnitDefinition
+): ServiceCommand[] => [
+  {
+    command: 'schtasks',
+    args: ['/End', '/TN', definition.serviceName]
+  },
+  {
+    command: 'schtasks',
+    args: ['/Delete', '/TN', definition.serviceName, '/F']
+  }
+]
+
+export const getWindowsStatusCommands = (
+  definition: ServiceUnitDefinition
+): ServiceCommand[] => [
+  {
+    command: 'schtasks',
+    args: ['/Query', '/TN', definition.serviceName, '/V', '/FO', 'LIST']
+  }
+]
+
 export const getDarwinInstallCommands = (
   definition: ServiceUnitDefinition,
   scope: ServiceScope,
@@ -225,6 +424,48 @@ export const getDarwinUninstallCommands = (
   ]
 }
 
+export const getDarwinStartCommands = (
+  definition: ServiceUnitDefinition,
+  scope: ServiceScope,
+  userId = getCurrentUserId()
+): ServiceCommand[] => {
+  const domain = getLaunchctlDomain(scope, userId)
+  return [
+    {
+      command: 'launchctl',
+      args: ['kickstart', `${domain}/${definition.serviceName}`]
+    }
+  ]
+}
+
+export const getDarwinStopCommands = (
+  definition: ServiceUnitDefinition,
+  scope: ServiceScope,
+  userId = getCurrentUserId()
+): ServiceCommand[] => {
+  const domain = getLaunchctlDomain(scope, userId)
+  return [
+    {
+      command: 'launchctl',
+      args: ['kill', 'SIGTERM', `${domain}/${definition.serviceName}`]
+    }
+  ]
+}
+
+export const getDarwinStatusCommands = (
+  definition: ServiceUnitDefinition,
+  scope: ServiceScope,
+  userId = getCurrentUserId()
+): ServiceCommand[] => {
+  const domain = getLaunchctlDomain(scope, userId)
+  return [
+    {
+      command: 'launchctl',
+      args: ['print', `${domain}/${definition.serviceName}`]
+    }
+  ]
+}
+
 export const getLinuxInstallCommands = (
   definition: ServiceUnitDefinition,
   scope: ServiceScope
@@ -272,6 +513,45 @@ export const getLinuxUninstallCommands = (
     {
       command: 'systemctl',
       args: [...prefix, 'daemon-reload']
+    }
+  ]
+}
+
+export const getLinuxStartCommands = (
+  definition: ServiceUnitDefinition,
+  scope: ServiceScope
+): ServiceCommand[] => {
+  const prefix = getSystemdPrefix(scope)
+  return [
+    {
+      command: 'systemctl',
+      args: [...prefix, 'start', definition.serviceName]
+    }
+  ]
+}
+
+export const getLinuxStopCommands = (
+  definition: ServiceUnitDefinition,
+  scope: ServiceScope
+): ServiceCommand[] => {
+  const prefix = getSystemdPrefix(scope)
+  return [
+    {
+      command: 'systemctl',
+      args: [...prefix, 'stop', definition.serviceName]
+    }
+  ]
+}
+
+export const getLinuxStatusCommands = (
+  definition: ServiceUnitDefinition,
+  scope: ServiceScope
+): ServiceCommand[] => {
+  const prefix = getSystemdPrefix(scope)
+  return [
+    {
+      command: 'systemctl',
+      args: [...prefix, 'status', definition.serviceName]
     }
   ]
 }
