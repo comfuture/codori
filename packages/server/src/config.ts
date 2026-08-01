@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import { join, resolve } from 'node:path'
 import { CodoriError } from './errors.js'
@@ -25,6 +25,9 @@ export const resolveCodoriHome = (homeDir = os.homedir()) => join(homeDir, '.cod
 
 export const resolveCodoriConfigPath = (homeDir = os.homedir()) =>
   join(resolveCodoriHome(homeDir), 'config.json')
+
+export const resolveLastServiceRootPath = (homeDir = os.homedir()) =>
+  join(resolveCodoriHome(homeDir), 'last-root.json')
 
 export const ensureCodoriDirectories = (homeDir = os.homedir()) => {
   const codoriHome = resolveCodoriHome(homeDir)
@@ -58,6 +61,65 @@ const loadUserConfig = (homeDir = os.homedir()): PartialConfig => {
   }
 
   return parsed as PartialConfig
+}
+
+export const ensureProjectRootDirectory = (value: string) => {
+  const resolved = resolve(value)
+  if (!existsSync(resolved) || !statSync(resolved).isDirectory()) {
+    throw new CodoriError(
+      'INVALID_ROOT',
+      `Project root "${resolved}" does not exist or is not a directory.`
+    )
+  }
+
+  return resolved
+}
+
+export const writeProjectRoot = (value: string, homeDir = os.homedir()) => {
+  const resolved = ensureProjectRootDirectory(value)
+  const configPath = resolveCodoriConfigPath(homeDir)
+  const existing = loadUserConfig(homeDir)
+
+  mkdirSync(resolveCodoriHome(homeDir), { recursive: true })
+  writeFileSync(
+    configPath,
+    `${JSON.stringify({ ...existing, root: resolved }, null, 2)}\n`,
+    'utf8'
+  )
+
+  return resolved
+}
+
+export const writeLastServiceRoot = (value: string, homeDir = os.homedir()) => {
+  const resolved = resolve(value)
+  mkdirSync(resolveCodoriHome(homeDir), { recursive: true })
+  writeFileSync(
+    resolveLastServiceRootPath(homeDir),
+    `${JSON.stringify({ root: resolved, updatedAt: new Date().toISOString() }, null, 2)}\n`,
+    'utf8'
+  )
+
+  return resolved
+}
+
+export const resolveLastServiceRoot = (homeDir = os.homedir()) => {
+  const path = resolveLastServiceRootPath(homeDir)
+  if (!existsSync(path)) {
+    return null
+  }
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(readFileSync(path, 'utf8'))
+  } catch {
+    return null
+  }
+
+  if (!isRecord(parsed) || typeof parsed.root !== 'string' || !parsed.root) {
+    return null
+  }
+
+  return resolve(parsed.root)
 }
 
 const ensureValidPort = (value: unknown, label: string): number => {

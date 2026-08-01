@@ -15,23 +15,41 @@ import { createInterface } from 'node:readline/promises'
 import {
   createDarwinServiceDefinition,
   createLinuxServiceDefinition,
+  createWindowsServiceDefinition,
   getDarwinInstallCommands,
   getDarwinRestartCommands,
+  getDarwinStartCommands,
+  getDarwinStatusCommands,
+  getDarwinStopCommands,
   getDarwinUninstallCommands,
   getLinuxInstallCommands,
   getLinuxRestartCommands,
+  getLinuxStartCommands,
+  getLinuxStatusCommands,
+  getLinuxStopCommands,
   getLinuxUninstallCommands,
+  getWindowsInstallCommands,
+  getWindowsRestartCommands,
+  getWindowsStartCommands,
+  getWindowsStatusCommands,
+  getWindowsStopCommands,
+  getWindowsUninstallCommands,
   resolveServicePlatform,
   type ServiceCommand,
   type ServiceUnitDefinition
 } from './service-adapters.js'
-import { DEFAULT_SERVER_PORT, resolveCodoriHome } from './config.js'
+import {
+  DEFAULT_SERVER_PORT,
+  resolveCodoriHome,
+  resolveLastServiceRoot,
+  writeLastServiceRoot
+} from './config.js'
 import { CodoriError } from './errors.js'
 import { scanProjects } from './project-scanner.js'
 
 export type ServiceScope = 'user' | 'system'
 
-export type ServicePlatform = 'darwin' | 'linux'
+export type ServicePlatform = 'darwin' | 'linux' | 'win32'
 
 export type ServiceInstallMetadata = {
   installId: string
@@ -74,6 +92,7 @@ export type LauncherScriptInput = {
   scope: ServiceScope
   nodePath: string
   npxPath: string
+  platform?: ServicePlatform
 }
 
 export type ServicePrompt = {
@@ -87,6 +106,9 @@ export type ServiceCommandName =
   | 'setup-service'
   | 'restart-service'
   | 'uninstall-service'
+  | 'start-service'
+  | 'stop-service'
+  | 'status-service'
 
 export type ServiceCommandOptions = {
   root?: string
@@ -110,9 +132,12 @@ export type ServiceCommandDependencies = {
 }
 
 export type ServiceOperationResult = {
-  action: 'install' | 'restart' | 'uninstall'
+  action: ServiceAction
   metadata: ServiceInstallMetadata
+  status?: string
 }
+
+export type ServiceAction = 'install' | 'restart' | 'uninstall' | 'start' | 'stop' | 'status'
 
 const WORKSPACE_MARKER_NAMES = [
   'package.json',
@@ -157,6 +182,45 @@ const defaultCommandRunner: CommandRunner = (command, args) =>
   })
 
 const shellEscape = (value: string) => `'${value.replaceAll("'", "'\"'\"'")}'`
+
+const batchQuote = (value: string) => `"${value.replaceAll('"', '""')}"`
+
+const batchEscapeValue = (value: string) => value.replaceAll('%', '%%').replaceAll('"', '""')
+
+export const buildWindowsLauncherScript = ({
+  installId,
+  root,
+  host,
+  port,
+  scope,
+  nodePath,
+  npxPath
+}: Omit<LauncherScriptInput, 'platform'>) => {
+  const pathEntries = Array.from(new Set([dirname(nodePath), dirname(npxPath)]))
+  const prependedPath = pathEntries.map(batchEscapeValue).join(';')
+
+  return [
+    '@echo off',
+    'setlocal',
+    `set "PATH=${prependedPath};%PATH%"`,
+    `set "${CODORI_SERVICE_MANAGED_ENV}=1"`,
+    `set "${CODORI_SERVICE_INSTALL_ID_ENV}=${batchEscapeValue(installId)}"`,
+    `set "${CODORI_SERVICE_SCOPE_ENV}=${batchEscapeValue(scope)}"`,
+    [
+      'call',
+      batchQuote(batchEscapeValue(npxPath)),
+      '--yes',
+      '@codori/server',
+      'serve',
+      '--root',
+      batchQuote(batchEscapeValue(resolve(root))),
+      '--host',
+      batchQuote(batchEscapeValue(host)),
+      '--port',
+      String(port)
+    ].join(' ')
+  ].join('\r\n')
+}
 
 const findFirstIpv4 = (values: unknown) => {
   if (!Array.isArray(values)) {
@@ -264,7 +328,7 @@ const normalizeServiceMetadata = (value: unknown): ServiceInstallMetadata | null
     || typeof record.host !== 'string'
     || typeof record.port !== 'number'
     || (record.scope !== 'user' && record.scope !== 'system')
-    || (record.platform !== 'darwin' && record.platform !== 'linux')
+    || (record.platform !== 'darwin' && record.platform !== 'linux' && record.platform !== 'win32')
     || typeof record.serviceName !== 'string'
     || typeof record.serviceFilePath !== 'string'
     || typeof record.launcherPath !== 'string'
@@ -306,10 +370,21 @@ const resolveServiceDefinition = (
   homeDir: string
 ): ServiceUnitDefinition => {
   const metadataDirectory = getServiceMetadataDirectory(metadata.installId, homeDir)
-  const launcherPath = getServiceLauncherPath(metadata.installId, homeDir)
+  const launcherPath = getServiceLauncherPath(metadata.installId, homeDir, metadata.platform)
 
   if (metadata.platform === 'darwin') {
     return createDarwinServiceDefinition({
+      installId: metadata.installId,
+      scope: metadata.scope,
+      launcherPath,
+      root: metadata.root,
+      metadataDirectory,
+      homeDir
+    })
+  }
+
+  if (metadata.platform === 'win32') {
+    return createWindowsServiceDefinition({
       installId: metadata.installId,
       scope: metadata.scope,
       launcherPath,
@@ -330,7 +405,7 @@ const resolveServiceDefinition = (
 }
 
 const resolveServiceCommands = (
-  action: ServiceOperationResult['action'],
+  action: ServiceAction,
   metadata: Pick<ServiceInstallMetadata, 'platform' | 'scope'>,
   definition: ServiceUnitDefinition
 ) => {
@@ -341,7 +416,35 @@ const resolveServiceCommands = (
     if (action === 'restart') {
       return getDarwinRestartCommands(definition, metadata.scope)
     }
+    if (action === 'start') {
+      return getDarwinStartCommands(definition, metadata.scope)
+    }
+    if (action === 'stop') {
+      return getDarwinStopCommands(definition, metadata.scope)
+    }
+    if (action === 'status') {
+      return getDarwinStatusCommands(definition, metadata.scope)
+    }
     return getDarwinUninstallCommands(definition, metadata.scope)
+  }
+
+  if (metadata.platform === 'win32') {
+    if (action === 'install') {
+      return getWindowsInstallCommands(definition, metadata.scope)
+    }
+    if (action === 'restart') {
+      return getWindowsRestartCommands(definition)
+    }
+    if (action === 'start') {
+      return getWindowsStartCommands(definition)
+    }
+    if (action === 'stop') {
+      return getWindowsStopCommands(definition)
+    }
+    if (action === 'status') {
+      return getWindowsStatusCommands(definition)
+    }
+    return getWindowsUninstallCommands(definition)
   }
 
   if (action === 'install') {
@@ -349,6 +452,15 @@ const resolveServiceCommands = (
   }
   if (action === 'restart') {
     return getLinuxRestartCommands(definition, metadata.scope)
+  }
+  if (action === 'start') {
+    return getLinuxStartCommands(definition, metadata.scope)
+  }
+  if (action === 'stop') {
+    return getLinuxStopCommands(definition, metadata.scope)
+  }
+  if (action === 'status') {
+    return getLinuxStatusCommands(definition, metadata.scope)
   }
   return getLinuxUninstallCommands(definition, metadata.scope)
 }
@@ -408,13 +520,56 @@ const ensureLinuxServiceManager = async (scope: ServiceScope, runCommand: Comman
   }
 }
 
+const ensureWindowsServiceManager = async (runCommand: CommandRunner) => {
+  let query: CommandResult
+  try {
+    query = await runCommand('schtasks', ['/Query', '/?'])
+  } catch (error) {
+    throw new CodoriError('UNSUPPORTED_SERVICE_MANAGER', 'schtasks is required on Windows.', error)
+  }
+
+  if (query.exitCode !== 0) {
+    throw new CodoriError('UNSUPPORTED_SERVICE_MANAGER', 'schtasks is required on Windows.')
+  }
+}
+
+const ensurePlatformServiceManager = async (
+  platform: ServicePlatform,
+  scope: ServiceScope,
+  runCommand: CommandRunner
+) => {
+  if (platform === 'linux') {
+    await ensureLinuxServiceManager(scope, runCommand)
+    return
+  }
+
+  if (platform === 'win32') {
+    await ensureWindowsServiceManager(runCommand)
+  }
+}
+
+const createWindowsElevationProbe = (runCommand: CommandRunner) => async () => {
+  try {
+    const result = await runCommand('net', ['session'])
+    return result.exitCode === 0
+  } catch {
+    return false
+  }
+}
+
 const ensureSystemScopePrivileges = (
   scope: ServiceScope,
   command: ServiceCommandName,
-  options: { root?: string, host?: string, port?: number, scope?: ServiceScope, yes?: boolean }
+  options: { root?: string, host?: string, port?: number, scope?: ServiceScope, yes?: boolean },
+  platform: ServicePlatform = 'linux',
+  isElevated?: () => Promise<boolean>
 ) => {
+  if (platform === 'win32') {
+    return ensureWindowsElevation(scope, command, options, isElevated)
+  }
+
   if (scope !== 'system' || getCurrentUserId() === 0) {
-    return
+    return Promise.resolve()
   }
 
   const rerun = `sudo ${buildCanonicalInvocation(command, options)}`
@@ -424,11 +579,46 @@ const ensureSystemScopePrivileges = (
   )
 }
 
+const ensureWindowsElevation = async (
+  scope: ServiceScope,
+  command: ServiceCommandName,
+  options: { root?: string, host?: string, port?: number, scope?: ServiceScope, yes?: boolean },
+  isElevated?: () => Promise<boolean>
+) => {
+  if (scope !== 'system') {
+    return
+  }
+
+  if (isElevated && await isElevated()) {
+    return
+  }
+
+  throw new CodoriError(
+    'SERVICE_REQUIRES_ELEVATION',
+    `System service registration requires an elevated prompt. Re-run from an Administrator terminal with: ${buildCanonicalInvocation(command, options)}`
+  )
+}
+
 const shouldIgnoreCommandFailure = (
-  action: ServiceOperationResult['action'],
+  action: ServiceAction,
   metadata: Pick<ServiceInstallMetadata, 'platform'>,
   command: ServiceCommand
-) => metadata.platform === 'darwin' && action !== 'restart' && command.args[0] === 'bootout'
+) => {
+  if (metadata.platform === 'darwin') {
+    return action !== 'restart' && command.args[0] === 'bootout'
+  }
+
+  if (metadata.platform === 'win32') {
+    // A first-time install has no task to delete, and stopping or removing an
+    // idle task reports a nonzero exit code from schtasks.
+    if (action === 'install') {
+      return command.args[0] === '/Delete'
+    }
+    return command.args[0] === '/End'
+  }
+
+  return false
+}
 
 const resolveRootWithPrompt = async (
   root: string | undefined,
@@ -527,7 +717,7 @@ const writeLauncherAndServiceFiles = (
   npxPath: string
 ) => {
   const metadataDirectory = getServiceMetadataDirectory(metadata.installId, homeDir)
-  const launcherPath = getServiceLauncherPath(metadata.installId, homeDir)
+  const launcherPath = getServiceLauncherPath(metadata.installId, homeDir, metadata.platform)
 
   ensureDirectory(metadataDirectory)
   ensureDirectory(dirname(definition.serviceFilePath))
@@ -539,12 +729,22 @@ const writeLauncherAndServiceFiles = (
     port: metadata.port,
     scope: metadata.scope,
     nodePath,
-    npxPath
+    npxPath,
+    platform: metadata.platform
   })
 
-  writeFileSync(launcherPath, `${launcherScript}\n`, 'utf8')
-  chmodSync(launcherPath, 0o755)
-  writeFileSync(definition.serviceFilePath, `${definition.serviceFileContents}\n`, 'utf8')
+  if (metadata.platform === 'win32') {
+    writeFileSync(launcherPath, `${launcherScript}\r\n`, 'utf8')
+  } else {
+    writeFileSync(launcherPath, `${launcherScript}\n`, 'utf8')
+    chmodSync(launcherPath, 0o755)
+  }
+
+  writeFileSync(
+    definition.serviceFilePath,
+    `${definition.serviceFileContents}${metadata.platform === 'win32' ? '\r\n' : '\n'}`,
+    definition.serviceFileEncoding ?? 'utf8'
+  )
 }
 
 const writeServiceMetadata = (metadata: ServiceInstallMetadata, homeDir: string) => {
@@ -596,7 +796,7 @@ const createOperationMetadata = (
   platform: values.platform,
   serviceName: values.definition.serviceName,
   serviceFilePath: values.definition.serviceFilePath,
-  launcherPath: getServiceLauncherPath(installId, values.homeDir),
+  launcherPath: getServiceLauncherPath(installId, values.homeDir, values.platform),
   installedAt: action === 'install'
     ? now().toISOString()
     : previousMetadata?.installedAt ?? now().toISOString()
@@ -611,8 +811,15 @@ export const getServiceMetadataDirectory = (installId: string, homeDir = os.home
 export const getServiceMetadataPath = (installId: string, homeDir = os.homedir()) =>
   join(getServiceMetadataDirectory(installId, homeDir), 'service.json')
 
-export const getServiceLauncherPath = (installId: string, homeDir = os.homedir()) =>
-  join(getServiceMetadataDirectory(installId, homeDir), 'run-service.sh')
+export const getServiceLauncherPath = (
+  installId: string,
+  homeDir = os.homedir(),
+  platform: ServicePlatform = resolveServicePlatform()
+) =>
+  join(
+    getServiceMetadataDirectory(installId, homeDir),
+    platform === 'win32' ? 'run-service.cmd' : 'run-service.sh'
+  )
 
 export const detectRootPromptDefault = (cwd: string): RootPromptDefault => {
   const resolvedCwd = resolve(cwd)
@@ -754,8 +961,21 @@ export const buildLauncherScript = ({
   port,
   scope,
   nodePath,
-  npxPath
+  npxPath,
+  platform = 'linux'
 }: LauncherScriptInput) => {
+  if (platform === 'win32') {
+    return buildWindowsLauncherScript({
+      installId,
+      root,
+      host,
+      port,
+      scope,
+      nodePath,
+      npxPath
+    })
+  }
+
   const pathEntries = Array.from(new Set([dirname(nodePath), dirname(npxPath)]))
   const exportPath = `${pathEntries.map(shellEscape).join(':')}:$PATH`
 
@@ -793,17 +1013,15 @@ export const installService = async (
     const host = await resolvePromptedHost(options.host, yes, prompt, runCommand, stdout)
     const port = await resolvePromptedPort(options.port, yes, prompt)
     const scope = await resolvePromptedScope(options.scope, yes, prompt)
-    ensureSystemScopePrivileges(scope, 'install-service', {
+    await ensureSystemScopePrivileges(scope, 'install-service', {
       root,
       host,
       port,
       scope,
       yes
-    })
+    }, platform, createWindowsElevationProbe(runCommand))
 
-    if (platform === 'linux') {
-      await ensureLinuxServiceManager(scope, runCommand)
-    }
+    await ensurePlatformServiceManager(platform, scope, runCommand)
 
     const installId = toServiceInstallId(root)
     const definition = resolveServiceDefinition({
@@ -818,7 +1036,7 @@ export const installService = async (
       host,
       port,
       scope,
-      launcherPath: getServiceLauncherPath(installId, homeDir),
+      launcherPath: getServiceLauncherPath(installId, homeDir, platform),
       serviceFilePath: definition.serviceFilePath
     })
 
@@ -846,6 +1064,7 @@ export const installService = async (
       (command, result) => shouldIgnoreCommandFailure('install', metadata, command) && result.exitCode !== 0
     )
     writeServiceMetadata(metadata, homeDir)
+    writeLastServiceRoot(metadata.root, homeDir)
 
     return {
       action: 'install',
@@ -886,19 +1105,18 @@ export const restartService = async (
       }
     }
 
-    ensureSystemScopePrivileges(metadata.scope, 'restart-service', {
+    await ensureSystemScopePrivileges(metadata.scope, 'restart-service', {
       root: metadata.root,
       scope: metadata.scope,
       yes
-    })
+    }, metadata.platform, createWindowsElevationProbe(runCommand))
 
-    if (metadata.platform === 'linux') {
-      await ensureLinuxServiceManager(metadata.scope, runCommand)
-    }
+    await ensurePlatformServiceManager(metadata.platform, metadata.scope, runCommand)
 
     const definition = resolveServiceDefinition(metadata, homeDir)
     writeLauncherAndServiceFiles(metadata, definition, homeDir, nodePath, npxPath)
     await runCommandSequence(resolveServiceCommands('restart', metadata, definition), runCommand)
+    writeLastServiceRoot(metadata.root, homeDir)
 
     return {
       action: 'restart',
@@ -927,11 +1145,11 @@ export const uninstallService = async (
   try {
     const root = await resolveRootWithPrompt(options.root, yes, cwd, prompt)
     const metadata = loadServiceMetadata(root, homeDir)
-    ensureSystemScopePrivileges(metadata.scope, 'uninstall-service', {
+    await ensureSystemScopePrivileges(metadata.scope, 'uninstall-service', {
       root: metadata.root,
       scope: metadata.scope,
       yes
-    })
+    }, metadata.platform, createWindowsElevationProbe(runCommand))
 
     if (!yes) {
       const confirmed = await prompt.confirm(`Remove the service for ${metadata.root}`, true)
@@ -940,9 +1158,7 @@ export const uninstallService = async (
       }
     }
 
-    if (metadata.platform === 'linux') {
-      await ensureLinuxServiceManager(metadata.scope, runCommand)
-    }
+    await ensurePlatformServiceManager(metadata.platform, metadata.scope, runCommand)
 
     const definition = resolveServiceDefinition(metadata, homeDir)
     const commands = resolveServiceCommands('uninstall', metadata, definition)
@@ -968,3 +1184,86 @@ export const uninstallService = async (
     }
   }
 }
+
+const runLifecycleAction = async (
+  action: 'start' | 'stop' | 'status',
+  options: ServiceCommandOptions,
+  dependencies: ServiceCommandDependencies
+): Promise<ServiceOperationResult> => {
+  const runCommand = dependencies.runCommand ?? defaultCommandRunner
+  const cwd = dependencies.cwd ?? process.cwd()
+  const homeDir = dependencies.homeDir ?? os.homedir()
+  const prompt = dependencies.prompt ?? createDefaultPrompt(
+    (dependencies.stdin ?? process.stdin) as typeof process.stdin,
+    (dependencies.stdout ?? process.stdout) as typeof process.stdout
+  )
+  const yes = options.yes ?? false
+
+  try {
+    const root = options.root
+      ? await resolveRootWithPrompt(options.root, yes, cwd, prompt)
+      : resolveLastServiceRoot(homeDir) ?? await resolveRootWithPrompt(options.root, yes, cwd, prompt)
+    const metadata = loadServiceMetadata(root, homeDir)
+
+    const commandName = action === 'start'
+      ? 'start-service'
+      : action === 'stop' ? 'stop-service' : 'status-service'
+
+    await ensureSystemScopePrivileges(metadata.scope, commandName, {
+      root: metadata.root,
+      scope: metadata.scope,
+      yes
+    }, metadata.platform, createWindowsElevationProbe(runCommand))
+
+    await ensurePlatformServiceManager(metadata.platform, metadata.scope, runCommand)
+
+    const definition = resolveServiceDefinition(metadata, homeDir)
+    const commands = resolveServiceCommands(action, metadata, definition)
+
+    if (action === 'status') {
+      const [statusCommand] = commands
+      const result = await runCommand(statusCommand.command, statusCommand.args)
+      return {
+        action,
+        metadata,
+        status: result.exitCode === 0
+          ? result.stdout.trim() || 'running'
+          : (result.stderr.trim() || result.stdout.trim() || 'not running')
+      }
+    }
+
+    await runCommandSequence(
+      commands,
+      runCommand,
+      (command, result) => shouldIgnoreCommandFailure(action, metadata, command) && result.exitCode !== 0
+    )
+
+    if (action === 'start') {
+      writeLastServiceRoot(metadata.root, homeDir)
+    }
+
+    return {
+      action,
+      metadata
+    }
+  } finally {
+    if (!dependencies.prompt) {
+      await prompt.close()
+    }
+  }
+}
+
+export const startService = async (
+  options: ServiceCommandOptions = {},
+  dependencies: ServiceCommandDependencies = {}
+) => await runLifecycleAction('start', options, dependencies)
+
+export const stopService = async (
+  options: ServiceCommandOptions = {},
+  dependencies: ServiceCommandDependencies = {}
+) => await runLifecycleAction('stop', options, dependencies)
+
+export const statusService = async (
+  options: ServiceCommandOptions = {},
+  dependencies: ServiceCommandDependencies = {}
+) => await runLifecycleAction('status', options, dependencies)

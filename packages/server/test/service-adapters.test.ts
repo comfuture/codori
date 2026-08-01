@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   createDarwinServiceDefinition,
   createLinuxServiceDefinition,
+  createWindowsServiceDefinition,
   getDarwinInstallCommands,
   getDarwinRestartCommands,
   getDarwinServiceName,
@@ -10,8 +11,14 @@ import {
   getLinuxRestartCommands,
   getLinuxServiceName,
   getLinuxUninstallCommands,
+  getWindowsInstallCommands,
+  getWindowsServiceName,
+  getWindowsStartCommands,
+  getWindowsStopCommands,
+  getWindowsUninstallCommands,
   renderLaunchdPlist,
   renderSystemdUnit,
+  renderWindowsTaskXml,
   resolveServicePlatform
 } from '../src/service-adapters.js'
 
@@ -19,7 +26,8 @@ describe('service adapters', () => {
   it('resolves supported service platforms', () => {
     expect(resolveServicePlatform('darwin')).toBe('darwin')
     expect(resolveServicePlatform('linux')).toBe('linux')
-    expect(() => resolveServicePlatform('win32')).toThrow(/Unsupported service platform/)
+    expect(resolveServicePlatform('win32')).toBe('win32')
+    expect(() => resolveServicePlatform('aix')).toThrow(/Unsupported service platform/)
   })
 
   it('renders a launchd plist for macOS services', () => {
@@ -135,5 +143,122 @@ describe('service adapters', () => {
         args: ['--user', 'daemon-reload']
       }
     ])
+  })
+
+  it('renders a windows logon task for user scope', () => {
+    const xml = renderWindowsTaskXml({
+      serviceName: 'Codori\\codori-abc123def456',
+      launcherPath: 'C:\\Users\\test\\.codori\\services\\abc\\run-service.cmd',
+      root: 'C:\\Users\\test\\Project',
+      scope: 'user',
+      principalId: 'test'
+    })
+
+    expect(xml).toContain('<?xml version="1.0" encoding="UTF-16"?>')
+    expect(xml).toContain('<LogonTrigger>')
+    expect(xml).toContain('<RunLevel>LeastPrivilege</RunLevel>')
+    expect(xml).toContain('<Command>C:\\Users\\test\\.codori\\services\\abc\\run-service.cmd</Command>')
+    expect(xml).toContain('<WorkingDirectory>C:\\Users\\test\\Project</WorkingDirectory>')
+    // Windows has no launchd KeepAlive or systemd Restart=always equivalent.
+    expect(xml).toContain('<RestartOnFailure>')
+    expect(xml).toContain('<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>')
+    expect(xml).not.toContain('<BootTrigger>')
+  })
+
+  it('renders a windows boot task running as SYSTEM for system scope', () => {
+    const xml = renderWindowsTaskXml({
+      serviceName: 'Codori\\codori-abc123def456',
+      launcherPath: 'C:\\ProgramData\\codori\\run-service.cmd',
+      root: 'C:\\Projects',
+      scope: 'system',
+      principalId: 'S-1-5-18'
+    })
+
+    expect(xml).toContain('<BootTrigger>')
+    expect(xml).toContain('<UserId>S-1-5-18</UserId>')
+    expect(xml).toContain('<RunLevel>HighestAvailable</RunLevel>')
+    expect(xml).not.toContain('<LogonTrigger>')
+  })
+
+  it('escapes xml-sensitive characters in windows task definitions', () => {
+    const xml = renderWindowsTaskXml({
+      serviceName: 'Codori\\codori-abc',
+      launcherPath: 'C:\\a & b\\run-service.cmd',
+      root: 'C:\\<root>',
+      scope: 'user',
+      principalId: 'te"st'
+    })
+
+    expect(xml).toContain('<Command>C:\\a &amp; b\\run-service.cmd</Command>')
+    expect(xml).toContain('<WorkingDirectory>C:\\&lt;root&gt;</WorkingDirectory>')
+    expect(xml).toContain('<UserId>te&quot;st</UserId>')
+  })
+
+  it('creates a windows service definition and command sequences', () => {
+    const definition = createWindowsServiceDefinition({
+      installId: 'abc123def456',
+      scope: 'user',
+      launcherPath: 'C:\\Users\\test\\.codori\\services\\abc\\run-service.cmd',
+      root: 'C:\\Users\\test\\Project',
+      metadataDirectory: 'C:\\Users\\test\\.codori\\services\\abc',
+      homeDir: 'C:\\Users\\test',
+      userName: 'test'
+    })
+
+    expect(definition.serviceName).toBe(getWindowsServiceName('abc123def456'))
+    expect(definition.serviceFileEncoding).toBe('utf16le')
+    expect(definition.serviceFilePath).toContain('service-task.xml')
+
+    expect(getWindowsInstallCommands(definition, 'user')).toEqual([
+      {
+        command: 'schtasks',
+        args: ['/Delete', '/TN', definition.serviceName, '/F']
+      },
+      {
+        command: 'schtasks',
+        args: ['/Create', '/TN', definition.serviceName, '/XML', definition.serviceFilePath, '/F']
+      },
+      {
+        command: 'schtasks',
+        args: ['/Run', '/TN', definition.serviceName]
+      }
+    ])
+
+    // A boot-triggered system task should not be kicked off from the installer session.
+    expect(getWindowsInstallCommands(definition, 'system')).toHaveLength(2)
+
+    expect(getWindowsStartCommands(definition)).toEqual([
+      {
+        command: 'schtasks',
+        args: ['/Run', '/TN', definition.serviceName]
+      }
+    ])
+    expect(getWindowsStopCommands(definition)).toEqual([
+      {
+        command: 'schtasks',
+        args: ['/End', '/TN', definition.serviceName]
+      }
+    ])
+    expect(getWindowsUninstallCommands(definition)).toEqual([
+      {
+        command: 'schtasks',
+        args: ['/End', '/TN', definition.serviceName]
+      },
+      {
+        command: 'schtasks',
+        args: ['/Delete', '/TN', definition.serviceName, '/F']
+      }
+    ])
+  })
+
+  it('rejects a user-scoped windows definition without a resolvable user', () => {
+    expect(() => createWindowsServiceDefinition({
+      installId: 'abc123def456',
+      scope: 'user',
+      launcherPath: 'C:\\run-service.cmd',
+      root: 'C:\\Projects',
+      metadataDirectory: 'C:\\meta',
+      userName: ''
+    })).toThrow(/Unable to resolve the current Windows user/)
   })
 })
