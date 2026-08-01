@@ -71,7 +71,8 @@ describe('settings layout', () => {
       expect(items.map(item => item.label)).toEqual([
         'Notifications',
         'Voice',
-        'Backend'
+        'Backend',
+        'Workspace'
       ])
       expect(items.find(item => item.active)?.label).toBe('Voice')
       expect(items.every(item =>

@@ -40,6 +40,7 @@ import type {
   AppServerTarget,
   ChatSessionStatusRecord,
   DeleteChatSessionResult,
+  ProjectRootResponse,
   ProjectStatusRecord,
   RuntimeBackendStatusResponse,
   RuntimeBridgeTarget,
@@ -57,6 +58,8 @@ export type RuntimeManagerLike = {
   listChatStatuses?: () => MaybePromise<ChatSessionStatusRecord[]>
   getProjectStatus: (projectId: string) => MaybePromise<ProjectStatusRecord>
   getChatStatus?: (chatId: string) => MaybePromise<ChatSessionStatusRecord>
+  setProjectRoot?: (root: string) => string
+  getLastProjectRoot?: () => string | null
   cloneProject?: (input: { repositoryUrl: string, destination?: string | null }) => MaybePromise<ProjectStatusRecord>
   createChatSession?: () => MaybePromise<StartChatSessionResult>
   deleteChatSession?: (chatId: string) => MaybePromise<DeleteChatSessionResult>
@@ -124,6 +127,10 @@ type ServiceUpdateResponse = {
   serviceUpdate: ServiceUpdateStatus
 }
 
+type ProjectRootRequest = {
+  root?: string
+}
+
 type ProjectGitBranchesResponse = {
   currentBranch: string | null
   branches: string[]
@@ -188,6 +195,7 @@ const toStatusCode = (error: CodoriError) => {
     case 'MISSING_THREAD_ID':
     case 'INVALID_ATTACHMENT':
     case 'MISSING_ROOT':
+    case 'INVALID_ROOT':
     case 'PROJECT_NOT_GIT_REPOSITORY':
     case 'INVALID_CHAT_TITLE':
       return 400
@@ -196,6 +204,8 @@ const toStatusCode = (error: CodoriError) => {
     case 'SERVICE_UPDATE_UNAVAILABLE':
     case 'SERVICE_UPDATE_IN_PROGRESS':
       return 409
+    case 'PROJECT_ROOT_UPDATE_UNAVAILABLE':
+      return 501
     case 'PROJECT_CLONE_FAILED':
       return 502
     default:
@@ -391,6 +401,38 @@ export const createHttpServer = async (
       fallbackReason: null
     }
   }))
+
+  app.get('/api/config/root', async (): Promise<ProjectRootResponse> => ({
+    projectRoot: {
+      root: manager.config?.root ?? '',
+      lastRoot: manager.getLastProjectRoot?.() ?? null
+    }
+  }))
+
+  app.patch<{ Body: ProjectRootRequest }>(
+    '/api/config/root',
+    async (request: FastifyRequest<{ Body: ProjectRootRequest }>): Promise<ProjectRootResponse> => {
+      const requestedRoot = typeof request.body?.root === 'string' ? request.body.root.trim() : ''
+      if (!requestedRoot) {
+        throw new CodoriError('MISSING_ROOT', 'A project root is required.')
+      }
+
+      if (!manager.setProjectRoot) {
+        throw new CodoriError(
+          'PROJECT_ROOT_UPDATE_UNAVAILABLE',
+          'This runtime does not support changing the project root.'
+        )
+      }
+
+      const root = manager.setProjectRoot(requestedRoot)
+      return {
+        projectRoot: {
+          root,
+          lastRoot: manager.getLastProjectRoot?.() ?? null
+        }
+      }
+    }
+  )
 
   app.get('/api/chats', async (): Promise<ChatsResponse> => ({
     chats: manager.listChatStatuses

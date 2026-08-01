@@ -87,6 +87,19 @@ export type ServiceUpdateResponse = {
   serviceUpdate: ServiceUpdateStatus
 }
 
+export type ProjectRootStatus = {
+  root: string
+  lastRoot: string | null
+}
+
+export type ProjectRootResponse = {
+  projectRoot: ProjectRootStatus
+}
+
+export type UpdateProjectRootRequest = {
+  root: string
+}
+
 export type ServerCapabilitiesResponse = {
   capabilities: {
     realtimeVoice: {

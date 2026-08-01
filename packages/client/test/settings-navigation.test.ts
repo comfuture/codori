@@ -6,17 +6,19 @@ import {
 } from '../shared/settings'
 
 describe('settings navigation', () => {
-  it('keeps a deterministic default and one route per initial section', () => {
+  it('keeps a deterministic default and one route per section', () => {
     expect(DEFAULT_SETTINGS_ROUTE).toBe('/settings/notifications')
     expect(SETTINGS_SECTIONS.map(section => section.path)).toEqual([
       '/settings/notifications',
       '/settings/voice',
-      '/settings/backend'
+      '/settings/backend',
+      '/settings/workspace'
     ])
     expect(SETTINGS_SECTIONS.map(section => section.label)).toEqual([
       'Notifications',
       'Voice',
-      'Backend'
+      'Backend',
+      'Workspace'
     ])
     expect(SETTINGS_SECTIONS.every(section => section.icon.startsWith('i-lucide-')))
       .toBe(true)
