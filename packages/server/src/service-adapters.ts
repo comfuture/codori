@@ -369,13 +369,15 @@ export const getDarwinInstallCommands = (
       command: 'launchctl',
       args: ['bootout', domain, definition.serviceFilePath]
     },
-    {
-      command: 'launchctl',
-      args: ['bootstrap', domain, definition.serviceFilePath]
-    },
+    // A previous uninstall leaves a persistent disabled override, and
+    // bootstrapping a disabled service fails, so clear it first.
     {
       command: 'launchctl',
       args: ['enable', `${domain}/${definition.serviceName}`]
+    },
+    {
+      command: 'launchctl',
+      args: ['bootstrap', domain, definition.serviceFilePath]
     },
     {
       command: 'launchctl',
@@ -433,6 +435,17 @@ export const getDarwinStartCommands = (
   return [
     {
       command: 'launchctl',
+      args: ['enable', `${domain}/${definition.serviceName}`]
+    },
+    // A stopped service was booted out, so it has to be loaded again before it
+    // can be kickstarted. Bootstrapping an already-loaded service fails and is
+    // tolerated.
+    {
+      command: 'launchctl',
+      args: ['bootstrap', domain, definition.serviceFilePath]
+    },
+    {
+      command: 'launchctl',
       args: ['kickstart', `${domain}/${definition.serviceName}`]
     }
   ]
@@ -445,9 +458,11 @@ export const getDarwinStopCommands = (
 ): ServiceCommand[] => {
   const domain = getLaunchctlDomain(scope, userId)
   return [
+    // `launchctl kill` only signals the process, and KeepAlive immediately
+    // restarts it. Booting the service out is what actually stops it.
     {
       command: 'launchctl',
-      args: ['kill', 'SIGTERM', `${domain}/${definition.serviceName}`]
+      args: ['bootout', domain, definition.serviceFilePath]
     }
   ]
 }

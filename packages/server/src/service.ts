@@ -605,6 +605,11 @@ const shouldIgnoreCommandFailure = (
   command: ServiceCommand
 ) => {
   if (metadata.platform === 'darwin') {
+    // Starting an already-loaded service fails on bootstrap; kickstart still
+    // brings it up.
+    if (action === 'start') {
+      return command.args[0] === 'bootstrap'
+    }
     return action !== 'restart' && command.args[0] === 'bootout'
   }
 

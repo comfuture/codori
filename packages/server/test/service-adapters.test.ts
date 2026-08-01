@@ -6,10 +6,14 @@ import {
   getDarwinInstallCommands,
   getDarwinRestartCommands,
   getDarwinServiceName,
+  getDarwinStartCommands,
+  getDarwinStopCommands,
   getDarwinUninstallCommands,
   getLinuxInstallCommands,
   getLinuxRestartCommands,
   getLinuxServiceName,
+  getLinuxStartCommands,
+  getLinuxStopCommands,
   getLinuxUninstallCommands,
   getWindowsInstallCommands,
   getWindowsServiceName,
@@ -76,13 +80,15 @@ describe('service adapters', () => {
         command: 'launchctl',
         args: ['bootout', 'gui/501', definition.serviceFilePath]
       },
-      {
-        command: 'launchctl',
-        args: ['bootstrap', 'gui/501', definition.serviceFilePath]
-      },
+      // Must precede bootstrap: a prior uninstall leaves a persistent disabled
+      // override that makes bootstrap fail with "Input/output error".
       {
         command: 'launchctl',
         args: ['enable', 'gui/501/io.codori.server.abc123def456']
+      },
+      {
+        command: 'launchctl',
+        args: ['bootstrap', 'gui/501', definition.serviceFilePath]
       },
       {
         command: 'launchctl',
@@ -97,6 +103,29 @@ describe('service adapters', () => {
       command: 'launchctl',
       args: ['disable', 'gui/501/io.codori.server.abc123def456']
     })
+
+    // KeepAlive restarts the process after a signal, so stopping must boot the
+    // service out instead of killing it.
+    expect(getDarwinStopCommands(definition, 'user', 501)).toEqual([
+      {
+        command: 'launchctl',
+        args: ['bootout', 'gui/501', definition.serviceFilePath]
+      }
+    ])
+    expect(getDarwinStartCommands(definition, 'user', 501)).toEqual([
+      {
+        command: 'launchctl',
+        args: ['enable', 'gui/501/io.codori.server.abc123def456']
+      },
+      {
+        command: 'launchctl',
+        args: ['bootstrap', 'gui/501', definition.serviceFilePath]
+      },
+      {
+        command: 'launchctl',
+        args: ['kickstart', 'gui/501/io.codori.server.abc123def456']
+      }
+    ])
   })
 
   it('creates a linux service definition and command sequences', () => {
@@ -141,6 +170,20 @@ describe('service adapters', () => {
       {
         command: 'systemctl',
         args: ['--user', 'daemon-reload']
+      }
+    ])
+
+    // systemctl stop overrides Restart=always, so no bootout equivalent is needed.
+    expect(getLinuxStopCommands(definition, 'user')).toEqual([
+      {
+        command: 'systemctl',
+        args: ['--user', 'stop', 'codori-abc123def456.service']
+      }
+    ])
+    expect(getLinuxStartCommands(definition, 'user')).toEqual([
+      {
+        command: 'systemctl',
+        args: ['--user', 'start', 'codori-abc123def456.service']
       }
     ])
   })
