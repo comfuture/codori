@@ -1413,6 +1413,13 @@ export const startHttpServer = async (manager: RuntimeManagerLike = createRuntim
   const app = await createHttpServer(manager, {
     serviceUpdateController
   })
+
+  // Fastify rejects addHook once the instance is listening, so register the
+  // teardown before binding.
+  app.addHook('onClose', async () => {
+    serviceUpdateController.stopPolling()
+  })
+
   await app.listen({
     host: manager.config.server.host,
     port: manager.config.server.port
@@ -1427,9 +1434,6 @@ export const startHttpServer = async (manager: RuntimeManagerLike = createRuntim
   // Keep looking for newer published bundles while the service runs. Discovering
   // one only enables the update affordance; it never restarts on its own.
   serviceUpdateController.startPolling()
-  app.addHook('onClose', async () => {
-    serviceUpdateController.stopPolling()
-  })
 
   return app
 }
