@@ -221,6 +221,53 @@ describe('service lifecycle orchestration', () => {
     expect(existsSync(join(homeDir, '.codori', 'services', installed.metadata.installId))).toBe(false)
   })
 
+  it('prints a runnable canonical command when elevation is missing', async () => {
+    const homeDir = mkdtempSync(join(os.tmpdir(), 'codori-home-'))
+    const root = mkdtempSync(join(os.tmpdir(), 'codori-root-'))
+    mkdirSync(join(root, '.git'), { recursive: true })
+
+    const dependencies = {
+      homeDir,
+      cwd: root,
+      platform: 'win32' as NodeJS.Platform,
+      nodePath: 'C:\\Program Files\\nodejs\\node.exe',
+      npxPath: 'C:\\Program Files\\nodejs\\npx.cmd',
+      runCommand: async (command: string) => ({
+        exitCode: command === 'net' ? 1 : 0,
+        stdout: '',
+        stderr: ''
+      }),
+      stdout: createOutput().stream
+    }
+
+    // Install the service as an elevated session first so lifecycle commands
+    // have metadata to load.
+    await installService({
+      root,
+      host: '127.0.0.1',
+      scope: 'system',
+      yes: true
+    }, {
+      ...dependencies,
+      runCommand: async () => ({ exitCode: 0, stdout: '', stderr: '' })
+    })
+
+    const failures = await Promise.all([
+      startService({ root, yes: true }, dependencies).catch(error => String(error.message)),
+      stopService({ root, yes: true }, dependencies).catch(error => String(error.message)),
+      statusService({ root, yes: true }, dependencies).catch(error => String(error.message))
+    ])
+
+    // `start-service`, `stop-service`, and `status-service` are not accepted by
+    // the CLI, so a printed recovery command must use the `service <verb>` form.
+    expect(failures[0]).toContain('service start')
+    expect(failures[1]).toContain('service stop')
+    expect(failures[2]).toContain('service status')
+    for (const message of failures) {
+      expect(message).not.toMatch(/(start|stop|status)-service/)
+    }
+  })
+
   it('refuses a Windows system-scope install without elevation', async () => {
     const homeDir = mkdtempSync(join(os.tmpdir(), 'codori-home-'))
     const root = mkdtempSync(join(os.tmpdir(), 'codori-root-'))

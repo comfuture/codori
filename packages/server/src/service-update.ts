@@ -8,6 +8,7 @@ import {
   CODORI_SERVICE_INSTALL_ID_ENV,
   CODORI_SERVICE_MANAGED_ENV,
   CODORI_SERVICE_SCOPE_ENV,
+  CODORI_SERVICE_HOME_ENV,
   getServiceMetadataDirectory,
   type ServiceScope
 } from './service.js'
@@ -225,7 +226,14 @@ export const createUpdateCommand = (
 
     return {
       command: 'cmd.exe',
-      args: ['/d', '/s', '/c', `timeout /t 1 /nobreak > nul & ${restart}`]
+      args: [
+        '/d',
+        '/s',
+        '/c',
+        // Keep the metadata home for a SYSTEM-run task so `service restart` can
+        // locate the installed service.
+        `set "${CODORI_SERVICE_HOME_ENV}=${options.homeDir}" & timeout /t 1 /nobreak > nul & ${restart}`
+      ]
     }
   }
 
@@ -336,7 +344,22 @@ export const checkStartupUpdate = async (
     }
   }
 
-  await options.execPackage(`${CURRENT_PACKAGE.name}@${latestVersion}`)
+  try {
+    await options.execPackage(`${CURRENT_PACKAGE.name}@${latestVersion}`)
+  } catch {
+    // The newer bundle could not be downloaded or executed. Serving the
+    // installed bundle is better than leaving a supervised service with nothing
+    // running, which would otherwise restart-loop while the newer release
+    // remains unusable.
+    return {
+      checked: true,
+      installedVersion,
+      latestVersion,
+      updateAvailable: true,
+      adopted: false,
+      reason: 'exec-unavailable'
+    }
+  }
 
   return {
     checked: true,
@@ -352,7 +375,9 @@ export const createServiceUpdateController = (
   options: ServiceUpdateControllerOptions
 ): ServiceUpdateController => {
   const env = options.env ?? process.env
-  const homeDir = options.homeDir ?? os.homedir()
+  // A system-scoped service can run as a different account than the installer,
+  // so prefer the home the launcher recorded.
+  const homeDir = options.homeDir ?? env[CODORI_SERVICE_HOME_ENV]?.trim() ?? os.homedir()
   const npxPath = options.npxPath ?? join(dirname(process.execPath), 'npx')
   const now = options.now ?? (() => Date.now())
   const fetchImpl = options.fetchImpl ?? fetch

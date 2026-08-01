@@ -93,6 +93,7 @@ export type LauncherScriptInput = {
   nodePath: string
   npxPath: string
   platform?: ServicePlatform
+  homeDir?: string
 }
 
 export type ServicePrompt = {
@@ -122,6 +123,7 @@ export type ServiceCommandDependencies = {
   cwd?: string
   homeDir?: string
   platform?: NodeJS.Platform
+  env?: NodeJS.ProcessEnv
   nodePath?: string
   npxPath?: string
   stdin?: NodeJS.ReadableStream
@@ -155,6 +157,20 @@ const WILDCARD_HOST_WARNING = [
 export const CODORI_SERVICE_MANAGED_ENV = 'CODORI_SERVICE_MANAGED'
 export const CODORI_SERVICE_INSTALL_ID_ENV = 'CODORI_SERVICE_INSTALL_ID'
 export const CODORI_SERVICE_SCOPE_ENV = 'CODORI_SERVICE_SCOPE'
+
+/**
+ * The root chosen at install time. A managed launch prefers the remembered root
+ * from `last-root.json` and falls back to this value, so changing the root from
+ * Settings survives a service restart.
+ */
+export const CODORI_SERVICE_INSTALL_ROOT_ENV = 'CODORI_SERVICE_INSTALL_ROOT'
+
+/**
+ * The home directory that owns the install metadata. A Windows system-scoped
+ * task runs as SYSTEM, whose `os.homedir()` differs from the administrator that
+ * installed the service, so the metadata location has to travel with the task.
+ */
+export const CODORI_SERVICE_HOME_ENV = 'CODORI_SERVICE_HOME'
 
 const defaultCommandRunner: CommandRunner = (command, args) =>
   new Promise((resolvePromise, reject) => {
@@ -194,7 +210,8 @@ export const buildWindowsLauncherScript = ({
   port,
   scope,
   nodePath,
-  npxPath
+  npxPath,
+  homeDir
 }: Omit<LauncherScriptInput, 'platform'>) => {
   const pathEntries = Array.from(new Set([dirname(nodePath), dirname(npxPath)]))
   const prependedPath = pathEntries.map(batchEscapeValue).join(';')
@@ -206,14 +223,16 @@ export const buildWindowsLauncherScript = ({
     `set "${CODORI_SERVICE_MANAGED_ENV}=1"`,
     `set "${CODORI_SERVICE_INSTALL_ID_ENV}=${batchEscapeValue(installId)}"`,
     `set "${CODORI_SERVICE_SCOPE_ENV}=${batchEscapeValue(scope)}"`,
+    `set "${CODORI_SERVICE_INSTALL_ROOT_ENV}=${batchEscapeValue(resolve(root))}"`,
+    // A SYSTEM task cannot see the installing administrator's profile, so the
+    // metadata home must be carried explicitly.
+    ...(homeDir ? [`set "${CODORI_SERVICE_HOME_ENV}=${batchEscapeValue(homeDir)}"`] : []),
     [
       'call',
       batchQuote(batchEscapeValue(npxPath)),
       '--yes',
       '@codori/server',
       'serve',
-      '--root',
-      batchQuote(batchEscapeValue(resolve(root))),
       '--host',
       batchQuote(batchEscapeValue(host)),
       '--port',
@@ -241,6 +260,16 @@ const writeLine = (stream: NodeJS.WritableStream, message: string) => {
 }
 
 const getCurrentUserId = () => (typeof process.getuid === 'function' ? process.getuid() : 0)
+
+/**
+ * Resolves the home directory that owns install metadata. A system-scoped
+ * service may run as a different account than the installer, so the launcher's
+ * recorded home takes precedence over `os.homedir()`.
+ */
+const resolveServiceHomeDir = (dependencies: ServiceCommandDependencies) =>
+  dependencies.homeDir
+  ?? (dependencies.env ?? process.env)[CODORI_SERVICE_HOME_ENV]?.trim()
+  ?? os.homedir()
 
 const createDefaultPrompt = (
   input = process.stdin as typeof process.stdin,
@@ -277,6 +306,30 @@ const createDefaultPrompt = (
   }
 }
 
+/**
+ * Maps an internal command name to the canonical `service <verb>` words so a
+ * printed recovery command is actually runnable. Only the four legacy
+ * `*-service` aliases are accepted by the CLI, so `start-service`,
+ * `stop-service`, and `status-service` must never appear in user-facing output.
+ */
+const toCanonicalCommandWords = (command: ServiceCommandName) => {
+  switch (command) {
+    case 'install-service':
+    case 'setup-service':
+      return ['service', 'install']
+    case 'restart-service':
+      return ['service', 'restart']
+    case 'uninstall-service':
+      return ['service', 'uninstall']
+    case 'start-service':
+      return ['service', 'start']
+    case 'stop-service':
+      return ['service', 'stop']
+    case 'status-service':
+      return ['service', 'status']
+  }
+}
+
 const buildCanonicalInvocation = (
   command: ServiceCommandName,
   options: {
@@ -287,12 +340,14 @@ const buildCanonicalInvocation = (
     yes?: boolean
   }
 ) => {
-  const parts = ['npx', '@codori/server', command]
+  // Keep literal command words unquoted so the printed command can be pasted
+  // directly; only quote values that may contain spaces.
+  const parts: string[] = ['npx', '@codori/server', ...toCanonicalCommandWords(command)]
   if (options.root) {
-    parts.push('--root', options.root)
+    parts.push('--root', maybeQuote(options.root))
   }
   if (options.host) {
-    parts.push('--host', options.host)
+    parts.push('--host', maybeQuote(options.host))
   }
   if (typeof options.port === 'number') {
     parts.push('--port', String(options.port))
@@ -303,8 +358,11 @@ const buildCanonicalInvocation = (
   if (options.yes) {
     parts.push('--yes')
   }
-  return parts.map(shellEscape).join(' ')
+  return parts.join(' ')
 }
+
+const maybeQuote = (value: string) =>
+  /^[A-Za-z0-9._:@/\\-]+$/u.test(value) ? value : shellEscape(value)
 
 const ensureDirectory = (path: string) => {
   mkdirSync(path, { recursive: true })
@@ -735,7 +793,10 @@ const writeLauncherAndServiceFiles = (
     scope: metadata.scope,
     nodePath,
     npxPath,
-    platform: metadata.platform
+    platform: metadata.platform,
+    // Only a system scope needs this; a user-scoped service already resolves the
+    // same home at runtime.
+    homeDir: metadata.scope === 'system' ? homeDir : undefined
   })
 
   if (metadata.platform === 'win32') {
@@ -967,7 +1028,8 @@ export const buildLauncherScript = ({
   scope,
   nodePath,
   npxPath,
-  platform = 'linux'
+  platform = 'linux',
+  homeDir
 }: LauncherScriptInput) => {
   if (platform === 'win32') {
     return buildWindowsLauncherScript({
@@ -977,7 +1039,8 @@ export const buildLauncherScript = ({
       port,
       scope,
       nodePath,
-      npxPath
+      npxPath,
+      homeDir
     })
   }
 
@@ -991,7 +1054,9 @@ export const buildLauncherScript = ({
     `export ${CODORI_SERVICE_MANAGED_ENV}=1`,
     `export ${CODORI_SERVICE_INSTALL_ID_ENV}=${shellEscape(installId)}`,
     `export ${CODORI_SERVICE_SCOPE_ENV}=${shellEscape(scope)}`,
-    `exec ${shellEscape(npxPath)} --yes @codori/server serve --root ${shellEscape(resolve(root))} --host ${shellEscape(host)} --port ${port}`
+    `export ${CODORI_SERVICE_INSTALL_ROOT_ENV}=${shellEscape(resolve(root))}`,
+    ...(homeDir ? [`export ${CODORI_SERVICE_HOME_ENV}=${shellEscape(homeDir)}`] : []),
+    `exec ${shellEscape(npxPath)} --yes @codori/server serve --host ${shellEscape(host)} --port ${port}`
   ].join('\n')
 }
 
@@ -1002,7 +1067,7 @@ export const installService = async (
   const runCommand = dependencies.runCommand ?? defaultCommandRunner
   const stdout = dependencies.stdout ?? process.stdout
   const cwd = dependencies.cwd ?? process.cwd()
-  const homeDir = dependencies.homeDir ?? os.homedir()
+  const homeDir = resolveServiceHomeDir(dependencies)
   const nodePath = dependencies.nodePath ?? process.execPath
   const npxPath = dependencies.npxPath ?? join(dirname(nodePath), 'npx')
   const platform = resolveServicePlatform(dependencies.platform)
@@ -1088,7 +1153,7 @@ export const restartService = async (
 ): Promise<ServiceOperationResult> => {
   const runCommand = dependencies.runCommand ?? defaultCommandRunner
   const cwd = dependencies.cwd ?? process.cwd()
-  const homeDir = dependencies.homeDir ?? os.homedir()
+  const homeDir = resolveServiceHomeDir(dependencies)
   const nodePath = dependencies.nodePath ?? process.execPath
   const npxPath = dependencies.npxPath ?? join(dirname(nodePath), 'npx')
   const prompt = dependencies.prompt ?? createDefaultPrompt(
@@ -1140,7 +1205,7 @@ export const uninstallService = async (
 ): Promise<ServiceOperationResult> => {
   const runCommand = dependencies.runCommand ?? defaultCommandRunner
   const cwd = dependencies.cwd ?? process.cwd()
-  const homeDir = dependencies.homeDir ?? os.homedir()
+  const homeDir = resolveServiceHomeDir(dependencies)
   const prompt = dependencies.prompt ?? createDefaultPrompt(
     (dependencies.stdin ?? process.stdin) as typeof process.stdin,
     (dependencies.stdout ?? process.stdout) as typeof process.stdout
@@ -1197,7 +1262,7 @@ const runLifecycleAction = async (
 ): Promise<ServiceOperationResult> => {
   const runCommand = dependencies.runCommand ?? defaultCommandRunner
   const cwd = dependencies.cwd ?? process.cwd()
-  const homeDir = dependencies.homeDir ?? os.homedir()
+  const homeDir = resolveServiceHomeDir(dependencies)
   const prompt = dependencies.prompt ?? createDefaultPrompt(
     (dependencies.stdin ?? process.stdin) as typeof process.stdin,
     (dependencies.stdout ?? process.stdout) as typeof process.stdout

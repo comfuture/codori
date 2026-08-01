@@ -104,6 +104,29 @@ describe('cli service commands', () => {
     })).toBe('/cwd')
   })
 
+  it('prefers the remembered root over the install-time root', () => {
+    // A root changed from Settings must survive an OS restart instead of
+    // reverting to the directory chosen at install time.
+    expect(resolveServeRoot(undefined, {
+      env: {
+        CODORI_SERVICE_MANAGED: '1',
+        CODORI_SERVICE_INSTALL_ROOT: '/install/root'
+      },
+      cwd: '/cwd',
+      lastRoot: () => '/remembered/root'
+    })).toBe('/remembered/root')
+
+    // With nothing remembered yet, the install-time root is the fallback.
+    expect(resolveServeRoot(undefined, {
+      env: {
+        CODORI_SERVICE_MANAGED: '1',
+        CODORI_SERVICE_INSTALL_ROOT: '/install/root'
+      },
+      cwd: '/cwd',
+      lastRoot: () => null
+    })).toBe('/install/root')
+  })
+
   it('rejects tailscale serve for installed service commands', async () => {
     await expect(runCli([
       'install-service',

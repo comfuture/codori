@@ -187,6 +187,27 @@ describe('service helpers', () => {
     expect(script).toContain('export CODORI_SERVICE_MANAGED=1')
     expect(script).toContain("export CODORI_SERVICE_INSTALL_ID='abc123def456'")
     expect(script).toContain("export CODORI_SERVICE_SCOPE='user'")
-    expect(script).toContain("exec '/opt/node/bin/npx' --yes @codori/server serve --root '/tmp/workspace' --host '100.64.0.10' --port 4310")
+    // The install-time root travels as an env fallback rather than `--root`, so a
+    // root changed from Settings is not overridden on the next managed launch.
+    expect(script).toContain("export CODORI_SERVICE_INSTALL_ROOT='/tmp/workspace'")
+    expect(script).not.toContain('--root')
+    expect(script).toContain("exec '/opt/node/bin/npx' --yes @codori/server serve --host '100.64.0.10' --port 4310")
+    // A user-scoped service resolves the same home at runtime.
+    expect(script).not.toContain('CODORI_SERVICE_HOME')
+  })
+
+  it('carries the metadata home for a system-scoped launcher', () => {
+    const script = buildLauncherScript({
+      installId: 'abc123def456',
+      root: '/tmp/workspace',
+      host: '127.0.0.1',
+      port: 4310,
+      scope: 'system',
+      nodePath: '/opt/node/bin/node',
+      npxPath: '/opt/node/bin/npx',
+      homeDir: '/Users/installer'
+    })
+
+    expect(script).toContain("export CODORI_SERVICE_HOME='/Users/installer'")
   })
 })
