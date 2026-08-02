@@ -6,7 +6,7 @@ self-hosted remote coding control plane for Codex.
 ## Install
 
 ```bash
-npm install -g codori
+npm install -g @codori/cli
 ```
 
 ## Usage

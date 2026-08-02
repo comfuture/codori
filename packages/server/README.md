@@ -9,7 +9,7 @@ install the separate [`codori`](https://www.npmjs.com/package/codori) package,
 which provides the `codori` command as a thin launcher over this one:
 
 ```bash
-npm install -g codori
+npm install -g @codori/cli
 codori serve --root ~/Project
 ```
 

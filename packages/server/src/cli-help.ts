@@ -23,7 +23,7 @@ export type CliOptionDoc = {
 
 export const CLI_BINARY = 'codori'
 export const CLI_PACKAGE = '@codori/server'
-export const CLI_INSTALL_PACKAGE = 'codori'
+export const CLI_INSTALL_PACKAGE = '@codori/cli'
 
 export const RUNTIME_COMMANDS: CliCommandDoc[] = [
   {

@@ -1,10 +1,10 @@
 {
   "name": "codori-workspace",
   "private": true,
-  "version": "0.11.0",
+  "version": "0.11.1",
   "packageManager": "pnpm@10.33.2",
   "scripts": {
-    "build": "pnpm --filter @codori/client build && pnpm --filter @codori/webxr build && pnpm --filter @codori/server build && pnpm --filter codori build",
+    "build": "pnpm --filter @codori/client build && pnpm --filter @codori/webxr build && pnpm --filter @codori/server build && pnpm --filter @codori/cli build",
     "dev": "pnpm --filter @codori/client dev",
     "dev:webxr": "pnpm --filter @codori/webxr dev",
     "generate:codex-types": "node ./scripts/generate-codex-types.mjs",

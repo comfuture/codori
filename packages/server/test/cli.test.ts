@@ -34,7 +34,7 @@ describe('cli service commands', () => {
 
     const help = stdout.read()
     // The installed binary is the documented primary entrypoint.
-    expect(help).toContain('npm install -g codori')
+    expect(help).toContain('npm install -g @codori/cli')
     expect(help).toContain('codori <command> [options]')
     expect(help).toContain('codori service install')
     // Running without installing stays documented as the alternative.
@@ -68,7 +68,7 @@ describe('cli service commands', () => {
     })
 
     expect(stdout.read()).toContain('Usage')
-    expect(stdout.read()).toContain('npm install -g codori')
+    expect(stdout.read()).toContain('npm install -g @codori/cli')
     // A first-time user must not accidentally bind a server.
     expect(startHttpServer).not.toHaveBeenCalled()
   })

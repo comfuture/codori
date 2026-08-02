@@ -36,7 +36,7 @@ The server package includes a matching Codex CLI runtime, so a separate host-glo
 ## Install
 
 ```bash
-npm install -g codori
+npm install -g @codori/cli
 ```
 
 This installs the `codori` command, which is the primary way to run and manage
@@ -312,14 +312,14 @@ pnpm build
 
 ## Release
 
-Codori publishes `@codori/client`, `@codori/webxr`, `@codori/server`, and `codori` from GitHub Actions when a GitHub release is published.
+Codori publishes `@codori/client`, `@codori/webxr`, `@codori/server`, and `@codori/cli` from GitHub Actions when a GitHub release is published.
 
 Trusted publishing setup is required once per package on npm:
 
 1. Open the npm package settings for `@codori/client`.
 2. Add a Trusted Publisher for GitHub Actions.
 3. Set the GitHub owner to `comfuture`, repository to `codori`, and workflow filename to `publish-release.yml`.
-4. Repeat the same setup for `@codori/webxr`, `@codori/server`, and `codori`.
+4. Repeat the same setup for `@codori/webxr`, `@codori/server`, and `@codori/cli`.
 
 The workflow uses npm trusted publishing with GitHub OIDC, so no long-lived npm automation token is required once that relationship is configured.
 
@@ -336,12 +336,12 @@ The release workflow checks that the Git tag matches the workspace version and s
 
 This repository is a pnpm workspace with four published packages:
 
-- `codori`: the installable `codori` command, a thin launcher over `@codori/server`
+- `@codori/cli`: the installable `codori` command, a thin launcher over `@codori/server`
 - `@codori/server`: project discovery, runtime management, CLI, REST API, WebSocket proxy, and bundled static UI serving
 - `@codori/client`: Nuxt + Nuxt UI dashboard for project browsing and Codex chat
 - `@codori/webxr`: Vite + Three.js immersive workspace served under `/xr/`
 
-`@codori/server` owns all CLI behavior and output. The `codori` package only
+`@codori/server` owns all CLI behavior and output. The `@codori/cli` package only
 provides the binary, so the installed command and `npx @codori/server` cannot
 drift apart. `@codori/server` still ships its own `codori-server` binary, which
 is what `npx @codori/server` runs.

@@ -20,7 +20,7 @@ describe('published bin names', () => {
     // so `codori` must belong to exactly one of them.
     expect(Object.keys(server.bin ?? {})).toEqual(['codori-server'])
     expect(Object.keys(cli.bin ?? {})).toEqual(['codori'])
-    expect(cli.name).toBe('codori')
+    expect(cli.name).toBe('@codori/cli')
   })
 
   it('pins the launcher to the matching workspace server version', () => {
