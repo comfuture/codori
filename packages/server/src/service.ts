@@ -667,13 +667,21 @@ const resolveServiceCommands = (
  */
 const describeServiceCommandFailure = (
   command: ServiceCommand,
-  metadata: Pick<ServiceInstallMetadata, 'platform' | 'scope'> | undefined,
+  metadata: Pick<ServiceInstallMetadata, 'platform' | 'scope' | 'serviceName'> | undefined,
   output: string | null
 ) => {
   const parts = output ? [output.trimEnd()] : []
-  if (metadata?.platform === 'linux' && command.command === 'systemctl') {
+  // Only a unit-scoped command has unit output to inspect. `daemon-reload` is a
+  // manager-state command with no unit argument, so keying off the last argument
+  // would point at `status daemon-reload`, which is not a unit at all.
+  const unit = metadata?.serviceName
+  if (
+    metadata?.platform === 'linux'
+    && command.command === 'systemctl'
+    && unit
+    && command.args.includes(unit)
+  ) {
     const scopeFlag = metadata.scope === 'system' ? '' : '--user '
-    const unit = command.args[command.args.length - 1]
     parts.push(
       `Inspect it with: systemctl ${scopeFlag}status ${unit}`,
       `or: journalctl ${scopeFlag}-u ${unit} -n 50`
@@ -687,7 +695,7 @@ const runCommandSequence = async (
   commands: ServiceCommand[],
   runCommand: CommandRunner,
   allowFailure: (command: ServiceCommand, result: CommandResult) => boolean = () => false,
-  metadata?: Pick<ServiceInstallMetadata, 'platform' | 'scope'>
+  metadata?: Pick<ServiceInstallMetadata, 'platform' | 'scope' | 'serviceName'>
 ) => {
   for (const command of commands) {
     let result: CommandResult

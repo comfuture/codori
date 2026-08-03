@@ -707,6 +707,39 @@ describe('linux service failures', () => {
     expect(String(error.details)).toContain('journalctl --user -u')
   })
 
+  // `daemon-reload` is a manager-state command with no unit argument. Keying the
+  // hint off the last argument pointed users at `status daemon-reload`, which is
+  // not a unit.
+  it('omits unit diagnostics when a manager-state command fails', async () => {
+    const homeDir = mkdtempSync(join(os.tmpdir(), 'codori-home-'))
+    const root = mkdtempSync(join(os.tmpdir(), 'codori-root-'))
+    mkdirSync(join(root, '.git'), { recursive: true })
+
+    const dependencies = createLinuxDependencies(homeDir, root, async (command, args) => {
+      if (command === 'systemctl' && args.includes('daemon-reload')) {
+        return {
+          exitCode: 1,
+          stdout: '',
+          stderr: 'Failed to reload daemon: Connection reset by peer'
+        }
+      }
+      return {
+        exitCode: 0,
+        stdout: args[0] === '--version' ? 'systemd 249' : '',
+        stderr: ''
+      }
+    })
+
+    const failure = await installService({ root, yes: true }, dependencies)
+      .catch((error: unknown) => error) as CodoriError
+
+    expect(failure.code).toBe('SERVICE_COMMAND_FAILED')
+    expect(String(failure.details)).toContain('Failed to reload daemon')
+    expect(String(failure.details)).not.toContain('status daemon-reload')
+    expect(String(failure.details)).not.toContain('-u daemon-reload')
+    expect(String(failure.details)).not.toContain('journalctl')
+  })
+
   it('prints an elevation command that survives sudo resetting PATH', async () => {
     const homeDir = mkdtempSync(join(os.tmpdir(), 'codori-home-'))
     const root = mkdtempSync(join(os.tmpdir(), 'codori-root-'))
