@@ -1,7 +1,7 @@
 import { chmodSync, mkdirSync, mkdtempSync, realpathSync, symlinkSync } from 'node:fs'
 import os from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { containsGitProject, scanProjects } from '../src/project-scanner.js'
 
 const restoreModes: (() => void)[] = []
@@ -10,6 +10,7 @@ afterEach(() => {
   while (restoreModes.length > 0) {
     (restoreModes.pop() as () => void)()
   }
+  vi.restoreAllMocks()
 })
 
 /**
@@ -81,6 +82,42 @@ describe('scanProjects', () => {
         path: join(canonicalRoot, 'zeta')
       }
     ])
+  })
+
+  it('surfaces an unexpected io failure instead of reporting no projects', async () => {
+    const root = mkdtempSync(join(os.tmpdir(), 'codori-projects-eio-'))
+    mkdirSync(join(root, 'alpha', '.git'), { recursive: true })
+    const failing = join(realpathSync(root), 'alpha')
+
+    // A configured root feeds the project inventory the API serves, so a real
+    // filesystem failure must surface rather than look like an empty directory.
+    // `readdirSync` is mocked at the module boundary because an ESM namespace
+    // export cannot be spied on.
+    vi.doMock('node:fs', async () => {
+      const actual = await vi.importActual<typeof import('node:fs')>('node:fs')
+      return {
+        ...actual,
+        readdirSync: ((path: Parameters<typeof actual.readdirSync>[0], options: never) => {
+          if (String(path) === failing) {
+            throw Object.assign(new Error('EIO: i/o error, scandir'), { code: 'EIO' })
+          }
+          return actual.readdirSync(path, options)
+        }) as typeof actual.readdirSync
+      }
+    })
+
+    try {
+      vi.resetModules()
+      const { scanProjects: scanWithFailure, containsGitProject: probeWithFailure }
+        = await import('../src/project-scanner.js')
+
+      expect(() => scanWithFailure(root)).toThrow(/EIO/)
+      // The bounded probe only proposes a default root, so it stays tolerant.
+      expect(probeWithFailure(root)).toBe(false)
+    } finally {
+      vi.doUnmock('node:fs')
+      vi.resetModules()
+    }
   })
 })
 

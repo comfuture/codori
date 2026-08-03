@@ -41,6 +41,7 @@ type CliOptionValues = {
   root?: string
   host?: string
   port?: string
+  json?: boolean
   scope?: string
   yes?: boolean
   help?: boolean
@@ -62,6 +63,14 @@ export type CliDependencies = ServiceCommandDependencies & {
   checkStartupUpdate?: typeof checkStartupUpdate
 }
 
+/**
+ * `--json` only ever applied to the retired runtime commands, so a surviving
+ * command rejects it by name instead of silently ignoring it.
+ */
+const JSON_OPTION_REMOVED_MESSAGE
+  = '--json was removed with the project runtime commands. '
+  + 'Query the running server directly for machine-readable output, for example GET /api/projects.'
+
 const optionConfig = {
   root: {
     type: 'string' as const
@@ -71,6 +80,16 @@ const optionConfig = {
   },
   port: {
     type: 'string' as const
+  },
+  /**
+   * Retired with `list`, `status`, `start <projectId>`, and `stop <projectId>`,
+   * which were the only commands that emitted JSON. It stays parser-recognized
+   * so a previously documented invocation such as `codori list --json` reaches
+   * the migration guidance instead of a generic unknown-option error, and is
+   * rejected explicitly for every surviving command.
+   */
+  json: {
+    type: 'boolean' as const
   },
   scope: {
     type: 'string' as const
@@ -600,6 +619,9 @@ export const runCli = async (
 
   const serviceAction = resolveServiceCliAction(command, maybeProjectId)
   if (serviceAction) {
+    if (values.json) {
+      throw new CodoriError('INVALID_CONFIG', JSON_OPTION_REMOVED_MESSAGE)
+    }
     if (
       hasTailscaleOption
       && serviceAction !== 'install'
@@ -632,10 +654,16 @@ export const runCli = async (
           `\`${CLI_BINARY} start <projectId>\` was removed. Run \`${CLI_BINARY} start\` to serve the project root, then open a project from the dashboard to start its workspace.`
         )
       }
+      if (values.json) {
+        throw new CodoriError('INVALID_CONFIG', JSON_OPTION_REMOVED_MESSAGE)
+      }
       await runServerCommand('start', argv, values, dependencies, ui)
       return
     }
     case 'serve': {
+      if (values.json) {
+        throw new CodoriError('INVALID_CONFIG', JSON_OPTION_REMOVED_MESSAGE)
+      }
       await runServerCommand('serve', argv, values, dependencies, ui)
       return
     }
