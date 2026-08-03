@@ -267,6 +267,46 @@ describe('service lifecycle orchestration', () => {
     expect(resolveLastServiceRoot(homeDir)).toBe(changedRoot)
   })
 
+  it('restarts an active linux service when start applies launch overrides', async () => {
+    const homeDir = mkdtempSync(join(os.tmpdir(), 'codori-home-'))
+    const root = mkdtempSync(join(os.tmpdir(), 'codori-root-'))
+    mkdirSync(join(root, '.git'), { recursive: true })
+    const commands: string[] = []
+    const runCommand = async (command: string, args: string[]) => {
+      commands.push(`${command} ${args.join(' ')}`)
+      return {
+        exitCode: 0,
+        stdout: args[0] === '--version' ? 'systemd 255' : '',
+        stderr: ''
+      }
+    }
+    const dependencies = {
+      homeDir,
+      cwd: root,
+      platform: 'linux' as NodeJS.Platform,
+      nodePath: '/opt/node/bin/node',
+      npxPath: '/opt/node/bin/npx',
+      runCommand,
+      stdout: createOutput().stream
+    }
+
+    const installed = await installService({ root, yes: true }, dependencies)
+    commands.length = 0
+
+    const started = await startService({
+      root,
+      host: '0.0.0.0',
+      tailscaleServePolicy: 'disabled',
+      yes: true
+    }, dependencies)
+
+    expect(started.metadata.host).toBe('0.0.0.0')
+    expect(started.metadata.tailscaleServePolicy).toBe('disabled')
+    expect(commands).toContain('systemctl --user daemon-reload')
+    expect(commands).toContain(`systemctl --user restart ${installed.metadata.serviceName}`)
+    expect(commands).not.toContain(`systemctl --user start ${installed.metadata.serviceName}`)
+  })
+
   it('migrates legacy service metadata and launcher on restart', async () => {
     const homeDir = mkdtempSync(join(os.tmpdir(), 'codori-home-'))
     const root = mkdtempSync(join(os.tmpdir(), 'codori-root-'))
@@ -344,7 +384,12 @@ describe('service lifecycle orchestration', () => {
     })
 
     const failures = await Promise.all([
-      startService({ root, yes: true }, dependencies).catch(error => String(error.message)),
+      startService({
+        root,
+        host: '0.0.0.0',
+        tailscaleServePolicy: 'disabled',
+        yes: true
+      }, dependencies).catch(error => String(error.message)),
       stopService({ root, yes: true }, dependencies).catch(error => String(error.message)),
       statusService({ root, yes: true }, dependencies).catch(error => String(error.message))
     ])
@@ -352,6 +397,8 @@ describe('service lifecycle orchestration', () => {
     // `start-service`, `stop-service`, and `status-service` are not accepted by
     // the CLI, so a printed recovery command must use the `service <verb>` form.
     expect(failures[0]).toContain('service start')
+    expect(failures[0]).toContain('--host 0.0.0.0')
+    expect(failures[0]).toContain('--no-tailscale-serve')
     expect(failures[1]).toContain('service stop')
     expect(failures[2]).toContain('service status')
     for (const message of failures) {
@@ -368,6 +415,7 @@ describe('service lifecycle orchestration', () => {
       root,
       host: '127.0.0.1',
       scope: 'system',
+      tailscaleServePolicy: 'required',
       yes: true
     }, {
       homeDir,
@@ -380,7 +428,7 @@ describe('service lifecycle orchestration', () => {
         stderr: ''
       }),
       stdout: createOutput().stream
-    })).rejects.toThrow(/elevated prompt/)
+    })).rejects.toThrow(/elevated prompt.*--tailscale-serve/)
 
     // Nothing should be written before the elevation check passes.
     expect(existsSync(join(homeDir, '.codori', 'services'))).toBe(false)
