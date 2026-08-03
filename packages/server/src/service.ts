@@ -330,6 +330,7 @@ const buildCanonicalInvocation = (
     port?: number
     scope?: ServiceScope
     yes?: boolean
+    tailscaleServePolicy?: TailscaleServePolicy
   }
 ) => {
   // Keep literal command words unquoted so the printed command can be pasted
@@ -349,6 +350,11 @@ const buildCanonicalInvocation = (
   }
   if (options.scope) {
     parts.push('--scope', options.scope)
+  }
+  if (options.tailscaleServePolicy === 'required') {
+    parts.push('--tailscale-serve')
+  } else if (options.tailscaleServePolicy === 'disabled') {
+    parts.push('--no-tailscale-serve')
   }
   if (options.yes) {
     parts.push('--yes')
@@ -628,7 +634,14 @@ const createWindowsElevationProbe = (runCommand: CommandRunner) => async () => {
 const ensureSystemScopePrivileges = (
   scope: ServiceScope,
   command: ServiceCommandName,
-  options: { root?: string, host?: string, port?: number, scope?: ServiceScope, yes?: boolean },
+  options: {
+    root?: string
+    host?: string
+    port?: number
+    scope?: ServiceScope
+    yes?: boolean
+    tailscaleServePolicy?: TailscaleServePolicy
+  },
   platform: ServicePlatform = 'linux',
   isElevated?: () => Promise<boolean>
 ) => {
@@ -650,7 +663,14 @@ const ensureSystemScopePrivileges = (
 const ensureWindowsElevation = async (
   scope: ServiceScope,
   command: ServiceCommandName,
-  options: { root?: string, host?: string, port?: number, scope?: ServiceScope, yes?: boolean },
+  options: {
+    root?: string
+    host?: string
+    port?: number
+    scope?: ServiceScope
+    yes?: boolean
+    tailscaleServePolicy?: TailscaleServePolicy
+  },
   isElevated?: () => Promise<boolean>
 ) => {
   if (scope !== 'system') {
@@ -676,7 +696,7 @@ const shouldIgnoreCommandFailure = (
     // Starting an already-loaded service fails on bootstrap; kickstart still
     // brings it up.
     if (action === 'start') {
-      return command.args[0] === 'bootstrap'
+      return command.args[0] === 'bootout' || command.args[0] === 'bootstrap'
     }
     return action !== 'restart' && command.args[0] === 'bootout'
   }
@@ -1101,6 +1121,7 @@ export const installService = async (
       host,
       port,
       scope,
+      tailscaleServePolicy,
       yes
     }, platform, createWindowsElevationProbe(runCommand))
 
@@ -1196,7 +1217,9 @@ export const restartService = async (
 
     await ensureSystemScopePrivileges(metadata.scope, 'restart-service', {
       root: metadata.root,
+      host: options.host,
       scope: metadata.scope,
+      tailscaleServePolicy: options.tailscaleServePolicy,
       yes
     }, metadata.platform, createWindowsElevationProbe(runCommand))
 
@@ -1296,6 +1319,10 @@ const runLifecycleAction = async (
       ? await resolveRootWithPrompt(options.root, yes, cwd, prompt)
       : resolveLastServiceRoot(homeDir) ?? await resolveRootWithPrompt(options.root, yes, cwd, prompt)
     let metadata = loadServiceMetadata(root, homeDir)
+    const previousLaunch = {
+      host: metadata.host,
+      tailscaleServePolicy: metadata.tailscaleServePolicy
+    }
 
     const commandName = action === 'start'
       ? 'start-service'
@@ -1303,7 +1330,9 @@ const runLifecycleAction = async (
 
     await ensureSystemScopePrivileges(metadata.scope, commandName, {
       root: metadata.root,
+      host: options.host,
       scope: metadata.scope,
+      tailscaleServePolicy: options.tailscaleServePolicy,
       yes
     }, metadata.platform, createWindowsElevationProbe(runCommand))
 
@@ -1316,7 +1345,16 @@ const runLifecycleAction = async (
     if (action === 'start') {
       writeLauncherAndServiceFiles(metadata, definition, homeDir, nodePath, npxPath)
     }
-    const commands = resolveServiceCommands(action, metadata, definition)
+    const launchChanged = action === 'start' && (
+      metadata.host !== previousLaunch.host
+      || metadata.tailscaleServePolicy !== previousLaunch.tailscaleServePolicy
+    )
+    const commandAction = action === 'start' && (
+      launchChanged
+      || options.host !== undefined
+      || options.tailscaleServePolicy !== undefined
+    ) ? 'restart' : action
+    const commands = resolveServiceCommands(commandAction, metadata, definition)
 
     if (action === 'status') {
       const [statusCommand] = commands
