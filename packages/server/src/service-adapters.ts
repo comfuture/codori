@@ -49,14 +49,32 @@ const WINDOWS_SYSTEM_ACCOUNT_SID = 'S-1-5-18'
 const getCurrentUserName = (env: NodeJS.ProcessEnv = process.env) =>
   env.USERNAME?.trim() || env.USER?.trim() || ''
 
-const quoteSystemdPathValue = (value: string) =>
+/**
+ * `WorkingDirectory=` takes one raw path and is not split on whitespace, so
+ * systemd treats surrounding quotes as part of the path and rejects the unit
+ * with `path is not absolute`. Only `%` needs escaping here, because systemd
+ * expands `%` specifiers in this value.
+ *
+ * Verified on Ubuntu 22.04 (systemd 249): a bare path containing spaces passes
+ * `systemd-analyze verify`, a quoted one fails, and a bare `%%` still resolves
+ * to a literal `%`.
+ */
+const escapeSystemdBarePathValue = (value: string) => value.replaceAll('%', '%%')
+
+/**
+ * `ExecStart=` is a command line split on whitespace, so the executable path
+ * does need quoting to survive a directory name containing spaces. `$` is
+ * doubled as well, since systemd expands `$VAR` in a command line.
+ *
+ * This is deliberately different from `WorkingDirectory=`: quoting the two the
+ * same way is what made every generated unit unloadable.
+ */
+const quoteSystemdExecValue = (value: string) =>
   `"${value
     .replaceAll('\\', '\\\\')
     .replaceAll('"', '\\"')
-    .replaceAll('%', '%%')}"`
-
-const quoteSystemdExecValue = (value: string) =>
-  quoteSystemdPathValue(value).replaceAll('$', '$$$$')
+    .replaceAll('%', '%%')
+    .replaceAll('$', '$$$$')}"`
 
 export const resolveServicePlatform = (platform = process.platform): ServicePlatform => {
   if (platform === 'darwin' || platform === 'linux' || platform === 'win32') {
@@ -111,7 +129,7 @@ export const renderSystemdUnit = ({ serviceName, launcherPath, root }: Omit<Serv
   '',
   '[Service]',
   'Type=simple',
-  `WorkingDirectory=${quoteSystemdPathValue(root)}`,
+  `WorkingDirectory=${escapeSystemdBarePathValue(root)}`,
   `ExecStart=${quoteSystemdExecValue(launcherPath)}`,
   'Restart=always',
   'RestartSec=5',
