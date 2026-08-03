@@ -10,7 +10,7 @@ which provides the `codori` command as a thin launcher over this one:
 
 ```bash
 npm install -g @codori/cli
-codori serve --root ~/Project
+codori start --root ~/Project
 ```
 
 Running this package directly stays fully supported and behaves identically.
@@ -24,13 +24,13 @@ Run Codori from the directory that contains your Git projects:
 
 ```bash
 cd ~/Project
-npx @codori/server serve
+npx @codori/server start
 ```
 
 Or point it at a different root explicitly:
 
 ```bash
-npx @codori/server serve --root ~/Project --host 127.0.0.1 --port 4310
+npx @codori/server start --root ~/Project --host 127.0.0.1 --port 4310
 ```
 
 The server serves the dashboard UI, immersive WebXR workspace, REST API, and
@@ -74,12 +74,18 @@ an appropriate access-control layer.
 
 ## Private Tailscale Serve
 
-On a machine that is already connected to Tailscale, a direct launch can bind
-Codori to loopback and configure persistent private HTTPS in one command:
+On a machine with a running Tailscale backend and a usable MagicDNS name, a
+normal direct or registered-service start binds Codori to loopback and
+configures persistent private HTTPS automatically:
 
 ```bash
-codori serve --root ~/Project --tailscale-serve
+codori start --root ~/Project
 ```
+
+Use `--tailscale-serve` to require this path and fail when its prerequisites
+cannot be satisfied. Use `--no-tailscale-serve` to disable automatic detection
+and mutation. `codori serve` remains accepted as a deprecated alias for
+`codori start`.
 
 Codori inspects `tailscale serve status --json`, refuses to replace a
 conflicting HTTPS root or Funnel listener, starts the HTTP origin only on
@@ -103,8 +109,7 @@ tailscale serve --https=443 off
 
 This mode is tailnet-only and relies on Tailscale membership and access-control
 rules. It does not enable Funnel, provide Codori-owned authentication, or
-support public exposure. Installed-service integration remains separate from
-this direct-launch option.
+support public exposure.
 
 ## App-server backend selection
 
@@ -181,7 +186,12 @@ codori service uninstall --root ~/Project/codori
 The earlier `install-service`, `setup-service`, `restart-service`, and
 `uninstall-service` commands remain accepted as aliases.
 
-The installer resolves missing `--root`, `--host`, and `--port` values interactively. If Tailscale is installed and running, the first tailnet IPv4 address becomes the default host. Otherwise the default host is `0.0.0.0`, and Codori prints a warning because that can expose the service without authentication unless you already have a firewall or private network boundary in place.
+The installer resolves missing `--root` and `--port` values interactively and
+uses `127.0.0.1` as the safe default host. Its Tailscale Serve policy defaults
+to `auto`; `--tailscale-serve` stores a required policy and
+`--no-tailscale-serve` stores a disabled policy. `service install`, `service
+start`, and `service restart` print the verified tailnet URL whenever Serve is
+active.
 
 By default Codori installs a user-scoped service:
 
@@ -196,7 +206,17 @@ privileges are required, Codori stops before writing files and prints the exact
 command to re-run: `sudo codori service ...` on macOS and Linux, or the same
 command from an Administrator terminal on Windows.
 
-`service restart` regenerates the launcher script and service definition before restarting. That keeps the service aligned with the current `node` and `npx` paths after package updates.
+`service start` and `service restart` regenerate the launcher script and
+service definition before launching. Launchers use the canonical
+`@codori/server start` verb. Metadata written by older releases has no ingress
+policy; the next start/restart/update treats it as `auto`, rewrites it to the
+current schema, switches the backend listener to loopback, and restarts while
+preserving the remembered project root.
+
+On macOS the launchd label and launcher directory include a deterministic
+12-character SHA-256 prefix derived from the resolved install root. It is not
+random: `codori service status|start|stop|restart|uninstall --root <path>` is
+the supported management surface for that root.
 
 ### Windows notes
 

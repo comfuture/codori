@@ -11,13 +11,17 @@ npm install -g @codori/cli
 
 ## Usage
 
-Serve every Git project under a parent directory:
+Start Codori for every Git project under a parent directory:
 
 ```bash
-codori serve --root ~/Project
+codori start --root ~/Project
 ```
 
-Then open the printed URL, which defaults to `http://127.0.0.1:4310`.
+Realtime voice is enabled by default. When the host is connected to a running
+Tailscale backend with a usable MagicDNS name, Codori also configures private
+Tailscale Serve HTTPS on the loopback listener and prints the tailnet URL. Use
+`--no-tailscale-serve` to keep the launch local. `codori serve` remains a
+deprecated compatibility alias.
 
 Inspect discovered projects and runtime state:
 
@@ -45,7 +49,7 @@ package depends on at a matching version, so the installed `codori` binary and
 Running without installing stays supported:
 
 ```bash
-npx @codori/server serve --root ~/Project
+npx @codori/server start --root ~/Project
 ```
 
 ## Documentation
