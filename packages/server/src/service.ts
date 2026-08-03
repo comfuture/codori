@@ -4,6 +4,7 @@ import {
   chmodSync,
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   rmSync,
   statSync,
@@ -47,7 +48,7 @@ import {
   writeLastServiceRoot
 } from './config.js'
 import { CodoriError } from './errors.js'
-import { scanProjects } from './project-scanner.js'
+import { containsGitProject } from './project-scanner.js'
 import type { TailscaleServePolicy } from './tailscale-serve.js'
 
 export type ServiceScope = 'user' | 'system'
@@ -437,6 +438,97 @@ const loadServiceMetadata = (root: string, homeDir = os.homedir()) => {
   }
 
   return metadata
+}
+
+/**
+ * Every registered install, read from each `~/.codori/services` entry's
+ * `service.json`.
+ *
+ * Install metadata already records the root a service serves, so a lifecycle
+ * command does not need to infer one from the current directory. Malformed or
+ * unreadable entries are skipped rather than failing the whole lookup: one bad
+ * directory must not make an otherwise healthy install unmanageable.
+ */
+export const listInstalledServices = (homeDir = os.homedir()): ServiceInstallMetadata[] => {
+  const servicesDirectory = join(resolveCodoriHome(homeDir), 'services')
+  if (!existsSync(servicesDirectory)) {
+    return []
+  }
+
+  let entries: string[]
+  try {
+    entries = readdirSync(servicesDirectory, { withFileTypes: true })
+      .filter(entry => entry.isDirectory())
+      .map(entry => entry.name)
+  } catch {
+    return []
+  }
+
+  const installs: ServiceInstallMetadata[] = []
+  for (const installId of entries) {
+    const metadataPath = getServiceMetadataPath(installId, homeDir)
+    if (!existsSync(metadataPath)) {
+      continue
+    }
+
+    try {
+      const metadata = normalizeServiceMetadata(JSON.parse(readFileSync(metadataPath, 'utf8')))
+      if (metadata) {
+        installs.push(metadata)
+      }
+    } catch {
+      continue
+    }
+  }
+
+  return installs.sort((left, right) => left.root.localeCompare(right.root))
+}
+
+/**
+ * Resolves the root for a command that acts on an already-installed service.
+ *
+ * Precedence is explicit `--root`, then the only registered install, then a
+ * remembered root that still has metadata. Nothing here touches the filesystem
+ * outside `~/.codori`, so `codori service restart` works from any directory and
+ * cannot fail on an unrelated unreadable path.
+ *
+ * Ambiguity is reported instead of guessed: picking one of several installs
+ * could restart the wrong service.
+ */
+export const resolveInstalledServiceRoot = (
+  explicitRoot: string | undefined,
+  homeDir = os.homedir()
+) => {
+  if (explicitRoot) {
+    const resolvedRoot = resolve(explicitRoot)
+    ensureExistingDirectory(resolvedRoot)
+    return resolvedRoot
+  }
+
+  const installs = listInstalledServices(homeDir)
+  if (installs.length === 1) {
+    return installs[0].root
+  }
+
+  if (installs.length > 1) {
+    const rememberedRoot = resolveLastServiceRoot(homeDir)
+    if (rememberedRoot && installs.some(install => install.root === rememberedRoot)) {
+      return rememberedRoot
+    }
+
+    throw new CodoriError(
+      'AMBIGUOUS_SERVICE_ROOT',
+      [
+        'Several Codori services are registered, so the target is ambiguous.',
+        `Pass --root with one of: ${installs.map(install => install.root).join(', ')}.`
+      ].join(' ')
+    )
+  }
+
+  throw new CodoriError(
+    'SERVICE_NOT_INSTALLED',
+    'No registered Codori service was found. Install one first with codori service install.'
+  )
 }
 
 const resolveServiceDefinition = (
@@ -969,7 +1061,7 @@ export const detectRootPromptDefault = (cwd: string): RootPromptDefault => {
     }
   }
 
-  if (scanProjects(resolvedCwd).length > 0) {
+  if (containsGitProject(resolvedCwd)) {
     return {
       value: resolvedCwd,
       reason: 'nested-git-projects',
@@ -1192,53 +1284,45 @@ export const restartService = async (
   dependencies: ServiceCommandDependencies = {}
 ): Promise<ServiceOperationResult> => {
   const runCommand = dependencies.runCommand ?? defaultCommandRunner
-  const cwd = dependencies.cwd ?? process.cwd()
   const homeDir = resolveServiceHomeDir(dependencies)
   const nodePath = dependencies.nodePath ?? process.execPath
   const npxPath = dependencies.npxPath ?? join(dirname(nodePath), 'npx')
-  const prompt = dependencies.prompt ?? createDefaultPrompt(
-    (dependencies.stdin ?? process.stdin) as typeof process.stdin,
-    (dependencies.stdout ?? process.stdout) as typeof process.stdout
-  )
   const yes = options.yes ?? false
 
-  try {
-    const root = await resolveRootWithPrompt(options.root, yes, cwd, prompt)
-    let metadata = loadServiceMetadata(root, homeDir)
-    if (options.scope) {
-      const requestedScope = resolveServiceScope(options.scope)
-      if (requestedScope !== metadata.scope) {
-        throw new CodoriError(
-          'SERVICE_SCOPE_MISMATCH',
-          `Installed scope is ${metadata.scope}, not ${requestedScope}.`
-        )
-      }
+  // A restart acts on an existing install, so the root comes from recorded
+  // metadata instead of a scan of the current directory. Nothing here prompts,
+  // so no readline interface is opened.
+  const root = resolveInstalledServiceRoot(options.root, homeDir)
+  let metadata = loadServiceMetadata(root, homeDir)
+  if (options.scope) {
+    const requestedScope = resolveServiceScope(options.scope)
+    if (requestedScope !== metadata.scope) {
+      throw new CodoriError(
+        'SERVICE_SCOPE_MISMATCH',
+        `Installed scope is ${metadata.scope}, not ${requestedScope}.`
+      )
     }
+  }
 
-    await ensureSystemScopePrivileges(metadata.scope, 'restart-service', {
-      root: metadata.root,
-      host: options.host,
-      scope: metadata.scope,
-      tailscaleServePolicy: options.tailscaleServePolicy,
-      yes
-    }, metadata.platform, createWindowsElevationProbe(runCommand))
+  await ensureSystemScopePrivileges(metadata.scope, 'restart-service', {
+    root: metadata.root,
+    host: options.host,
+    scope: metadata.scope,
+    tailscaleServePolicy: options.tailscaleServePolicy,
+    yes
+  }, metadata.platform, createWindowsElevationProbe(runCommand))
 
-    await ensurePlatformServiceManager(metadata.platform, metadata.scope, runCommand)
+  await ensurePlatformServiceManager(metadata.platform, metadata.scope, runCommand)
 
-    metadata = applyServiceLaunchPolicy(metadata, options)
-    const definition = resolveServiceDefinition(metadata, homeDir)
-    writeLauncherAndServiceFiles(metadata, definition, homeDir, nodePath, npxPath)
-    await runCommandSequence(resolveServiceCommands('restart', metadata, definition), runCommand)
-    writeServiceMetadata(metadata, homeDir)
+  metadata = applyServiceLaunchPolicy(metadata, options)
+  const definition = resolveServiceDefinition(metadata, homeDir)
+  writeLauncherAndServiceFiles(metadata, definition, homeDir, nodePath, npxPath)
+  await runCommandSequence(resolveServiceCommands('restart', metadata, definition), runCommand)
+  writeServiceMetadata(metadata, homeDir)
 
-    return {
-      action: 'restart',
-      metadata
-    }
-  } finally {
-    if (!dependencies.prompt) {
-      await prompt.close()
-    }
+  return {
+    action: 'restart',
+    metadata
   }
 }
 
@@ -1247,7 +1331,6 @@ export const uninstallService = async (
   dependencies: ServiceCommandDependencies = {}
 ): Promise<ServiceOperationResult> => {
   const runCommand = dependencies.runCommand ?? defaultCommandRunner
-  const cwd = dependencies.cwd ?? process.cwd()
   const homeDir = resolveServiceHomeDir(dependencies)
   const prompt = dependencies.prompt ?? createDefaultPrompt(
     (dependencies.stdin ?? process.stdin) as typeof process.stdin,
@@ -1256,7 +1339,7 @@ export const uninstallService = async (
   const yes = options.yes ?? false
 
   try {
-    const root = await resolveRootWithPrompt(options.root, yes, cwd, prompt)
+    const root = resolveInstalledServiceRoot(options.root, homeDir)
     const metadata = loadServiceMetadata(root, homeDir)
     await ensureSystemScopePrivileges(metadata.scope, 'uninstall-service', {
       root: metadata.root,
@@ -1304,88 +1387,77 @@ const runLifecycleAction = async (
   dependencies: ServiceCommandDependencies
 ): Promise<ServiceOperationResult> => {
   const runCommand = dependencies.runCommand ?? defaultCommandRunner
-  const cwd = dependencies.cwd ?? process.cwd()
   const homeDir = resolveServiceHomeDir(dependencies)
   const nodePath = dependencies.nodePath ?? process.execPath
   const npxPath = dependencies.npxPath ?? join(dirname(nodePath), 'npx')
-  const prompt = dependencies.prompt ?? createDefaultPrompt(
-    (dependencies.stdin ?? process.stdin) as typeof process.stdin,
-    (dependencies.stdout ?? process.stdout) as typeof process.stdout
-  )
   const yes = options.yes ?? false
 
-  try {
-    const root = options.root
-      ? await resolveRootWithPrompt(options.root, yes, cwd, prompt)
-      : resolveLastServiceRoot(homeDir) ?? await resolveRootWithPrompt(options.root, yes, cwd, prompt)
-    let metadata = loadServiceMetadata(root, homeDir)
-    const previousLaunch = {
-      host: metadata.host,
-      tailscaleServePolicy: metadata.tailscaleServePolicy
-    }
+  // These verbs only act on an already-registered install, so the root is
+  // resolved from metadata and no prompt is ever opened.
+  const root = resolveInstalledServiceRoot(options.root, homeDir)
+  let metadata = loadServiceMetadata(root, homeDir)
+  const previousLaunch = {
+    host: metadata.host,
+    tailscaleServePolicy: metadata.tailscaleServePolicy
+  }
 
-    const commandName = action === 'start'
-      ? 'start-service'
-      : action === 'stop' ? 'stop-service' : 'status-service'
+  const commandName = action === 'start'
+    ? 'start-service'
+    : action === 'stop' ? 'stop-service' : 'status-service'
 
-    await ensureSystemScopePrivileges(metadata.scope, commandName, {
-      root: metadata.root,
-      host: options.host,
-      scope: metadata.scope,
-      tailscaleServePolicy: options.tailscaleServePolicy,
-      yes
-    }, metadata.platform, createWindowsElevationProbe(runCommand))
+  await ensureSystemScopePrivileges(metadata.scope, commandName, {
+    root: metadata.root,
+    host: options.host,
+    scope: metadata.scope,
+    tailscaleServePolicy: options.tailscaleServePolicy,
+    yes
+  }, metadata.platform, createWindowsElevationProbe(runCommand))
 
-    await ensurePlatformServiceManager(metadata.platform, metadata.scope, runCommand)
+  await ensurePlatformServiceManager(metadata.platform, metadata.scope, runCommand)
 
-    if (action === 'start') {
-      metadata = applyServiceLaunchPolicy(metadata, options)
-    }
-    const definition = resolveServiceDefinition(metadata, homeDir)
-    if (action === 'start') {
-      writeLauncherAndServiceFiles(metadata, definition, homeDir, nodePath, npxPath)
-    }
-    const launchChanged = action === 'start' && (
-      metadata.host !== previousLaunch.host
-      || metadata.tailscaleServePolicy !== previousLaunch.tailscaleServePolicy
-    )
-    const commandAction = action === 'start' && (
-      launchChanged
-      || options.host !== undefined
-      || options.tailscaleServePolicy !== undefined
-    ) ? 'restart' : action
-    const commands = resolveServiceCommands(commandAction, metadata, definition)
+  if (action === 'start') {
+    metadata = applyServiceLaunchPolicy(metadata, options)
+  }
+  const definition = resolveServiceDefinition(metadata, homeDir)
+  if (action === 'start') {
+    writeLauncherAndServiceFiles(metadata, definition, homeDir, nodePath, npxPath)
+  }
+  const launchChanged = action === 'start' && (
+    metadata.host !== previousLaunch.host
+    || metadata.tailscaleServePolicy !== previousLaunch.tailscaleServePolicy
+  )
+  const commandAction = action === 'start' && (
+    launchChanged
+    || options.host !== undefined
+    || options.tailscaleServePolicy !== undefined
+  ) ? 'restart' : action
+  const commands = resolveServiceCommands(commandAction, metadata, definition)
 
-    if (action === 'status') {
-      const [statusCommand] = commands
-      const result = await runCommand(statusCommand.command, statusCommand.args)
-      return {
-        action,
-        metadata,
-        status: result.exitCode === 0
-          ? result.stdout.trim() || 'running'
-          : (result.stderr.trim() || result.stdout.trim() || 'not running')
-      }
-    }
-
-    await runCommandSequence(
-      commands,
-      runCommand,
-      (command, result) => shouldIgnoreCommandFailure(action, metadata, command) && result.exitCode !== 0
-    )
-
-    if (action === 'start') {
-      writeServiceMetadata(metadata, homeDir)
-    }
-
+  if (action === 'status') {
+    const [statusCommand] = commands
+    const result = await runCommand(statusCommand.command, statusCommand.args)
     return {
       action,
-      metadata
+      metadata,
+      status: result.exitCode === 0
+        ? result.stdout.trim() || 'running'
+        : (result.stderr.trim() || result.stdout.trim() || 'not running')
     }
-  } finally {
-    if (!dependencies.prompt) {
-      await prompt.close()
-    }
+  }
+
+  await runCommandSequence(
+    commands,
+    runCommand,
+    (command, result) => shouldIgnoreCommandFailure(action, metadata, command) && result.exitCode !== 0
+  )
+
+  if (action === 'start') {
+    writeServiceMetadata(metadata, homeDir)
+  }
+
+  return {
+    action,
+    metadata
   }
 }
 
