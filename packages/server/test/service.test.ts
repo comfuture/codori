@@ -4,7 +4,6 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   buildLauncherScript,
-  detectTailscaleIpv4,
   detectRootPromptDefault,
   getServiceLauncherPath,
   getServiceMetadataDirectory,
@@ -107,54 +106,13 @@ describe('service helpers', () => {
     expect(resolveDefaultServicePort(8080)).toBe(8080)
   })
 
-  it('uses the running tailscale IPv4 address as the default host', async () => {
-    const tailscaleIpv4 = await detectTailscaleIpv4(async () => ({
-      exitCode: 0,
-      stdout: JSON.stringify({
-        BackendState: 'Running',
-        Self: {
-          TailscaleIPs: ['100.100.100.100', 'fd7a:115c:a1e0::1']
-        }
-      }),
-      stderr: ''
-    }))
-
-    expect(tailscaleIpv4).toBe('100.100.100.100')
-  })
-
-  it('falls back to tailscale ip when status output is unavailable', async () => {
-    const calls: string[] = []
-    const tailscaleIpv4 = await detectTailscaleIpv4(async (command, args) => {
-      calls.push(`${command} ${args.join(' ')}`)
-      if (args[0] === 'status') {
-        throw new Error('tailscale missing')
-      }
-
-      return {
-        exitCode: 0,
-        stdout: '100.64.0.10\n',
-        stderr: ''
-      }
-    })
-
-    expect(tailscaleIpv4).toBe('100.64.0.10')
-    expect(calls).toEqual([
-      'tailscale status --json',
-      'tailscale ip -4'
-    ])
-  })
-
-  it('returns the wildcard host and warning when tailscale is unavailable', async () => {
-    const hostDefault = await resolveHostPromptDefault(undefined, async () => ({
-      exitCode: 1,
-      stdout: '',
-      stderr: 'not running'
-    }))
+  it('uses the safe loopback host by default', async () => {
+    const hostDefault = await resolveHostPromptDefault(undefined)
 
     expect(hostDefault).toEqual({
-      value: '0.0.0.0',
-      source: 'wildcard',
-      warning: getWildcardHostWarning()
+      value: '127.0.0.1',
+      source: 'loopback',
+      warning: null
     })
   })
 
@@ -179,7 +137,8 @@ describe('service helpers', () => {
       port: 4310,
       scope: 'user',
       nodePath: '/opt/node/bin/node',
-      npxPath: '/opt/node/bin/npx'
+      npxPath: '/opt/node/bin/npx',
+      tailscaleServePolicy: 'disabled'
     })
 
     expect(script).toContain('#!/bin/sh')
@@ -191,7 +150,7 @@ describe('service helpers', () => {
     // root changed from Settings is not overridden on the next managed launch.
     expect(script).toContain("export CODORI_SERVICE_INSTALL_ROOT='/tmp/workspace'")
     expect(script).not.toContain('--root')
-    expect(script).toContain("exec '/opt/node/bin/npx' --yes @codori/server serve --host '100.64.0.10' --port 4310")
+    expect(script).toContain("exec '/opt/node/bin/npx' --yes @codori/server start --host '100.64.0.10' --port 4310 --no-tailscale-serve")
     // A user-scoped service resolves the same home at runtime.
     expect(script).not.toContain('CODORI_SERVICE_HOME')
   })

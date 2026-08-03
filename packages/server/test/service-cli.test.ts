@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import { join } from 'node:path'
 import { PassThrough } from 'node:stream'
@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest'
 import { resolveLastServiceRoot, writeLastServiceRoot } from '../src/config.js'
 import {
   installService,
+  getServiceMetadataPath,
   restartService,
   startService,
   statusService,
@@ -70,12 +71,13 @@ describe('service lifecycle orchestration', () => {
       stdout: stdout.stream
     })
 
-    expect(installed.metadata.host).toBe('100.88.1.2')
+    expect(installed.metadata.host).toBe('127.0.0.1')
+    expect(installed.metadata.tailscaleServePolicy).toBe('auto')
     expect(installed.metadata.port).toBe(4310)
     expect(existsSync(installed.metadata.launcherPath)).toBe(true)
     expect(existsSync(installed.metadata.serviceFilePath)).toBe(true)
     expect(readFileSync(installed.metadata.launcherPath, 'utf8')).toContain(
-      "exec '/opt/node/bin/npx' --yes @codori/server serve"
+      "exec '/opt/node/bin/npx' --yes @codori/server start"
     )
     expect(stdout.read()).toContain('Service installation summary:')
     expect(commands).toContain(
@@ -180,6 +182,7 @@ describe('service lifecycle orchestration', () => {
     const installed = await installService({
       root,
       host: '127.0.0.1',
+      tailscaleServePolicy: 'disabled',
       yes: true
     }, dependencies)
 
@@ -193,7 +196,8 @@ describe('service lifecycle orchestration', () => {
     expect(launcher).toContain('set "CODORI_SERVICE_MANAGED=1"')
     expect(launcher).toContain(`set "CODORI_SERVICE_INSTALL_ID=${installed.metadata.installId}"`)
     expect(launcher).toContain('set "CODORI_SERVICE_SCOPE=user"')
-    expect(launcher).toContain('npx.cmd" --yes @codori/server serve')
+    expect(launcher).toContain('npx.cmd" --yes @codori/server start')
+    expect(launcher).toContain('--no-tailscale-serve')
 
     // The task definition must be UTF-16 for schtasks /XML to accept it.
     const taskXml = readFileSync(installed.metadata.serviceFilePath, 'utf16le')
@@ -204,7 +208,8 @@ describe('service lifecycle orchestration', () => {
       `schtasks /Create /TN ${installed.metadata.serviceName} /XML ${installed.metadata.serviceFilePath} /F`
     )
 
-    await startService({ root, yes: true }, dependencies)
+    const started = await startService({ root, yes: true }, dependencies)
+    expect(started.metadata.tailscaleServePolicy).toBe('disabled')
     expect(commands).toContain(`schtasks /Run /TN ${installed.metadata.serviceName}`)
 
     await stopService({ root, yes: true }, dependencies)
@@ -260,6 +265,51 @@ describe('service lifecycle orchestration', () => {
 
     await startService({ root: installRoot, yes: true }, dependencies)
     expect(resolveLastServiceRoot(homeDir)).toBe(changedRoot)
+  })
+
+  it('migrates legacy service metadata and launcher on restart', async () => {
+    const homeDir = mkdtempSync(join(os.tmpdir(), 'codori-home-'))
+    const root = mkdtempSync(join(os.tmpdir(), 'codori-root-'))
+    mkdirSync(join(root, '.git'), { recursive: true })
+    const dependencies = {
+      homeDir,
+      cwd: root,
+      platform: 'darwin' as NodeJS.Platform,
+      nodePath: '/opt/node/bin/node',
+      npxPath: '/opt/node/bin/npx',
+      runCommand: async () => ({ exitCode: 0, stdout: '', stderr: '' }),
+      stdout: createOutput().stream
+    }
+
+    const installed = await installService({
+      root,
+      host: '100.88.1.2',
+      yes: true
+    }, dependencies)
+    const legacyMetadata = Object.fromEntries(
+      Object.entries(installed.metadata)
+        .filter(([key]) => key !== 'tailscaleServePolicy')
+    )
+    writeFileSync(
+      getServiceMetadataPath(installed.metadata.installId, homeDir),
+      `${JSON.stringify(legacyMetadata, null, 2)}\n`,
+      'utf8'
+    )
+
+    const restarted = await restartService({ root, yes: true }, dependencies)
+
+    expect(restarted.metadata.host).toBe('127.0.0.1')
+    expect(restarted.metadata.tailscaleServePolicy).toBe('auto')
+    expect(readFileSync(restarted.metadata.launcherPath, 'utf8')).toContain(
+      "@codori/server start --host '127.0.0.1'"
+    )
+    expect(JSON.parse(readFileSync(
+      getServiceMetadataPath(restarted.metadata.installId, homeDir),
+      'utf8'
+    ))).toMatchObject({
+      host: '127.0.0.1',
+      tailscaleServePolicy: 'auto'
+    })
   })
 
   it('prints a runnable canonical command when elevation is missing', async () => {

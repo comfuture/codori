@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   configureTailscaleServe,
+  detectTailscaleServeEligibility,
   type TailscaleCommandResult
 } from '../src/tailscale-serve.js'
 
@@ -192,5 +193,47 @@ describe('configureTailscaleServe', () => {
       url: 'https://codori-host.example.ts.net/',
       alreadyConfigured: false
     })
+  })
+})
+
+describe('detectTailscaleServeEligibility', () => {
+  it('accepts a running node with a MagicDNS identity', async () => {
+    const runCommand = vi.fn().mockResolvedValue(result(JSON.stringify({
+      BackendState: 'Running',
+      MagicDNSSuffix: 'example.ts.net',
+      Self: {
+        DNSName: 'codori-host.example.ts.net.'
+      }
+    })))
+
+    await expect(detectTailscaleServeEligibility(runCommand)).resolves.toEqual({
+      eligible: true,
+      dnsName: 'codori-host.example.ts.net',
+      reason: 'available'
+    })
+    expect(runCommand).toHaveBeenCalledWith('tailscale', ['status', '--json'])
+  })
+
+  it('rejects stopped, malformed, and MagicDNS-less states without throwing', async () => {
+    await expect(detectTailscaleServeEligibility(vi.fn().mockResolvedValue(result(JSON.stringify({
+      BackendState: 'Stopped'
+    }))))).resolves.toMatchObject({
+      eligible: false,
+      reason: 'not-running'
+    })
+
+    await expect(detectTailscaleServeEligibility(vi.fn().mockResolvedValue(result(JSON.stringify({
+      BackendState: 'Running',
+      Self: { DNSName: 'codori-host' }
+    }))))).resolves.toMatchObject({
+      eligible: false,
+      reason: 'magicdns-unavailable'
+    })
+
+    await expect(detectTailscaleServeEligibility(vi.fn().mockResolvedValue(result('not-json'))))
+      .resolves.toMatchObject({
+        eligible: false,
+        reason: 'unavailable'
+      })
   })
 })
