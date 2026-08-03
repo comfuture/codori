@@ -1,7 +1,7 @@
 {
   "name": "codori-workspace",
   "private": true,
-  "version": "0.12.0",
+  "version": "0.12.1",
   "packageManager": "pnpm@10.33.2",
   "scripts": {
     "build": "pnpm --filter @codori/client build && pnpm --filter @codori/webxr build && pnpm --filter @codori/server build && pnpm --filter @codori/cli build",
