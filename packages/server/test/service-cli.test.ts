@@ -1,12 +1,14 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { PassThrough } from 'node:stream'
 import { describe, expect, it } from 'vitest'
 import { resolveLastServiceRoot, writeLastServiceRoot } from '../src/config.js'
 import {
   installService,
   getServiceMetadataPath,
+  listInstalledServices,
+  resolveInstalledServiceRoot,
   restartService,
   startService,
   statusService,
@@ -534,5 +536,122 @@ describe('service lifecycle orchestration', () => {
     })).rejects.toThrow(/Command failed: launchctl disable/)
 
     expect(existsSync(join(homeDir, '.codori', 'services', installed.metadata.installId, 'service.json'))).toBe(true)
+  })
+})
+
+/**
+ * These cover the fix for `codori service restart` failing with
+ * `EPERM: operation not permitted, scandir '~/.Trash'`. A lifecycle command
+ * must resolve its target from recorded install metadata, never by scanning the
+ * current directory.
+ */
+describe('installed service root resolution', () => {
+  const createServiceMetadata = (
+    homeDir: string,
+    installId: string,
+    root: string
+  ) => {
+    const metadataPath = getServiceMetadataPath(installId, homeDir)
+    mkdirSync(dirname(metadataPath), { recursive: true })
+    writeFileSync(metadataPath, JSON.stringify({
+      installId,
+      root,
+      host: '127.0.0.1',
+      port: 4310,
+      scope: 'user',
+      platform: 'darwin',
+      serviceName: `io.codori.server.${installId}`,
+      serviceFilePath: join(homeDir, 'Library', 'LaunchAgents', `io.codori.server.${installId}.plist`),
+      launcherPath: join(homeDir, '.codori', 'services', installId, 'run-service.sh'),
+      installedAt: '2026-08-03T00:00:00.000Z',
+      tailscaleServePolicy: 'auto'
+    }), 'utf8')
+  }
+
+  it('adopts the only registered install instead of inspecting the cwd', () => {
+    const homeDir = mkdtempSync(join(os.tmpdir(), 'codori-home-'))
+    createServiceMetadata(homeDir, 'aaaaaaaaaaaa', '/srv/projects')
+
+    expect(resolveInstalledServiceRoot(undefined, homeDir)).toBe('/srv/projects')
+  })
+
+  it('prefers an explicit root over the registered install', () => {
+    const homeDir = mkdtempSync(join(os.tmpdir(), 'codori-home-'))
+    const explicitRoot = mkdtempSync(join(os.tmpdir(), 'codori-root-'))
+    createServiceMetadata(homeDir, 'aaaaaaaaaaaa', '/srv/projects')
+
+    expect(resolveInstalledServiceRoot(explicitRoot, homeDir)).toBe(explicitRoot)
+  })
+
+  it('reports ambiguity instead of guessing between several installs', () => {
+    const homeDir = mkdtempSync(join(os.tmpdir(), 'codori-home-'))
+    createServiceMetadata(homeDir, 'aaaaaaaaaaaa', '/srv/alpha')
+    createServiceMetadata(homeDir, 'bbbbbbbbbbbb', '/srv/beta')
+
+    expect(() => resolveInstalledServiceRoot(undefined, homeDir)).toThrow(/Pass --root with one of/)
+  })
+
+  it('breaks a tie with a remembered root that still has metadata', () => {
+    const homeDir = mkdtempSync(join(os.tmpdir(), 'codori-home-'))
+    createServiceMetadata(homeDir, 'aaaaaaaaaaaa', '/srv/alpha')
+    createServiceMetadata(homeDir, 'bbbbbbbbbbbb', '/srv/beta')
+    writeLastServiceRoot('/srv/beta', homeDir)
+
+    expect(resolveInstalledServiceRoot(undefined, homeDir)).toBe('/srv/beta')
+  })
+
+  it('ignores a remembered root with no matching install', () => {
+    const homeDir = mkdtempSync(join(os.tmpdir(), 'codori-home-'))
+    createServiceMetadata(homeDir, 'aaaaaaaaaaaa', '/srv/projects')
+    // A stale last-root.json used to produce SERVICE_NOT_INSTALLED for a
+    // directory that was never installed.
+    writeLastServiceRoot('/tmp/projects', homeDir)
+
+    expect(resolveInstalledServiceRoot(undefined, homeDir)).toBe('/srv/projects')
+  })
+
+  it('explains that nothing is installed rather than scanning for a root', () => {
+    const homeDir = mkdtempSync(join(os.tmpdir(), 'codori-home-'))
+
+    expect(() => resolveInstalledServiceRoot(undefined, homeDir))
+      .toThrow(/No registered Codori service was found/)
+  })
+
+  it('skips a malformed metadata file when listing installs', () => {
+    const homeDir = mkdtempSync(join(os.tmpdir(), 'codori-home-'))
+    createServiceMetadata(homeDir, 'aaaaaaaaaaaa', '/srv/projects')
+    const brokenPath = getServiceMetadataPath('bbbbbbbbbbbb', homeDir)
+    mkdirSync(dirname(brokenPath), { recursive: true })
+    writeFileSync(brokenPath, '{ not json', 'utf8')
+
+    expect(listInstalledServices(homeDir).map(install => install.root)).toEqual(['/srv/projects'])
+    expect(resolveInstalledServiceRoot(undefined, homeDir)).toBe('/srv/projects')
+  })
+
+  it('restarts from an unrelated cwd without touching the filesystem outside ~/.codori', async () => {
+    const homeDir = mkdtempSync(join(os.tmpdir(), 'codori-home-'))
+    const root = mkdtempSync(join(os.tmpdir(), 'codori-root-'))
+    mkdirSync(join(root, '.git'), { recursive: true })
+    const dependencies = {
+      homeDir,
+      cwd: root,
+      platform: 'darwin' as NodeJS.Platform,
+      nodePath: '/opt/node/bin/node',
+      npxPath: '/opt/node/bin/npx',
+      runCommand: async () => ({ exitCode: 0, stdout: '', stderr: '' }),
+      stdout: createOutput().stream
+    }
+
+    await installService({ root, yes: true }, dependencies)
+
+    // A directory with no .git child and no workspace marker used to send
+    // restart through a full recursive scan of that directory.
+    const unrelatedCwd = mkdtempSync(join(os.tmpdir(), 'codori-elsewhere-'))
+    const restarted = await restartService({}, {
+      ...dependencies,
+      cwd: unrelatedCwd
+    })
+
+    expect(restarted.metadata.root).toBe(root)
   })
 })
