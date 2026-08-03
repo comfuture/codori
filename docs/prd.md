@@ -9,9 +9,9 @@ Codori is a self-hosted remote coding control plane for Codex app-server.
   chat workspaces, preferring the first-party remote-control daemon and
   managing a fallback process only when required.
 - `@codori/client` provides a browser UI for browsing projects, activating/stopping project workspaces, listing prior Codex threads, starting new threads, and resuming prior threads.
-- Codori does not provide a private network tunnel. For direct launches it can
-  configure a loopback-backed Tailscale Serve mapping after the user has
-  connected the host to a tailnet.
+- Codori does not provide a private network tunnel. Direct and registered
+  service launches automatically configure a loopback-backed Tailscale Serve
+  mapping when the host reports a running backend and usable MagicDNS name.
 
 ## 2. Goals
 
@@ -26,8 +26,8 @@ Codori is a self-hosted remote coding control plane for Codex app-server.
 
 - No built-in authentication or identity layer in v1.
 - No general tunnel/provider abstraction, public ingress, Funnel, or
-  Codori-hosted relay in v1. The narrow `--tailscale-serve` direct-launch
-  helper is the only ingress automation.
+  Codori-hosted relay in v1. The narrow automatic/required/disabled Tailscale
+  Serve policy is the only ingress automation.
 - No multi-root support in v1.
 - No Codori-owned thread database in v1.
 - No direct browser connection to raw app-server ports.
@@ -40,9 +40,10 @@ Primary user:
 
 Expected usage:
 
-1. User runs `codori serve --root ~/Project`.
-2. For private remote access, the user may run with `--tailscale-serve` on a
-   host that is already connected to Tailscale.
+1. User runs `codori start --root ~/Project`.
+2. If the host is eligible, Codori binds loopback and prints the automatically
+   configured private Tailscale HTTPS URL. The user can require or disable that
+   behavior explicitly.
 3. User opens the Codori dashboard.
 4. User chooses a project from the sidebar.
 5. Codori starts the shared Codex app-server on demand if necessary.
@@ -62,7 +63,7 @@ Config shape:
 {
   "root": "/Users/comfuture/Project",
   "server": {
-    "host": "0.0.0.0",
+    "host": "127.0.0.1",
     "port": 4310
   },
   "ports": {
@@ -220,17 +221,24 @@ Binary:
 
 Commands:
 
-### `codori serve`
+### `codori start`
 
 ```bash
-codori serve --root <path> --host <host> --port <port>
+codori start --root <path> --host <host> --port <port>
 ```
 
 Behavior:
 
 - Starts the HTTP + WebSocket management server.
 - Resolves config and validates required values.
+- Enables realtime voice unless `realtimeVoice.enabled` is `false`.
+- In automatic ingress mode, detects current Tailscale and MagicDNS state,
+  binds to loopback when eligible, configures/reuses safe private HTTPS, and
+  prints the verified tailnet URL.
 - Does not eagerly start the shared app-server.
+
+`codori serve` is a deprecated compatibility alias that invokes this same
+path and prints a migration warning outside managed-service logs.
 
 ### `codori list`
 
@@ -242,7 +250,7 @@ Behavior:
 
 - Prints all discovered projects with logical workspace runtime status.
 
-### `codori start`
+### `codori start <projectId>`
 
 ```bash
 codori start <projectId> [--root <path>] [--json]
@@ -393,10 +401,11 @@ Required states:
 
 Required messaging:
 
-- A normal server launch must explain that private HTTPS is not active and name
-  `--tailscale-serve` as the supported private Tailscale setup path.
-- A `--tailscale-serve` launch must print the verified private MagicDNS HTTPS
-  URL and whether the exact mapping was configured or reused.
+- An eligible normal server/service launch must print the verified private
+  MagicDNS HTTPS URL and whether the exact mapping was configured or reused.
+- An ineligible automatic launch must continue on the safe local listener and
+  print a concise prerequisite reason. `--tailscale-serve` remains a required,
+  fail-closed request; `--no-tailscale-serve` skips detection and mutation.
 - The integration must keep the Codori origin on `127.0.0.1`, refuse existing
   root/Funnel conflicts on HTTPS port 443, and never invoke Funnel or a broad
   Serve reset.
