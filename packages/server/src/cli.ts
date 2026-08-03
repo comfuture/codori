@@ -4,7 +4,7 @@ import { realpathSync } from 'node:fs'
 import { resolve as resolvePath } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
-import { asErrorMessage, CodoriError, formatCliError } from './errors.js'
+import { CodoriError, describeErrorWithDetails, formatCliError } from './errors.js'
 import { startHttpServer } from './http-server.js'
 import { createRuntimeManager } from './process-manager.js'
 import { DEFAULT_SERVER_HOST, resolveLastServiceRoot, writeLastServiceRoot } from './config.js'
@@ -349,6 +349,22 @@ export const resolveTailscaleServePolicy = (
   return 'auto'
 }
 
+/**
+ * Reports an advisory Serve failure without hiding how to fix it.
+ *
+ * Automatic Serve is best effort: the server keeps listening on loopback, so a
+ * failure is a warning. A permission denial carries recovery steps in the error
+ * detail, and printing only the summary line left the user with a refusal and no
+ * way forward.
+ */
+const warnServeFailure = (ui: CliUi, error: unknown) => {
+  const [summary, ...details] = describeErrorWithDetails(error)
+  ui.warn(`Tailscale Serve was not configured automatically: ${summary}`)
+  for (const line of details) {
+    ui.muted(`  ${line}`)
+  }
+}
+
 const describeTailscaleEligibility = (eligibility: TailscaleServeEligibility) => {
   if (eligibility.reason === 'not-running') {
     return 'the Tailscale backend is not running'
@@ -390,7 +406,7 @@ const configureServiceTailscaleAccess = async (
     if (metadata.tailscaleServePolicy === 'required') {
       throw error
     }
-    ui.warn(`Tailscale Serve was not configured automatically: ${asErrorMessage(error)}`)
+    warnServeFailure(ui, error)
   }
 }
 
@@ -548,7 +564,7 @@ const runServerCommand = async (
   )
 
   let serveResult: TailscaleServeResult | null = null
-  let automaticServeError: string | null = null
+  let automaticServeError: unknown = null
   if (shouldConfigureTailscale) {
     try {
       serveResult = await (
@@ -560,7 +576,7 @@ const runServerCommand = async (
         await Promise.resolve(app.close()).catch(() => {})
         throw error
       }
-      automaticServeError = asErrorMessage(error)
+      automaticServeError = error
     }
   }
 
@@ -570,7 +586,7 @@ const runServerCommand = async (
     const action = serveResult.alreadyConfigured ? 'reusing' : 'configured'
     ui.success(`Tailscale Serve ${action}: ${ui.url(serveResult.url)}`)
   } else if (automaticServeError) {
-    ui.warn(`Tailscale Serve was not configured automatically: ${automaticServeError}`)
+    warnServeFailure(ui, automaticServeError)
   } else if (policy === 'auto' && eligibility && !eligibility.eligible) {
     ui.muted(`  Tailscale Serve was not configured automatically: ${describeTailscaleEligibility(eligibility)}.`)
   }
