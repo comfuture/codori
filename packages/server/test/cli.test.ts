@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import { join } from 'node:path'
 import { PassThrough } from 'node:stream'
-import { describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import {
   CLI_USAGE,
   isCliEntrypointPath,
@@ -10,6 +10,36 @@ import {
   resolveServiceCliAction,
   runCli
 } from '../src/cli.js'
+
+/**
+ * A server launch records the served root in `~/.codori/last-root.json`, and
+ * these tests launch with fixture roots. Without an isolated home, the suite
+ * overwrote the developer's real remembered root with a fixture path such as
+ * `/tmp/projects`, which then made a running service serve a directory that
+ * does not exist.
+ */
+const originalHome = process.env.HOME
+const originalUserProfile = process.env.USERPROFILE
+let scratchHome: string
+
+beforeAll(() => {
+  scratchHome = mkdtempSync(join(os.tmpdir(), 'codori-cli-home-'))
+  process.env.HOME = scratchHome
+  process.env.USERPROFILE = scratchHome
+})
+
+afterAll(() => {
+  if (originalHome === undefined) {
+    delete process.env.HOME
+  } else {
+    process.env.HOME = originalHome
+  }
+  if (originalUserProfile === undefined) {
+    delete process.env.USERPROFILE
+  } else {
+    process.env.USERPROFILE = originalUserProfile
+  }
+})
 
 const createOutput = () => {
   const stream = new PassThrough()
