@@ -27,8 +27,8 @@ export const CLI_INSTALL_PACKAGE = '@codori/cli'
 
 export const RUNTIME_COMMANDS: CliCommandDoc[] = [
   {
-    usage: 'serve',
-    description: 'Start the Codori server and serve the dashboard, WebXR app, and API.'
+    usage: 'start',
+    description: 'Start the Codori server, dashboard, WebXR app, and API.'
   },
   {
     usage: 'list',
@@ -90,13 +90,18 @@ export const CLI_OPTIONS: CliOptionDoc[] = [
   },
   {
     flag: '--tailscale-serve',
-    description: 'Configure private Tailscale Serve HTTPS on loopback.',
-    appliesTo: 'serve'
+    description: 'Require private Tailscale Serve HTTPS on loopback.',
+    appliesTo: 'start, service install/start/restart'
+  },
+  {
+    flag: '--no-tailscale-serve',
+    description: 'Disable automatic private Tailscale Serve HTTPS.',
+    appliesTo: 'start, service install/start/restart'
   },
   {
     flag: '--experimental-realtime-voice',
     description: 'Compatibility flag. Realtime voice is already enabled by default.',
-    appliesTo: 'serve'
+    appliesTo: 'start'
   },
   {
     flag: '--scope <user|system>',
@@ -121,12 +126,12 @@ export const CLI_OPTIONS: CliOptionDoc[] = [
 
 export const CLI_EXAMPLES: { command: string, description: string }[] = [
   {
-    command: `${CLI_BINARY} serve --root ~/Project`,
-    description: 'Serve every Git project under ~/Project.'
+    command: `${CLI_BINARY} start --root ~/Project`,
+    description: 'Serve every Git project under ~/Project with automatic private HTTPS.'
   },
   {
-    command: `${CLI_BINARY} serve --root ~/Project --tailscale-serve`,
-    description: 'Serve on loopback behind private Tailscale HTTPS.'
+    command: `${CLI_BINARY} start --root ~/Project --no-tailscale-serve`,
+    description: 'Start locally without configuring Tailscale Serve.'
   },
   {
     command: `${CLI_BINARY} list --root ~/Project`,
@@ -144,8 +149,8 @@ export const CLI_EXAMPLES: { command: string, description: string }[] = [
  * body advertises only the canonical `service <verb>` form.
  */
 export const LEGACY_ALIAS_NOTE
-  = 'Deprecated aliases install-service, setup-service, restart-service, and '
-  + 'uninstall-service still work; prefer service <verb>.'
+  = 'Deprecated aliases serve, install-service, setup-service, restart-service, and '
+  + 'uninstall-service still work; prefer start and service <verb>.'
 
 const renderRows = (
   ui: CliUi,

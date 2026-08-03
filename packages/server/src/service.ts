@@ -40,6 +40,7 @@ import {
   type ServiceUnitDefinition
 } from './service-adapters.js'
 import {
+  DEFAULT_SERVER_HOST,
   DEFAULT_SERVER_PORT,
   resolveCodoriHome,
   resolveLastServiceRoot,
@@ -47,6 +48,7 @@ import {
 } from './config.js'
 import { CodoriError } from './errors.js'
 import { scanProjects } from './project-scanner.js'
+import type { TailscaleServePolicy } from './tailscale-serve.js'
 
 export type ServiceScope = 'user' | 'system'
 
@@ -63,6 +65,7 @@ export type ServiceInstallMetadata = {
   serviceFilePath: string
   launcherPath: string
   installedAt: string
+  tailscaleServePolicy: TailscaleServePolicy
 }
 
 export type RootPromptDefault = {
@@ -73,7 +76,7 @@ export type RootPromptDefault = {
 
 export type HostPromptDefault = {
   value: string
-  source: 'explicit' | 'tailscale' | 'wildcard'
+  source: 'explicit' | 'loopback'
   warning: string | null
 }
 
@@ -95,6 +98,7 @@ export type LauncherScriptInput = {
   npxPath: string
   platform?: ServicePlatform
   homeDir?: string
+  tailscaleServePolicy?: TailscaleServePolicy
 }
 
 export type ServicePrompt = {
@@ -118,6 +122,7 @@ export type ServiceCommandOptions = {
   port?: string | number
   scope?: string
   yes?: boolean
+  tailscaleServePolicy?: TailscaleServePolicy
 }
 
 export type ServiceCommandDependencies = {
@@ -212,7 +217,8 @@ export const buildWindowsLauncherScript = ({
   scope,
   nodePath,
   npxPath,
-  homeDir
+  homeDir,
+  tailscaleServePolicy = 'auto'
 }: Omit<LauncherScriptInput, 'platform'>) => {
   const pathEntries = Array.from(new Set([dirname(nodePath), dirname(npxPath)]))
   const prependedPath = pathEntries.map(batchEscapeValue).join(';')
@@ -233,27 +239,16 @@ export const buildWindowsLauncherScript = ({
       batchQuote(batchEscapeValue(npxPath)),
       '--yes',
       '@codori/server',
-      'serve',
+      'start',
       '--host',
       batchQuote(batchEscapeValue(host)),
       '--port',
-      String(port)
+      String(port),
+      ...(tailscaleServePolicy === 'required'
+        ? ['--tailscale-serve']
+        : tailscaleServePolicy === 'disabled' ? ['--no-tailscale-serve'] : [])
     ].join(' ')
   ].join('\r\n')
-}
-
-const findFirstIpv4 = (values: unknown) => {
-  if (!Array.isArray(values)) {
-    return null
-  }
-
-  for (const value of values) {
-    if (typeof value === 'string' && /^\d{1,3}(?:\.\d{1,3}){3}$/.test(value)) {
-      return value
-    }
-  }
-
-  return null
 }
 
 const getCurrentUserId = () => (typeof process.getuid === 'function' ? process.getuid() : 0)
@@ -395,7 +390,22 @@ const normalizeServiceMetadata = (value: unknown): ServiceInstallMetadata | null
     return null
   }
 
-  return record as ServiceInstallMetadata
+  const tailscaleServePolicy = record.tailscaleServePolicy
+  if (
+    tailscaleServePolicy !== undefined
+    && tailscaleServePolicy !== 'auto'
+    && tailscaleServePolicy !== 'required'
+    && tailscaleServePolicy !== 'disabled'
+  ) {
+    return null
+  }
+
+  return {
+    ...record,
+    // Services installed before the automatic policy are migrated the next
+    // time start/restart rewrites their launcher and metadata.
+    tailscaleServePolicy: tailscaleServePolicy ?? 'auto'
+  } as ServiceInstallMetadata
 }
 
 const loadServiceMetadata = (root: string, homeDir = os.homedir()) => {
@@ -759,7 +769,7 @@ const resolvePromptedHost = async (
   runCommand: CommandRunner,
   stdout: NodeJS.WritableStream
 ) => {
-  const hostDefault = await resolveHostPromptDefault(host, runCommand)
+  const hostDefault = await resolveHostPromptDefault(host)
   if (hostDefault.warning) {
     createCliUi({ stream: stdout }).warn(`Warning: ${hostDefault.warning}`)
   }
@@ -773,7 +783,7 @@ const resolvePromptedHost = async (
 }
 
 const writeLauncherAndServiceFiles = (
-  metadata: Pick<ServiceInstallMetadata, 'installId' | 'root' | 'host' | 'port' | 'scope' | 'platform'>,
+  metadata: Pick<ServiceInstallMetadata, 'installId' | 'root' | 'host' | 'port' | 'scope' | 'platform' | 'tailscaleServePolicy'>,
   definition: ServiceUnitDefinition,
   homeDir: string,
   nodePath: string,
@@ -794,6 +804,7 @@ const writeLauncherAndServiceFiles = (
     nodePath,
     npxPath,
     platform: metadata.platform,
+    tailscaleServePolicy: metadata.tailscaleServePolicy,
     // Only a system scope needs this; a user-scoped service already resolves the
     // same home at runtime.
     homeDir: metadata.scope === 'system' ? homeDir : undefined
@@ -819,6 +830,31 @@ const writeServiceMetadata = (metadata: ServiceInstallMetadata, homeDir: string)
   writeFileSync(metadataPath, `${JSON.stringify(metadata, null, 2)}\n`, 'utf8')
 }
 
+const applyServiceLaunchPolicy = (
+  metadata: ServiceInstallMetadata,
+  options: ServiceCommandOptions
+): ServiceInstallMetadata => {
+  const requestedPolicy = options.tailscaleServePolicy
+    ?? (options.host && options.host !== DEFAULT_SERVER_HOST
+      ? 'disabled'
+      : metadata.tailscaleServePolicy)
+
+  if (requestedPolicy === 'required' && options.host && options.host !== DEFAULT_SERVER_HOST) {
+    throw new CodoriError(
+      'INVALID_CONFIG',
+      `Tailscale Serve requires --host ${DEFAULT_SERVER_HOST}; remove the conflicting --host value.`
+    )
+  }
+
+  return {
+    ...metadata,
+    host: requestedPolicy === 'disabled'
+      ? options.host ?? metadata.host
+      : DEFAULT_SERVER_HOST,
+    tailscaleServePolicy: requestedPolicy
+  }
+}
+
 const printInstallSummary = (
   stdout: NodeJS.WritableStream,
   summary: {
@@ -826,6 +862,7 @@ const printInstallSummary = (
     host: string
     port: number
     scope: ServiceScope
+    tailscaleServePolicy: TailscaleServePolicy
     serviceFilePath: string
     launcherPath: string
   }
@@ -837,6 +874,7 @@ const printInstallSummary = (
     ['host', summary.host],
     ['port', String(summary.port)],
     ['scope', summary.scope],
+    ['Tailscale Serve', summary.tailscaleServePolicy],
     ['launcher', summary.launcherPath],
     ['service file', summary.serviceFilePath]
   ])
@@ -853,6 +891,7 @@ const createOperationMetadata = (
     platform: ServicePlatform
     definition: ServiceUnitDefinition
     homeDir: string
+    tailscaleServePolicy: TailscaleServePolicy
   },
   now: () => Date,
   previousMetadata?: ServiceInstallMetadata
@@ -868,7 +907,8 @@ const createOperationMetadata = (
   launcherPath: getServiceLauncherPath(installId, values.homeDir, values.platform),
   installedAt: action === 'install'
     ? now().toISOString()
-    : previousMetadata?.installedAt ?? now().toISOString()
+    : previousMetadata?.installedAt ?? now().toISOString(),
+  tailscaleServePolicy: values.tailscaleServePolicy
 })
 
 export const toServiceInstallId = (root: string) =>
@@ -956,48 +996,8 @@ export const resolveDefaultServicePort = (value: number | undefined) =>
 
 export const getWildcardHostWarning = () => WILDCARD_HOST_WARNING
 
-export const detectTailscaleIpv4 = async (runCommand: CommandRunner = defaultCommandRunner) => {
-  try {
-    const status = await runCommand('tailscale', ['status', '--json'])
-    if (status.exitCode === 0) {
-      const parsed: unknown = JSON.parse(status.stdout)
-      if (typeof parsed === 'object' && parsed !== null) {
-        const backendState = 'BackendState' in parsed ? parsed.BackendState : undefined
-        const self = 'Self' in parsed ? parsed.Self : undefined
-        const selfIps = typeof self === 'object' && self !== null && 'TailscaleIPs' in self
-          ? self.TailscaleIPs
-          : undefined
-        const statusIps = 'TailscaleIPs' in parsed ? parsed.TailscaleIPs : undefined
-
-        if (backendState === 'Running') {
-          return findFirstIpv4(selfIps) ?? findFirstIpv4(statusIps)
-        }
-      }
-    }
-  } catch {
-    // Fall back to the direct IP command.
-  }
-
-  try {
-    const ipResult = await runCommand('tailscale', ['ip', '-4'])
-    if (ipResult.exitCode !== 0) {
-      return null
-    }
-
-    const line = ipResult.stdout
-      .split(/\r?\n/u)
-      .map(value => value.trim())
-      .find(Boolean)
-
-    return line && /^\d{1,3}(?:\.\d{1,3}){3}$/.test(line) ? line : null
-  } catch {
-    return null
-  }
-}
-
 export const resolveHostPromptDefault = async (
-  explicitHost: string | undefined,
-  runCommand: CommandRunner = defaultCommandRunner
+  explicitHost: string | undefined
 ): Promise<HostPromptDefault> => {
   if (explicitHost) {
     return {
@@ -1007,19 +1007,10 @@ export const resolveHostPromptDefault = async (
     }
   }
 
-  const tailscaleIpv4 = await detectTailscaleIpv4(runCommand)
-  if (tailscaleIpv4) {
-    return {
-      value: tailscaleIpv4,
-      source: 'tailscale',
-      warning: null
-    }
-  }
-
   return {
-    value: '0.0.0.0',
-    source: 'wildcard',
-    warning: WILDCARD_HOST_WARNING
+    value: DEFAULT_SERVER_HOST,
+    source: 'loopback',
+    warning: null
   }
 }
 
@@ -1032,7 +1023,8 @@ export const buildLauncherScript = ({
   nodePath,
   npxPath,
   platform = 'linux',
-  homeDir
+  homeDir,
+  tailscaleServePolicy = 'auto'
 }: LauncherScriptInput) => {
   if (platform === 'win32') {
     return buildWindowsLauncherScript({
@@ -1043,7 +1035,8 @@ export const buildLauncherScript = ({
       scope,
       nodePath,
       npxPath,
-      homeDir
+      homeDir,
+      tailscaleServePolicy
     })
   }
 
@@ -1059,7 +1052,14 @@ export const buildLauncherScript = ({
     `export ${CODORI_SERVICE_SCOPE_ENV}=${shellEscape(scope)}`,
     `export ${CODORI_SERVICE_INSTALL_ROOT_ENV}=${shellEscape(resolve(root))}`,
     ...(homeDir ? [`export ${CODORI_SERVICE_HOME_ENV}=${shellEscape(homeDir)}`] : []),
-    `exec ${shellEscape(npxPath)} --yes @codori/server serve --host ${shellEscape(host)} --port ${port}`
+    [
+      `exec ${shellEscape(npxPath)} --yes @codori/server start`,
+      `--host ${shellEscape(host)}`,
+      `--port ${port}`,
+      tailscaleServePolicy === 'required'
+        ? '--tailscale-serve'
+        : tailscaleServePolicy === 'disabled' ? '--no-tailscale-serve' : null
+    ].filter(Boolean).join(' ')
   ].join('\n')
 }
 
@@ -1083,7 +1083,17 @@ export const installService = async (
 
   try {
     const root = await resolveRootWithPrompt(options.root, yes, cwd, prompt)
-    const host = await resolvePromptedHost(options.host, yes, prompt, runCommand, stdout)
+    const tailscaleServePolicy = options.tailscaleServePolicy
+      ?? (options.host && options.host !== DEFAULT_SERVER_HOST ? 'disabled' : 'auto')
+    if (tailscaleServePolicy === 'required' && options.host && options.host !== DEFAULT_SERVER_HOST) {
+      throw new CodoriError(
+        'INVALID_CONFIG',
+        `Tailscale Serve requires --host ${DEFAULT_SERVER_HOST}; remove the conflicting --host value.`
+      )
+    }
+    const host = tailscaleServePolicy === 'disabled'
+      ? await resolvePromptedHost(options.host, yes, prompt, runCommand, stdout)
+      : DEFAULT_SERVER_HOST
     const port = await resolvePromptedPort(options.port, yes, prompt)
     const scope = await resolvePromptedScope(options.scope, yes, prompt)
     await ensureSystemScopePrivileges(scope, 'install-service', {
@@ -1109,6 +1119,7 @@ export const installService = async (
       host,
       port,
       scope,
+      tailscaleServePolicy,
       launcherPath: getServiceLauncherPath(installId, homeDir, platform),
       serviceFilePath: definition.serviceFilePath
     })
@@ -1127,7 +1138,8 @@ export const installService = async (
       scope,
       platform,
       definition,
-      homeDir
+      homeDir,
+      tailscaleServePolicy
     }, now)
 
     writeLauncherAndServiceFiles(metadata, definition, homeDir, nodePath, npxPath)
@@ -1171,7 +1183,7 @@ export const restartService = async (
 
   try {
     const root = await resolveRootWithPrompt(options.root, yes, cwd, prompt)
-    const metadata = loadServiceMetadata(root, homeDir)
+    let metadata = loadServiceMetadata(root, homeDir)
     if (options.scope) {
       const requestedScope = resolveServiceScope(options.scope)
       if (requestedScope !== metadata.scope) {
@@ -1190,9 +1202,11 @@ export const restartService = async (
 
     await ensurePlatformServiceManager(metadata.platform, metadata.scope, runCommand)
 
+    metadata = applyServiceLaunchPolicy(metadata, options)
     const definition = resolveServiceDefinition(metadata, homeDir)
     writeLauncherAndServiceFiles(metadata, definition, homeDir, nodePath, npxPath)
     await runCommandSequence(resolveServiceCommands('restart', metadata, definition), runCommand)
+    writeServiceMetadata(metadata, homeDir)
 
     return {
       action: 'restart',
@@ -1269,6 +1283,8 @@ const runLifecycleAction = async (
   const runCommand = dependencies.runCommand ?? defaultCommandRunner
   const cwd = dependencies.cwd ?? process.cwd()
   const homeDir = resolveServiceHomeDir(dependencies)
+  const nodePath = dependencies.nodePath ?? process.execPath
+  const npxPath = dependencies.npxPath ?? join(dirname(nodePath), 'npx')
   const prompt = dependencies.prompt ?? createDefaultPrompt(
     (dependencies.stdin ?? process.stdin) as typeof process.stdin,
     (dependencies.stdout ?? process.stdout) as typeof process.stdout
@@ -1279,7 +1295,7 @@ const runLifecycleAction = async (
     const root = options.root
       ? await resolveRootWithPrompt(options.root, yes, cwd, prompt)
       : resolveLastServiceRoot(homeDir) ?? await resolveRootWithPrompt(options.root, yes, cwd, prompt)
-    const metadata = loadServiceMetadata(root, homeDir)
+    let metadata = loadServiceMetadata(root, homeDir)
 
     const commandName = action === 'start'
       ? 'start-service'
@@ -1293,7 +1309,13 @@ const runLifecycleAction = async (
 
     await ensurePlatformServiceManager(metadata.platform, metadata.scope, runCommand)
 
+    if (action === 'start') {
+      metadata = applyServiceLaunchPolicy(metadata, options)
+    }
     const definition = resolveServiceDefinition(metadata, homeDir)
+    if (action === 'start') {
+      writeLauncherAndServiceFiles(metadata, definition, homeDir, nodePath, npxPath)
+    }
     const commands = resolveServiceCommands(action, metadata, definition)
 
     if (action === 'status') {
@@ -1313,6 +1335,10 @@ const runLifecycleAction = async (
       runCommand,
       (command, result) => shouldIgnoreCommandFailure(action, metadata, command) && result.exitCode !== 0
     )
+
+    if (action === 'start') {
+      writeServiceMetadata(metadata, homeDir)
+    }
 
     return {
       action,

@@ -17,6 +17,14 @@ export type TailscaleServeResult = {
   alreadyConfigured: boolean
 }
 
+export type TailscaleServePolicy = 'auto' | 'required' | 'disabled'
+
+export type TailscaleServeEligibility = {
+  eligible: boolean
+  dnsName: string | null
+  reason: 'available' | 'unavailable' | 'not-running' | 'magicdns-unavailable'
+}
+
 type ServeInspection = {
   state: 'missing' | 'configured'
   url: string | null
@@ -216,6 +224,74 @@ const readServeStatus = async (
       'Tailscale Serve returned malformed JSON from `tailscale serve status --json`.',
       error
     )
+  }
+}
+
+export const detectTailscaleServeEligibility = async (
+  runCommand: TailscaleCommandRunner = defaultCommandRunner
+): Promise<TailscaleServeEligibility> => {
+  let result: TailscaleCommandResult
+  try {
+    result = await runCommand('tailscale', ['status', '--json'])
+  } catch {
+    return {
+      eligible: false,
+      dnsName: null,
+      reason: 'unavailable'
+    }
+  }
+
+  if (result.exitCode !== 0) {
+    return {
+      eligible: false,
+      dnsName: null,
+      reason: 'unavailable'
+    }
+  }
+
+  let status: unknown
+  try {
+    status = JSON.parse(result.stdout)
+  } catch {
+    return {
+      eligible: false,
+      dnsName: null,
+      reason: 'unavailable'
+    }
+  }
+
+  if (!isRecord(status) || status.BackendState !== 'Running') {
+    return {
+      eligible: false,
+      dnsName: null,
+      reason: 'not-running'
+    }
+  }
+
+  const magicDnsSuffix = typeof status.MagicDNSSuffix === 'string'
+    ? status.MagicDNSSuffix.trim().replace(/\.$/u, '')
+    : ''
+  const self = isRecord(status.Self) ? status.Self : null
+  const dnsName = typeof self?.DNSName === 'string'
+    ? self.DNSName.trim().replace(/\.$/u, '')
+    : ''
+
+  if (
+    !magicDnsSuffix
+    || !dnsName
+    || (dnsName !== magicDnsSuffix && !dnsName.endsWith(`.${magicDnsSuffix}`))
+  ) {
+    return {
+      eligible: false,
+      dnsName: null,
+      reason: 'magicdns-unavailable'
+    }
+  }
+
+  return {
+    eligible: true,
+    dnsName,
+    reason: 'available'
   }
 }
 

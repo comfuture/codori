@@ -37,6 +37,8 @@ describe('cli service commands', () => {
     expect(help).toContain('npm install -g @codori/cli')
     expect(help).toContain('codori <command> [options]')
     expect(help).toContain('codori service install')
+    expect(help).toContain('start')
+    expect(help).toContain('Deprecated aliases serve')
     // Running without installing stays documented as the alternative.
     expect(help).toContain('npx @codori/server <command> [options]')
     // Each command carries a description rather than a bare name.
@@ -89,6 +91,11 @@ describe('cli service commands', () => {
       stdout: stdout.stream,
       createRuntimeManager: vi.fn(() => manager) as never,
       startHttpServer: startHttpServer as never,
+      detectTailscaleServeEligibility: vi.fn(async () => ({
+        eligible: false,
+        dnsName: null,
+        reason: 'unavailable' as const
+      })),
       checkStartupUpdate: vi.fn(async () => ({ checked: false, adopted: false })) as never
     })
 
@@ -182,12 +189,67 @@ describe('cli service commands', () => {
     })).toBe('/install/root')
   })
 
-  it('rejects tailscale serve for installed service commands', async () => {
-    await expect(runCli([
-      'install-service',
+  it('persists and configures required tailscale serve for service installs', async () => {
+    const homeDir = mkdtempSync(join(os.tmpdir(), 'codori-home-'))
+    const root = mkdtempSync(join(os.tmpdir(), 'codori-root-'))
+    mkdirSync(join(root, '.git'), { recursive: true })
+    const stdout = createOutput()
+    const configureTailscaleServe = vi.fn(async () => ({
+      url: 'https://codori-host.example.ts.net/',
+      alreadyConfigured: false
+    }))
+
+    await runCli([
+      'service',
+      'install',
+      '--root',
+      root,
       '--tailscale-serve',
       '--yes'
-    ])).rejects.toThrow(/available only for a direct `serve` launch/)
+    ], {
+      homeDir,
+      cwd: root,
+      platform: 'darwin',
+      nodePath: '/opt/node/bin/node',
+      npxPath: '/opt/node/bin/npx',
+      stdout: stdout.stream,
+      runCommand: async () => ({ exitCode: 0, stdout: '', stderr: '' }),
+      configureTailscaleServe
+    })
+
+    expect(configureTailscaleServe).toHaveBeenCalledWith(4310, expect.any(Function))
+    expect(stdout.read()).toContain('Tailscale Serve configured: https://codori-host.example.ts.net/')
+  })
+
+  it('automatically configures tailscale serve for service installs', async () => {
+    const homeDir = mkdtempSync(join(os.tmpdir(), 'codori-home-'))
+    const root = mkdtempSync(join(os.tmpdir(), 'codori-root-'))
+    mkdirSync(join(root, '.git'), { recursive: true })
+    const stdout = createOutput()
+    const configureTailscaleServe = vi.fn(async () => ({
+      url: 'https://codori-host.example.ts.net/',
+      alreadyConfigured: true
+    }))
+
+    await runCli(['service', 'install', '--root', root, '--yes'], {
+      homeDir,
+      cwd: root,
+      platform: 'darwin',
+      nodePath: '/opt/node/bin/node',
+      npxPath: '/opt/node/bin/npx',
+      stdout: stdout.stream,
+      runCommand: async () => ({ exitCode: 0, stdout: '', stderr: '' }),
+      detectTailscaleServeEligibility: vi.fn(async () => ({
+        eligible: true,
+        dnsName: 'codori-host.example.ts.net',
+        reason: 'available' as const
+      })),
+      configureTailscaleServe
+    })
+
+    expect(configureTailscaleServe).toHaveBeenCalledWith(4310, expect.any(Function))
+    expect(stdout.read()).toContain('Tailscale Serve  auto')
+    expect(stdout.read()).toContain('Tailscale Serve reusing: https://codori-host.example.ts.net/')
   })
 
   it('treats setup-service as an alias for install-service', async () => {
@@ -211,7 +273,8 @@ describe('cli service commands', () => {
     })
 
     expect(stdout.read()).toContain('Installed service io.codori.server.')
-    expect(stdout.read()).toContain('Warning: Binding Codori to 0.0.0.0 can expose it without authentication.')
+    expect(stdout.read()).toContain('host             127.0.0.1')
+    expect(stdout.read()).toContain('Tailscale Serve  auto')
   })
 
   it('prints usage for unknown commands instead of requiring a root', async () => {
@@ -243,6 +306,16 @@ describe('cli service commands', () => {
       '0.0.0.0',
       '--tailscale-serve'
     ])).rejects.toThrow(/requires --host 127\.0\.0\.1/)
+  })
+
+  it('rejects contradictory tailscale serve options', async () => {
+    await expect(runCli([
+      'start',
+      '--root',
+      '/tmp/projects',
+      '--tailscale-serve',
+      '--no-tailscale-serve'
+    ])).rejects.toThrow(/cannot be used together/)
   })
 
   it('explains an empty project root instead of printing nothing', async () => {
@@ -376,6 +449,123 @@ describe('cli service commands', () => {
     )
   })
 
+  it('automatically configures tailscale serve for bare start on an eligible host', async () => {
+    const stdout = createOutput()
+    const app = { close: vi.fn(), ready: vi.fn() }
+    const manager = {
+      config: {
+        root: '/tmp/projects',
+        server: { host: '127.0.0.1', port: 4310 }
+      }
+    }
+    const createRuntimeManager = vi.fn(() => manager)
+    const configureTailscaleServe = vi.fn(async () => ({
+      url: 'https://codori-host.example.ts.net/',
+      alreadyConfigured: true
+    }))
+
+    await runCli(['start', '--root', '/tmp/projects'], {
+      stdout: stdout.stream,
+      createRuntimeManager: createRuntimeManager as never,
+      startHttpServer: vi.fn(async () => app) as never,
+      detectTailscaleServeEligibility: vi.fn(async () => ({
+        eligible: true,
+        dnsName: 'codori-host.example.ts.net',
+        reason: 'available' as const
+      })),
+      configureTailscaleServe,
+      checkStartupUpdate: vi.fn(async () => ({ checked: false, adopted: false })) as never
+    })
+
+    expect(createRuntimeManager).toHaveBeenCalledWith({
+      configOverrides: {
+        root: '/tmp/projects',
+        host: '127.0.0.1',
+        port: undefined,
+        realtimeVoiceEnabled: undefined
+      }
+    })
+    expect(configureTailscaleServe).toHaveBeenCalledWith(4310, undefined)
+    expect(stdout.read()).toContain('Tailscale Serve reusing: https://codori-host.example.ts.net/')
+  })
+
+  it('keeps an automatic start running when Serve setup is unavailable', async () => {
+    const stdout = createOutput()
+    const app = { close: vi.fn(), ready: vi.fn() }
+    const manager = {
+      config: {
+        root: '/tmp/projects',
+        server: { host: '127.0.0.1', port: 4310 }
+      }
+    }
+
+    await runCli(['start', '--root', '/tmp/projects'], {
+      stdout: stdout.stream,
+      createRuntimeManager: vi.fn(() => manager) as never,
+      startHttpServer: vi.fn(async () => app) as never,
+      detectTailscaleServeEligibility: vi.fn(async () => ({
+        eligible: true,
+        dnsName: 'codori-host.example.ts.net',
+        reason: 'available' as const
+      })),
+      configureTailscaleServe: vi.fn().mockRejectedValue(new Error('HTTPS is disabled')),
+      checkStartupUpdate: vi.fn(async () => ({ checked: false, adopted: false })) as never
+    })
+
+    expect(app.close).not.toHaveBeenCalled()
+    expect(app.ready).toHaveBeenCalled()
+    expect(stdout.read()).toContain('Tailscale Serve was not configured automatically: HTTPS is disabled')
+  })
+
+  it('skips tailscale detection and mutation when explicitly disabled', async () => {
+    const app = { close: vi.fn(), ready: vi.fn() }
+    const manager = {
+      config: {
+        root: '/tmp/projects',
+        server: { host: '127.0.0.1', port: 4310 }
+      }
+    }
+    const detectTailscaleServeEligibility = vi.fn()
+    const configureTailscaleServe = vi.fn()
+
+    await runCli([
+      'start',
+      '--root',
+      '/tmp/projects',
+      '--no-tailscale-serve'
+    ], {
+      stdout: createOutput().stream,
+      createRuntimeManager: vi.fn(() => manager) as never,
+      startHttpServer: vi.fn(async () => app) as never,
+      detectTailscaleServeEligibility,
+      configureTailscaleServe,
+      checkStartupUpdate: vi.fn(async () => ({ checked: false, adopted: false })) as never
+    })
+
+    expect(detectTailscaleServeEligibility).not.toHaveBeenCalled()
+    expect(configureTailscaleServe).not.toHaveBeenCalled()
+    expect(app.ready).toHaveBeenCalled()
+  })
+
+  it('keeps start with a project id as the workspace runtime command', async () => {
+    const manager = {
+      config: { root: '/tmp/projects' },
+      startProject: vi.fn(async () => ({
+        projectId: 'codori',
+        port: 46000,
+        pid: 42,
+        reusedExisting: false
+      }))
+    }
+
+    await runCli(['start', 'codori', '--root', '/tmp/projects', '--json'], {
+      stdout: createOutput().stream,
+      createRuntimeManager: vi.fn(() => manager) as never
+    })
+
+    expect(manager.startProject).toHaveBeenCalledWith('codori')
+  })
+
   it('closes the server when tailscale serve setup fails', async () => {
     const app = {
       close: vi.fn(),
@@ -419,11 +609,17 @@ describe('cli service commands', () => {
       stdout: stdout.stream,
       createRuntimeManager: vi.fn(() => manager) as never,
       startHttpServer: vi.fn(async () => app) as never,
+      detectTailscaleServeEligibility: vi.fn(async () => ({
+        eligible: false,
+        dnsName: null,
+        reason: 'unavailable' as const
+      })),
       checkStartupUpdate: vi.fn(async () => ({ checked: false, adopted: false })) as never
     })
 
     const output = stdout.read()
     expect(output).toContain('Codori listening on http://127.0.0.1:4310')
+    expect(output).toContain('`codori serve` is deprecated')
     expect(output).toContain('root')
     // A loopback launch cannot benefit from the hint, so it must stay quiet.
     expect(output).not.toContain('--tailscale-serve to configure')
