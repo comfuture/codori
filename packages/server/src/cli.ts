@@ -4,7 +4,7 @@ import { realpathSync } from 'node:fs'
 import { resolve as resolvePath } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
-import { asErrorMessage, CodoriError } from './errors.js'
+import { asErrorMessage, CodoriError, formatCliError } from './errors.js'
 import { startHttpServer } from './http-server.js'
 import { createRuntimeManager } from './process-manager.js'
 import { DEFAULT_SERVER_HOST, resolveLastServiceRoot, writeLastServiceRoot } from './config.js'
@@ -682,11 +682,7 @@ const isEntrypoint = isCliEntrypointPath(process.argv[1], import.meta.url)
 
 if (isEntrypoint) {
   void runCli().catch((error) => {
-    if (error instanceof CodoriError) {
-      process.stderr.write(`${error.code}: ${error.message}\n`)
-    } else {
-      process.stderr.write(`${asErrorMessage(error)}\n`)
-    }
+    process.stderr.write(formatCliError(error))
     process.exitCode = 1
   })
 }

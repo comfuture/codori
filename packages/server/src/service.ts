@@ -332,14 +332,15 @@ const buildCanonicalInvocation = (
     scope?: ServiceScope
     yes?: boolean
     tailscaleServePolicy?: TailscaleServePolicy
-  }
+  },
+  binary = 'codori'
 ) => {
   // Keep literal command words unquoted so the printed command can be pasted
   // directly; only quote values that may contain spaces. The printed form uses
   // the installed `codori` binary because that is the documented entrypoint;
   // the launcher scripts written to disk keep using `npx @codori/server` so
   // already-installed services stay valid.
-  const parts: string[] = ['codori', ...toCanonicalCommandWords(command)]
+  const parts: string[] = [binary, ...toCanonicalCommandWords(command)]
   if (options.root) {
     parts.push('--root', maybeQuote(options.root))
   }
@@ -365,6 +366,34 @@ const buildCanonicalInvocation = (
 
 const maybeQuote = (value: string) =>
   /^[A-Za-z0-9._:@/\\-]+$/u.test(value) ? value : shellEscape(value)
+
+/**
+ * Builds the elevated re-run command for a system-scoped install.
+ *
+ * A plain `sudo codori ...` does not work when Node is installed per user.
+ * `sudo` replaces `PATH` with its compiled `secure_path`, so `codori` is either
+ * not found at all or, worse, its `#!/usr/bin/env node` shebang resolves to a
+ * distro Node old enough to fail on modern syntax. Observed on Ubuntu 22.04
+ * with nvm: `sudo node --version` reported v12.22.9 while the user's shell had
+ * v22.12.0, and passing an absolute CLI path still crashed with a SyntaxError
+ * because the wrong interpreter was chosen before the script ran.
+ *
+ * Preserving `PATH` keeps the caller's Node and CLI, which is the only form
+ * verified to work on such a host. `command -v` is expanded by the user's shell
+ * so the printed line stays copy-pasteable.
+ */
+const buildSudoInvocation = (
+  command: ServiceCommandName,
+  options: {
+    root?: string
+    host?: string
+    port?: number
+    scope?: ServiceScope
+    yes?: boolean
+    tailscaleServePolicy?: TailscaleServePolicy
+  }
+) =>
+  `sudo --preserve-env=PATH ${buildCanonicalInvocation(command, options, '"$(command -v codori)"')}`
 
 const ensureDirectory = (path: string) => {
   mkdirSync(path, { recursive: true })
@@ -631,10 +660,34 @@ const resolveServiceCommands = (
   return getLinuxUninstallCommands(definition, metadata.scope)
 }
 
+/**
+ * `systemctl` reports a rejected unit in one terse line and leaves the actual
+ * reason in the journal, so a failure names the follow-up command instead of
+ * expecting the user to know where to look.
+ */
+const describeServiceCommandFailure = (
+  command: ServiceCommand,
+  metadata: Pick<ServiceInstallMetadata, 'platform' | 'scope'> | undefined,
+  output: string | null
+) => {
+  const parts = output ? [output.trimEnd()] : []
+  if (metadata?.platform === 'linux' && command.command === 'systemctl') {
+    const scopeFlag = metadata.scope === 'system' ? '' : '--user '
+    const unit = command.args[command.args.length - 1]
+    parts.push(
+      `Inspect it with: systemctl ${scopeFlag}status ${unit}`,
+      `or: journalctl ${scopeFlag}-u ${unit} -n 50`
+    )
+  }
+
+  return parts.length > 0 ? parts.join('\n') : null
+}
+
 const runCommandSequence = async (
   commands: ServiceCommand[],
   runCommand: CommandRunner,
-  allowFailure: (command: ServiceCommand, result: CommandResult) => boolean = () => false
+  allowFailure: (command: ServiceCommand, result: CommandResult) => boolean = () => false,
+  metadata?: Pick<ServiceInstallMetadata, 'platform' | 'scope'>
 ) => {
   for (const command of commands) {
     let result: CommandResult
@@ -655,7 +708,11 @@ const runCommandSequence = async (
     throw new CodoriError(
       'SERVICE_COMMAND_FAILED',
       `Command failed: ${command.command} ${command.args.join(' ')}`,
-      result.stderr || result.stdout || null
+      describeServiceCommandFailure(
+        command,
+        metadata,
+        result.stderr || result.stdout || null
+      )
     )
   }
 }
@@ -745,10 +802,9 @@ const ensureSystemScopePrivileges = (
     return Promise.resolve()
   }
 
-  const rerun = `sudo ${buildCanonicalInvocation(command, options)}`
   throw new CodoriError(
     'SERVICE_REQUIRES_SUDO',
-    `System service registration requires elevated privileges. Re-run with: ${rerun}`
+    `System service registration requires elevated privileges. Re-run with: ${buildSudoInvocation(command, options)}`
   )
 }
 
@@ -1259,7 +1315,8 @@ export const installService = async (
     await runCommandSequence(
       resolveServiceCommands('install', metadata, definition),
       runCommand,
-      (command, result) => shouldIgnoreCommandFailure('install', metadata, command) && result.exitCode !== 0
+      (command, result) => shouldIgnoreCommandFailure('install', metadata, command) && result.exitCode !== 0,
+      metadata
     )
     writeServiceMetadata(metadata, homeDir)
     // Install is the only lifecycle command that seeds the remembered root.
@@ -1317,7 +1374,12 @@ export const restartService = async (
   metadata = applyServiceLaunchPolicy(metadata, options)
   const definition = resolveServiceDefinition(metadata, homeDir)
   writeLauncherAndServiceFiles(metadata, definition, homeDir, nodePath, npxPath)
-  await runCommandSequence(resolveServiceCommands('restart', metadata, definition), runCommand)
+  await runCommandSequence(
+    resolveServiceCommands('restart', metadata, definition),
+    runCommand,
+    undefined,
+    metadata
+  )
   writeServiceMetadata(metadata, homeDir)
 
   return {
@@ -1363,10 +1425,11 @@ export const uninstallService = async (
       await runCommandSequence(
         [first],
         runCommand,
-        (command, result) => shouldIgnoreCommandFailure('uninstall', metadata, command) && result.exitCode !== 0
+        (command, result) => shouldIgnoreCommandFailure('uninstall', metadata, command) && result.exitCode !== 0,
+        metadata
       )
       rmSync(definition.serviceFilePath, { force: true })
-      await runCommandSequence(rest, runCommand)
+      await runCommandSequence(rest, runCommand, undefined, metadata)
       rmSync(getServiceMetadataDirectory(metadata.installId, homeDir), { recursive: true, force: true })
     }
 
@@ -1448,7 +1511,8 @@ const runLifecycleAction = async (
   await runCommandSequence(
     commands,
     runCommand,
-    (command, result) => shouldIgnoreCommandFailure(action, metadata, command) && result.exitCode !== 0
+    (command, result) => shouldIgnoreCommandFailure(action, metadata, command) && result.exitCode !== 0,
+    metadata
   )
 
   if (action === 'start') {
