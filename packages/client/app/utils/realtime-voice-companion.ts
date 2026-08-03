@@ -56,3 +56,6 @@ export const resolveRealtimeVoiceCompanionEntries = (input: {
 
 export const resolveRealtimeVoiceAvatarWidth = (viewportWidth: number) =>
   Math.round(Math.min(88, Math.max(64, viewportWidth * 0.06)))
+
+export const resolveCenteredRealtimeVoiceAvatarWidth = (viewportWidth: number) =>
+  Math.round(Math.min(192, Math.max(128, viewportWidth * 0.12)))

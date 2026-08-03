@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import RealtimeVoiceCompanion from '../app/components/RealtimeVoiceCompanion.vue'
 import {
   isRealtimeVoiceCompanionActive,
+  resolveCenteredRealtimeVoiceAvatarWidth,
   resolveRealtimeVoiceAvatarWidth,
   resolveRealtimeVoiceCompanionEntries
 } from '../app/utils/realtime-voice-companion'
@@ -82,7 +83,11 @@ const ServerPetAvatarStub = defineComponent({
 
 const mountCompanion = (
   transcripts: RealtimeTranscriptSegment[],
-  selectedAvatar: ServerAvatarMetadata | null = avatar
+  selectedAvatar: ServerAvatarMetadata | null = avatar,
+  options?: {
+    presentation?: 'floating' | 'centered'
+    showTranscripts?: boolean
+  }
 ) =>
   mount(RealtimeVoiceCompanion, {
     props: {
@@ -92,7 +97,8 @@ const mountCompanion = (
       activity: 'listening',
       generation: 3,
       transcripts,
-      bottomOffset: 152
+      bottomOffset: 152,
+      ...options
     },
     global: {
       stubs: {
@@ -151,6 +157,9 @@ describe('realtime voice companion transcript window', () => {
     expect(resolveRealtimeVoiceAvatarWidth(375)).toBe(64)
     expect(resolveRealtimeVoiceAvatarWidth(1280)).toBe(77)
     expect(resolveRealtimeVoiceAvatarWidth(1920)).toBe(88)
+    expect(resolveCenteredRealtimeVoiceAvatarWidth(375)).toBe(128)
+    expect(resolveCenteredRealtimeVoiceAvatarWidth(1280)).toBe(154)
+    expect(resolveCenteredRealtimeVoiceAvatarWidth(1920)).toBe(192)
   })
 })
 
@@ -213,6 +222,30 @@ describe('RealtimeVoiceCompanion', () => {
     expect(bubble.classes()).not.toContain('shadow-xl')
 
     wrapper.unmount()
+  })
+
+  it('renders one centered avatar-only stop control without transcript UI', async () => {
+    const wrapper = mountCompanion([
+      transcript(1, 'user', 'Hidden request'),
+      transcript(2, 'assistant', 'Hidden response')
+    ], avatar, {
+      presentation: 'centered',
+      showTranscripts: false
+    })
+    await nextTick()
+
+    const root = wrapper.get('[data-testid="realtime-voice-companion"]')
+    expect(root.attributes('data-presentation')).toBe('centered')
+    expect(root.classes()).toContain('inset-0')
+    expect(root.attributes('style') ?? '').not.toContain('bottom')
+    expect(wrapper.get('[data-testid="avatar-stub"]').attributes('data-width')).toBe('192')
+    expect(wrapper.find('[data-testid="popover-stub"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="realtime-voice-bubble"]').exists()).toBe(false)
+    expect(wrapper.get('[aria-live="polite"]').text()).toBe('')
+    expect(vi.getTimerCount()).toBe(0)
+
+    await wrapper.get('[data-testid="realtime-voice-centered-stop"]').trigger('click')
+    expect(wrapper.emitted('stop')).toHaveLength(1)
   })
 
   it('announces the segment that finalizes during overlapping speech', async () => {

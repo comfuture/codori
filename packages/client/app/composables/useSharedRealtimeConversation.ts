@@ -177,7 +177,10 @@ export const useActiveRealtimeConversation = () => {
     sessionKind: computed(() => controller.value?.sessionKind.value ?? null),
     activity: computed(() => controller.value?.activity.value ?? 'idle'),
     generation: computed(() => controller.value?.generation.value ?? 0),
-    transcripts: computed(() => controller.value?.transcripts.value ?? [])
+    transcripts: computed(() => controller.value?.transcripts.value ?? []),
+    stop: async () => {
+      await controller.value?.stop()
+    }
   }
 }
 
