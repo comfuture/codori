@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { asErrorMessage, CodoriError, runCli } from '@codori/server'
+import { formatCliError, runCli } from '@codori/server'
 
 /**
  * Thin launcher for the globally installed `codori` binary.
@@ -10,10 +10,6 @@ import { asErrorMessage, CodoriError, runCli } from '@codori/server'
  * readable stderr line plus a nonzero exit code.
  */
 void runCli().catch((error: unknown) => {
-  if (error instanceof CodoriError) {
-    process.stderr.write(`${error.code}: ${error.message}\n`)
-  } else {
-    process.stderr.write(`${asErrorMessage(error)}\n`)
-  }
+  process.stderr.write(formatCliError(error))
   process.exitCode = 1
 })

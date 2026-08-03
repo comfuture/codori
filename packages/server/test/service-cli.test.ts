@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path'
 import { PassThrough } from 'node:stream'
 import { describe, expect, it } from 'vitest'
 import { resolveLastServiceRoot, writeLastServiceRoot } from '../src/config.js'
+import { CodoriError } from '../src/errors.js'
 import {
   installService,
   getServiceMetadataPath,
@@ -653,5 +654,82 @@ describe('installed service root resolution', () => {
     })
 
     expect(restarted.metadata.root).toBe(root)
+  })
+})
+
+describe('linux service failures', () => {
+  const createLinuxDependencies = (
+    homeDir: string,
+    root: string,
+    runCommand: (command: string, args: string[]) => Promise<{ exitCode: number, stdout: string, stderr: string }>
+  ) => ({
+    homeDir,
+    cwd: root,
+    platform: 'linux' as NodeJS.Platform,
+    nodePath: '/home/u/.nvm/versions/node/v22.12.0/bin/node',
+    npxPath: '/home/u/.nvm/versions/node/v22.12.0/bin/npx',
+    runCommand,
+    stdout: createOutput().stream
+  })
+
+  it('reports systemd output and how to inspect a failed unit', async () => {
+    const homeDir = mkdtempSync(join(os.tmpdir(), 'codori-home-'))
+    const root = mkdtempSync(join(os.tmpdir(), 'codori-root-'))
+    mkdirSync(join(root, '.git'), { recursive: true })
+
+    // `systemctl --user enable --now` is the step that failed on Ubuntu when the
+    // generated unit was unloadable.
+    const dependencies = createLinuxDependencies(homeDir, root, async (command, args) => {
+      if (command === 'systemctl' && args.includes('enable')) {
+        return {
+          exitCode: 1,
+          stdout: '',
+          stderr: 'Failed to start codori.service: Unit codori.service has a bad unit file setting.'
+        }
+      }
+      return {
+        exitCode: 0,
+        stdout: args[0] === '--version' ? 'systemd 249' : '',
+        stderr: ''
+      }
+    })
+
+    const failure = await installService({ root, yes: true }, dependencies)
+      .catch((error: unknown) => error)
+
+    expect(failure).toBeInstanceOf(CodoriError)
+    const error = failure as CodoriError
+    expect(error.code).toBe('SERVICE_COMMAND_FAILED')
+    // The reason and the follow-up command both have to reach the user; the
+    // command line alone left nothing to act on.
+    expect(String(error.details)).toContain('bad unit file setting')
+    expect(String(error.details)).toContain('systemctl --user status')
+    expect(String(error.details)).toContain('journalctl --user -u')
+  })
+
+  it('prints an elevation command that survives sudo resetting PATH', async () => {
+    const homeDir = mkdtempSync(join(os.tmpdir(), 'codori-home-'))
+    const root = mkdtempSync(join(os.tmpdir(), 'codori-root-'))
+    mkdirSync(join(root, '.git'), { recursive: true })
+
+    const dependencies = createLinuxDependencies(homeDir, root, async () => ({
+      exitCode: 0,
+      stdout: '',
+      stderr: ''
+    }))
+
+    const message = await installService({
+      root,
+      scope: 'system',
+      yes: true
+    }, dependencies).then(() => '', (error: Error) => error.message)
+
+    // A bare `sudo codori` fails when Node is per-user: sudo's secure_path
+    // either hides the binary or resolves its shebang to a distro Node too old
+    // to parse the bundle.
+    expect(message).toContain('sudo --preserve-env=PATH')
+    expect(message).toContain('"$(command -v codori)" service install')
+    expect(message).toContain('--scope system')
+    expect(message).not.toMatch(/Re-run with: sudo codori/)
   })
 })
