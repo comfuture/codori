@@ -11,6 +11,7 @@ import { DEFAULT_SERVER_HOST, resolveLastServiceRoot, writeLastServiceRoot } fro
 import { createCliUi, type CliUi } from './cli-ui.js'
 import {
   CLI_BINARY,
+  RETIRED_RUNTIME_COMMANDS,
   renderCliHelp
 } from './cli-help.js'
 import {
@@ -36,13 +37,10 @@ import {
   CODORI_STARTUP_UPDATE_APPLIED_ENV,
   type StartupUpdateResult
 } from './service-update.js'
-import type { ProjectStatusRecord } from './types.js'
-
 type CliOptionValues = {
   root?: string
   host?: string
   port?: string
-  json?: boolean
   scope?: string
   yes?: boolean
   help?: boolean
@@ -64,38 +62,6 @@ export type CliDependencies = ServiceCommandDependencies & {
   checkStartupUpdate?: typeof checkStartupUpdate
 }
 
-/**
- * JSON output bypasses the presentation layer entirely so a piped consumer
- * receives exactly one parseable document with no ANSI or spinner bytes.
- */
-const printJson = (value: unknown, stdout: NodeJS.WritableStream) => {
-  stdout.write(`${JSON.stringify(value, null, 2)}\n`)
-}
-
-const printStatuses = (records: ProjectStatusRecord[], ui: CliUi) => {
-  if (records.length === 0) {
-    ui.info('No project workspace runtimes are currently tracked.')
-    ui.muted(`  Run \`${CLI_BINARY} list\` to see discovered projects, or start one with \`${CLI_BINARY} start <projectId>\`.`)
-    return
-  }
-
-  ui.table(
-    ['project', 'status', 'port', 'pid'],
-    records.map(record => [
-      ui.bold(record.projectId),
-      ui.statusLabel(record.status),
-      record.port ? String(record.port) : ui.dim('-'),
-      record.pid ? String(record.pid) : ui.dim('-')
-    ])
-  )
-
-  for (const record of records) {
-    if (record.error) {
-      ui.warn(`${record.projectId}: ${record.error}`)
-    }
-  }
-}
-
 const optionConfig = {
   root: {
     type: 'string' as const
@@ -105,9 +71,6 @@ const optionConfig = {
   },
   port: {
     type: 'string' as const
-  },
-  json: {
-    type: 'boolean' as const
   },
   scope: {
     type: 'string' as const
@@ -137,8 +100,6 @@ const coercePort = (value: string | undefined) => {
   const parsed = Number.parseInt(value, 10)
   return Number.isFinite(parsed) ? parsed : undefined
 }
-
-const resolveCliRoot = (value: string | undefined) => value ?? process.cwd()
 
 export const resolveServeRoot = (
   value: string | undefined,
@@ -620,15 +581,12 @@ export const runCli = async (
   const values = parsed.values as CliOptionValues
   const [command = 'start', maybeProjectId] = parsed.positionals
   const stdoutStream = dependencies.stdout ?? process.stdout
-  const json = values.json ?? false
   const hasTailscaleOption = Boolean(
     values['tailscale-serve'] || values['no-tailscale-serve']
   )
-  // `--json` forces plain mode so a machine consumer never receives styling.
   const ui = createCliUi({
     stream: stdoutStream,
-    env: dependencies.env,
-    plain: json
+    env: dependencies.env
   })
 
   // A bare `codori` shows help rather than silently starting a server, so a
@@ -664,134 +622,17 @@ export const runCli = async (
   }
 
   switch (command) {
-    case 'list': {
-      if (hasTailscaleOption) {
-        throw new CodoriError('INVALID_CONFIG', 'Tailscale Serve options are available only for server or service launches.')
-      }
-      const manager = (dependencies.createRuntimeManager ?? createRuntimeManager)({
-        configOverrides: {
-          root: resolveCliRoot(values.root),
-          host: values.host,
-          port: coercePort(values.port),
-          realtimeVoiceEnabled: values['experimental-realtime-voice']
-        }
-      })
-      const statuses = manager.listProjectStatuses()
-      if (json) {
-        printJson(statuses, stdoutStream)
-        return
-      }
-
-      if (statuses.length === 0) {
-        ui.info(`No Git projects were found under ${ui.bold(manager.config.root)}.`)
-        ui.muted('  Codori treats any descendant directory with a direct .git child as a project.')
-        ui.muted(`  Point it elsewhere with \`${CLI_BINARY} list --root <path>\`.`)
-        return
-      }
-
-      ui.line(`${ui.bold(String(statuses.length))} ${statuses.length === 1 ? 'project' : 'projects'} under ${ui.dim(manager.config.root)}`)
-      printStatuses(statuses, ui)
-      return
-    }
-    case 'status': {
-      if (hasTailscaleOption) {
-        throw new CodoriError('INVALID_CONFIG', 'Tailscale Serve options are available only for server or service launches.')
-      }
-      const manager = (dependencies.createRuntimeManager ?? createRuntimeManager)({
-        configOverrides: {
-          root: resolveCliRoot(values.root),
-          host: values.host,
-          port: coercePort(values.port),
-          realtimeVoiceEnabled: values['experimental-realtime-voice']
-        }
-      })
-      if (maybeProjectId) {
-        const status = manager.getProjectStatus(maybeProjectId)
-        if (json) {
-          printJson(status, stdoutStream)
-        } else {
-          printStatuses([status], ui)
-        }
-        return
-      }
-
-      const statuses = manager.listProjectStatuses()
-      if (json) {
-        printJson(statuses, stdoutStream)
-        return
-      }
-
-      if (statuses.length === 0) {
-        ui.info(`No Git projects were found under ${ui.bold(manager.config.root)}.`)
-        ui.muted(`  Point Codori at another directory with \`${CLI_BINARY} status --root <path>\`.`)
-        return
-      }
-
-      printStatuses(statuses, ui)
-      return
-    }
     case 'start': {
-      if (!maybeProjectId) {
-        await runServerCommand('start', argv, values, dependencies, ui)
-        return
+      // A trailing project id used to start one workspace runtime from the CLI.
+      // That is the server's job now, so it is rejected explicitly rather than
+      // silently serving the whole root and ignoring the argument.
+      if (maybeProjectId) {
+        throw new CodoriError(
+          'COMMAND_MOVED_TO_DASHBOARD',
+          `\`${CLI_BINARY} start <projectId>\` was removed. Run \`${CLI_BINARY} start\` to serve the project root, then open a project from the dashboard to start its workspace.`
+        )
       }
-      if (hasTailscaleOption) {
-        throw new CodoriError('INVALID_CONFIG', 'Tailscale Serve options cannot be used when starting a project runtime.')
-      }
-      const manager = (dependencies.createRuntimeManager ?? createRuntimeManager)({
-        configOverrides: {
-          root: resolveCliRoot(values.root),
-          host: values.host,
-          port: coercePort(values.port),
-          realtimeVoiceEnabled: values['experimental-realtime-voice']
-        }
-      })
-      if (json) {
-        printJson(await manager.startProject(maybeProjectId), stdoutStream)
-        return
-      }
-
-      // Starting a workspace runtime waits on process spawn and port
-      // allocation, so it is the one runtime command worth a spinner.
-      const result = await ui.task(
-        `Starting ${maybeProjectId}`,
-        () => manager.startProject(maybeProjectId),
-        value => `${value.reusedExisting ? 'Reused' : 'Started'} ${maybeProjectId}`
-      )
-      ui.keyValues([
-        ['port', String(result.port)],
-        ['pid', String(result.pid)]
-      ])
-      return
-    }
-    case 'stop': {
-      if (hasTailscaleOption) {
-        throw new CodoriError('INVALID_CONFIG', 'Tailscale Serve options are available only for server or service launches.')
-      }
-      const manager = (dependencies.createRuntimeManager ?? createRuntimeManager)({
-        configOverrides: {
-          root: resolveCliRoot(values.root),
-          host: values.host,
-          port: coercePort(values.port),
-          realtimeVoiceEnabled: values['experimental-realtime-voice']
-        }
-      })
-      if (!maybeProjectId) {
-        throw new CodoriError('MISSING_PROJECT_ID', 'The stop command requires a project id.')
-      }
-      if (json) {
-        printJson(await manager.stopProject(maybeProjectId), stdoutStream)
-        return
-      }
-
-      const result = await ui.task(
-        `Stopping ${maybeProjectId}`,
-        () => manager.stopProject(maybeProjectId),
-        () => `Stopped ${maybeProjectId}`
-      )
-      if (result.error) {
-        ui.warn(result.error)
-      }
+      await runServerCommand('start', argv, values, dependencies, ui)
       return
     }
     case 'serve': {
@@ -799,6 +640,12 @@ export const runCli = async (
       return
     }
     default:
+      if (RETIRED_RUNTIME_COMMANDS.has(command)) {
+        throw new CodoriError(
+          'COMMAND_MOVED_TO_DASHBOARD',
+          `\`${CLI_BINARY} ${command}\` was removed. ${RETIRED_RUNTIME_COMMANDS.get(command) as string}`
+        )
+      }
       printUsage(ui)
   }
 }

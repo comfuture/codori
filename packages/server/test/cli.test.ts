@@ -42,7 +42,11 @@ describe('cli service commands', () => {
     // Running without installing stays documented as the alternative.
     expect(help).toContain('npx @codori/server <command> [options]')
     // Each command carries a description rather than a bare name.
-    expect(help).toContain('Stop the workspace runtime for one project.')
+    expect(help).toContain('Start the Codori server, dashboard, WebXR app, and API.')
+    // Workspace lifecycle belongs to the dashboard, not the CLI.
+    expect(help).toContain('managed from the dashboard')
+    expect(help).not.toContain('Stop the workspace runtime for one project.')
+    expect(help).not.toContain('status [projectId]')
     // The legacy aliases stay discoverable so existing docs keep working.
     expect(help).toContain('install-service')
     expect(CLI_USAGE).toContain('--experimental-realtime-voice')
@@ -318,83 +322,33 @@ describe('cli service commands', () => {
     ])).rejects.toThrow(/cannot be used together/)
   })
 
-  it('explains an empty project root instead of printing nothing', async () => {
-    const stdout = createOutput()
-    const manager = {
-      config: { root: '/tmp/empty-root' },
-      listProjectStatuses: () => []
-    }
+  // `list`, `status`, and `stop` read and mutated local runtime state instead of
+  // the running server. They now point at the dashboard, which already performs
+  // the same operations over the HTTP API.
+  it.each([
+    ['list', 'Projects are listed in the dashboard sidebar.'],
+    ['status', 'Workspace runtime status is shown in the dashboard sidebar.'],
+    ['stop', 'Stop a workspace from the dashboard.']
+  ])('rejects the retired %s command with a specific reason', async (command, reason) => {
+    const createRuntimeManager = vi.fn()
 
-    await runCli(['list', '--root', '/tmp/empty-root'], {
-      stdout: stdout.stream,
-      createRuntimeManager: vi.fn(() => manager) as never
-    })
+    await expect(runCli([command, '--root', '/tmp/projects'], {
+      stdout: createOutput().stream,
+      createRuntimeManager: createRuntimeManager as never
+    })).rejects.toThrow(reason)
 
-    // A silent exit 0 was indistinguishable from a failure.
-    expect(stdout.read()).toContain('No Git projects were found under /tmp/empty-root')
-    expect(stdout.read()).toContain('direct .git child')
+    // A rejected command must not build a second runtime manager in the CLI.
+    expect(createRuntimeManager).not.toHaveBeenCalled()
   })
 
-  it('renders discovered projects as an aligned table', async () => {
+  it('still shows help for an unknown command', async () => {
     const stdout = createOutput()
-    const manager = {
-      config: { root: '/tmp/projects' },
-      listProjectStatuses: () => [
-        { projectId: 'codori', status: 'running', port: 46001, pid: 4242 },
-        { projectId: 'team/api', status: 'stopped' }
-      ]
-    }
 
-    await runCli(['list', '--root', '/tmp/projects'], {
-      stdout: stdout.stream,
-      createRuntimeManager: vi.fn(() => manager) as never
+    await runCli(['bogus-runtime-command'], {
+      stdout: stdout.stream
     })
 
-    const output = stdout.read()
-    expect(output).toContain('2 projects under /tmp/projects')
-    expect(output).toContain('PROJECT')
-    expect(output).toContain('codori')
-    expect(output).toContain('46001')
-    // The old tab-separated record shape is gone.
-    expect(output).not.toContain('\t')
-  })
-
-  it('keeps --json output free of styling and prose', async () => {
-    const stdout = createOutput()
-    const statuses = [
-      { projectId: 'codori', status: 'running', port: 46001, pid: 4242 }
-    ]
-    const manager = {
-      config: { root: '/tmp/projects' },
-      listProjectStatuses: () => statuses
-    }
-
-    await runCli(['list', '--root', '/tmp/projects', '--json'], {
-      stdout: stdout.stream,
-      createRuntimeManager: vi.fn(() => manager) as never
-    })
-
-    const output = stdout.read()
-    // eslint-disable-next-line no-control-regex
-    expect(output).not.toMatch(/\u001B\[/)
-    expect(JSON.parse(output)).toEqual(statuses)
-  })
-
-  it('surfaces a per-project error as a warning under the table', async () => {
-    const stdout = createOutput()
-    const manager = {
-      config: { root: '/tmp/projects' },
-      listProjectStatuses: () => [
-        { projectId: 'codori', status: 'error', error: 'runtime file was stale' }
-      ]
-    }
-
-    await runCli(['status', '--root', '/tmp/projects'], {
-      stdout: stdout.stream,
-      createRuntimeManager: vi.fn(() => manager) as never
-    })
-
-    expect(stdout.read()).toContain('codori: runtime file was stale')
+    expect(stdout.read()).toContain('codori <command> [options]')
   })
 
   it('configures tailscale serve after starting a loopback server', async () => {
@@ -547,23 +501,22 @@ describe('cli service commands', () => {
     expect(app.ready).toHaveBeenCalled()
   })
 
-  it('keeps start with a project id as the workspace runtime command', async () => {
+  it('rejects start with a project id instead of silently serving the root', async () => {
+    const startHttpServer = vi.fn()
     const manager = {
       config: { root: '/tmp/projects' },
-      startProject: vi.fn(async () => ({
-        projectId: 'codori',
-        port: 46000,
-        pid: 42,
-        reusedExisting: false
-      }))
+      startProject: vi.fn()
     }
 
-    await runCli(['start', 'codori', '--root', '/tmp/projects', '--json'], {
+    await expect(runCli(['start', 'codori', '--root', '/tmp/projects'], {
       stdout: createOutput().stream,
-      createRuntimeManager: vi.fn(() => manager) as never
-    })
+      createRuntimeManager: vi.fn(() => manager) as never,
+      startHttpServer: startHttpServer as never
+    })).rejects.toThrow(/`codori start <projectId>` was removed/)
 
-    expect(manager.startProject).toHaveBeenCalledWith('codori')
+    // Neither the old direct spawn nor an accidental full server launch runs.
+    expect(manager.startProject).not.toHaveBeenCalled()
+    expect(startHttpServer).not.toHaveBeenCalled()
   })
 
   it('closes the server when tailscale serve setup fails', async () => {
