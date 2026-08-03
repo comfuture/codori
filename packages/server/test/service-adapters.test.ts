@@ -56,9 +56,52 @@ describe('service adapters', () => {
     })
 
     expect(unit).toContain('Description=Codori service (codori-abc123def456.service)')
-    expect(unit).toContain('WorkingDirectory="/home/test/My $Projects"')
+    // systemd does not strip quotes from WorkingDirectory=; it treats them as
+    // part of the path and rejects the unit with `path is not absolute`, which
+    // made every generated unit unloadable. The value takes a raw path, so only
+    // `%` is escaped. ExecStart= is a command line and still needs its quotes.
+    expect(unit).toContain('WorkingDirectory=/home/test/My $Projects\n')
+    expect(unit).not.toContain('WorkingDirectory="')
     expect(unit).toContain('ExecStart="/home/test/My $$Projects/.codori/%%services/abc/run-service.sh"')
     expect(unit).toContain('WantedBy=default.target')
+  })
+
+  it('escapes a percent in the systemd working directory without quoting it', () => {
+    const unit = renderSystemdUnit({
+      serviceName: 'codori-pct.service',
+      launcherPath: '/home/test/%root/.codori/services/abc/run-service.sh',
+      root: '/home/test/%root'
+    })
+
+    // systemd expands `%` specifiers in this value, so it stays escaped even
+    // though the path is unquoted. Verified on systemd 249: a unit with
+    // `WorkingDirectory=/tmp/cd probe/%%dir` starts and resolves to `%dir`.
+    expect(unit).toContain('WorkingDirectory=/home/test/%%root\n')
+  })
+
+  // systemd validates WorkingDirectory= as an absolute path after `%` expansion
+  // and without any quote removal. This asserts the rule directly, so a future
+  // change that re-quotes the value fails here instead of on a Linux host.
+  it.each([
+    ['/home/test/workspaces'],
+    ['/home/test/My Projects'],
+    ['/home/test/%root']
+  ])('renders a loadable systemd working directory for %s', (root) => {
+    const unit = renderSystemdUnit({
+      serviceName: 'codori-load.service',
+      launcherPath: `${root}/.codori/services/abc/run-service.sh`,
+      root
+    })
+
+    const workingDirectory = unit
+      .split('\n')
+      .find(line => line.startsWith('WorkingDirectory='))
+      ?.slice('WorkingDirectory='.length)
+
+    expect(workingDirectory).toBeDefined()
+    expect(workingDirectory?.startsWith('"')).toBe(false)
+    // What systemd resolves after collapsing `%%` back to a literal `%`.
+    expect((workingDirectory as string).replaceAll('%%', '%')).toBe(root)
   })
 
   it('creates a macOS service definition and command sequences', () => {
