@@ -176,15 +176,21 @@ Available service lifecycle commands:
 
 ```bash
 codori service install
-codori service start --root ~/Project/codori
-codori service stop --root ~/Project/codori
-codori service restart --root ~/Project/codori
-codori service status --root ~/Project/codori
-codori service uninstall --root ~/Project/codori
+codori service start
+codori service stop
+codori service restart
+codori service status
+codori service uninstall
 ```
 
 The earlier `install-service`, `setup-service`, `restart-service`, and
 `uninstall-service` commands remain accepted as aliases.
+
+Every verb except `install` resolves its target from the install metadata under
+`~/.codori/services/<installId>/service.json`, so it works from any directory
+and never scans the filesystem for a project root. With several services
+registered, Codori lists their roots and asks for an explicit `--root` rather
+than choosing one.
 
 The installer resolves missing `--root` and `--port` values interactively and
 uses `127.0.0.1` as the safe default host. Its Tailscale Serve policy defaults
@@ -215,7 +221,7 @@ preserving the remembered project root.
 
 On macOS the launchd label and launcher directory include a deterministic
 12-character SHA-256 prefix derived from the resolved install root. It is not
-random: `codori service status|start|stop|restart|uninstall --root <path>` is
+random: `codori service status|start|stop|restart|uninstall [--root <path>]` is
 the supported management surface for that root.
 
 ### Windows notes

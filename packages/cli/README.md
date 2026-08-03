@@ -23,12 +23,8 @@ Tailscale Serve HTTPS on the loopback listener and prints the tailnet URL. Use
 `--no-tailscale-serve` to keep the launch local. `codori serve` remains a
 deprecated compatibility alias.
 
-Inspect discovered projects and runtime state:
-
-```bash
-codori list --root ~/Project
-codori status --root ~/Project
-```
+Projects and workspace runtimes are managed from the dashboard, not the CLI. The
+server owns that state, and the dashboard drives it over the HTTP API.
 
 Keep Codori running in the background across logins:
 
@@ -36,6 +32,9 @@ Keep Codori running in the background across logins:
 codori service install
 codori service status
 ```
+
+Every service verb except `install` resolves its target from the recorded
+install, so it works from any directory.
 
 See `codori --help` for the full command and option list.
 
