@@ -27,17 +27,38 @@ const toProjectId = (root: string, path: string) =>
   relative(root, path).split(sep).join('/')
 
 /**
- * Reads a directory, treating an unreadable one as empty.
+ * Failures that mean "this directory is not available to walk" rather than
+ * "this filesystem is misbehaving".
  *
- * Scanning arbitrary directories means crossing paths the current user cannot
- * read: macOS protects `~/.Trash` and other locations with TCC, so `readdirSync`
- * raises `EPERM` there. Propagating that error aborted whole commands that had
- * nothing to do with the offending directory.
+ * `EPERM` and `EACCES` are the permission cases: macOS protects `~/.Trash` and
+ * similar locations with TCC, so `readdirSync` raises `EPERM` there. `ENOENT`
+ * and `ENOTDIR` cover an entry that was removed or replaced between the parent
+ * listing and the child read.
  */
-const readDirectoryEntries = (path: string): Dirent[] => {
+const SKIPPABLE_DIRECTORY_ERROR_CODES = new Set(['EPERM', 'EACCES', 'ENOENT', 'ENOTDIR'])
+
+const isSkippableDirectoryError = (error: unknown) =>
+  typeof error === 'object'
+  && error !== null
+  && SKIPPABLE_DIRECTORY_ERROR_CODES.has((error as { code?: unknown }).code as string)
+
+/**
+ * Reads a directory, skipping one that is legitimately unavailable.
+ *
+ * `strict` distinguishes the two callers. An exhaustive scan of a configured
+ * root feeds the project inventory the API serves, so an unexpected failure such
+ * as `EIO` or `EMFILE` must surface instead of being reported as an empty
+ * directory. The bounded probe only proposes a default root, where any failure
+ * simply means "do not suggest this subtree"; raising there is what broke
+ * `codori service restart` in the first place.
+ */
+const readDirectoryEntries = (path: string, { strict }: { strict: boolean }): Dirent[] => {
   try {
     return readdirSync(path, { withFileTypes: true })
-  } catch {
+  } catch (error) {
+    if (strict && !isSkippableDirectoryError(error)) {
+      throw error
+    }
     return []
   }
 }
@@ -63,7 +84,7 @@ export const scanProjects = (rootDirectory: string): ProjectRecord[] => {
 
   while (queue.length > 0) {
     const current = queue.shift() as string
-    const entries = readDirectoryEntries(current)
+    const entries = readDirectoryEntries(current, { strict: true })
 
     if (hasGitDirectory(entries)) {
       if (current !== root) {
@@ -109,7 +130,7 @@ export const containsGitProject = (
 
   while (queue.length > 0) {
     const { path, depth } = queue.shift() as { path: string, depth: number }
-    const entries = readDirectoryEntries(path)
+    const entries = readDirectoryEntries(path, { strict: false })
 
     if (hasGitDirectory(entries)) {
       if (path !== root) {

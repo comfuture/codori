@@ -381,6 +381,32 @@ describe('cli service commands', () => {
     expect(stdout.read()).toContain('codori <command> [options]')
   })
 
+  // `--json` only applied to the retired commands, but rejecting it at the
+  // parser hid the migration message from exactly the scripted callers who
+  // needed it: `codori list --json` produced a generic unknown-option error.
+  it('reaches migration guidance for a retired command invoked with --json', async () => {
+    await expect(runCli(['list', '--json'], {
+      stdout: createOutput().stream
+    })).rejects.toThrow(/Projects are listed in the dashboard sidebar/)
+  })
+
+  it('rejects --json by name on a surviving command', async () => {
+    const startHttpServer = vi.fn()
+
+    await expect(runCli(['start', '--root', '/tmp/projects', '--json'], {
+      stdout: createOutput().stream,
+      startHttpServer: startHttpServer as never
+    })).rejects.toThrow(/--json was removed with the project runtime commands/)
+
+    expect(startHttpServer).not.toHaveBeenCalled()
+  })
+
+  it('rejects --json on a service command instead of ignoring it', async () => {
+    await expect(runCli(['service', 'status', '--json'], {
+      stdout: createOutput().stream
+    })).rejects.toThrow(/--json was removed with the project runtime commands/)
+  })
+
   it('configures tailscale serve after starting a loopback server', async () => {
     const stdout = createOutput()
     const app = {
