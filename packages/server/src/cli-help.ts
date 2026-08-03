@@ -29,24 +29,23 @@ export const RUNTIME_COMMANDS: CliCommandDoc[] = [
   {
     usage: 'start',
     description: 'Start the Codori server, dashboard, WebXR app, and API.'
-  },
-  {
-    usage: 'list',
-    description: 'List the Git projects discovered under the project root.'
-  },
-  {
-    usage: 'status [projectId]',
-    description: 'Show runtime status for every workspace, or just one project.'
-  },
-  {
-    usage: 'start <projectId>',
-    description: 'Start the workspace runtime for one project.'
-  },
-  {
-    usage: 'stop <projectId>',
-    description: 'Stop the workspace runtime for one project.'
   }
 ]
+
+/**
+ * Commands that used to manage individual workspace runtimes from the CLI.
+ *
+ * They read and mutated local runtime state instead of talking to the running
+ * server, which could leave a workspace the server did not know it owned. The
+ * dashboard already performs the same operations over the HTTP API, so the CLI
+ * keeps only server launch and service management. The names stay known so an
+ * old invocation gets a specific reason instead of bare help.
+ */
+export const RETIRED_RUNTIME_COMMANDS = new Map<string, string>([
+  ['list', 'Projects are listed in the dashboard sidebar.'],
+  ['status', 'Workspace runtime status is shown in the dashboard sidebar.'],
+  ['stop', 'Stop a workspace from the dashboard.']
+])
 
 export const SERVICE_COMMANDS: CliCommandDoc[] = [
   {
@@ -114,11 +113,6 @@ export const CLI_OPTIONS: CliOptionDoc[] = [
     appliesTo: 'service'
   },
   {
-    flag: '--json',
-    description: 'Emit machine-readable JSON instead of formatted output.',
-    appliesTo: 'list, status, start, stop'
-  },
-  {
     flag: '-h, --help',
     description: 'Show this help.'
   }
@@ -132,10 +126,6 @@ export const CLI_EXAMPLES: { command: string, description: string }[] = [
   {
     command: `${CLI_BINARY} start --root ~/Project --no-tailscale-serve`,
     description: 'Start locally without configuring Tailscale Serve.'
-  },
-  {
-    command: `${CLI_BINARY} list --root ~/Project`,
-    description: 'Inspect discovered projects and their runtime state.'
   },
   {
     command: `${CLI_BINARY} service install`,
@@ -187,6 +177,7 @@ export const renderCliHelp = (ui: CliUi) => {
     left: command.usage,
     right: command.description
   })))
+  ui.muted('  Projects and workspace runtimes are managed from the dashboard, not the CLI.')
   ui.line()
 
   ui.heading('Service')
