@@ -552,54 +552,39 @@ All commands are available as `codori <command>` after a global install, or as
 `npx @codori/server <command>` without installing. Run `codori --help` for the
 grouped command, option, and example reference.
 
-List discovered projects:
+The CLI has two jobs: run the server and manage the background service. Project
+discovery and workspace lifecycle belong to the dashboard, which drives the same
+HTTP API the server exposes.
+
+Color is used only when the terminal supports it. `NO_COLOR`, `TERM=dumb`, and a
+piped stream all produce plain text.
+
+Project browsing, workspace start, and workspace stop moved to the dashboard.
+`codori list`, `codori status`, `codori start <projectId>`, and
+`codori stop <projectId>` were removed; they read and mutated local runtime
+state instead of talking to the running server, so the CLI could start a
+workspace the server did not know it owned. Open the dashboard sidebar for the
+same actions, or call the API directly:
 
 ```bash
-codori list --root ~/Project
-codori list --root ~/Project --json
-```
-
-Formatted output uses an aligned table, and `--json` emits plain, parseable JSON
-with no color or spinner output so it stays safe to pipe:
-
-```text
-2 projects under /Users/comfuture/Project
-  PROJECT   STATUS   PORT   PID
-  codori    running  46001  4242
-  team/api  stopped  -      -
-```
-
-Color is used only when the terminal supports it. `NO_COLOR`, `TERM=dumb`, a
-piped stream, and `--json` all produce plain text.
-
-Start a project workspace runtime:
-
-```bash
-codori start codori --root ~/Project
-```
-
-Stop a project workspace runtime:
-
-```bash
-codori stop codori --root ~/Project
-```
-
-Inspect runtime status:
-
-```bash
-codori status --root ~/Project
-codori status codori --root ~/Project
+curl http://127.0.0.1:4310/api/projects
+curl -X POST http://127.0.0.1:4310/api/projects/codori/start
+curl -X POST http://127.0.0.1:4310/api/projects/codori/stop
 ```
 
 Register Codori as a background service:
 
 ```bash
 codori service install
-codori service start --root ~/Project
-codori service stop --root ~/Project
-codori service status --root ~/Project
-codori service uninstall --root ~/Project
+codori service start
+codori service stop
+codori service status
+codori service uninstall
 ```
+
+Every verb except `install` resolves its target from the recorded install under
+`~/.codori/services/`, so they work from any directory. Pass `--root` only when
+more than one service is registered.
 
 A user-scoped install uses a launchd agent on macOS, a systemd user unit on
 Linux, and a Task Scheduler logon task on Windows. `--scope system` registers a

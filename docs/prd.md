@@ -240,49 +240,35 @@ Behavior:
 `codori serve` is a deprecated compatibility alias that invokes this same
 path and prints a migration warning outside managed-service logs.
 
-### `codori list`
+### `codori service <verb>`
 
 ```bash
-codori list [--root <path>] [--json]
+codori service install|start|stop|restart|status|uninstall [--root <path>]
 ```
 
 Behavior:
 
-- Prints all discovered projects with logical workspace runtime status.
+- Registers, controls, and removes the platform background service.
+- Every verb except `install` resolves its target from recorded install metadata
+  under `~/.codori/services/`, so no verb inspects the current directory and
+  none can fail on an unreadable path outside `~/.codori`.
+- Reports ambiguity when several services are registered instead of choosing one.
 
-### `codori start <projectId>`
+### Project and workspace lifecycle
 
-```bash
-codori start <projectId> [--root <path>] [--json]
-```
-
-Behavior:
-
-- Activates the project workspace and starts the shared runtime if it is not already running.
-- Returns the shared runtime listening port either way.
-
-### `codori stop`
-
-```bash
-codori stop <projectId> [--root <path>] [--json]
-```
-
-### `codori status`
-
-```bash
-codori status [projectId] [--root <path>] [--json]
-```
-
-Behavior:
-
-- Without `projectId`, returns all projects and their statuses.
-- With `projectId`, returns only the resolved project.
+Project discovery and workspace start/stop are not CLI responsibilities. The
+running server owns that state and exposes it over the HTTP API
+(`GET /api/projects`, `GET /api/projects/:projectId/status`,
+`POST /api/projects/:projectId/start`, `POST /api/projects/:projectId/stop`),
+which the dashboard drives. A CLI that mutated the same state locally could
+start a workspace runtime the running server did not know it owned.
 
 CLI output requirements:
 
 - Human-friendly by default.
-- Deterministic JSON when `--json` is passed.
-- Non-zero exit code on invalid root, invalid project id, missing Codex binary, or spawn failure.
+- Plain text with no color or cursor-control bytes for a non-TTY stream.
+- Non-zero exit code on invalid root, missing Codex binary, spawn failure, an
+  unresolved service target, or a command that moved to the dashboard.
 
 ## 9. HTTP And WebSocket API
 
