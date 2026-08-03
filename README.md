@@ -225,6 +225,17 @@ Tailscale when port 443 has a conflicting root mapping, a foreground listener,
 Funnel exposure, or a non-HTTPS listener. Codori never runs
 `tailscale serve reset` and does not remove unrelated path handlers.
 
+Writing a Serve config requires root or a Tailscale operator, so an unprivileged
+launch is refused with `Access denied: serve config denied` even though status
+reads fine. Grant the account that runs Codori ongoing control once:
+
+```bash
+sudo tailscale set --operator=$USER
+```
+
+Codori keeps serving on loopback until that is set; only the private HTTPS URL
+is unavailable.
+
 Tailscale Serve is private to the tailnet, uses tailnet access-control rules,
 and provisions TLS for the MagicDNS name. Codori still has no built-in
 authentication, so restrict tailnet access to trusted operators. Tailscale
