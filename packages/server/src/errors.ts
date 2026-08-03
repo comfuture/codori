@@ -50,3 +50,22 @@ export const formatCliError = (error: unknown) => {
 
   return `${lines.join('\n')}\n`
 }
+
+/**
+ * Message plus actionable detail, for a failure that is reported as a warning
+ * rather than thrown to the top level.
+ *
+ * An automatic Tailscale Serve attempt is advisory: the server keeps running on
+ * loopback, so its failure is warned about instead of raised. Using only the
+ * message dropped the recovery steps carried in `details`.
+ */
+export const describeErrorWithDetails = (error: unknown): string[] => {
+  if (!(error instanceof CodoriError)) {
+    return [asErrorMessage(error)]
+  }
+
+  const detail = asDetailText(error.details)
+  return detail
+    ? [error.message, ...detail.split('\n').map(line => line.trimEnd())]
+    : [error.message]
+}

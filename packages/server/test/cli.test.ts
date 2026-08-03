@@ -10,6 +10,7 @@ import {
   resolveServiceCliAction,
   runCli
 } from '../src/cli.js'
+import { CodoriError } from '../src/errors.js'
 
 /**
  * A server launch records the served root in `~/.codori/last-root.json`, and
@@ -525,6 +526,44 @@ describe('cli service commands', () => {
     expect(app.close).not.toHaveBeenCalled()
     expect(app.ready).toHaveBeenCalled()
     expect(stdout.read()).toContain('Tailscale Serve was not configured automatically: HTTPS is disabled')
+  })
+
+  // A denied Serve write carries recovery steps in the error detail. Warning
+  // with the summary alone told the user it was refused and nothing else.
+  it('prints the recovery steps when Serve is denied for this user', async () => {
+    const stdout = createOutput()
+    const app = { close: vi.fn(), ready: vi.fn() }
+    const manager = {
+      config: {
+        root: '/tmp/projects',
+        server: { host: '127.0.0.1', port: 4310 }
+      }
+    }
+
+    await runCli(['start', '--root', '/tmp/projects'], {
+      stdout: stdout.stream,
+      createRuntimeManager: vi.fn(() => manager) as never,
+      startHttpServer: vi.fn(async () => app) as never,
+      detectTailscaleServeEligibility: vi.fn(async () => ({
+        eligible: true,
+        dnsName: 'codori-host.example.ts.net',
+        reason: 'available' as const
+      })),
+      configureTailscaleServe: vi.fn().mockRejectedValue(new CodoriError(
+        'TAILSCALE_SERVE_DENIED',
+        'Tailscale denied the Serve configuration for this user.',
+        'Grant this user ongoing control: sudo tailscale set --operator=ubuntu\nOr configure it once: sudo tailscale serve --bg --yes --https=443 http://127.0.0.1:4310'
+      )),
+      checkStartupUpdate: vi.fn(async () => ({ checked: false, adopted: false })) as never
+    })
+
+    const output = stdout.read()
+    expect(output).toContain('Tailscale denied the Serve configuration for this user.')
+    expect(output).toContain('sudo tailscale set --operator=ubuntu')
+    expect(output).toContain('sudo tailscale serve --bg --yes --https=443')
+    // The server still serves on loopback, so a denial must not stop the launch.
+    expect(app.close).not.toHaveBeenCalled()
+    expect(app.ready).toHaveBeenCalled()
   })
 
   it('skips tailscale detection and mutation when explicitly disabled', async () => {

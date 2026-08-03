@@ -66,6 +66,35 @@ const commandFailureMessage = (result: TailscaleCommandResult) =>
   || result.stdout.trim()
   || `tailscale exited with code ${result.exitCode ?? 'unknown'}.`
 
+/**
+ * Whether `tailscale serve` refused the write for lack of privileges.
+ *
+ * `tailscaled` normally runs as root, and writing a serve config requires either
+ * root or a configured operator. Reading status stays permitted, so eligibility
+ * detection succeeds and only the write fails. Tailscale reports this as
+ * `Access denied: serve config denied`.
+ */
+const isServePermissionDenied = (result: TailscaleCommandResult) =>
+  /access denied/i.test(`${result.stderr} ${result.stdout}`)
+
+/**
+ * The two ways to let Codori configure Serve without a privileged relaunch.
+ *
+ * `tailscale set --operator` is the durable fix: it grants the current user
+ * ongoing control so an unprivileged `codori start` and a user-scoped service
+ * both work. Running the serve command under sudo is the one-shot alternative,
+ * and it is what Tailscale itself suggests.
+ */
+const buildServePermissionGuidance = (port: number, user: string | undefined) => {
+  const operatorTarget = user?.trim() || '$USER'
+  return [
+    'Writing a Tailscale Serve config requires root or an operator, and tailscaled is not granting it to this user.',
+    `Grant this user ongoing control: sudo tailscale set --operator=${operatorTarget}`,
+    `Or configure it once: sudo tailscale serve --bg --yes --https=${TAILSCALE_HTTPS_PORT} http://${LOOPBACK_HOST}:${port}`,
+    'Codori keeps serving on loopback either way; only the private HTTPS URL is unavailable until this is set.'
+  ].join('\n')
+}
+
 const isHttpsHostPort = (value: string) => value.endsWith(`:${TAILSCALE_HTTPS_PORT}`)
 
 const hostnameFromHostPort = (value: string) => {
@@ -330,6 +359,14 @@ export const configureTailscaleServe = async (
   }
 
   if (result.exitCode !== 0) {
+    if (isServePermissionDenied(result)) {
+      throw new CodoriError(
+        'TAILSCALE_SERVE_DENIED',
+        'Tailscale denied the Serve configuration for this user.',
+        buildServePermissionGuidance(port, process.env.USER)
+      )
+    }
+
     throw new CodoriError(
       'TAILSCALE_SERVE_FAILED',
       `Unable to configure Tailscale Serve: ${commandFailureMessage(result)}`

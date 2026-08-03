@@ -114,6 +114,43 @@ describe('configureTailscaleServe', () => {
     })
   })
 
+  // tailscaled runs as root and grants serve writes only to root or a configured
+  // operator. Reading status stays allowed, so eligibility passes and only the
+  // write is refused. This used to surface as a bare
+  // `Access denied: serve config denied` with no way forward.
+  it('turns a denied serve write into actionable recovery steps', async () => {
+    const runCommand = vi.fn(async (_command: string, args: string[]) => {
+      if (args.includes('status')) {
+        return result('{}')
+      }
+      return result('', {
+        exitCode: 1,
+        stderr: 'sending serve config: Access denied: serve config denied'
+      })
+    })
+
+    const failure = await configureTailscaleServe(4310, runCommand).catch(error => error)
+
+    expect(failure).toMatchObject({ code: 'TAILSCALE_SERVE_DENIED' })
+    const details = String((failure as { details?: unknown }).details)
+    expect(details).toContain('sudo tailscale set --operator=')
+    expect(details).toContain('sudo tailscale serve --bg --yes --https=443 http://127.0.0.1:4310')
+    expect(details).toContain('Codori keeps serving on loopback')
+  })
+
+  it('keeps an unrelated serve failure on the generic code', async () => {
+    const runCommand = vi.fn(async (_command: string, args: string[]) => {
+      if (args.includes('status')) {
+        return result('{}')
+      }
+      return result('', { exitCode: 1, stderr: 'HTTPS is not enabled for this tailnet' })
+    })
+
+    await expect(configureTailscaleServe(4310, runCommand)).rejects.toMatchObject({
+      code: 'TAILSCALE_SERVE_FAILED'
+    })
+  })
+
   it('reports a missing Tailscale executable as an actionable prerequisite', async () => {
     const runCommand = vi.fn().mockRejectedValue(new Error('spawn tailscale ENOENT'))
 
