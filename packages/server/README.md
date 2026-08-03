@@ -100,6 +100,32 @@ After verifying the structured status, Codori prints the private
 launches. Unrelated path handlers are preserved; Codori never runs
 `tailscale serve reset`.
 
+### Serve permission
+
+`tailscaled` usually runs as root and allows a serve config write only from root
+or a configured operator. Reading status stays permitted, so Codori detects the
+node as eligible and then the write is refused:
+
+```
+Access denied: serve config denied
+```
+
+Grant the account that runs Codori ongoing control, which is what a user-scoped
+service needs:
+
+```bash
+sudo tailscale set --operator=$USER
+```
+
+Or configure the mapping once with elevated privileges:
+
+```bash
+sudo tailscale serve --bg --yes --https=443 http://127.0.0.1:4310
+```
+
+Codori keeps serving on loopback either way; only the private HTTPS URL is
+unavailable until Serve is configured.
+
 The background Serve mapping persists when Codori exits. Remove the root
 mapping explicitly when it is no longer needed:
 
@@ -209,8 +235,17 @@ Use `--scope system` for a machine-wide service. A system scope registers a
 launchd daemon in `/Library/LaunchDaemons`, a systemd unit in
 `/etc/systemd/system`, or a Windows boot task running as `SYSTEM`. If elevated
 privileges are required, Codori stops before writing files and prints the exact
-command to re-run: `sudo codori service ...` on macOS and Linux, or the same
-command from an Administrator terminal on Windows.
+command to re-run, or the same command from an Administrator terminal on
+Windows. On macOS and Linux that command preserves `PATH`:
+
+```bash
+sudo --preserve-env=PATH "$(command -v codori)" service install --scope system
+```
+
+A bare `sudo codori ...` is not reliable. `sudo` replaces `PATH` with its
+compiled `secure_path`, so a per-user Node install (nvm, fnm, asdf, mise, volta)
+is either invisible to `sudo` or, worse, the `#!/usr/bin/env node` shebang
+resolves to a distro Node too old to run the bundle.
 
 `service start` and `service restart` regenerate the launcher script and
 service definition before launching. Launchers use the canonical
