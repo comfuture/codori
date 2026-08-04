@@ -1,6 +1,6 @@
 import { useRuntimeConfig } from '#imports'
 import { $fetch } from 'ofetch'
-import { computed, ref, type Ref } from 'vue'
+import { computed, ref, watch, type Ref } from 'vue'
 import { useChats } from './useChats'
 import { useRpc } from './useRpc'
 import {
@@ -26,7 +26,11 @@ import type { ThreadSettingsUpdateParams } from '~~/shared/generated/codex-app-s
 import type { ThreadSettingsUpdateResponse } from '~~/shared/generated/codex-app-server/v2/ThreadSettingsUpdateResponse'
 import type { ThreadStartParams } from '~~/shared/generated/codex-app-server/v2/ThreadStartParams'
 import type { ThreadStartResponse } from '~~/shared/generated/codex-app-server/v2/ThreadStartResponse'
-import type { RealtimeVoiceCatalog } from '~~/shared/realtime-core'
+import type {
+  RealtimeSessionKind,
+  RealtimeSessionState,
+  RealtimeVoiceCatalog
+} from '~~/shared/realtime-core'
 import {
   resolveConfiguredRealtimeVoicePrompt,
   resolveRealtimeVoiceOverride,
@@ -58,7 +62,45 @@ type LandingRealtimeVoiceController = {
     options?: { voice?: RealtimeVoiceCatalog['voices'][number], prompt?: string }
   ) => Promise<void>
   stop: () => Promise<void>
+}
+
+export const useDeferredRealtimeVoiceMicrophoneActivation = (input: {
+  state: Readonly<Ref<RealtimeSessionState>>
+  sessionKind: Readonly<Ref<RealtimeSessionKind | null>>
   setMicrophoneEnabled: (enabled: boolean) => void
+}) => {
+  const pending = ref(false)
+
+  const activateWhenConnected = () => {
+    if (
+      pending.value
+      && input.state.value === 'connected'
+      && input.sessionKind.value === 'conversation'
+    ) {
+      pending.value = false
+      input.setMicrophoneEnabled(true)
+      return
+    }
+
+    if (
+      input.state.value === 'idle'
+      || input.state.value === 'stopping'
+      || input.state.value === 'closed'
+      || input.state.value === 'error'
+    ) {
+      pending.value = false
+    }
+  }
+
+  watch([input.state, input.sessionKind], activateWhenConnected)
+
+  return {
+    pending,
+    request: () => {
+      pending.value = true
+      activateWhenConnected()
+    }
+  }
 }
 
 export type LandingRealtimeVoiceCompanionDependencies = {
@@ -74,6 +116,7 @@ export type LandingRealtimeVoiceCompanionDependencies = {
   getChatClient: (chatId: string) => CodexRpcClient
   promoteConversation: (sourceKey: string, targetKey: string) => void
   realtimeVoice: LandingRealtimeVoiceController
+  requestMicrophoneActivation: () => void
   showPresentation: (presentation: LandingRealtimeVoicePresentation) => void
   clearPresentation: (presentation?: LandingRealtimeVoicePresentation) => void
 }
@@ -168,7 +211,7 @@ export const createLandingRealtimeVoiceCompanion = (
         }),
         ...(startPrompt !== undefined ? { prompt: startPrompt } : {})
       })
-      dependencies.realtimeVoice.setMicrophoneEnabled(true)
+      dependencies.requestMicrophoneActivation()
     } catch (caughtError) {
       dependencies.clearPresentation(presentation)
       if (dependencies.ownsActiveSession()) {
@@ -208,6 +251,11 @@ export const useLandingRealtimeVoiceCompanion = () => {
   )
   const voicePreference = useRealtimeVoicePreference()
   const promptPreference = useRealtimeVoicePromptPreference()
+  const microphoneActivation = useDeferredRealtimeVoiceMicrophoneActivation({
+    state: realtimeVoice.state,
+    sessionKind: realtimeVoice.sessionKind,
+    setMicrophoneEnabled: realtimeVoice.setMicrophoneEnabled
+  })
   const configuredBase = String(runtimeConfig.public.serverBase ?? '')
   const capabilitiesUrl = shouldUseServerProxy(configuredBase)
     ? '/api/codori/capabilities'
@@ -226,6 +274,7 @@ export const useLandingRealtimeVoiceCompanion = () => {
     getChatClient,
     promoteConversation: promoteSharedRealtimeConversation,
     realtimeVoice,
+    requestMicrophoneActivation: microphoneActivation.request,
     showPresentation: presentation.show,
     clearPresentation: presentation.clear
   }, draftWorkspaceKey)
