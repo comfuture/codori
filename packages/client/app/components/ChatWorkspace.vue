@@ -108,6 +108,7 @@ import {
   resolveChatMessagesStatus,
   shouldAwaitAssistantOutput
 } from '../utils/chat-messages-status'
+import { chatTranscriptRootClass } from '../utils/chat-transcript-density'
 import { routePromptKeydownCapture } from '../utils/prompt-keydown'
 import {
   ITEM_PART,
@@ -739,12 +740,7 @@ const showAwaitingAssistantIndicator = computed(() =>
 const chatMessagesStatus = computed(() =>
   resolveChatMessagesStatus(status.value, showAwaitingAssistantIndicator.value)
 )
-const chatMessagesRootClass = computed(() =>
-  [
-    'min-h-full px-4 py-5 md:px-6',
-    '[&>article:last-of-type]:!min-h-0'
-  ].filter(Boolean).join(' ')
-)
+const chatMessagesRootClass = computed(() => chatTranscriptRootClass())
 const chatSpacingOffset = computed(() =>
   Math.max(140, stickyFooterHeight.value + 24)
 )
