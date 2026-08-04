@@ -2,7 +2,9 @@
 /* eslint-disable vue/one-component-per-file */
 import { mount } from '@vue/test-utils'
 import { defineComponent } from 'vue'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+const reloadPageMock = vi.hoisted(() => vi.fn())
 
 const routeMock = vi.hoisted(() => ({
   path: '/',
@@ -12,6 +14,14 @@ const routeMock = vi.hoisted(() => ({
 vi.mock('#imports', () => ({
   useRoute: () => routeMock
 }))
+
+vi.mock('../app/utils/service-update-completion', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../app/utils/service-update-completion')>()
+  return {
+    ...actual,
+    reloadPage: reloadPageMock
+  }
+})
 
 vi.mock('../app/composables/useProjects', async () => {
   const { ref: createRef } = await import('vue')
@@ -114,6 +124,7 @@ const findUpdateTrigger = (wrapper: ReturnType<typeof mountLayout>) =>
 
 describe('service update prompt', () => {
   beforeEach(() => {
+    reloadPageMock.mockClear()
     projectsMock.triggerServiceUpdate.mockClear()
     projectsMock.refreshServiceUpdate.mockClear()
     projectsMock.serviceUpdatePending.value = false
@@ -124,6 +135,10 @@ describe('service update prompt', () => {
       installedVersion: '0.10.0',
       latestVersion: '0.11.0'
     }
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
   it('checks for updates on mount without restarting the service', () => {
@@ -161,5 +176,82 @@ describe('service update prompt', () => {
 
     expect(projectsMock.triggerServiceUpdate).not.toHaveBeenCalled()
     expect(wrapper.get('[data-testid="modal"]').attributes('data-open')).toBe('false')
+  })
+
+  it('starts completion polling before updating and reloads after the target server responds', async () => {
+    vi.useFakeTimers()
+    const targetVersion = '0.11.0'
+    let timerWasActiveWhenUpdateStarted = false
+    projectsMock.triggerServiceUpdate.mockImplementation(async () => {
+      // The layout also owns the long-lived availability timer.
+      timerWasActiveWhenUpdateStarted = vi.getTimerCount() === 2
+      const status = {
+        enabled: true,
+        updateAvailable: true,
+        updating: true,
+        installedVersion: '0.10.0',
+        latestVersion: targetVersion
+      }
+      projectsMock.serviceUpdate.value = status
+      return status
+    })
+    projectsMock.refreshServiceUpdate
+      // Initial availability refresh performed by onMounted.
+      .mockResolvedValueOnce(projectsMock.serviceUpdate.value)
+      .mockRejectedValueOnce(new Error('service restarting'))
+      .mockResolvedValueOnce({
+        enabled: true,
+        updateAvailable: true,
+        updating: false,
+        installedVersion: '0.10.0',
+        latestVersion: targetVersion
+      })
+      .mockResolvedValueOnce({
+        enabled: true,
+        updateAvailable: false,
+        updating: false,
+        installedVersion: targetVersion,
+        latestVersion: targetVersion
+      })
+
+    const wrapper = mountLayout()
+    const updateButton = findUpdateTrigger(wrapper)
+    await updateButton?.trigger('click')
+    await findButtonByText(wrapper, 'Update and restart')?.trigger('click')
+
+    expect(timerWasActiveWhenUpdateStarted).toBe(true)
+
+    await vi.advanceTimersByTimeAsync(2_000)
+    expect(reloadPageMock).not.toHaveBeenCalled()
+
+    await vi.advanceTimersByTimeAsync(1_000)
+    expect(reloadPageMock).toHaveBeenCalledTimes(1)
+    // Successful completion clears only the short-lived watcher.
+    expect(vi.getTimerCount()).toBe(1)
+
+    wrapper.unmount()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('cleans up completion polling when the layout unmounts', async () => {
+    vi.useFakeTimers()
+    projectsMock.triggerServiceUpdate.mockResolvedValue({
+      enabled: true,
+      updateAvailable: true,
+      updating: true,
+      installedVersion: '0.10.0',
+      latestVersion: '0.11.0'
+    })
+
+    const wrapper = mountLayout()
+    await findUpdateTrigger(wrapper)?.trigger('click')
+    await findButtonByText(wrapper, 'Update and restart')?.trigger('click')
+    expect(vi.getTimerCount()).toBe(2)
+
+    wrapper.unmount()
+    await vi.advanceTimersByTimeAsync(5_000)
+
+    expect(vi.getTimerCount()).toBe(0)
+    expect(reloadPageMock).not.toHaveBeenCalled()
   })
 })

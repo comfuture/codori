@@ -2,6 +2,10 @@
 import { useRoute } from '#imports'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useProjects } from '../composables/useProjects'
+import {
+  createServiceUpdateCompletionMonitor,
+  reloadPage
+} from '../utils/service-update-completion'
 import { DEFAULT_SETTINGS_ROUTE } from '~~/shared/settings'
 
 const route = useRoute()
@@ -17,6 +21,10 @@ const serviceUpdateConfirmOpen = ref(false)
 
 const SERVICE_UPDATE_POLL_INTERVAL_MS = 15 * 60 * 1000
 let serviceUpdateTimer: ReturnType<typeof setInterval> | null = null
+const serviceUpdateCompletionMonitor = createServiceUpdateCompletionMonitor({
+  refreshStatus: refreshServiceUpdate,
+  reload: reloadPage
+})
 
 const showServiceUpdateButton = computed(() =>
   serviceUpdate.value.enabled && (serviceUpdate.value.updateAvailable || serviceUpdate.value.updating)
@@ -55,7 +63,13 @@ const handleServiceUpdate = () => {
 
 const confirmServiceUpdate = async () => {
   serviceUpdateConfirmOpen.value = false
-  await triggerServiceUpdate()
+  // Start watching before the POST: the detached updater deliberately shuts
+  // this server down shortly after its response is flushed.
+  serviceUpdateCompletionMonitor.start(serviceUpdate.value.latestVersion)
+  const status = await triggerServiceUpdate()
+  if (!status?.updating) {
+    serviceUpdateCompletionMonitor.stop()
+  }
 }
 
 onMounted(() => {
@@ -66,6 +80,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  serviceUpdateCompletionMonitor.stop()
   if (serviceUpdateTimer) {
     clearInterval(serviceUpdateTimer)
     serviceUpdateTimer = null
