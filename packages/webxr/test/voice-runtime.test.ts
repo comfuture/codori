@@ -32,6 +32,7 @@ const snapshot = (
   },
   state,
   activity: 'idle',
+  avatarCue: null,
   sessionKind: state === 'idle' ? null : 'conversation',
   activeVoice: null,
   owningThreadId: state === 'idle' ? null : 'thread-1',

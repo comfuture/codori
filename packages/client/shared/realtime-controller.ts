@@ -10,6 +10,8 @@ import type { ThreadRealtimeStartParams } from './generated/codex-app-server/v2/
 import {
   resolveRealtimeCapability,
   type RealtimeActivity,
+  type RealtimeAvatarCue,
+  type RealtimeAvatarCueKind,
   type RealtimeCapability,
   type RealtimeSessionKind,
   type RealtimeSessionState,
@@ -23,6 +25,38 @@ import {
   type RealtimeTranscriptSegment,
   type RealtimeTranscriptState
 } from './realtime-transcript'
+
+const REALTIME_TOOL_ITEM_TYPES = new Set([
+  'commandExecution',
+  'fileChange',
+  'mcpToolCall',
+  'dynamicToolCall',
+  'collabAgentToolCall',
+  'webSearch',
+  'imageGeneration'
+])
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+
+const realtimeToolItem = (notification: CodexRpcNotification) => {
+  const params = isRecord(notification.params) ? notification.params : null
+  const item = params && isRecord(params.item) ? params.item : null
+  return item && typeof item.type === 'string' && REALTIME_TOOL_ITEM_TYPES.has(item.type)
+    ? item
+    : null
+}
+
+const realtimeToolItemFailed = (item: Record<string, unknown>) =>
+  item.status === 'failed'
+  || item.status === 'declined'
+  || item.success === false
+  || item.error != null
+  || (
+    item.type === 'commandExecution'
+    && typeof item.exitCode === 'number'
+    && item.exitCode !== 0
+  )
 
 type RealtimeTrack = {
   enabled: boolean
@@ -160,6 +194,7 @@ export type RealtimeConversationSnapshot = {
   capability: RealtimeCapability
   state: RealtimeSessionState
   activity: RealtimeActivity
+  avatarCue: RealtimeAvatarCue | null
   sessionKind: RealtimeSessionKind | null
   activeVoice: RealtimeVoice | null
   owningThreadId: string | null
@@ -192,6 +227,14 @@ export const createRealtimeConversationController = (
   })
   const state = ref<RealtimeSessionState>('idle')
   const activity = ref<RealtimeActivity>('idle')
+  const avatarCue = ref<RealtimeAvatarCue | null>(null)
+  let avatarCueSequence = 0
+  const emitAvatarCue = (kind: RealtimeAvatarCueKind) => {
+    avatarCue.value = {
+      kind,
+      sequence: ++avatarCueSequence
+    }
+  }
   const sessionKind = ref<RealtimeSessionKind | null>(null)
   const activeVoice = ref<RealtimeVoice | null>(null)
   const owningThreadId = ref<string | null>(null)
@@ -759,17 +802,38 @@ export const createRealtimeConversationController = (
         return
       }
       case 'turn/started':
+        emitAvatarCue('turn-start')
         activity.value = 'delegating'
         return
       case 'item/started':
+        if (realtimeToolItem(notification)) {
+          emitAvatarCue('tool-start')
+        }
+        activity.value = 'working'
+        return
+      case 'item/completed': {
+        const item = realtimeToolItem(notification)
+        if (item && realtimeToolItemFailed(item)) {
+          emitAvatarCue('tool-failed')
+        }
+        return
+      }
       case 'item/agentMessage/delta':
       case 'item/plan/delta':
       case 'item/reasoning/textDelta':
       case 'item/reasoning/summaryTextDelta':
         activity.value = 'working'
         return
-      case 'turn/completed':
+      case 'turn/completed': {
+        const params = isRecord(notification.params) ? notification.params : null
+        const turn = params && isRecord(params.turn) ? params.turn : null
+        emitAvatarCue(
+          turn?.status === 'failed' || turn?.status === 'interrupted'
+            ? 'turn-failed'
+            : 'turn-complete'
+        )
         activity.value = 'idle'
+      }
     }
   }
 
@@ -1133,6 +1197,7 @@ export const createRealtimeConversationController = (
     capability: capability.value,
     state: state.value,
     activity: activity.value,
+    avatarCue: avatarCue.value ? { ...avatarCue.value } : null,
     sessionKind: sessionKind.value,
     activeVoice: activeVoice.value,
     owningThreadId: owningThreadId.value,

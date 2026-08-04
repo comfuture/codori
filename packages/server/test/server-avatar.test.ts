@@ -352,5 +352,7 @@ describe('defaultServerAvatarAnimations', () => {
       .toEqual([48, 49, 50, 51, 52, 53])
     expect(animations.review?.frames.slice(0, 6).map(frame => frame.spriteIndex))
       .toEqual([64, 65, 66, 67, 68, 69])
+    expect(animations.waving?.loopStart).toBe(8)
+    expect(animations.running?.loopStart).toBe(12)
   })
 })

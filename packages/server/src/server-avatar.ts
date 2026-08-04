@@ -181,8 +181,8 @@ const stateAnimation = (
     finalFrameDurationMs
   )
   return {
-    frames: [...primary, ...primary, ...primary, ...idleFrames()],
-    loopStart: primary.length * 3,
+    frames: [...primary, ...primary, ...idleFrames()],
+    loopStart: primary.length * 2,
     fallback: 'idle'
   }
 }

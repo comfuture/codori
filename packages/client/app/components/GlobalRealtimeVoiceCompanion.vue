@@ -108,6 +108,7 @@ onBeforeUnmount(() => {
     :sprite-url="spriteUrl"
     :session-state="companionState"
     :activity="realtimeVoice.activity.value"
+    :avatar-cue="realtimeVoice.avatarCue.value"
     :generation="realtimeVoice.generation.value"
     :transcripts="centered ? [] : realtimeVoice.transcripts.value"
     :bottom-offset="156"

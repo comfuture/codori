@@ -6,9 +6,11 @@ const props = withDefaults(defineProps<{
   avatar: ServerAvatarMetadata | null
   spriteUrl: string | null
   animation?: string
+  playbackKey?: number
   width?: number
 }>(), {
   animation: 'idle',
+  playbackKey: 0,
   width: 48
 })
 
@@ -102,7 +104,7 @@ const restartAnimation = () => {
 }
 
 watch(
-  () => [props.avatar?.revision, props.spriteUrl, props.animation],
+  () => [props.avatar?.revision, props.spriteUrl, props.animation, props.playbackKey],
   restartAnimation
 )
 
