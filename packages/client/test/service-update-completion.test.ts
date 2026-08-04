@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ServiceUpdateStatus } from '../shared/codori'
-import { createServiceUpdateCompletionMonitor } from '../app/utils/service-update-completion'
+import {
+  comparePackageVersions,
+  createServiceUpdateCompletionMonitor
+} from '../app/utils/service-update-completion'
 
 const createStatus = (overrides: Partial<ServiceUpdateStatus> = {}): ServiceUpdateStatus => ({
   enabled: true,
@@ -71,6 +74,46 @@ describe('service update completion monitor', () => {
 
     expect(reload).toHaveBeenCalledTimes(1)
     expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('uses SemVer precedence when stable latest replaces a prerelease target', async () => {
+    vi.useFakeTimers()
+    const refreshStatus = vi.fn(async () => createStatus({
+      updateAvailable: false,
+      updating: false,
+      installedVersion: '1.0.0',
+      latestVersion: '1.0.0'
+    }))
+    const reload = vi.fn()
+    const monitor = createServiceUpdateCompletionMonitor({
+      refreshStatus,
+      reload,
+      intervalMs: 1_000
+    })
+
+    monitor.start('1.0.0-beta')
+    await vi.advanceTimersByTimeAsync(1_000)
+
+    expect(reload).toHaveBeenCalledTimes(1)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('orders SemVer prerelease identifiers and ignores build metadata', () => {
+    const versions = [
+      '1.0.0-alpha',
+      '1.0.0-alpha.1',
+      '1.0.0-alpha.beta',
+      '1.0.0-beta',
+      '1.0.0-beta.2',
+      '1.0.0-beta.11',
+      '1.0.0-rc.1',
+      '1.0.0'
+    ]
+
+    for (let index = 1; index < versions.length; index += 1) {
+      expect(comparePackageVersions(versions[index]!, versions[index - 1]!)).toBeGreaterThan(0)
+    }
+    expect(comparePackageVersions('1.0.0+build.2', '1.0.0+build.1')).toBe(0)
   })
 
   it('stops polling after the bounded completion window', async () => {
