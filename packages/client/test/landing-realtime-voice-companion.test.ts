@@ -1,10 +1,11 @@
-import { ref } from 'vue'
+import { effectScope, nextTick, ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 import {
   createLandingRealtimeVoiceCompanion,
   LANDING_VOICE_DEVELOPER_INSTRUCTIONS,
   LANDING_VOICE_MODEL,
   LANDING_VOICE_REASONING_EFFORT,
+  useDeferredRealtimeVoiceMicrophoneActivation,
   type LandingRealtimeVoiceCompanionDependencies
 } from '../app/composables/useLandingRealtimeVoiceCompanion'
 import { matchesLandingRealtimeVoicePresentation } from '../app/composables/useLandingRealtimeVoicePresentation'
@@ -117,10 +118,10 @@ const createFixture = (input?: {
       }),
       connect,
       stop,
-      setMicrophoneEnabled: vi.fn(() => {
-        order.push('enable-microphone')
-      })
     },
+    requestMicrophoneActivation: vi.fn(() => {
+      order.push('request-microphone-activation')
+    }),
     showPresentation,
     clearPresentation
   }
@@ -159,7 +160,7 @@ describe('landing realtime voice companion startup', () => {
       'config/read',
       'show-presentation',
       'connect',
-      'enable-microphone'
+      'request-microphone-activation'
     ])
     expect(fixture.request).toHaveBeenNthCalledWith(1, 'thread/start', {
       model: LANDING_VOICE_MODEL,
@@ -231,6 +232,58 @@ describe('landing realtime voice companion startup', () => {
       threadId: 'thread-voice'
     })
     expect(fixture.stop).toHaveBeenCalledOnce()
+  })
+})
+
+describe('landing realtime voice microphone activation', () => {
+  it('waits for a connected conversation before enabling the microphone', async () => {
+    const scope = effectScope()
+    const state = ref<'starting' | 'connected' | 'closed'>('starting')
+    const sessionKind = ref<'conversation' | 'preview' | null>('conversation')
+    const setMicrophoneEnabled = vi.fn()
+
+    const activation = scope.run(() => useDeferredRealtimeVoiceMicrophoneActivation({
+      state,
+      sessionKind,
+      setMicrophoneEnabled
+    }))
+    if (!activation) {
+      throw new Error('Failed to create microphone activation scope.')
+    }
+
+    activation.request()
+    expect(activation.pending.value).toBe(true)
+    expect(setMicrophoneEnabled).not.toHaveBeenCalled()
+
+    state.value = 'connected'
+    await nextTick()
+
+    expect(activation.pending.value).toBe(false)
+    expect(setMicrophoneEnabled).toHaveBeenCalledOnce()
+    expect(setMicrophoneEnabled).toHaveBeenCalledWith(true)
+    scope.stop()
+  })
+
+  it('activates immediately when the session connected before the request', () => {
+    const scope = effectScope()
+    const state = ref<'connected'>('connected')
+    const sessionKind = ref<'conversation'>('conversation')
+    const setMicrophoneEnabled = vi.fn()
+
+    const activation = scope.run(() => useDeferredRealtimeVoiceMicrophoneActivation({
+      state,
+      sessionKind,
+      setMicrophoneEnabled
+    }))
+    if (!activation) {
+      throw new Error('Failed to create microphone activation scope.')
+    }
+
+    activation.request()
+
+    expect(activation.pending.value).toBe(false)
+    expect(setMicrophoneEnabled).toHaveBeenCalledOnce()
+    scope.stop()
   })
 })
 
