@@ -117,6 +117,74 @@ describe('chat transcript stability', () => {
     expect(parseRealtimeDelegation('Ordinary typed message')).toBeNull()
   })
 
+  it('renders near-miss delegation wrappers as delegations instead of raw markup', () => {
+    expect(parseRealtimeDelegation(
+      'Heads up: <realtime_delegation><input>Run the tests</input></realtime_delegation> thanks'
+    )).toEqual({
+      input: 'Run the tests',
+      transcriptDelta: null,
+      source: 'handoff'
+    })
+
+    // An unterminated wrapper is a streaming partial, not ordinary chat text.
+    expect(parseRealtimeDelegation('<realtime_delegation><input>Deploy the')).toEqual({
+      input: 'Deploy the',
+      transcriptDelta: null,
+      source: 'handoff',
+      parse: 'partial'
+    })
+
+    // A body with no usable input keeps the unparsed remainder in the disclosure.
+    expect(parseRealtimeDelegation(
+      '<realtime_delegation><unknown_field>x</unknown_field></realtime_delegation>'
+    )).toEqual({
+      input: '',
+      transcriptDelta: '<unknown_field>x</unknown_field>',
+      source: 'handoff',
+      parse: 'partial'
+    })
+
+    expect(parseRealtimeDelegation('<realtime_delegation></realtime_delegation>')).toEqual({
+      input: '',
+      transcriptDelta: null,
+      source: 'handoff',
+      parse: 'partial'
+    })
+  })
+
+  it('preserves prose around a delegation wrapper and promotes only pure delegations', () => {
+    expect(itemToMessages({
+      type: 'userMessage',
+      id: 'voice-handoff-2',
+      clientId: null,
+      content: [{
+        type: 'text',
+        text: 'Before <realtime_delegation><input>Run tests</input></realtime_delegation> after',
+        text_elements: []
+      }]
+    })).toEqual<ChatMessage[]>([{
+      id: 'voice-handoff-2',
+      // A surviving text part keeps the message in the user bubble styling.
+      role: 'user',
+      parts: [{
+        type: 'text',
+        text: 'Before ',
+        state: 'done'
+      }, {
+        type: REALTIME_DELEGATION_PART,
+        data: {
+          input: 'Run tests',
+          transcriptDelta: null,
+          source: 'handoff'
+        }
+      }, {
+        type: 'text',
+        text: ' after',
+        state: 'done'
+      }]
+    }])
+  })
+
   it('replaces a streamed text message with the completed server payload', () => {
     const streamedMessages = upsertStreamingMessage([], {
       id: 'agent-1',
