@@ -759,7 +759,12 @@ const projectItems = computed<ProjectSidebarNavigationItem[][]>(() => [
       tooltip: {
         text: project.projectId
       },
-      onClick: () => selectProject(project.projectId),
+      // A collapsed sidebar shows neither thread children nor the trailing plus
+      // button, so the row keeps its route there and stays the way into a project.
+      // Expanded, the row browses and expands instead of starting a thread.
+      ...(props.collapsed
+        ? { to: toProjectRoute(project.projectId) }
+        : { onClick: () => selectProject(project.projectId) }),
       projectId: project.projectId,
       projectPath: project.projectPath,
       error: project.error
