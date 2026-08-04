@@ -14,6 +14,10 @@ export type RealtimeDelegationData = {
   input: string
   transcriptDelta: string | null
   source: 'handoff' | 'transcript_tail_flush'
+  // `partial` marks a wrapper that is still streaming, unterminated, or whose body
+  // yielded no usable input. The component then presents the designed block without
+  // inventing content, and raw markup never reaches the transcript as ordinary text.
+  parse?: 'complete' | 'partial'
 }
 
 export type ThreadEventData =
@@ -443,34 +447,138 @@ const realtimeElementText = (body: string, element: string) => {
   return match?.[1] ? decodeRealtimeXmlText(match[1].trim()) : null
 }
 
-export const parseRealtimeDelegation = (text: string): RealtimeDelegationData | null => {
-  const wrapper = /^\s*<realtime_delegation>\s*([\s\S]*?)\s*<\/realtime_delegation>\s*$/u.exec(text)
-  if (!wrapper?.[1]) {
-    return null
-  }
+const REALTIME_DELEGATION_OPEN_TAG = '<realtime_delegation>'
+const REALTIME_DELEGATION_CLOSE_TAG = '</realtime_delegation>'
 
-  const body = wrapper[1]
+// An element that is still streaming has an opening tag with no closing tag yet.
+const danglingRealtimeElementText = (body: string, element: string) => {
+  const match = new RegExp(`<${element}>\\s*([\\s\\S]*)$`, 'u').exec(body)
+  return match?.[1] ? decodeRealtimeXmlText(match[1].trim()) : null
+}
+
+const withoutRealtimeElement = (body: string, element: string) =>
+  body
+    .replace(new RegExp(`<${element}>\\s*[\\s\\S]*?\\s*</${element}>`, 'u'), '')
+    .replace(new RegExp(`<${element}>[\\s\\S]*$`, 'u'), '')
+
+// The legacy shape carries the delegated request as bare body text. Residual markup
+// means the body was not understood, so it is not presented as request text.
+const realtimeDelegationBodyText = (body: string) => {
+  const remainder = decodeRealtimeXmlText(
+    ['source', 'transcript_delta', 'input']
+      .reduce(withoutRealtimeElement, body)
+      .trim()
+  )
+
+  return /<[^>]+>/u.test(remainder) ? '' : remainder
+}
+
+// The wrapper is produced upstream by the realtime voice path, so its exact shape is
+// untrusted input. Detection stays deliberately permissive: any wrapper marker yields
+// the designed delegation block, and only text with no marker at all is left alone.
+const realtimeDelegationFromBody = (
+  body: string,
+  terminated: boolean
+): RealtimeDelegationData => {
   const transcriptDelta = realtimeElementText(body, 'transcript_delta')
-  const explicitInput = realtimeElementText(body, 'input')
+    ?? (terminated ? null : danglingRealtimeElementText(body, 'transcript_delta'))
   const source = realtimeElementText(body, 'source') === 'transcript_tail_flush'
     ? 'transcript_tail_flush'
     : 'handoff'
-  const fallbackInput = decodeRealtimeXmlText(
-    body
-      .replace(/<source>\s*[\s\S]*?\s*<\/source>/u, '')
-      .replace(/<transcript_delta>\s*[\s\S]*?\s*<\/transcript_delta>/u, '')
-      .trim()
-  )
-  const delegationInput = explicitInput ?? fallbackInput
-  if (!delegationInput) {
-    return null
+  const delegationInput = realtimeElementText(body, 'input')
+    ?? realtimeDelegationBodyText(body)
+    ?? ''
+  const partialInput = delegationInput || danglingRealtimeElementText(body, 'input') || ''
+
+  if (terminated && delegationInput) {
+    return {
+      input: delegationInput,
+      transcriptDelta,
+      source
+    }
   }
 
   return {
-    input: delegationInput,
-    transcriptDelta,
-    source
+    input: partialInput,
+    // A body that yields no usable input still renders the designed block, and the
+    // unparsed remainder stays inside the conversation-context disclosure instead of
+    // reaching the transcript as raw markup.
+    transcriptDelta: transcriptDelta
+      ?? (partialInput ? null : decodeRealtimeXmlText(body.trim()) || null),
+    source,
+    parse: 'partial'
   }
+}
+
+export const parseRealtimeDelegation = (text: string): RealtimeDelegationData | null => {
+  const segment = realtimeDelegationSegments(text)
+    .find(candidate => candidate.kind === 'delegation')
+
+  return segment?.kind === 'delegation' ? segment.data : null
+}
+
+type RealtimeDelegationSegment =
+  | {
+      kind: 'text'
+      text: string
+    }
+  | {
+      kind: 'delegation'
+      data: RealtimeDelegationData
+    }
+
+export const realtimeDelegationSegments = (text: string): RealtimeDelegationSegment[] => {
+  // Entity-encoded wrappers arrive from the same upstream path, so decode the whole
+  // text when only the encoded marker is present.
+  const source = text.includes(REALTIME_DELEGATION_OPEN_TAG)
+    ? text
+    : (text.includes('&lt;realtime_delegation&gt;') ? decodeRealtimeXmlText(text) : text)
+
+  if (!source.includes(REALTIME_DELEGATION_OPEN_TAG)) {
+    return [{
+      kind: 'text',
+      text
+    }]
+  }
+
+  const segments: RealtimeDelegationSegment[] = []
+  let cursor = 0
+
+  while (cursor < source.length) {
+    const openIndex = source.indexOf(REALTIME_DELEGATION_OPEN_TAG, cursor)
+    if (openIndex < 0) {
+      segments.push({
+        kind: 'text',
+        text: source.slice(cursor)
+      })
+      break
+    }
+
+    if (openIndex > cursor) {
+      segments.push({
+        kind: 'text',
+        text: source.slice(cursor, openIndex)
+      })
+    }
+
+    const bodyStart = openIndex + REALTIME_DELEGATION_OPEN_TAG.length
+    const closeIndex = source.indexOf(REALTIME_DELEGATION_CLOSE_TAG, bodyStart)
+    if (closeIndex < 0) {
+      segments.push({
+        kind: 'delegation',
+        data: realtimeDelegationFromBody(source.slice(bodyStart), false)
+      })
+      break
+    }
+
+    segments.push({
+      kind: 'delegation',
+      data: realtimeDelegationFromBody(source.slice(bodyStart, closeIndex), true)
+    })
+    cursor = closeIndex + REALTIME_DELEGATION_CLOSE_TAG.length
+  }
+
+  return segments.filter(segment => segment.kind !== 'text' || segment.text.trim())
 }
 
 const userInputToParts = (input: UserInput): ChatPart[] => {
@@ -479,19 +587,18 @@ const userInputToParts = (input: UserInput): ChatPart[] => {
       return []
     }
 
-    const realtimeDelegation = parseRealtimeDelegation(input.text)
-    if (realtimeDelegation) {
-      return [{
-        type: REALTIME_DELEGATION_PART,
-        data: realtimeDelegation
-      }]
-    }
-
-    return [{
-      type: 'text',
-      text: input.text,
-      state: 'done'
-    }]
+    // Text outside the wrapper survives as its own text part, so surrounding prose is
+    // preserved while the wrapped portion always renders as the designed block.
+    return realtimeDelegationSegments(input.text).map(segment => segment.kind === 'delegation'
+      ? {
+          type: REALTIME_DELEGATION_PART,
+          data: segment.data
+        }
+      : {
+          type: 'text',
+          text: segment.text,
+          state: 'done'
+        })
   }
 
   if (input.type === 'skill' || input.type === 'mention') {
