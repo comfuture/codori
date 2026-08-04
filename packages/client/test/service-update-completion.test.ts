@@ -51,6 +51,47 @@ describe('service update completion monitor', () => {
     expect(reload).toHaveBeenCalledTimes(1)
   })
 
+  it('accepts a server version newer than the originally observed target', async () => {
+    vi.useFakeTimers()
+    const refreshStatus = vi.fn(async () => createStatus({
+      updateAvailable: false,
+      updating: false,
+      installedVersion: '0.13.3',
+      latestVersion: '0.13.3'
+    }))
+    const reload = vi.fn()
+    const monitor = createServiceUpdateCompletionMonitor({
+      refreshStatus,
+      reload,
+      intervalMs: 1_000
+    })
+
+    monitor.start('0.13.2')
+    await vi.advanceTimersByTimeAsync(1_000)
+
+    expect(reload).toHaveBeenCalledTimes(1)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('stops polling after the bounded completion window', async () => {
+    vi.useFakeTimers()
+    const refreshStatus = vi.fn(async () => createStatus())
+    const reload = vi.fn()
+    const monitor = createServiceUpdateCompletionMonitor({
+      refreshStatus,
+      reload,
+      intervalMs: 1_000,
+      timeoutMs: 3_500
+    })
+
+    monitor.start('0.13.2')
+    await vi.advanceTimersByTimeAsync(4_000)
+
+    expect(refreshStatus).toHaveBeenCalledTimes(3)
+    expect(reload).not.toHaveBeenCalled()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
   it('does not overlap slow status requests', async () => {
     vi.useFakeTimers()
     let resolveStatus!: (status: ServiceUpdateStatus) => void

@@ -183,8 +183,9 @@ describe('service update prompt', () => {
     const targetVersion = '0.11.0'
     let timerWasActiveWhenUpdateStarted = false
     projectsMock.triggerServiceUpdate.mockImplementation(async () => {
-      // The layout also owns the long-lived availability timer.
-      timerWasActiveWhenUpdateStarted = vi.getTimerCount() === 2
+      // The layout also owns the long-lived availability timer; completion owns
+      // both its polling interval and bounded timeout.
+      timerWasActiveWhenUpdateStarted = vi.getTimerCount() === 3
       const status = {
         enabled: true,
         updateAvailable: true,
@@ -246,7 +247,7 @@ describe('service update prompt', () => {
     const wrapper = mountLayout()
     await findUpdateTrigger(wrapper)?.trigger('click')
     await findButtonByText(wrapper, 'Update and restart')?.trigger('click')
-    expect(vi.getTimerCount()).toBe(2)
+    expect(vi.getTimerCount()).toBe(3)
 
     wrapper.unmount()
     await vi.advanceTimersByTimeAsync(5_000)
