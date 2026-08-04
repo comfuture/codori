@@ -1,5 +1,10 @@
 export const SETTINGS_SECTIONS = [
   {
+    label: 'General',
+    icon: 'i-lucide-settings',
+    path: '/settings/general'
+  },
+  {
     label: 'Notifications',
     icon: 'i-lucide-bell',
     path: '/settings/notifications'
@@ -13,11 +18,6 @@ export const SETTINGS_SECTIONS = [
     label: 'Backend',
     icon: 'i-lucide-server',
     path: '/settings/backend'
-  },
-  {
-    label: 'Workspace',
-    icon: 'i-lucide-folder-tree',
-    path: '/settings/workspace'
   }
 ] as const
 
