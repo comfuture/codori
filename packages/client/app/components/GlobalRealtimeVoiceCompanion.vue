@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useRoute } from '#imports'
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import LandingVoiceFullscreen from './LandingVoiceFullscreen.vue'
 import RealtimeVoiceCompanion from './RealtimeVoiceCompanion.vue'
 import { useRealtimeVoiceWakeLock } from '../composables/useRealtimeVoiceWakeLock'
 import { useActiveRealtimeConversation } from '../composables/useSharedRealtimeConversation'
@@ -36,6 +37,17 @@ const releaseAvatarResource = () => {
   releaseAvatar = null
   avatar.value = null
   spriteUrl.value = null
+}
+
+const stopVoiceCompanion = () => {
+  void realtimeVoice.stop()
+}
+
+const handleKeydown = (event: KeyboardEvent) => {
+  if (centered.value && event.key === 'Escape') {
+    event.preventDefault()
+    stopVoiceCompanion()
+  }
 }
 
 const syncAvatarResource = () => {
@@ -75,10 +87,22 @@ watch(companionState, (state) => {
   }
 })
 
-onBeforeUnmount(releaseAvatarResource)
+onMounted(() => {
+  window.addEventListener('keydown', handleKeydown)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', handleKeydown)
+  releaseAvatarResource()
+})
 </script>
 
 <template>
+  <LandingVoiceFullscreen
+    v-if="centered"
+    @exit="stopVoiceCompanion"
+  />
+
   <RealtimeVoiceCompanion
     :avatar="avatar"
     :sprite-url="spriteUrl"
@@ -89,6 +113,6 @@ onBeforeUnmount(releaseAvatarResource)
     :bottom-offset="156"
     :presentation="centered ? 'centered' : 'floating'"
     :show-transcripts="!centered"
-    @stop="void realtimeVoice.stop()"
+    @stop="stopVoiceCompanion"
   />
 </template>
