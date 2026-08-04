@@ -110,7 +110,6 @@ const mountCompanion = (
   selectedAvatar: ServerAvatarMetadata | null = avatar,
   options?: {
     presentation?: 'floating' | 'centered'
-    showTranscripts?: boolean
   }
 ) =>
   mount(RealtimeVoiceCompanion, {
@@ -215,9 +214,11 @@ describe('RealtimeVoiceCompanion', () => {
     const assistant = wrapper.get('[data-testid="realtime-transcript-assistant"]')
     expect(user.text()).toContain('You')
     expect(user.classes()).toContain('space-y-0.5')
-    expect(user.get('p.text-sm').classes()).toContain('text-muted')
+    // Caption text uses strong tokens so it stays above WCAG AA contrast on the
+    // translucent surface.
+    expect(user.get('p.text-sm').classes()).toContain('text-default')
     expect(assistant.text()).toContain('Codex')
-    expect(assistant.get('p.text-sm').classes()).toContain('text-default')
+    expect(assistant.get('p.text-sm').classes()).toContain('text-highlighted')
     expect(wrapper.get('[aria-live="polite"]').text()).toBe('Codex: It is ready.')
 
     await wrapper.setProps({
@@ -231,7 +232,7 @@ describe('RealtimeVoiceCompanion', () => {
     expect(wrapper.get('[aria-live="polite"]').text()).toBe('Codex: It is ready.')
   })
 
-  it('uses one popover surface for matching border, fill, and corner radius', () => {
+  it('uses one translucent blurred popover surface for matching border, fill, and radius', () => {
     const wrapper = mountCompanion([
       transcript(1, 'assistant', 'One consistent surface')
     ])
@@ -239,23 +240,64 @@ describe('RealtimeVoiceCompanion', () => {
     const bubble = wrapper.get('[data-testid="realtime-voice-bubble"]')
 
     expect(popover.props('ui')).toEqual({
-      content: 'rounded-xl bg-elevated/95 shadow-xl ring ring-default backdrop-blur'
+      content: 'rounded-xl bg-elevated/65 shadow-xl ring ring-default backdrop-blur-md'
     })
     expect(bubble.classes()).not.toContain('rounded-xl')
     expect(bubble.classes()).not.toContain('border')
-    expect(bubble.classes()).not.toContain('bg-elevated/95')
+    expect(bubble.classes()).not.toContain('bg-elevated/65')
     expect(bubble.classes()).not.toContain('shadow-xl')
 
     wrapper.unmount()
   })
 
-  it('renders one centered avatar-only stop control without transcript UI', async () => {
+  it('animates caption entrance once and dismissal without blocking new captions', async () => {
     const wrapper = mountCompanion([
-      transcript(1, 'user', 'Hidden request'),
-      transcript(2, 'assistant', 'Hidden response')
+      transcript(1, 'assistant', 'Streaming', 3, false)
+    ])
+    await nextTick()
+
+    const bubble = wrapper.get('[data-testid="realtime-voice-bubble"]')
+    expect(bubble.classes()).toContain('realtime-voice-caption-enter')
+    const firstElement = bubble.element
+
+    await wrapper.setProps({
+      transcripts: [transcript(1, 'assistant', 'Streaming more text', 3, false)]
+    })
+    // The same element persists, so the entrance animation is not replayed and
+    // the caption cannot jitter while transcript text grows.
+    expect(wrapper.get('[data-testid="realtime-voice-bubble"]').element).toBe(firstElement)
+    expect(wrapper.get('[data-testid="realtime-voice-bubble"]').classes())
+      .toContain('realtime-voice-caption-enter')
+
+    // Inactivity starts the dismissal animation while the caption is still mounted.
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(wrapper.get('[data-testid="realtime-voice-bubble"]').classes())
+      .toContain('realtime-voice-caption-leave')
+
+    // A caption arriving mid-dismissal cancels the leave immediately.
+    await wrapper.setProps({
+      transcripts: [
+        transcript(1, 'assistant', 'Streaming more text'),
+        transcript(2, 'user', 'A brand new request')
+      ]
+    })
+    expect(wrapper.get('[data-testid="realtime-voice-bubble"]').classes())
+      .toContain('realtime-voice-caption-enter')
+
+    await vi.advanceTimersByTimeAsync(5000)
+    await vi.advanceTimersByTimeAsync(160)
+    expect(wrapper.find('[data-testid="realtime-voice-bubble"]').exists()).toBe(false)
+
+    wrapper.unmount()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('renders centered subtitles above the avatar stop control', async () => {
+    const wrapper = mountCompanion([
+      transcript(1, 'user', 'Spoken request'),
+      transcript(2, 'assistant', 'Spoken response')
     ], avatar, {
-      presentation: 'centered',
-      showTranscripts: false
+      presentation: 'centered'
     })
     await nextTick()
 
@@ -266,11 +308,34 @@ describe('RealtimeVoiceCompanion', () => {
     expect(wrapper.get('[data-testid="avatar-stub"]').attributes('data-width')).toBe('192')
     expect(wrapper.find('[data-testid="popover-stub"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="realtime-voice-bubble"]').exists()).toBe(false)
-    expect(wrapper.get('[aria-live="polite"]').text()).toBe('')
-    expect(vi.getTimerCount()).toBe(0)
+
+    const subtitles = wrapper.get('[data-testid="realtime-voice-subtitles"]')
+    expect(subtitles.classes()).toContain('bg-elevated/65')
+    expect(subtitles.classes()).toContain('backdrop-blur-md')
+    expect(subtitles.classes()).toContain('realtime-voice-caption-enter')
+    expect(wrapper.get('[data-testid="realtime-transcript-user"]').text())
+      .toContain('Spoken request')
+    expect(wrapper.get('[data-testid="realtime-transcript-assistant"]').text())
+      .toContain('Spoken response')
+    expect(wrapper.get('[aria-live="polite"]').text()).toBe('Codex: Spoken response')
+
+    const region = wrapper.get('[data-testid="realtime-voice-subtitle-region"]')
+    expect(region.classes()).toContain('absolute')
+    expect(region.classes()).toContain('top-0')
+
+    await vi.advanceTimersByTimeAsync(5000)
+    // The dismissal animation plays before the caption is removed.
+    expect(wrapper.get('[data-testid="realtime-voice-subtitles"]').classes())
+      .toContain('realtime-voice-caption-leave')
+    await vi.advanceTimersByTimeAsync(160)
+    expect(wrapper.find('[data-testid="realtime-voice-subtitles"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="realtime-voice-centered-stop"]').exists()).toBe(true)
 
     await wrapper.get('[data-testid="realtime-voice-centered-stop"]').trigger('click')
     expect(wrapper.emitted('stop')).toHaveLength(1)
+
+    wrapper.unmount()
+    expect(vi.getTimerCount()).toBe(0)
   })
 
   it('plays queued voice-event animations and returns to idle', async () => {
@@ -359,6 +424,10 @@ describe('RealtimeVoiceCompanion', () => {
     await vi.advanceTimersByTimeAsync(4999)
     expect(wrapper.find('[data-testid="realtime-voice-bubble"]').exists()).toBe(true)
     await vi.advanceTimersByTimeAsync(1)
+    // The caption stays mounted for its short dismissal animation.
+    expect(wrapper.get('[data-testid="realtime-voice-bubble"]').classes())
+      .toContain('realtime-voice-caption-leave')
+    await vi.advanceTimersByTimeAsync(160)
     expect(wrapper.find('[data-testid="realtime-voice-bubble"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="realtime-voice-companion"]').exists()).toBe(true)
 
