@@ -26,14 +26,30 @@ const coerceVersionPart = (value: string) => {
   return value
 }
 
+const parsePackageVersion = (version: string) => {
+  const [withoutBuildMetadata = version] = version.split('+', 1)
+  const prereleaseSeparator = withoutBuildMetadata.indexOf('-')
+  const core = prereleaseSeparator >= 0
+    ? withoutBuildMetadata.slice(0, prereleaseSeparator)
+    : withoutBuildMetadata
+  const prerelease = prereleaseSeparator >= 0
+    ? withoutBuildMetadata.slice(prereleaseSeparator + 1).split('.')
+    : null
+
+  return {
+    core: core.split('.').map(coerceVersionPart),
+    prerelease
+  }
+}
+
 export const comparePackageVersions = (left: string, right: string) => {
-  const maxLength = Math.max(left.split('.').length, right.split('.').length)
-  const leftParts = left.split('.').map(coerceVersionPart)
-  const rightParts = right.split('.').map(coerceVersionPart)
+  const leftVersion = parsePackageVersion(left)
+  const rightVersion = parsePackageVersion(right)
+  const maxLength = Math.max(leftVersion.core.length, rightVersion.core.length)
 
   for (let index = 0; index < maxLength; index += 1) {
-    const leftPart = leftParts[index] ?? 0
-    const rightPart = rightParts[index] ?? 0
+    const leftPart = leftVersion.core[index] ?? 0
+    const rightPart = rightVersion.core[index] ?? 0
 
     if (leftPart === rightPart) {
       continue
@@ -43,7 +59,41 @@ export const comparePackageVersions = (left: string, right: string) => {
       return leftPart > rightPart ? 1 : -1
     }
 
-    return String(leftPart).localeCompare(String(rightPart), undefined, { numeric: true })
+    return String(leftPart).localeCompare(String(rightPart), 'en')
+  }
+
+  if (leftVersion.prerelease === null || rightVersion.prerelease === null) {
+    if (leftVersion.prerelease === rightVersion.prerelease) {
+      return 0
+    }
+    return leftVersion.prerelease === null ? 1 : -1
+  }
+
+  const prereleaseLength = Math.max(
+    leftVersion.prerelease.length,
+    rightVersion.prerelease.length
+  )
+  for (let index = 0; index < prereleaseLength; index += 1) {
+    const leftIdentifier = leftVersion.prerelease[index]
+    const rightIdentifier = rightVersion.prerelease[index]
+
+    if (leftIdentifier === undefined || rightIdentifier === undefined) {
+      return leftIdentifier === undefined ? -1 : 1
+    }
+    if (leftIdentifier === rightIdentifier) {
+      continue
+    }
+
+    const leftNumeric = /^\d+$/u.test(leftIdentifier)
+    const rightNumeric = /^\d+$/u.test(rightIdentifier)
+    if (leftNumeric && rightNumeric) {
+      return Number.parseInt(leftIdentifier, 10) > Number.parseInt(rightIdentifier, 10) ? 1 : -1
+    }
+    if (leftNumeric !== rightNumeric) {
+      return leftNumeric ? -1 : 1
+    }
+
+    return leftIdentifier > rightIdentifier ? 1 : -1
   }
 
   return 0
