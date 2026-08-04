@@ -568,8 +568,8 @@ describe('project sidebar inline threads', () => {
     expect(threadLink.attributes('data-depth')).toBe('1')
     expect(wrapper.find('[data-kind="thread"][data-to="/projects/other/threads/thread-1"]').exists()).toBe(false)
 
-    const activeProject = wrapper.get('[data-kind="project"][data-to="/projects/codori"]')
-    const inactiveProject = wrapper.get('[data-kind="project"][data-to="/projects/other"]')
+    const activeProject = wrapper.get('[data-kind="project"][data-value="project:codori"]')
+    const inactiveProject = wrapper.get('[data-kind="project"][data-value="project:other"]')
     expect(activeProject.attributes('data-depth')).toBe('0')
     expect(activeProject.attributes('data-value')).toBe('project:codori')
     expect(activeProject.attributes('data-active')).toBe('true')
@@ -589,6 +589,50 @@ describe('project sidebar inline threads', () => {
       sourceKinds: INLINE_THREAD_SOURCE_KINDS,
       cwd: '/repo/codori'
     })
+  })
+
+  it('starts a new thread from an explicit project-row plus button', async () => {
+    mockRpcRequest.mockResolvedValue(makeThreadListResponse(1))
+    const wrapper = mountSidebar({ collapsed: false })
+    await waitForSidebar()
+
+    const projectRow = wrapper.get('[data-kind="project"][data-value="project:other"]')
+    const newThreadButton = projectRow.get('button[aria-label="New thread in other"]')
+    expect(newThreadButton.attributes('data-icon')).toBe('i-lucide-plus')
+    expect(newThreadButton.attributes('data-variant')).toBe('ghost')
+    expect(newThreadButton.attributes('data-color')).toBe('neutral')
+
+    await newThreadButton.trigger('click')
+    await waitForSidebar()
+
+    expect(mockRouterPush).toHaveBeenCalledWith('/projects/other')
+  })
+
+  it('browses a project row without starting a thread and without a chevron', async () => {
+    mockRpcRequest.mockResolvedValue(makeThreadListResponse(1))
+    const wrapper = mountSidebar({ collapsed: false })
+    await waitForSidebar()
+
+    const projectRow = wrapper.get('[data-kind="project"][data-value="project:other"]')
+    expect(projectRow.attributes('data-to')).toBe('')
+
+    await projectRow.trigger('click')
+    await waitForSidebar()
+
+    expect(mockRouterPush).not.toHaveBeenCalled()
+    expect(wrapper.get('.navigation-menu-stub').attributes('data-model-value'))
+      .toBe('["project:other"]')
+    expect(wrapper.findAll('[data-kind="project"] [data-icon="i-lucide-chevron-down"]'))
+      .toHaveLength(0)
+  })
+
+  it('omits the project-row plus button while the sidebar is collapsed', async () => {
+    mockRpcRequest.mockResolvedValue(makeThreadListResponse(1))
+    const wrapper = mountSidebar({ collapsed: true })
+    await waitForSidebar()
+
+    expect(wrapper.find('button[aria-label="New thread in codori"]').exists()).toBe(false)
+    expect(wrapper.find('button[aria-label="New thread in other"]').exists()).toBe(false)
   })
 
   it('appends cursor pages from an icon-free muted Show more row', async () => {
@@ -683,7 +727,7 @@ describe('project sidebar inline threads', () => {
     })
     await waitForSidebar()
 
-    const activeProject = wrapper.get('[data-kind="project"][data-to="/projects/codori"]')
+    const activeProject = wrapper.get('[data-kind="project"][data-value="project:codori"]')
     const activeThread = wrapper.get('[data-kind="thread"][data-to="/projects/codori/threads/thread-1"]')
     const inactiveThread = wrapper.get('[data-kind="thread"][data-to="/projects/codori/threads/thread-2"]')
     expect(activeProject.attributes('data-active')).toBe('true')
@@ -929,7 +973,7 @@ describe('project sidebar inline threads', () => {
 
     expect(wrapper.find('[data-to="/projects/codori/threads/status-thread"] [role="status"]').exists()).toBe(false)
     expect(wrapper.get('[data-to="/projects/codori/threads/status-thread"] .navigation-menu-icon')
-      .attributes('data-icon')).toBe('i-lucide-message-square-text')
+      .attributes('data-icon')).toBe('')
   })
 
   it('starts and stops the spinner from correlated turn lifecycle evidence', async () => {
@@ -939,7 +983,7 @@ describe('project sidebar inline threads', () => {
 
     const threadSelector = '[data-to="/projects/codori/threads/thread-1"]'
     expect(wrapper.get(`${threadSelector} .navigation-menu-icon`).attributes('data-icon'))
-      .toBe('i-lucide-message-square-text')
+      .toBe('')
 
     emitRpcNotification({
       method: 'turn/started',
@@ -966,7 +1010,7 @@ describe('project sidebar inline threads', () => {
     await waitForSidebar()
 
     expect(wrapper.get(`${threadSelector} .navigation-menu-icon`).attributes('data-icon'))
-      .toBe('i-lucide-message-square-text')
+      .toBe('')
     expect(wrapper.get(`${threadSelector} .navigation-menu-icon`).classes()).not.toContain('animate-spin')
     expect(wrapper.find(`${threadSelector} [role="status"]`).exists()).toBe(false)
   })
@@ -996,7 +1040,7 @@ describe('project sidebar inline threads', () => {
     await waitForSidebar()
 
     expect(wrapper.get(`${threadSelector} .navigation-menu-icon`).attributes('data-icon'))
-      .toBe('i-lucide-message-square-text')
+      .toBe('')
     expect(wrapper.find(`${threadSelector} [role="status"]`).exists()).toBe(false)
   })
 
@@ -1077,7 +1121,7 @@ describe('project sidebar inline threads', () => {
     await waitForSidebar()
 
     expect(wrapper.get('[data-to="/projects/codori/threads/thread-1"] .navigation-menu-icon')
-      .attributes('data-icon')).toBe('i-lucide-message-square-text')
+      .attributes('data-icon')).toBe('')
   })
 
   it('keeps a newer thread/started status when an older list request resolves later', async () => {

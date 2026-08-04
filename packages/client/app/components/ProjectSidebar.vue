@@ -186,6 +186,10 @@ const activeThreadId = computed(() => {
 })
 const openChatNavigationValues = ref<string[]>([])
 const openProjectNavigationValues = ref<string[]>([])
+// A project row expands its threads instead of navigating, so the browsed project
+// is tracked here and falls back to the routed project.
+const browsedProjectId = ref<string | null>(null)
+const selectedProjectId = computed(() => browsedProjectId.value ?? activeProjectId.value)
 
 watch(activeChatId, (chatId) => {
   if (chatId && !openChatNavigationValues.value.includes(CHAT_ROOT_NAVIGATION_VALUE)) {
@@ -194,6 +198,7 @@ watch(activeChatId, (chatId) => {
 }, { immediate: true })
 
 watch([activeProjectId, activeThreadId], ([projectId]) => {
+  browsedProjectId.value = null
   openProjectNavigationValues.value = projectId
     ? [projectNavigationValue(projectId)]
     : []
@@ -245,7 +250,7 @@ const releaseInlineThreadSubscriptions = () => {
 const isCurrentInlineThreadSubscription = (projectId: string, sequence: number) =>
   inlineThreadSubscriptionSequence === sequence
   && inlineThreadSubscriptionKey === projectId
-  && activeProjectId.value === projectId
+  && selectedProjectId.value === projectId
   && !props.collapsed
 
 const hydrateInlineThread = (
@@ -546,7 +551,7 @@ const waitForProjectsRefresh = async () => {
 }
 
 const fetchInlineThreads = async (cursor: string | null = null) => {
-  const projectId = activeProjectId.value
+  const projectId = selectedProjectId.value
   if (!projectId || props.collapsed) {
     resetInlineThreads()
     return
@@ -646,7 +651,7 @@ const fetchInlineThreads = async (cursor: string | null = null) => {
 }
 
 watch([
-  activeProjectId,
+  selectedProjectId,
   () => props.collapsed
 ], () => {
   void fetchInlineThreads()
@@ -686,6 +691,22 @@ const removeChat = async (chatId: string) => {
   if (activeChatId.value === chatId) {
     await router.push('/')
   }
+}
+
+const startProjectThread = async (projectId: string) => {
+  await router.push(toProjectRoute(projectId))
+}
+
+// Clicking a project row browses that project instead of starting a thread.
+// When the row is already selected the accordion trigger owns expand/collapse,
+// so this only moves the selection.
+const selectProject = (projectId: string) => {
+  if (selectedProjectId.value === projectId) {
+    return
+  }
+
+  browsedProjectId.value = projectId
+  openProjectNavigationValues.value = [projectNavigationValue(projectId)]
 }
 
 const chatItems = computed<ChatSidebarNavigationItem[][]>(() => {
@@ -732,19 +753,19 @@ const projectItems = computed<ProjectSidebarNavigationItem[][]>(() => [
       value: projectNavigationValue(project.projectId),
       label: project.projectId,
       icon: 'i-lucide-folder-git-2',
-      to: toProjectRoute(project.projectId),
       active,
       class: navigationItemClass(active),
       ui: navigationItemUi(active),
       tooltip: {
         text: project.projectId
       },
+      onClick: () => selectProject(project.projectId),
       projectId: project.projectId,
       projectPath: project.projectPath,
       error: project.error
     }
 
-    if (props.collapsed || activeProjectId.value !== project.projectId) {
+    if (props.collapsed || selectedProjectId.value !== project.projectId) {
       return item
     }
 
@@ -784,7 +805,7 @@ const projectItems = computed<ProjectSidebarNavigationItem[][]>(() => [
       children.push({
         itemKind: 'thread',
         label: thread.title,
-        icon: running ? 'i-lucide-loader-circle' : 'i-lucide-message-square-text',
+        ...(running ? { icon: 'i-lucide-loader-circle' } : {}),
         to: toProjectThreadRoute(project.projectId, thread.id),
         active,
         class: navigationItemClass(active),
@@ -1124,6 +1145,22 @@ const isThreadStatusItem = (item: NavigationMenuItem): item is ProjectThreadStat
           </div>
         </template>
         <template #item-trailing="{ item }">
+          <div
+            v-if="!props.collapsed && isProjectItem(item)"
+            class="flex items-center"
+          >
+            <UTooltip text="New thread">
+              <UButton
+                icon="i-lucide-plus"
+                color="neutral"
+                variant="ghost"
+                size="xs"
+                square
+                :aria-label="`New thread in ${asProjectItem(item).projectId}`"
+                @click.prevent.stop="startProjectThread(asProjectItem(item).projectId)"
+              />
+            </UTooltip>
+          </div>
           <span
             v-if="!props.collapsed && isThreadItem(item) && asProjectThreadItem(item).running"
             role="status"
