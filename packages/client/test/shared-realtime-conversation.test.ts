@@ -2,6 +2,7 @@ import { effectScope, nextTick, type ComputedRef, type Ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 import type {
   RealtimeActivity,
+  RealtimeAvatarCue,
   RealtimeCapability,
   RealtimeSessionKind,
   RealtimeSessionState,
@@ -23,6 +24,7 @@ type MockController = {
   sessionKind: Ref<RealtimeSessionKind | null>
   activeVoice: Ref<RealtimeVoice | null>
   activity: Ref<RealtimeActivity>
+  avatarCue: Ref<RealtimeAvatarCue | null>
   owningThreadId: Ref<string | null>
   generation: Ref<number>
   transcripts: Ref<RealtimeTranscriptSegment[]>
@@ -67,6 +69,7 @@ vi.mock('../app/composables/useRealtimeConversation', async () => {
         sessionKind,
         activeVoice,
         activity: ref('idle'),
+        avatarCue: ref(null),
         owningThreadId,
         generation: ref(0),
         transcripts: ref([]),

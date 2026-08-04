@@ -46,6 +46,18 @@ export type RealtimeActivity =
   | 'working'
   | 'speaking'
 
+export type RealtimeAvatarCueKind =
+  | 'turn-start'
+  | 'tool-start'
+  | 'tool-failed'
+  | 'turn-complete'
+  | 'turn-failed'
+
+export type RealtimeAvatarCue = {
+  kind: RealtimeAvatarCueKind
+  sequence: number
+}
+
 export type RealtimeCapability = {
   status: RealtimeCapabilityStatus
   message: string

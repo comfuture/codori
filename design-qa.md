@@ -17,6 +17,7 @@
 - The desktop pointer bloom measured 1000 x 780 with a 42-pixel blur and palette-tinted layers; its edge no longer reads as a hard circle.
 - The Exit control remained visible at the top-right safe-area offset. Escape and the button share the same stop action.
 - The isolated visual preview did not attach a backend avatar resource, so its sprite is absent from the screenshot. The existing centered avatar layer remained present in the DOM above the background.
+- Event-driven avatar playback was verified with real animation metadata contracts: turn start selects `waving`, tool start selects `running`, tool or turn failure selects `failed`, and successful turn completion selects `jumping`, after which playback returns to `idle`.
 - Browser console verification returned no warnings or errors for the final visual state.
 
 ## Comparison history
@@ -24,6 +25,7 @@
 1. Replaced the initial raster-backed concept with four CSS radial-gradient layers at the user's request.
 2. Reworked the initial compact white pointer circle into a larger, blurred blue-violet-cyan bloom.
 3. Added damped cursor parallax to all four background layers and pulled the color centers inward after side-by-side comparison showed the first CSS pass was too washed out.
+4. Added bounded avatar animation cues shared by fullscreen and in-thread voice presentations, with failure priority and idle fallback.
 
 ## Final result
 

@@ -176,6 +176,7 @@ export const useActiveRealtimeConversation = () => {
     state: computed(() => controller.value?.state.value ?? 'idle'),
     sessionKind: computed(() => controller.value?.sessionKind.value ?? null),
     activity: computed(() => controller.value?.activity.value ?? 'idle'),
+    avatarCue: computed(() => controller.value?.avatarCue.value ?? null),
     generation: computed(() => controller.value?.generation.value ?? 0),
     transcripts: computed(() => controller.value?.transcripts.value ?? []),
     stop: async () => {
@@ -286,6 +287,7 @@ export const useSharedRealtimeConversation = (
     sessionKind: computed(() => displayController.value.sessionKind.value),
     activeVoice: computed(() => displayController.value.activeVoice.value),
     activity: computed(() => displayController.value.activity.value),
+    avatarCue: computed(() => displayController.value.avatarCue.value),
     owningThreadId,
     activeWorkspaceKey,
     activeClient,

@@ -49,6 +49,26 @@ const avatar: ServerAvatarMetadata = {
       frames: [{ spriteIndex: 0, durationMs: 1000 }],
       loopStart: 0,
       fallback: 'idle'
+    },
+    waving: {
+      frames: [{ spriteIndex: 24, durationMs: 100 }],
+      loopStart: null,
+      fallback: 'idle'
+    },
+    running: {
+      frames: [{ spriteIndex: 56, durationMs: 100 }],
+      loopStart: null,
+      fallback: 'idle'
+    },
+    failed: {
+      frames: [{ spriteIndex: 40, durationMs: 100 }],
+      loopStart: null,
+      fallback: 'idle'
+    },
+    jumping: {
+      frames: [{ spriteIndex: 32, durationMs: 100 }],
+      loopStart: null,
+      fallback: 'idle'
     }
   }
 }
@@ -71,12 +91,16 @@ const UPopoverStub = defineComponent({
 
 const ServerPetAvatarStub = defineComponent({
   props: {
-    width: Number
+    width: Number,
+    animation: String,
+    playbackKey: Number
   },
   setup(props) {
     return () => h('span', {
       'data-testid': 'avatar-stub',
-      'data-width': props.width
+      'data-width': props.width,
+      'data-animation': props.animation,
+      'data-playback-key': props.playbackKey
     })
   }
 })
@@ -95,6 +119,7 @@ const mountCompanion = (
       spriteUrl: 'blob:pet',
       sessionState: 'connected',
       activity: 'listening',
+      avatarCue: null,
       generation: 3,
       transcripts,
       bottomOffset: 152,
@@ -246,6 +271,46 @@ describe('RealtimeVoiceCompanion', () => {
 
     await wrapper.get('[data-testid="realtime-voice-centered-stop"]').trigger('click')
     expect(wrapper.emitted('stop')).toHaveLength(1)
+  })
+
+  it('plays queued voice-event animations and returns to idle', async () => {
+    const wrapper = mountCompanion([])
+    const avatarStub = () => wrapper.get('[data-testid="avatar-stub"]')
+
+    await wrapper.setProps({
+      avatarCue: { kind: 'turn-start', sequence: 1 }
+    })
+    expect(avatarStub().attributes('data-animation')).toBe('waving')
+
+    await wrapper.setProps({
+      avatarCue: { kind: 'tool-start', sequence: 2 }
+    })
+    await vi.advanceTimersByTimeAsync(400)
+    expect(avatarStub().attributes('data-animation')).toBe('running')
+
+    await wrapper.setProps({
+      avatarCue: { kind: 'tool-failed', sequence: 3 }
+    })
+    expect(avatarStub().attributes('data-animation')).toBe('failed')
+    const failedPlaybackKey = Number(avatarStub().attributes('data-playback-key'))
+
+    await wrapper.setProps({
+      avatarCue: { kind: 'turn-failed', sequence: 4 }
+    })
+    expect(avatarStub().attributes('data-animation')).toBe('failed')
+    expect(Number(avatarStub().attributes('data-playback-key'))).toBeGreaterThan(
+      failedPlaybackKey
+    )
+
+    await wrapper.setProps({
+      avatarCue: { kind: 'turn-complete', sequence: 5 }
+    })
+    await vi.advanceTimersByTimeAsync(400)
+    expect(avatarStub().attributes('data-animation')).toBe('jumping')
+    await vi.advanceTimersByTimeAsync(400)
+    expect(avatarStub().attributes('data-animation')).toBe('idle')
+
+    wrapper.unmount()
   })
 
   it('announces the segment that finalizes during overlapping speech', async () => {

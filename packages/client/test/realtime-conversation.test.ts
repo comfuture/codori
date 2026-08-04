@@ -972,6 +972,74 @@ describe('realtime conversation controller', () => {
     expect(fixture.controller.latestUserTranscript.value).toBe('Run tests')
   })
 
+  it('emits ordered avatar cues for turns and tool outcomes', async () => {
+    const fixture = createFixture()
+    await connectFixture(fixture)
+
+    fixture.rpc.emit('turn/started', {
+      threadId: 'thread-1',
+      turn: { id: 'turn-1' }
+    })
+    expect(fixture.controller.avatarCue.value).toEqual({
+      kind: 'turn-start',
+      sequence: 1
+    })
+
+    fixture.rpc.emit('item/started', {
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      item: {
+        type: 'commandExecution',
+        id: 'command-1',
+        status: 'inProgress'
+      }
+    })
+    expect(fixture.controller.avatarCue.value).toEqual({
+      kind: 'tool-start',
+      sequence: 2
+    })
+
+    fixture.rpc.emit('item/completed', {
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      completedAtMs: 1,
+      item: {
+        type: 'commandExecution',
+        id: 'command-1',
+        status: 'failed',
+        exitCode: 1
+      }
+    })
+    expect(fixture.controller.avatarCue.value).toEqual({
+      kind: 'tool-failed',
+      sequence: 3
+    })
+
+    fixture.rpc.emit('turn/completed', {
+      threadId: 'thread-1',
+      turn: {
+        id: 'turn-1',
+        status: 'completed'
+      }
+    })
+    expect(fixture.controller.avatarCue.value).toEqual({
+      kind: 'turn-complete',
+      sequence: 4
+    })
+
+    fixture.rpc.emit('turn/completed', {
+      threadId: 'thread-1',
+      turn: {
+        id: 'turn-2',
+        status: 'failed'
+      }
+    })
+    expect(fixture.controller.avatarCue.value).toEqual({
+      kind: 'turn-failed',
+      sequence: 5
+    })
+  })
+
   it('attaches remote audio and reports an autoplay block', async () => {
     const fixture = createFixture({ playError: new Error('NotAllowedError') })
     await connectFixture(fixture)

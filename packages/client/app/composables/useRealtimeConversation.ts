@@ -41,6 +41,7 @@ export const useRealtimeConversation = (options: ControllerOptions) => {
     capability,
     state: computed(() => snapshot.value.state),
     activity: computed(() => snapshot.value.activity),
+    avatarCue: computed(() => snapshot.value.avatarCue),
     sessionKind: computed(() => snapshot.value.sessionKind),
     activeVoice: computed(() => snapshot.value.activeVoice),
     owningThreadId: computed(() => snapshot.value.owningThreadId),

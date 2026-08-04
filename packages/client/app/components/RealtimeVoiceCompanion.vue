@@ -3,6 +3,8 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import ServerPetAvatar from './ServerPetAvatar.vue'
 import type {
   RealtimeActivity,
+  RealtimeAvatarCue,
+  RealtimeAvatarCueKind,
   RealtimeSessionState,
   RealtimeTranscriptSegment
 } from '../composables/useRealtimeConversation'
@@ -25,12 +27,14 @@ const props = withDefaults(defineProps<{
   spriteUrl: string | null
   sessionState: RealtimeSessionState
   activity: RealtimeActivity
+  avatarCue?: RealtimeAvatarCue | null
   generation: number
   transcripts: RealtimeTranscriptSegment[]
   bottomOffset: number
   presentation?: 'floating' | 'centered'
   showTranscripts?: boolean
 }>(), {
+  avatarCue: null,
   presentation: 'floating',
   showTranscripts: true
 })
@@ -42,7 +46,12 @@ const emit = defineEmits<{
 const bubbleOpen = ref(false)
 const viewportWidth = ref(375)
 const latestAnnouncement = ref('')
+const avatarAnimation = ref('idle')
+const avatarAnimationKey = ref(0)
 let closeTimer: ReturnType<typeof setTimeout> | null = null
+let avatarCueTimer: ReturnType<typeof setTimeout> | null = null
+let activeAvatarCue: RealtimeAvatarCueKind | null = null
+const avatarCueQueue: RealtimeAvatarCueKind[] = []
 let visibilityState: TranscriptVisibilityState = createTranscriptVisibilityState(props.generation)
 let announcementGeneration = props.generation
 const announcedFinalSegments = new Set<number>()
@@ -82,6 +91,97 @@ const rootClass = computed(() => centered.value
   ? 'pointer-events-none fixed inset-0 z-20 flex items-center justify-center'
   : 'pointer-events-none fixed end-3 z-20 md:end-6'
 )
+
+const AVATAR_CUE_ANIMATIONS: Record<RealtimeAvatarCueKind, string[]> = {
+  'turn-start': ['waving', 'wave'],
+  'tool-start': ['running', 'running-right', 'move_right'],
+  'tool-failed': ['failed', 'sad'],
+  'turn-complete': ['jumping', 'bounce'],
+  'turn-failed': ['failed', 'sad']
+}
+
+const resolveAvatarCueAnimation = (cue: RealtimeAvatarCueKind) =>
+  AVATAR_CUE_ANIMATIONS[cue].find(name => props.avatar?.animations[name]) ?? null
+
+const resolveAvatarCueDuration = (animationName: string) => {
+  const animation = props.avatar?.animations[animationName]
+  if (!animation?.frames.length) {
+    return 0
+  }
+
+  const cueFrameCount = animation.loopStart !== null && animation.loopStart > 0
+    ? animation.loopStart
+    : animation.frames.length
+  const durationMs = animation.frames
+    .slice(0, cueFrameCount)
+    .reduce((total, frame) => total + Math.max(16, frame.durationMs), 0)
+  return Math.min(6_000, Math.max(400, durationMs))
+}
+
+const clearAvatarCueTimer = () => {
+  if (avatarCueTimer) {
+    clearTimeout(avatarCueTimer)
+    avatarCueTimer = null
+  }
+}
+
+const playNextAvatarCue = () => {
+  if (activeAvatarCue || !active.value || !props.avatar) {
+    return
+  }
+
+  while (avatarCueQueue.length > 0) {
+    const cue = avatarCueQueue.shift()
+    if (!cue) {
+      break
+    }
+    const animationName = resolveAvatarCueAnimation(cue)
+    if (!animationName) {
+      continue
+    }
+
+    activeAvatarCue = cue
+    avatarAnimation.value = animationName
+    avatarAnimationKey.value += 1
+    avatarCueTimer = setTimeout(() => {
+      avatarCueTimer = null
+      activeAvatarCue = null
+      avatarAnimation.value = 'idle'
+      avatarAnimationKey.value += 1
+      playNextAvatarCue()
+    }, resolveAvatarCueDuration(animationName))
+    return
+  }
+
+  avatarAnimation.value = 'idle'
+}
+
+const resetAvatarCues = () => {
+  clearAvatarCueTimer()
+  activeAvatarCue = null
+  avatarCueQueue.length = 0
+  avatarAnimation.value = 'idle'
+  avatarAnimationKey.value += 1
+}
+
+const enqueueAvatarCue = (cue: RealtimeAvatarCueKind) => {
+  const urgent = cue === 'tool-failed' || cue === 'turn-failed'
+  if (urgent) {
+    clearAvatarCueTimer()
+    activeAvatarCue = null
+    avatarCueQueue.length = 0
+    avatarAnimation.value = 'idle'
+    avatarAnimationKey.value += 1
+  } else if (activeAvatarCue === cue || avatarCueQueue.includes(cue)) {
+    return
+  }
+
+  avatarCueQueue.push(cue)
+  if (avatarCueQueue.length > 4) {
+    avatarCueQueue.shift()
+  }
+  playNextAvatarCue()
+}
 
 const clearCloseTimer = () => {
   if (closeTimer) {
@@ -126,6 +226,18 @@ watch(
   },
   { immediate: true }
 )
+
+watch(() => props.avatarCue?.sequence, () => {
+  if (active.value && props.avatarCue) {
+    enqueueAvatarCue(props.avatarCue.kind)
+  }
+})
+
+watch(() => props.avatar?.revision, () => {
+  playNextAvatarCue()
+})
+
+watch([active, () => props.generation], resetAvatarCues)
 
 watch(
   [active, () => props.generation, announcementSignature],
@@ -179,6 +291,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   closeBubble()
+  resetAvatarCues()
   window.removeEventListener('resize', syncAvatarWidth)
   window.visualViewport?.removeEventListener('resize', syncAvatarWidth)
 })
@@ -205,7 +318,8 @@ onBeforeUnmount(() => {
         <ServerPetAvatar
           :avatar="avatar"
           :sprite-url="spriteUrl"
-          animation="idle"
+          :animation="avatarAnimation"
+          :playback-key="avatarAnimationKey"
           :width="avatarWidth"
         />
       </span>
@@ -224,7 +338,8 @@ onBeforeUnmount(() => {
         <ServerPetAvatar
           :avatar="avatar"
           :sprite-url="spriteUrl"
-          animation="idle"
+          :animation="avatarAnimation"
+          :playback-key="avatarAnimationKey"
           :width="avatarWidth"
         />
       </span>
