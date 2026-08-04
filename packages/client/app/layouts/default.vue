@@ -116,24 +116,44 @@ const settingsRoute = computed(() => ({
     >
       <template #header="{ collapsed }">
         <div class="flex items-center gap-3 px-1">
-          <div class="flex size-9 items-center justify-center rounded-xl bg-primary/12 text-primary">
-            <UIcon
-              name="i-lucide-terminal-square"
-              class="size-5"
-            />
-          </div>
-          <div
-            v-if="!collapsed"
-            class="flex min-w-0 flex-1 items-start justify-between gap-3"
+          <NuxtLink
+            to="/"
+            data-testid="sidebar-home-link"
+            aria-label="Go to the Codori home screen"
+            class="flex min-w-0 items-center gap-3 rounded-xl outline-none transition hover:opacity-80 focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-default"
+            :class="collapsed ? '' : 'flex-1'"
           >
-            <div class="min-w-0">
-              <div class="text-sm font-semibold">
+            <span class="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary/12 text-primary">
+              <UIcon
+                name="i-lucide-terminal-square"
+                class="size-5"
+              />
+            </span>
+            <span
+              v-if="!collapsed"
+              class="min-w-0"
+            >
+              <span class="block truncate text-sm font-semibold">
                 Codori
-              </div>
-              <div class="text-xs text-muted">
+              </span>
+              <span class="block truncate text-xs text-muted">
                 Codex project control
-              </div>
-            </div>
+              </span>
+            </span>
+            <span
+              v-else
+              class="sr-only"
+            >
+              <span>
+                Codori
+              </span>
+              <span>
+                Codex project control
+              </span>
+            </span>
+          </NuxtLink>
+
+          <div v-if="!collapsed">
             <UTooltip
               v-if="showServiceUpdateButton"
               :text="serviceUpdateTooltip"
@@ -149,17 +169,6 @@ const settingsRoute = computed(() => ({
                 {{ serviceUpdateLabel }}
               </UButton>
             </UTooltip>
-          </div>
-          <div
-            v-else-if="collapsed"
-            class="sr-only"
-          >
-            <span>
-              Codori
-            </span>
-            <span>
-              Codex project control
-            </span>
           </div>
         </div>
       </template>
