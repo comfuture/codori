@@ -10,13 +10,15 @@ definePageMeta({
   <section>
     <header class="border-b border-default pb-6">
       <h2 class="text-2xl font-semibold tracking-tight text-highlighted">
-        Workspace
+        General
       </h2>
       <p class="mt-2 max-w-2xl text-sm leading-6 text-muted">
-        Choose which project directory Codori serves, and review what a registered service reuses on startup.
+        Choose which project directory Codori serves, review what a registered service reuses on
+        startup, and pick how the interface looks.
       </p>
     </header>
 
     <ProjectRootSettings />
+    <AppearanceSettings />
   </section>
 </template>

@@ -16,6 +16,6 @@ definePageMeta({
 
 <template>
   <div aria-live="polite">
-    Opening notification settings…
+    Opening settings…
   </div>
 </template>
