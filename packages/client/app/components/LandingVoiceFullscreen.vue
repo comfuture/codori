@@ -91,6 +91,10 @@ onBeforeUnmount(() => {
       class="landing-voice-pointer-highlight absolute"
     />
 
+    <!-- Companion content renders inside the dialog so assistive technology
+         honoring `aria-modal` still reaches the captions and live region. -->
+    <slot />
+
     <UButton
       type="button"
       color="neutral"

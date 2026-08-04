@@ -39,4 +39,23 @@ describe('LandingVoiceFullscreen', () => {
     expect(wrapper.emitted('exit')).toHaveLength(1)
     wrapper.unmount()
   })
+
+  it('renders companion content inside the modal subtree', () => {
+    const wrapper = mount(LandingVoiceFullscreen, {
+      slots: {
+        default: '<p data-testid="companion-content">caption</p>'
+      },
+      global: {
+        stubs: {
+          UButton: ButtonStub
+        }
+      }
+    })
+
+    // Assistive technology honoring `aria-modal` only exposes descendants of the
+    // dialog, so captions and the live region must live inside it.
+    const dialog = wrapper.get('[data-testid="landing-voice-fullscreen"]')
+    expect(dialog.find('[data-testid="companion-content"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
 })

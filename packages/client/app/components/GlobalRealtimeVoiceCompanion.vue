@@ -98,12 +98,28 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
+  <!-- In centered mode the companion renders inside the fullscreen dialog so
+       its captions and live region stay within the `aria-modal` subtree. -->
   <LandingVoiceFullscreen
     v-if="centered"
     @exit="stopVoiceCompanion"
-  />
+  >
+    <RealtimeVoiceCompanion
+      :avatar="avatar"
+      :sprite-url="spriteUrl"
+      :session-state="companionState"
+      :activity="realtimeVoice.activity.value"
+      :avatar-cue="realtimeVoice.avatarCue.value"
+      :generation="realtimeVoice.generation.value"
+      :transcripts="realtimeVoice.transcripts.value"
+      :bottom-offset="156"
+      presentation="centered"
+      @stop="stopVoiceCompanion"
+    />
+  </LandingVoiceFullscreen>
 
   <RealtimeVoiceCompanion
+    v-else
     :avatar="avatar"
     :sprite-url="spriteUrl"
     :session-state="companionState"
@@ -112,7 +128,7 @@ onBeforeUnmount(() => {
     :generation="realtimeVoice.generation.value"
     :transcripts="realtimeVoice.transcripts.value"
     :bottom-offset="156"
-    :presentation="centered ? 'centered' : 'floating'"
+    presentation="floating"
     @stop="stopVoiceCompanion"
   />
 </template>
