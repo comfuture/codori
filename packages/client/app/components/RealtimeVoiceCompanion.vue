@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import ServerPetAvatar from './ServerPetAvatar.vue'
+import RealtimeVoiceTranscriptList from './RealtimeVoiceTranscriptList.vue'
 import type {
   RealtimeActivity,
   RealtimeAvatarCue,
@@ -32,11 +33,9 @@ const props = withDefaults(defineProps<{
   transcripts: RealtimeTranscriptSegment[]
   bottomOffset: number
   presentation?: 'floating' | 'centered'
-  showTranscripts?: boolean
 }>(), {
   avatarCue: null,
-  presentation: 'floating',
-  showTranscripts: true
+  presentation: 'floating'
 })
 
 const emit = defineEmits<{
@@ -62,20 +61,17 @@ const avatarWidth = computed(() => centered.value
   ? resolveCenteredRealtimeVoiceAvatarWidth(viewportWidth.value)
   : resolveRealtimeVoiceAvatarWidth(viewportWidth.value)
 )
-const entries = computed(() => props.showTranscripts
-  ? resolveRealtimeVoiceCompanionEntries({
-      transcripts: props.transcripts,
-      generation: props.generation
-    })
-  : []
-)
+const entries = computed(() => resolveRealtimeVoiceCompanionEntries({
+  transcripts: props.transcripts,
+  generation: props.generation
+}))
 const transcriptSignature = computed(() =>
   entries.value
     .map(entry => `${entry.id}:${entry.role}:${entry.final ? 1 : 0}:${entry.text}`)
     .join('\u0000')
 )
 const announcementSignature = computed(() =>
-  (props.showTranscripts ? props.transcripts : [])
+  props.transcripts
     .filter(segment =>
       segment.generation === props.generation
       && (segment.role === 'user' || segment.role === 'assistant')
@@ -91,6 +87,56 @@ const rootClass = computed(() => centered.value
   ? 'pointer-events-none fixed inset-0 z-20 flex items-center justify-center'
   : 'pointer-events-none fixed end-3 z-20 md:end-6'
 )
+// 65% keeps the backdrop faintly visible while every caption text token stays
+// above the WCAG AA 4.5:1 threshold against the composited surface.
+const transcriptSurfaceClass = 'rounded-xl bg-elevated/65 shadow-xl ring ring-default backdrop-blur-md'
+const CAPTION_LEAVE_MS = 160
+const captionMounted = ref(false)
+const captionLeaving = ref(false)
+let captionLeaveTimer: ReturnType<typeof setTimeout> | null = null
+const captionRequested = computed(() => bubbleOpen.value && entries.value.length > 0)
+const captionClass = computed(() => captionLeaving.value
+  ? 'realtime-voice-caption-leave'
+  : 'realtime-voice-caption-enter'
+)
+
+const clearCaptionLeaveTimer = () => {
+  if (captionLeaveTimer) {
+    clearTimeout(captionLeaveTimer)
+    captionLeaveTimer = null
+  }
+}
+
+watch(captionRequested, (requested) => {
+  clearCaptionLeaveTimer()
+  if (requested) {
+    // An incoming caption always wins over an in-flight dismissal so new
+    // transcript text is never delayed by the leave animation.
+    captionLeaving.value = false
+    captionMounted.value = true
+    return
+  }
+
+  if (!captionMounted.value) {
+    return
+  }
+
+  if (!active.value || entries.value.length === 0) {
+    // A session that stopped, a generation reset, and cleared transcripts all
+    // remove the caption immediately. The companion root itself disappears in
+    // those cases, so there is nothing to animate out.
+    captionLeaving.value = false
+    captionMounted.value = false
+    return
+  }
+
+  captionLeaving.value = true
+  captionLeaveTimer = setTimeout(() => {
+    captionLeaveTimer = null
+    captionLeaving.value = false
+    captionMounted.value = false
+  }, CAPTION_LEAVE_MS)
+}, { immediate: true, flush: 'sync' })
 
 const AVATAR_CUE_ANIMATIONS: Record<RealtimeAvatarCueKind, string[]> = {
   'turn-start': ['waving', 'wave'],
@@ -192,6 +238,9 @@ const clearCloseTimer = () => {
 
 const closeBubble = () => {
   clearCloseTimer()
+  clearCaptionLeaveTimer()
+  captionLeaving.value = false
+  captionMounted.value = false
   visibilityState = createTranscriptVisibilityState(props.generation)
   bubbleOpen.value = false
 }
@@ -207,8 +256,8 @@ watch(
   ([isActive, generation]) => {
     clearCloseTimer()
     visibilityState = reconcileTranscriptVisibility(visibilityState, {
-      active: isActive && props.showTranscripts,
-      segments: props.showTranscripts ? props.transcripts : [],
+      active: isActive,
+      segments: props.transcripts,
       generation,
       roles: ['user', 'assistant'],
       nowMs: Date.now()
@@ -247,7 +296,7 @@ watch(
       announcedFinalSegments.clear()
       latestAnnouncement.value = ''
     }
-    if (!isActive || !props.showTranscripts) {
+    if (!isActive) {
       announcedFinalSegments.clear()
       latestAnnouncement.value = ''
       return
@@ -306,6 +355,25 @@ onBeforeUnmount(() => {
     :class="rootClass"
     :style="rootStyle"
   >
+    <div
+      v-if="centered"
+      data-testid="realtime-voice-subtitle-region"
+      class="absolute inset-x-0 top-0 flex h-[38%] items-end justify-center px-4 pb-4"
+    >
+      <div
+        v-if="captionMounted"
+        data-testid="realtime-voice-subtitles"
+        class="max-h-full w-[min(40rem,calc(100vw-2rem))] space-y-3 overflow-hidden p-4 text-center"
+        :class="[transcriptSurfaceClass, captionClass]"
+      >
+        <RealtimeVoiceTranscriptList
+          :entries="entries"
+          :speaker-name="avatar?.displayName ?? null"
+          size="subtitle"
+        />
+      </div>
+    </div>
+
     <button
       v-if="centered"
       type="button"
@@ -327,10 +395,10 @@ onBeforeUnmount(() => {
 
     <UPopover
       v-else
-      :open="bubbleOpen && entries.length > 0"
+      :open="captionMounted"
       :content="{ side: 'top', align: 'end', sideOffset: 10 }"
       :ui="{
-        content: 'rounded-xl bg-elevated/95 shadow-xl ring ring-default backdrop-blur'
+        content: transcriptSurfaceClass
       }"
       @update:open="updateBubbleOpen"
     >
@@ -348,26 +416,12 @@ onBeforeUnmount(() => {
         <div
           data-testid="realtime-voice-bubble"
           class="pointer-events-none w-[min(20rem,calc(100vw-2rem))] space-y-3 p-3"
+          :class="captionClass"
         >
-          <div
-            v-for="entry in entries"
-            :key="`${entry.generation}:${entry.id}`"
-            :data-testid="`realtime-transcript-${entry.role}`"
-            class="space-y-0.5"
-          >
-            <p
-              class="text-[11px] font-medium"
-              :class="entry.role === 'user' ? 'text-dimmed' : 'text-toned'"
-            >
-              {{ entry.role === 'user' ? 'You' : (avatar?.displayName || 'Codex') }}
-            </p>
-            <p
-              class="text-sm leading-snug"
-              :class="entry.role === 'user' ? 'text-muted' : 'text-default'"
-            >
-              {{ entry.text }}
-            </p>
-          </div>
+          <RealtimeVoiceTranscriptList
+            :entries="entries"
+            :speaker-name="avatar?.displayName ?? null"
+          />
         </div>
       </template>
     </UPopover>
@@ -381,3 +435,77 @@ onBeforeUnmount(() => {
     </p>
   </div>
 </template>
+
+<style scoped>
+/* The caption surface animates only when it first appears. Streaming transcript
+   updates mutate text inside a persistent element, so they never restart this
+   animation and never move the surrounding layout. */
+.realtime-voice-caption-enter {
+  animation: realtime-voice-caption-enter 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  transform-origin: center bottom;
+  will-change: opacity, transform;
+}
+
+.realtime-voice-caption-leave {
+  animation: realtime-voice-caption-leave 160ms cubic-bezier(0.4, 0, 1, 1) both;
+  transform-origin: center bottom;
+  pointer-events: none;
+  will-change: opacity, transform;
+}
+
+@keyframes realtime-voice-caption-enter {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 6px, 0) scale(0.985);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes realtime-voice-caption-leave {
+  0% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translate3d(0, 4px, 0) scale(0.99);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .realtime-voice-caption-enter {
+    animation: realtime-voice-caption-fade 120ms ease-out both;
+    will-change: opacity;
+  }
+
+  .realtime-voice-caption-leave {
+    animation: realtime-voice-caption-fade-out 100ms ease-in both;
+    will-change: opacity;
+  }
+}
+
+@keyframes realtime-voice-caption-fade {
+  0% {
+    opacity: 0;
+  }
+
+  100% {
+    opacity: 1;
+  }
+}
+
+@keyframes realtime-voice-caption-fade-out {
+  0% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+  }
+}
+</style>

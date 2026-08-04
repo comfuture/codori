@@ -110,10 +110,9 @@ onBeforeUnmount(() => {
     :activity="realtimeVoice.activity.value"
     :avatar-cue="realtimeVoice.avatarCue.value"
     :generation="realtimeVoice.generation.value"
-    :transcripts="centered ? [] : realtimeVoice.transcripts.value"
+    :transcripts="realtimeVoice.transcripts.value"
     :bottom-offset="156"
     :presentation="centered ? 'centered' : 'floating'"
-    :show-transcripts="!centered"
     @stop="stopVoiceCompanion"
   />
 </template>
