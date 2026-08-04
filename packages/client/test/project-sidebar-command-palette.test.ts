@@ -633,6 +633,10 @@ describe('project sidebar inline threads', () => {
 
     expect(wrapper.find('button[aria-label="New thread in codori"]').exists()).toBe(false)
     expect(wrapper.find('button[aria-label="New thread in other"]').exists()).toBe(false)
+    // Collapsed rows show no children and no plus button, so the row itself must
+    // stay the way into a project.
+    expect(wrapper.get('[data-kind="project"][data-value="project:other"]').attributes('data-to'))
+      .toBe('/projects/other')
   })
 
   it('appends cursor pages from an icon-free muted Show more row', async () => {
