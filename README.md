@@ -150,6 +150,9 @@ settings action.
 The Settings item at the bottom of the application sidebar opens a dedicated
 workspace with directly loadable sections:
 
+- `/settings/general` chooses the served project root, reports the remembered
+  service root, and selects the color mode (`system`, `light`, or `dark`)
+  persisted by `@nuxtjs/color-mode`.
 - `/settings/notifications` controls the browser-local
   `codori:system-notifications` opt-in without requesting permission on page
   load.
@@ -160,7 +163,7 @@ workspace with directly loadable sections:
 - `/settings/backend` reports the selected backend, transport, state, version,
   and fallback reason as read-only diagnostics.
 
-`/settings` redirects to Notifications. The settings navigation includes a
+`/settings` redirects to General. The settings navigation includes a
 safe return to the app route from which it was opened.
 
 ### Immersive WebXR workspace
@@ -522,7 +525,7 @@ The client dashboard provides:
 
 - a left sidebar with all discovered projects
 - a main chat workspace
-- a new thread action
+- a per-project new thread action in the project row
 - recent project threads with inline `Show more` expansion in the project tree
 - a read-only workspace file explorer for projects and projectless chats
 
@@ -604,7 +607,7 @@ more than one service is registered.
 A user-scoped install uses a launchd agent on macOS, a systemd user unit on
 Linux, and a Task Scheduler logon task on Windows. `--scope system` registers a
 machine-wide equivalent and requires elevation. The served project root can be
-changed at runtime from Settings → Workspace, and the most recently served
+changed at runtime from Settings → General, and the most recently served
 directory is reused the next time the service starts. See
 [packages/server/README.md](packages/server/README.md) for the platform details,
 root persistence, deterministic macOS install identifiers, automatic

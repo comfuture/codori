@@ -271,7 +271,7 @@ carries restart-on-failure settings and no execution time limit.
 
 ## Project Root
 
-A service serves one project root. Change it from Settings → Workspace, or with
+A service serves one project root. Change it from Settings → General, or with
 the API directly:
 
 ```bash
