@@ -20,6 +20,7 @@ import { cloneProjectIntoRoot } from './git.js'
 import { findAvailablePort } from './ports.js'
 import { scanProjects } from './project-scanner.js'
 import { RuntimeStore } from './runtime-store.js'
+import { terminateProcessTree } from './process-tree.js'
 import {
   AppServerBackendSelector,
   type DaemonSelectionResult
@@ -83,8 +84,6 @@ type WorkspaceActivityRecord = {
   lastActivityAt: number
 }
 
-const CODORI_STOP_TIMEOUT_MS = 3_000
-const CODORI_STOP_POLL_MS = 50
 const CHAT_PARENT_DIR_NAME = 'Chats'
 const CHAT_MARKER_FILE = '.codori-chat.json'
 const CHAT_RECENT_LIMIT = 5
@@ -114,46 +113,8 @@ const isProcessAlive = (pid: number) => {
   }
 }
 
-const wait = async (ms: number) =>
-  new Promise<void>((resolvePromise) => {
-    setTimeout(resolvePromise, ms)
-  })
-
-const waitForExit = async (pid: number, timeoutMs: number) => {
-  const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline) {
-    if (!isProcessAlive(pid)) {
-      return true
-    }
-    await wait(CODORI_STOP_POLL_MS)
-  }
-  return !isProcessAlive(pid)
-}
-
-const terminateProcess = async (pid: number) => {
-  if (!isProcessAlive(pid)) {
-    return false
-  }
-
-  try {
-    process.kill(pid, 'SIGTERM')
-  } catch {
-    return false
-  }
-
-  const exited = await waitForExit(pid, CODORI_STOP_TIMEOUT_MS)
-  if (exited) {
-    return true
-  }
-
-  try {
-    process.kill(pid, 'SIGKILL')
-  } catch {
-    return !isProcessAlive(pid)
-  }
-
-  return await waitForExit(pid, CODORI_STOP_TIMEOUT_MS)
-}
+const terminateProcess = async (pid: number) =>
+  await terminateProcessTree(pid)
 
 const spawnDetached = async (
   command: string,

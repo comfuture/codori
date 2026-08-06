@@ -8,6 +8,7 @@ import type {
   CodexExecutableSource,
   CodexExecutableStatus
 } from './types.js'
+import { terminateProcessTree } from './process-tree.js'
 
 const require = createRequire(import.meta.url)
 const DEFAULT_VALIDATION_TIMEOUT_MS = 2_000
@@ -60,8 +61,8 @@ const windowsExecutableNames = (env: NodeJS.ProcessEnv) => {
     .split(';')
     .map(extension => extension.trim().toLowerCase())
     .filter(Boolean)
-  const names = ['codex', ...extensions.map(extension => `codex${extension}`)]
-  names.push('codex.ps1')
+  const names = extensions.map(extension => `codex${extension}`)
+  names.push('codex.ps1', 'codex')
   return [...new Set(names)]
 }
 
@@ -169,24 +170,24 @@ export const probeCodexExecutable: CodexExecutableProbe = async (
   )
   const command = buildCodexLaunchCommand(executable, ['--version'])
   let settled = false
-  let child: ReturnType<typeof spawn>
+  let timedOut = false
+  let timer: ReturnType<typeof setTimeout> | null = null
+  let child: ReturnType<typeof spawn> | null = null
 
   const finish = (result: CodexExecutableProbeResult) => {
     if (settled) {
       return
     }
     settled = true
-    clearTimeout(timer)
+    if (timer) {
+      clearTimeout(timer)
+    }
     resolveProbe(result)
   }
 
-  const timer = setTimeout(() => {
-    child?.kill('SIGTERM')
-    finish({ usable: false, reason: 'path-validation-timeout' })
-  }, input.timeoutMs)
-
   try {
     child = spawn(command.command, command.args, {
+      detached: input.platform !== 'win32',
       env: input.env,
       shell: command.shell,
       stdio: 'ignore',
@@ -197,10 +198,33 @@ export const probeCodexExecutable: CodexExecutableProbe = async (
     return
   }
 
+  timer = setTimeout(() => {
+    timedOut = true
+    const pid = child?.pid
+    if (typeof pid !== 'number') {
+      child?.kill('SIGTERM')
+      finish({ usable: false, reason: 'path-validation-timeout' })
+      return
+    }
+    void terminateProcessTree(pid, {
+      platform: input.platform,
+      forceAfterMs: 500,
+      pollMs: 25
+    }).finally(() => {
+      finish({ usable: false, reason: 'path-validation-timeout' })
+    })
+  }, input.timeoutMs)
+
   child.once('error', () => {
+    if (timedOut) {
+      return
+    }
     finish({ usable: false, reason: 'path-validation-failed' })
   })
   child.once('close', (code) => {
+    if (timedOut) {
+      return
+    }
     finish(code === 0
       ? { usable: true }
       : { usable: false, reason: 'path-validation-failed' })
