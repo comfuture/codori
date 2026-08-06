@@ -53,8 +53,8 @@ unavailable avatars fall back to a bundled icon.
 
 `@codori/server` includes a Codex CLI runtime as a safe fallback, so a separate
 global `codex` installation is not required. When launching Codex, the server
-first honors `CODORI_CODEX_BIN`, then validates the first `codex` available on
-its effective `PATH`, and finally uses the bundled runtime.
+first honors `CODORI_CODEX_BIN`, then scans its effective `PATH` for a usable
+installed `codex`, and finally uses the bundled runtime.
 
 Experimental realtime voice is enabled by default. The existing
 `--experimental-realtime-voice` flag remains accepted for compatibility. To
@@ -157,7 +157,8 @@ the daemon-start and managed app-server paths:
 1. Use `CODORI_CODEX_BIN` unchanged when it is set explicitly.
 2. Search the server process's `PATH` for `codex` and require a successful,
    bounded `codex --version` probe. Shell wrappers and version-manager shims are
-   valid candidates.
+   valid candidates. Package-local entries that resolve back to Codori's own
+   bundled entrypoint are skipped so later installed wrappers remain eligible.
 3. Fall back to the bundled `@openai/codex/bin/codex.js` entrypoint when PATH
    discovery misses, finds a non-executable entry, fails validation, or times
    out.

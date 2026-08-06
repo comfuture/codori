@@ -248,6 +248,7 @@ export const resolveCodexExecutable = async (
   const names = platform === 'win32' ? windowsExecutableNames(env) : ['codex']
   const probe = options.probe ?? probeCodexExecutable
   let fallbackReason: CodexExecutableFallbackReason = 'path-not-found'
+  let foundBundledCandidate = false
   let bundledRealPath: string
   try {
     bundledRealPath = await realpath(bundledPath)
@@ -276,11 +277,8 @@ export const resolveCodexExecutable = async (
         candidateRealPath = candidate
       }
       if (candidateRealPath === bundledRealPath) {
-        return bundledExecutable(
-          bundledPath,
-          execPath,
-          'path-resolved-to-bundle'
-        )
+        foundBundledCandidate = true
+        continue
       }
 
       const result = await probe(candidate, {
@@ -295,7 +293,11 @@ export const resolveCodexExecutable = async (
     }
   }
 
-  return bundledExecutable(bundledPath, execPath, fallbackReason)
+  return bundledExecutable(
+    bundledPath,
+    execPath,
+    foundBundledCandidate ? 'path-resolved-to-bundle' : fallbackReason
+  )
 }
 
 export const createCodexExecutableResolver = (
