@@ -1,6 +1,8 @@
-import { chmod, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { chmod, mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { createRequire } from 'node:module'
 import os from 'node:os'
 import { dirname, join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { resolveDaemonStartCommand } from '../src/app-server-backend.js'
 import {
@@ -292,6 +294,65 @@ describe('Codex executable resolution', () => {
         PATHEXT: '.CMD'
       },
       bundledPath,
+      execPath: 'C:\\node.exe',
+      probe
+    })
+
+    expect(executable.path).toBe(installedCommandShim)
+    expect(executable.source).toBe('path')
+    expect(probe).toHaveBeenCalledOnce()
+    expect(probe).toHaveBeenCalledWith(installedCommandShim, expect.any(Object))
+  })
+
+  it('recovers a package-owned bin after require.resolve canonicalizes a package link', async () => {
+    const root = await mkdtemp(join(os.tmpdir(), 'codori-resolved-package-link-'))
+    tempDirectories.push(root)
+    const serverRoot = join(
+      root,
+      'app',
+      'node_modules',
+      '@codori',
+      'server'
+    )
+    const serverEntrypoint = join(serverRoot, 'dist', 'index.js')
+    const serverNodeModules = join(serverRoot, 'node_modules')
+    const lexicalPackage = join(serverNodeModules, '@openai', 'codex')
+    const lexicalBin = join(serverNodeModules, '.bin')
+    const physicalPackage = join(root, 'store', '@openai', 'codex')
+    const physicalBundledPath = join(physicalPackage, 'bin', 'codex.js')
+    await mkdir(dirname(serverEntrypoint), { recursive: true })
+    await mkdir(dirname(lexicalPackage), { recursive: true })
+    await mkdir(lexicalBin, { recursive: true })
+    await mkdir(dirname(physicalBundledPath), { recursive: true })
+    await writeFile(serverEntrypoint, '')
+    await writeFile(physicalBundledPath, '#!/usr/bin/env node\n')
+    await writeFile(
+      join(physicalPackage, 'package.json'),
+      JSON.stringify({
+        name: '@openai/codex',
+        exports: { './bin/codex.js': './bin/codex.js' }
+      })
+    )
+    await writeFile(join(lexicalBin, 'codex.cmd'), '@echo off\r\nexit /b 0\r\n')
+    await symlink(physicalPackage, lexicalPackage)
+
+    const fixtureRequire = createRequire(pathToFileURL(serverEntrypoint))
+    const bundledPath = fixtureRequire.resolve('@openai/codex/bin/codex.js')
+    expect(bundledPath).toBe(await realpath(physicalBundledPath))
+
+    const installed = await createBinDirectory()
+    const installedCommandShim = join(installed.bin, 'codex.cmd')
+    await writeFile(installedCommandShim, '@echo off\r\nexit /b 0\r\n')
+    const probe = vi.fn(async () => ({ usable: true as const }))
+
+    const executable = await resolveCodexExecutable({
+      platform: 'win32',
+      env: {
+        PATH: `${lexicalBin};${installed.bin}`,
+        PATHEXT: '.CMD'
+      },
+      bundledPath,
+      bundledSearchPaths: fixtureRequire.resolve.paths('@openai/codex') ?? [],
       execPath: 'C:\\node.exe',
       probe
     })

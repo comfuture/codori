@@ -52,6 +52,7 @@ type ResolveCodexExecutableOptions = {
   cwd?: string
   execPath?: string
   bundledPath?: string
+  bundledSearchPaths?: string[]
   validationTimeoutMs?: number
   probe?: CodexExecutableProbe
 }
@@ -85,6 +86,19 @@ const pathEntries = (
 
 const comparablePath = (path: string, platform: NodeJS.Platform) =>
   platform === 'win32' ? path.toLowerCase() : path
+
+const addBundledBinDirectory = async (
+  directories: Set<string>,
+  directory: string,
+  platform: NodeJS.Platform
+) => {
+  directories.add(comparablePath(directory, platform))
+  try {
+    directories.add(comparablePath(await realpath(directory), platform))
+  } catch {
+    // The lexical directory is still useful when the package bin is absent.
+  }
+}
 
 const bundledBinDirectory = (bundledPath: string) => {
   let current = dirname(resolve(bundledPath))
@@ -258,6 +272,9 @@ export const resolveCodexExecutable = async (
   const execPath = options.execPath ?? process.execPath
   const bundledPath = options.bundledPath
     ?? require.resolve('@openai/codex/bin/codex.js')
+  const bundledSearchPaths = options.bundledSearchPaths
+    ?? require.resolve.paths('@openai/codex')
+    ?? []
   const override = options.override ?? env.CODORI_CODEX_BIN
   if (override) {
     return directExecutable(override, 'override', null, platform, env)
@@ -277,12 +294,29 @@ export const resolveCodexExecutable = async (
   for (const path of [bundledPath, bundledRealPath]) {
     const directory = bundledBinDirectory(path)
     if (directory) {
-      bundledBins.add(comparablePath(directory, platform))
-      try {
-        bundledBins.add(comparablePath(await realpath(directory), platform))
-      } catch {
-        // The lexical directory is still useful when the package bin is absent.
-      }
+      await addBundledBinDirectory(bundledBins, directory, platform)
+    }
+  }
+  for (const nodeModulesDirectory of bundledSearchPaths) {
+    const lexicalBundledPath = resolve(
+      nodeModulesDirectory,
+      '@openai/codex/bin/codex.js'
+    )
+    let lexicalBundledRealPath: string
+    try {
+      lexicalBundledRealPath = await realpath(lexicalBundledPath)
+    } catch {
+      continue
+    }
+    if (
+      comparablePath(lexicalBundledRealPath, platform)
+        === comparablePath(bundledRealPath, platform)
+    ) {
+      await addBundledBinDirectory(
+        bundledBins,
+        resolve(nodeModulesDirectory, '.bin'),
+        platform
+      )
     }
   }
 
