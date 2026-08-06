@@ -295,7 +295,12 @@ describe('createHttpServer', () => {
         transport: 'tcp-websocket',
         state: 'fallback',
         version: '0.145.0',
-        fallbackReason: 'incompatible-realtime'
+        fallbackReason: 'incompatible-realtime',
+        codexExecutable: {
+          path: '/usr/local/bin/codex',
+          source: 'path',
+          fallbackReason: null
+        }
       })
     }))
     startedApps.push(app)
@@ -312,7 +317,12 @@ describe('createHttpServer', () => {
         transport: 'tcp-websocket',
         state: 'fallback',
         version: '0.145.0',
-        fallbackReason: 'incompatible-realtime'
+        fallbackReason: 'incompatible-realtime',
+        codexExecutable: {
+          path: '/usr/local/bin/codex',
+          source: 'path',
+          fallbackReason: null
+        }
       }
     })
     expect(response.body).not.toContain('socketPath')

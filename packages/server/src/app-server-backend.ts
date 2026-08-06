@@ -1,15 +1,19 @@
 import { spawn } from 'node:child_process'
 import os from 'node:os'
-import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import WebSocket from 'ws'
+import {
+  buildCodexLaunchCommand,
+  createCodexExecutableResolver,
+  type CodexExecutableResolver,
+  type ResolvedCodexExecutable
+} from './codex-executable.js'
 import type {
   CodexDaemonTarget,
   RuntimeBackendFallbackReason
 } from './types.js'
 import { createUnixWebSocket } from './unix-websocket.js'
 
-const require = createRequire(import.meta.url)
 const DEFAULT_PROBE_TIMEOUT_MS = 2_000
 const DEFAULT_START_TIMEOUT_MS = 12_000
 const MAX_COMMAND_OUTPUT_BYTES = 256 * 1024
@@ -43,6 +47,7 @@ export type DaemonSelectionResult =
 export type DaemonStartRequest = {
   command: string
   args: string[]
+  shell?: boolean
   cwd: string
   env: NodeJS.ProcessEnv
   timeoutMs: number
@@ -58,6 +63,7 @@ type AppServerBackendSelectorOptions = {
   homeDir?: string
   platform?: NodeJS.Platform
   codexBin?: string
+  resolveCodexExecutable?: CodexExecutableResolver
   realtimeVoiceEnabled?: boolean
   probeTimeoutMs?: number
   startTimeoutMs?: number
@@ -318,6 +324,7 @@ const runDaemonStart = async (request: DaemonStartRequest) =>
     const child = spawn(request.command, request.args, {
       cwd: request.cwd,
       env: request.env,
+      shell: request.shell,
       stdio: ['ignore', 'pipe', 'pipe'],
       windowsHide: true
     })
@@ -373,22 +380,13 @@ export const resolveEffectiveCodexHome = (
 
 export const resolveDaemonStartCommand = (
   realtimeVoiceEnabled: boolean,
-  codexBin = process.env.CODORI_CODEX_BIN
+  executable: ResolvedCodexExecutable
 ) => {
   const args = ['remote-control', 'start', '--json']
   if (realtimeVoiceEnabled) {
     args.push('--enable', 'realtime_conversation')
   }
-  if (codexBin) {
-    return {
-      command: codexBin,
-      args
-    }
-  }
-  return {
-    command: process.execPath,
-    args: [require.resolve('@openai/codex/bin/codex.js'), ...args]
-  }
+  return buildCodexLaunchCommand(executable, args)
 }
 
 export class AppServerBackendSelector {
@@ -396,7 +394,7 @@ export class AppServerBackendSelector {
 
   private readonly platform: NodeJS.Platform
 
-  private readonly codexBin: string | undefined
+  private readonly resolveCodexExecutable: CodexExecutableResolver
 
   private readonly realtimeVoiceEnabled: boolean
 
@@ -413,7 +411,8 @@ export class AppServerBackendSelector {
   constructor(options: AppServerBackendSelectorOptions = {}) {
     this.homeDir = options.homeDir ?? os.homedir()
     this.platform = options.platform ?? process.platform
-    this.codexBin = options.codexBin ?? process.env.CODORI_CODEX_BIN
+    this.resolveCodexExecutable = options.resolveCodexExecutable
+      ?? createCodexExecutableResolver({ override: options.codexBin })
     this.realtimeVoiceEnabled = options.realtimeVoiceEnabled ?? false
     this.probeTimeoutMs = options.probeTimeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS
     this.startTimeoutMs = options.startTimeoutMs ?? DEFAULT_START_TIMEOUT_MS
@@ -477,9 +476,10 @@ export class AppServerBackendSelector {
 
     let started: ParsedDaemonStart
     try {
+      const executable = await this.resolveCodexExecutable()
       const command = resolveDaemonStartCommand(
         this.realtimeVoiceEnabled,
-        this.codexBin
+        executable
       )
       const output = await this.startDaemon({
         ...command,

@@ -26,7 +26,8 @@ export const idleRuntimeBackendStatus = (): RuntimeBackendStatus => ({
   transport: null,
   state: 'idle',
   version: null,
-  fallbackReason: null
+  fallbackReason: null,
+  codexExecutable: null
 })
 
 export const resolveRuntimeBackendStatusEndpoint = (configuredBase: string) =>

@@ -69,6 +69,21 @@ export type RuntimeBackendFallbackReason =
   | 'incompatible-realtime'
   | 'managed-runtime-stop-failed'
 
+export type CodexExecutableSource = 'override' | 'path' | 'bundle'
+
+export type CodexExecutableFallbackReason =
+  | 'path-not-found'
+  | 'path-not-executable'
+  | 'path-validation-failed'
+  | 'path-validation-timeout'
+  | 'path-resolved-to-bundle'
+
+export type CodexExecutableStatus = {
+  path: string
+  source: CodexExecutableSource
+  fallbackReason: CodexExecutableFallbackReason | null
+}
+
 export type CodexDaemonTarget = {
   kind: 'codex-daemon'
   transport: 'unix-socket'
@@ -95,6 +110,7 @@ export type RuntimeBackendStatus = {
   state: 'idle' | 'probing' | 'ready' | 'fallback'
   version: string | null
   fallbackReason: RuntimeBackendFallbackReason | null
+  codexExecutable: CodexExecutableStatus | null
 }
 
 export type RuntimeBackendStatusResponse = {

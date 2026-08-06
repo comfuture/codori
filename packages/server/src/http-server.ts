@@ -398,7 +398,8 @@ export const createHttpServer = async (
       transport: null,
       state: 'idle',
       version: null,
-      fallbackReason: null
+      fallbackReason: null,
+      codexExecutable: null
     }
   }))
 
