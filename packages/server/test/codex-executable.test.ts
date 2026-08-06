@@ -44,6 +44,41 @@ const createBundledBinDirectory = async () => {
   return { bin, bundledPath, candidate, commandShim }
 }
 
+const createNestedBundledBinDirectory = async () => {
+  const root = await mkdtemp(join(os.tmpdir(), 'codori-nested-bundled-bin-'))
+  tempDirectories.push(root)
+  const outerBin = join(root, 'node_modules', '.bin')
+  const nestedNodeModules = join(
+    root,
+    'node_modules',
+    '@codori',
+    'server',
+    'node_modules'
+  )
+  const nestedBin = join(nestedNodeModules, '.bin')
+  const bundledPath = join(
+    nestedNodeModules,
+    '@openai',
+    'codex',
+    'bin',
+    'codex.js'
+  )
+  const bundledCommandShim = join(nestedBin, 'codex.cmd')
+  const outerCommandShim = join(outerBin, 'codex.cmd')
+  await mkdir(nestedBin, { recursive: true })
+  await mkdir(outerBin, { recursive: true })
+  await mkdir(dirname(bundledPath), { recursive: true })
+  await writeFile(bundledPath, '#!/usr/bin/env node\n')
+  await writeFile(bundledCommandShim, '@echo off\r\nexit /b 0\r\n')
+  await writeFile(outerCommandShim, '@echo off\r\nexit /b 0\r\n')
+  return {
+    bundledPath,
+    nestedBin,
+    outerBin,
+    outerCommandShim
+  }
+}
+
 const waitForCondition = async (condition: () => boolean, timeoutMs = 2_000) => {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
@@ -163,6 +198,58 @@ describe('Codex executable resolution', () => {
     })
     expect(probe).toHaveBeenCalledOnce()
     expect(probe).toHaveBeenCalledWith(installedCommandShim, expect.any(Object))
+  })
+
+  it('recognizes a bundled Windows shim through a symlinked bin directory', async () => {
+    const bundled = await createBundledBinDirectory()
+    const aliasRoot = await mkdtemp(join(os.tmpdir(), 'codori-bundled-bin-alias-'))
+    tempDirectories.push(aliasRoot)
+    const aliasBin = join(aliasRoot, 'bin')
+    await symlink(bundled.bin, aliasBin)
+    const installed = await createBinDirectory()
+    const installedCommandShim = join(installed.bin, 'codex.cmd')
+    await writeFile(installedCommandShim, '@echo off\r\nexit /b 0\r\n')
+    const probe = vi.fn(async () => ({ usable: true as const }))
+
+    const executable = await resolveCodexExecutable({
+      platform: 'win32',
+      env: {
+        PATH: `${aliasBin};${installed.bin}`,
+        PATHEXT: '.CMD'
+      },
+      bundledPath: bundled.bundledPath,
+      execPath: 'C:\\node.exe',
+      probe
+    })
+
+    expect(executable.path).toBe(installedCommandShim)
+    expect(executable.source).toBe('path')
+    expect(probe).toHaveBeenCalledOnce()
+    expect(probe).toHaveBeenCalledWith(installedCommandShim, expect.any(Object))
+  })
+
+  it('keeps an outer installed wrapper eligible for a nested bundle', async () => {
+    const bundled = await createNestedBundledBinDirectory()
+    const probe = vi.fn(async () => ({ usable: true as const }))
+
+    const executable = await resolveCodexExecutable({
+      platform: 'win32',
+      env: {
+        PATH: `${bundled.nestedBin};${bundled.outerBin}`,
+        PATHEXT: '.CMD'
+      },
+      bundledPath: bundled.bundledPath,
+      execPath: 'C:\\node.exe',
+      probe
+    })
+
+    expect(executable.path).toBe(bundled.outerCommandShim)
+    expect(executable.source).toBe('path')
+    expect(probe).toHaveBeenCalledOnce()
+    expect(probe).toHaveBeenCalledWith(
+      bundled.outerCommandShim,
+      expect.any(Object)
+    )
   })
 
   it('uses the bundle when PATH has no codex entry', async () => {

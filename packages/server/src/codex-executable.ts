@@ -86,20 +86,19 @@ const pathEntries = (
 const comparablePath = (path: string, platform: NodeJS.Platform) =>
   platform === 'win32' ? path.toLowerCase() : path
 
-const bundledBinDirectories = (
+const bundledBinDirectory = (
   bundledPath: string,
   platform: NodeJS.Platform
 ) => {
-  const directories = new Set<string>()
   let current = dirname(resolve(bundledPath))
 
   while (true) {
     if (basename(current).toLowerCase() === 'node_modules') {
-      directories.add(comparablePath(resolve(current, '.bin'), platform))
+      return comparablePath(resolve(current, '.bin'), platform)
     }
     const parent = dirname(current)
     if (parent === current) {
-      return directories
+      return null
     }
     current = parent
   }
@@ -277,9 +276,12 @@ export const resolveCodexExecutable = async (
   } catch {
     bundledRealPath = bundledPath
   }
-  const bundledBins = bundledBinDirectories(bundledPath, platform)
-  for (const directory of bundledBinDirectories(bundledRealPath, platform)) {
-    bundledBins.add(directory)
+  const bundledBins = new Set<string>()
+  for (const path of [bundledPath, bundledRealPath]) {
+    const directory = bundledBinDirectory(path, platform)
+    if (directory) {
+      bundledBins.add(directory)
+    }
   }
 
   for (const directory of pathEntries(env.PATH, platform, cwd)) {
@@ -306,6 +308,7 @@ export const resolveCodexExecutable = async (
         comparablePath(candidateRealPath, platform)
           === comparablePath(bundledRealPath, platform)
         || bundledBins.has(comparablePath(dirname(candidate), platform))
+        || bundledBins.has(comparablePath(dirname(candidateRealPath), platform))
       ) {
         foundBundledCandidate = true
         continue
