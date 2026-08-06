@@ -33,8 +33,8 @@ Codori follows a few hard constraints:
 
 The server package includes a matching Codex CLI runtime, so a separate
 host-global `codex` installation is not required. When launching Codex, Codori
-first honors `CODORI_CODEX_BIN`, then validates the first `codex` available on
-the server process's `PATH`, and finally uses the bundled runtime as a fallback.
+first honors `CODORI_CODEX_BIN`, then scans the server process's `PATH` for a
+usable installed `codex`, and finally uses the bundled runtime as a fallback.
 
 ## Install
 
@@ -113,11 +113,13 @@ restart Codori.
 Codori resolves that executable once per server process and uses the same
 selection for both `remote-control start` and the managed `app-server`
 fallback. A discovered executable must complete `codex --version` successfully
-within a bounded timeout. Missing, non-executable, failing, or timed-out PATH
-entries fall back safely to the bundled dependency. `CODORI_CODEX_BIN` is an
-explicit override and is used unchanged without PATH validation. Installed
-services use their own effective `PATH`, so restart the service after changing
-its executable environment.
+within a bounded timeout. Package-local PATH entries that resolve back to
+Codori's own bundled entrypoint are skipped so a later installed wrapper can
+still be selected. Missing, non-executable, failing, or timed-out PATH entries
+fall back safely to the bundled dependency. `CODORI_CODEX_BIN` is an explicit
+override and is used unchanged without PATH validation. Installed services use
+their own effective `PATH`, so restart the service after changing its
+executable environment.
 
 If you need different bind settings:
 

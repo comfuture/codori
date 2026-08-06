@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -26,6 +26,19 @@ const createBinDirectory = async (executable = true) => {
   await writeFile(candidate, '#!/bin/sh\nexit 0\n')
   await chmod(candidate, executable ? 0o755 : 0o644)
   return { bin, candidate }
+}
+
+const createBundledBinDirectory = async () => {
+  const root = await mkdtemp(join(os.tmpdir(), 'codori-bundled-codex-bin-'))
+  tempDirectories.push(root)
+  const bin = join(root, 'bin')
+  const bundledPath = join(root, 'codex.js')
+  const candidate = join(bin, 'codex')
+  await mkdir(bin)
+  await writeFile(bundledPath, '#!/usr/bin/env node\n')
+  await chmod(bundledPath, 0o755)
+  await symlink(bundledPath, candidate)
+  return { bin, bundledPath, candidate }
 }
 
 const waitForCondition = async (condition: () => boolean, timeoutMs = 2_000) => {
@@ -138,6 +151,48 @@ describe('Codex executable resolution', () => {
     expect(probe).not.toHaveBeenCalled()
   })
 
+  it('keeps searching after a PATH shim resolves to the bundle', async () => {
+    const bundled = await createBundledBinDirectory()
+    const installed = await createBinDirectory()
+    const probe = vi.fn(async () => ({ usable: true as const }))
+
+    const executable = await resolveCodexExecutable({
+      env: { PATH: `${bundled.bin}:${installed.bin}` },
+      bundledPath: bundled.bundledPath,
+      execPath: '/usr/bin/node',
+      probe
+    })
+
+    expect(executable).toEqual({
+      path: installed.candidate,
+      source: 'path',
+      fallbackReason: null,
+      command: installed.candidate,
+      argsPrefix: []
+    })
+    expect(probe).toHaveBeenCalledOnce()
+    expect(probe).toHaveBeenCalledWith(installed.candidate, expect.any(Object))
+  })
+
+  it('uses the bundle after bundle-equivalent PATH entries are exhausted', async () => {
+    const bundled = await createBundledBinDirectory()
+    const probe = vi.fn(async () => ({ usable: true as const }))
+
+    await expect(resolveCodexExecutable({
+      env: { PATH: bundled.bin },
+      bundledPath: bundled.bundledPath,
+      execPath: '/usr/bin/node',
+      probe
+    })).resolves.toEqual({
+      path: bundled.bundledPath,
+      source: 'bundle',
+      fallbackReason: 'path-resolved-to-bundle',
+      command: '/usr/bin/node',
+      argsPrefix: [bundled.bundledPath]
+    })
+    expect(probe).not.toHaveBeenCalled()
+  })
+
   it('records a validation failure and falls back to the bundle', async () => {
     const { bin, candidate } = await createBinDirectory()
     const probe = vi.fn(async () => ({
@@ -233,11 +288,12 @@ describe('Codex executable resolution', () => {
   }
 
   it('caches one resolution for daemon and managed launch commands', async () => {
-    const { bin, candidate } = await createBinDirectory()
+    const bundled = await createBundledBinDirectory()
+    const installed = await createBinDirectory()
     const probe = vi.fn(async () => ({ usable: true as const }))
     const resolver = createCodexExecutableResolver({
-      env: { PATH: bin },
-      bundledPath: '/bundle/codex.js',
+      env: { PATH: `${bundled.bin}:${installed.bin}` },
+      bundledPath: bundled.bundledPath,
       execPath: '/usr/bin/node',
       probe
     })
@@ -245,7 +301,7 @@ describe('Codex executable resolution', () => {
     const daemonCommand = resolveDaemonStartCommand(true, await resolver())
     const managedCommand = resolveCodexCommand(4765, await resolver(), true)
 
-    expect(daemonCommand.command).toBe(candidate)
+    expect(daemonCommand.command).toBe(installed.candidate)
     expect(daemonCommand.args).toEqual([
       'remote-control',
       'start',
@@ -253,7 +309,7 @@ describe('Codex executable resolution', () => {
       '--enable',
       'realtime_conversation'
     ])
-    expect(managedCommand.command).toBe(candidate)
+    expect(managedCommand.command).toBe(installed.candidate)
     expect(managedCommand.args).toEqual([
       'app-server',
       '--enable',
