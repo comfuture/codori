@@ -51,10 +51,10 @@ avatar manifests. Only validated metadata and bounded PNG/WebP bytes cross the
 proxy; remote filesystem paths are never returned to the browser. Invalid or
 unavailable avatars fall back to a bundled icon.
 
-`@codori/server` includes the Codex CLI runtime it uses for both the preferred
-remote-control daemon and the managed app-server fallback. A separate global
-`codex` installation is not required. Set `CODORI_CODEX_BIN` to an executable
-path to opt into a custom runtime.
+`@codori/server` includes a Codex CLI runtime as a safe fallback, so a separate
+global `codex` installation is not required. When launching Codex, the server
+first honors `CODORI_CODEX_BIN`, then validates the first `codex` available on
+its effective `PATH`, and finally uses the bundled runtime.
 
 Experimental realtime voice is enabled by default. The existing
 `--experimental-realtime-voice` flag remains accepted for compatibility. To
@@ -145,11 +145,27 @@ On macOS and Linux, Codori prefers the first-party Codex remote-control daemon:
    (`CODEX_HOME` defaults to `~/.codex`).
 2. Perform a bounded WebSocket-over-Unix handshake and app-server `initialize`
    probe. A socket file is not treated as proof of readiness.
-3. If needed, run the bundled `codex remote-control start --json` once across
+3. If needed, run the selected `codex remote-control start --json` once across
    concurrent callers and probe the socket reported by the command.
 4. Fall back to the existing Codori-managed TCP app-server for an unsupported
    command, inaccessible socket, failed handshake, or incompatible realtime
    capability.
+
+The executable is resolved once per Codori server process and reused for both
+the daemon-start and managed app-server paths:
+
+1. Use `CODORI_CODEX_BIN` unchanged when it is set explicitly.
+2. Search the server process's `PATH` for `codex` and require a successful,
+   bounded `codex --version` probe. Shell wrappers and version-manager shims are
+   valid candidates.
+3. Fall back to the bundled `@openai/codex/bin/codex.js` entrypoint when PATH
+   discovery misses, finds a non-executable entry, fails validation, or times
+   out.
+
+An installed service uses its own effective environment rather than an
+interactive shell's current `PATH`; restart the service after changing that
+environment. `CODORI_CODEX_BIN` remains the escape hatch for pinning a specific
+wrapper or deliberately selecting the bundled entrypoint.
 
 Codori does not persist the first-party daemon PID or directly reap, restart, or
 stop it. Stopping a logical workspace only releases Codori's reference to it.
@@ -174,9 +190,10 @@ selecting the daemon, it retains the runtime record and continues using the
 managed backend. The status API reports this controlled fallback instead of
 orphaning the process.
 
-`GET /api/runtime/backend` and the dashboard sidebar expose the selected
-backend kind, transport, readiness, version, and a compact fallback reason.
-They intentionally do not expose the Unix socket path.
+`GET /api/runtime/backend` and Settings → Backend expose the selected backend
+kind, transport, readiness, version, compact fallback reason, and resolved
+Codex executable with its `override`, `path`, or `bundle` source. They
+intentionally do not expose the Unix socket path.
 
 The daemon integration is Unix-only and requires the Codori service user to
 traverse the effective `CODEX_HOME` and open its socket. A container must mount

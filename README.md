@@ -31,7 +31,10 @@ Codori follows a few hard constraints:
 
 - Node.js 22+
 
-The server package includes a matching Codex CLI runtime, so a separate host-global `codex` installation is not required. Codori first asks that runtime for its Unix-socket remote-control daemon and otherwise starts the existing managed TCP fallback. Set `CODORI_CODEX_BIN` to an executable path only when you intentionally want to override the bundled runtime.
+The server package includes a matching Codex CLI runtime, so a separate
+host-global `codex` installation is not required. When launching Codex, Codori
+first honors `CODORI_CODEX_BIN`, then validates the first `codex` available on
+the server process's `PATH`, and finally uses the bundled runtime as a fallback.
 
 ## Install
 
@@ -106,6 +109,15 @@ incompatible, Codori leaves it untouched and uses the managed app-server
 fallback instead. Codori does not modify `~/.codex/config.toml`. To opt out,
 set `"realtimeVoice": { "enabled": false }` in `~/.codori/config.json` and
 restart Codori.
+
+Codori resolves that executable once per server process and uses the same
+selection for both `remote-control start` and the managed `app-server`
+fallback. A discovered executable must complete `codex --version` successfully
+within a bounded timeout. Missing, non-executable, failing, or timed-out PATH
+entries fall back safely to the bundled dependency. `CODORI_CODEX_BIN` is an
+explicit override and is used unchanged without PATH validation. Installed
+services use their own effective `PATH`, so restart the service after changing
+its executable environment.
 
 If you need different bind settings:
 
@@ -485,9 +497,10 @@ Codori ignores common heavy directories during recursive scanning such as `node_
 - If an existing managed fallback cannot be stopped safely, Codori keeps its
   runtime record and continues using it instead of orphaning that process or
   selecting a second backend.
-- Settings → Backend and `GET /api/runtime/backend` report only a
-  safe backend kind, transport, readiness, version, and fallback reason. The
-  daemon socket path is never exposed to the browser.
+- Settings → Backend and `GET /api/runtime/backend` report the safe backend
+  kind, transport, readiness, version, fallback reason, and resolved Codex
+  executable with its source (`override`, `path`, or `bundle`). The daemon
+  socket path is never exposed to the browser.
 
 The daemon path is Unix-only. The Codori service user must have permission to
 traverse `CODEX_HOME` and open the socket. Containerized Codori deployments

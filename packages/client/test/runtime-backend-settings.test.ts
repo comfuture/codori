@@ -56,7 +56,12 @@ describe('RuntimeBackendSettings', () => {
         transport: 'unix-socket',
         state: 'ready',
         version: '0.145.0',
-        fallbackReason: null
+        fallbackReason: null,
+        codexExecutable: {
+          path: '/usr/local/bin/codex',
+          source: 'path',
+          fallbackReason: null
+        }
       }
     })
 
@@ -71,6 +76,8 @@ describe('RuntimeBackendSettings', () => {
     expect(wrapper.text()).toContain('First-party Codex')
     expect(wrapper.text()).toContain('Unix socket')
     expect(wrapper.text()).toContain('0.145.0')
+    expect(wrapper.text()).toContain('/usr/local/bin/codex')
+    expect(wrapper.text()).toContain('Discovered on PATH')
     expect(wrapper.text()).not.toContain('app-server-control.sock')
 
     wrapper.unmount()
@@ -83,7 +90,12 @@ describe('RuntimeBackendSettings', () => {
         transport: 'tcp-websocket',
         state: 'fallback',
         version: null,
-        fallbackReason: 'incompatible-realtime'
+        fallbackReason: 'incompatible-realtime',
+        codexExecutable: {
+          path: '/srv/codori/node_modules/@openai/codex/bin/codex.js',
+          source: 'bundle',
+          fallbackReason: 'path-validation-failed'
+        }
       }
     })
 
@@ -95,6 +107,8 @@ describe('RuntimeBackendSettings', () => {
     expect(wrapper.text()).toContain(
       'The daemon lacks the configured realtime voice capability.'
     )
+    expect(wrapper.text()).toContain('Bundled dependency')
+    expect(wrapper.text()).toContain('failed validation')
     expect(wrapper.find('input').exists()).toBe(false)
     expect(wrapper.find('select').exists()).toBe(false)
 
@@ -108,7 +122,8 @@ describe('RuntimeBackendSettings', () => {
         transport: null,
         state: 'idle',
         version: null,
-        fallbackReason: null
+        fallbackReason: null,
+        codexExecutable: null
       }
     })
 
@@ -153,7 +168,12 @@ describe('RuntimeBackendSettings', () => {
           transport: 'unix-socket',
           state: 'ready',
           version: '0.145.0',
-          fallbackReason: null
+          fallbackReason: null,
+          codexExecutable: {
+            path: '/opt/codex/bin/codex',
+            source: 'override',
+            fallbackReason: null
+          }
         }
       })
       .mockRejectedValueOnce(new Error('offline'))

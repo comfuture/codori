@@ -3,6 +3,7 @@ import { createServer } from 'node:http'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import WebSocket, { WebSocketServer } from 'ws'
+import { resolveCodexExecutable } from '../src/codex-executable.js'
 import {
   AppServerBackendSelector,
   parseDaemonStartOutput,
@@ -325,6 +326,7 @@ describe('app-server backend selection', () => {
     const selector = new AppServerBackendSelector({
       homeDir: '/Users/test',
       platform: 'linux',
+      codexBin: '/usr/local/bin/codex',
       realtimeVoiceEnabled: true,
       probe,
       startDaemon
@@ -388,6 +390,7 @@ describe('app-server backend selection', () => {
     const failed = new AppServerBackendSelector({
       homeDir: '/Users/test',
       platform: 'darwin',
+      codexBin: '/usr/local/bin/codex',
       probe: async () => ({
         ready: false,
         reason: 'daemon-unavailable'
@@ -402,8 +405,11 @@ describe('app-server backend selection', () => {
     })
   })
 
-  it('builds direct and bundled daemon commands with realtime feature parity', () => {
-    expect(resolveDaemonStartCommand(true, '/usr/local/bin/codex')).toEqual({
+  it('builds direct daemon commands with realtime feature parity', async () => {
+    const executable = await resolveCodexExecutable({
+      override: '/usr/local/bin/codex'
+    })
+    expect(resolveDaemonStartCommand(true, executable)).toEqual({
       command: '/usr/local/bin/codex',
       args: [
         'remote-control',
@@ -413,7 +419,7 @@ describe('app-server backend selection', () => {
         'realtime_conversation'
       ]
     })
-    expect(resolveDaemonStartCommand(false, '/usr/local/bin/codex')).toEqual({
+    expect(resolveDaemonStartCommand(false, executable)).toEqual({
       command: '/usr/local/bin/codex',
       args: ['remote-control', 'start', '--json']
     })

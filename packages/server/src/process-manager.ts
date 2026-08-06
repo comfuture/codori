@@ -6,7 +6,6 @@ import {
   statSync
 } from 'node:fs'
 import { mkdir, rm, writeFile } from 'node:fs/promises'
-import { createRequire } from 'node:module'
 import os from 'node:os'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -25,6 +24,14 @@ import {
   AppServerBackendSelector,
   type DaemonSelectionResult
 } from './app-server-backend.js'
+import {
+  buildCodexLaunchCommand,
+  codexExecutableStatus,
+  createCodexExecutableResolver,
+  type CodexExecutableResolver,
+  type CodexLaunchCommand,
+  type ResolvedCodexExecutable
+} from './codex-executable.js'
 import type {
   AppServerTarget,
   ChatSessionRecord,
@@ -44,10 +51,10 @@ import type {
   UpdateChatSessionTitleResult
 } from './types.js'
 
-type CommandFactory = (port: number, project: ProjectRecord) => {
-  command: string
-  args: string[]
-}
+type CommandFactory = (
+  port: number,
+  project: ProjectRecord
+) => CodexLaunchCommand | Promise<CodexLaunchCommand>
 
 type RuntimeSessionLease<T> = {
   touchActivity: (at?: number) => T
@@ -60,6 +67,7 @@ type RuntimeManagerOptions = {
   configOverrides?: ConfigOverrides
   config?: CodoriConfig
   commandFactory?: CommandFactory
+  resolveCodexExecutable?: CodexExecutableResolver
   backendSelector?: {
     ensure: () => Promise<DaemonSelectionResult>
   }
@@ -83,29 +91,18 @@ const CHAT_RECENT_LIMIT = 5
 const CHAT_RUNTIME_ID_PREFIX = 'chat:'
 const SHARED_RUNTIME_ID = 'codori:shared-app-server'
 const DEFAULT_CHAT_TITLE = 'New Chat'
-const require = createRequire(import.meta.url)
 
 export const resolveCodexCommand = (
   port: number,
-  codexBin = process.env.CODORI_CODEX_BIN,
+  executable: ResolvedCodexExecutable,
   realtimeVoiceEnabled = false
-): ReturnType<CommandFactory> => {
+): CodexLaunchCommand => {
   const args = ['app-server']
   if (realtimeVoiceEnabled) {
     args.push('--enable', 'realtime_conversation')
   }
   args.push('--listen', `ws://127.0.0.1:${port}`)
-  if (codexBin) {
-    return {
-      command: codexBin,
-      args
-    }
-  }
-
-  return {
-    command: process.execPath,
-    args: [require.resolve('@openai/codex/bin/codex.js'), ...args]
-  }
+  return buildCodexLaunchCommand(executable, args)
 }
 
 const isProcessAlive = (pid: number) => {
@@ -158,11 +155,18 @@ const terminateProcess = async (pid: number) => {
   return await waitForExit(pid, CODORI_STOP_TIMEOUT_MS)
 }
 
-const spawnDetached = async (command: string, args: string[], cwd: string) =>
+const spawnDetached = async (
+  command: string,
+  args: string[],
+  cwd: string,
+  shell = false
+) =>
   new Promise<ChildProcess>((resolvePromise, reject) => {
     const child = spawn(command, args, {
       cwd,
       detached: true,
+      env: { ...process.env },
+      shell,
       stdio: 'ignore',
       windowsHide: true
     })
@@ -185,6 +189,8 @@ export class RuntimeManager {
 
   private readonly commandFactory: CommandFactory
 
+  private readonly resolveCodexExecutable: CodexExecutableResolver | null
+
   private readonly backendSelector: NonNullable<RuntimeManagerOptions['backendSelector']>
 
   private readonly activeSessions = new Map<string, number>()
@@ -202,7 +208,8 @@ export class RuntimeManager {
     transport: null,
     state: 'idle',
     version: null,
-    fallbackReason: null
+    fallbackReason: null,
+    codexExecutable: null
   }
 
   private idleReaper: NodeJS.Timeout | null = null
@@ -214,8 +221,14 @@ export class RuntimeManager {
     this.store = new RuntimeStore(options.homeDir)
     this.homeDir = options.homeDir
     this.documentsDir = options.documentsDir ?? join(options.homeDir ?? os.homedir(), 'Documents')
+    this.resolveCodexExecutable = options.resolveCodexExecutable
+      ?? (options.commandFactory ? null : createCodexExecutableResolver())
     this.commandFactory = options.commandFactory
-      ?? ((port) => resolveCodexCommand(port, undefined, this.config.realtimeVoice.enabled))
+      ?? (async (port) => resolveCodexCommand(
+        port,
+        await this.resolveCodexExecutable!(),
+        this.config.realtimeVoice.enabled
+      ))
     this.backendSelector = options.backendSelector
       ?? (options.commandFactory
         ? {
@@ -226,6 +239,7 @@ export class RuntimeManager {
           }
         : new AppServerBackendSelector({
             homeDir: options.homeDir,
+            resolveCodexExecutable: this.resolveCodexExecutable!,
             realtimeVoiceEnabled: this.config.realtimeVoice.enabled
           }))
 
@@ -496,25 +510,31 @@ export class RuntimeManager {
       transport: target.transport,
       state: target.kind === 'codex-daemon' ? 'ready' : 'fallback',
       version: target.appServerVersion,
-      fallbackReason
+      fallbackReason,
+      codexExecutable: this.backendStatus.codexExecutable
     }
     return target
   }
 
   private setBackendIdle() {
     this.activeTarget = null
+    const codexExecutable = this.backendStatus.codexExecutable
     this.backendStatus = {
       backend: null,
       transport: null,
       state: 'idle',
       version: null,
-      fallbackReason: null
+      fallbackReason: null,
+      codexExecutable
     }
   }
 
   getRuntimeBackendStatus(): RuntimeBackendStatus {
     return {
-      ...this.backendStatus
+      ...this.backendStatus,
+      codexExecutable: this.backendStatus.codexExecutable
+        ? { ...this.backendStatus.codexExecutable }
+        : null
     }
   }
 
@@ -868,9 +888,19 @@ export class RuntimeManager {
       transport: null,
       state: 'probing',
       version: null,
-      fallbackReason: null
+      fallbackReason: null,
+      codexExecutable: null
     }
-    const daemon = await this.backendSelector.ensure()
+    const [executable, daemon] = await Promise.all([
+      this.resolveCodexExecutable
+        ? this.resolveCodexExecutable().then(codexExecutableStatus)
+        : null,
+      this.backendSelector.ensure()
+    ])
+    this.backendStatus = {
+      ...this.backendStatus,
+      codexExecutable: executable
+    }
     if (daemon.selected) {
       const runtimeProject = this.sharedRuntimeProject()
       const loaded = this.store.load(runtimeProject.path)
@@ -928,8 +958,13 @@ export class RuntimeManager {
     }
 
     const port = await findAvailablePort(this.config.ports.start, this.config.ports.end)
-    const command = this.commandFactory(port, runtimeProject)
-    const child = await spawnDetached(command.command, command.args, runtimeProject.path)
+    const command = await this.commandFactory(port, runtimeProject)
+    const child = await spawnDetached(
+      command.command,
+      command.args,
+      runtimeProject.path,
+      command.shell
+    )
 
     if (typeof child.pid !== 'number') {
       throw new CodoriError('PROCESS_START_FAILED', 'Failed to determine PID for shared app-server runtime.')
@@ -1174,5 +1209,6 @@ export const createRuntimeManager = (options: RuntimeManagerOptions = {}) =>
     configOverrides: options.configOverrides,
     config: options.config,
     commandFactory: options.commandFactory,
+    resolveCodexExecutable: options.resolveCodexExecutable,
     backendSelector: options.backendSelector
   })

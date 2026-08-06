@@ -3,6 +3,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSy
 import os from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { resolveCodexExecutable } from '../src/codex-executable.js'
 import { resolveConfig } from '../src/config.js'
 import { createRuntimeManager, resolveCodexCommand } from '../src/process-manager.js'
 import { RuntimeStore } from '../src/runtime-store.js'
@@ -139,8 +140,11 @@ const waitForCondition = async (condition: () => boolean, timeoutMs = 1_000) => 
 }
 
 describe('RuntimeManager', () => {
-  it('resolves the bundled Codex CLI through the current Node runtime', () => {
-    const command = resolveCodexCommand(4765, undefined)
+  it('builds a bundled Codex CLI command through the current Node runtime', async () => {
+    const executable = await resolveCodexExecutable({
+      env: { PATH: '' }
+    })
+    const command = resolveCodexCommand(4765, executable)
 
     expect(command.command).toBe(process.execPath)
     expect(command.args[0].replaceAll('\\', '/')).toMatch(/\/@openai\/codex\/bin\/codex\.js$/u)
@@ -151,7 +155,7 @@ describe('RuntimeManager', () => {
       'ws://127.0.0.1:4765'
     ])
 
-    const enabledCommand = resolveCodexCommand(4765, undefined, true)
+    const enabledCommand = resolveCodexCommand(4765, executable, true)
     expect(enabledCommand.command).toBe(process.execPath)
     expect(enabledCommand.args.slice(1)).toEqual([
       'app-server',
@@ -162,8 +166,11 @@ describe('RuntimeManager', () => {
     ])
   })
 
-  it('preserves an explicit Codex binary override', () => {
-    expect(resolveCodexCommand(4766, '/opt/codex/bin/codex')).toEqual({
+  it('preserves an explicit Codex binary override', async () => {
+    const executable = await resolveCodexExecutable({
+      override: '/opt/codex/bin/codex'
+    })
+    expect(resolveCodexCommand(4766, executable)).toEqual({
       command: '/opt/codex/bin/codex',
       args: [
         'app-server',
@@ -171,7 +178,7 @@ describe('RuntimeManager', () => {
         'ws://127.0.0.1:4766'
       ]
     })
-    expect(resolveCodexCommand(4766, '/opt/codex/bin/codex', true)).toEqual({
+    expect(resolveCodexCommand(4766, executable, true)).toEqual({
       command: '/opt/codex/bin/codex',
       args: [
         'app-server',
@@ -230,7 +237,8 @@ describe('RuntimeManager', () => {
       transport: 'unix-socket',
       state: 'ready',
       version: '0.145.0',
-      fallbackReason: null
+      fallbackReason: null,
+      codexExecutable: null
     })
     const bridgeTarget = await manager.getProjectBridgeTarget('demo')
     expect(bridgeTarget.target).toEqual(daemonTarget)
@@ -307,7 +315,8 @@ describe('RuntimeManager', () => {
         transport: 'tcp-websocket',
         state: 'fallback',
         version: null,
-        fallbackReason: 'managed-runtime-stop-failed'
+        fallbackReason: 'managed-runtime-stop-failed',
+        codexExecutable: null
       })
       expect(store.load(fixture.root)).toMatchObject({
         kind: 'valid',
@@ -358,6 +367,44 @@ describe('RuntimeManager', () => {
       transport: 'tcp-websocket',
       state: 'fallback',
       fallbackReason: 'daemon-unavailable'
+    })
+  })
+
+  it('reports the cached Codex executable used by backend selection', async () => {
+    const fixture = createFixture()
+    const resolveExecutable = vi.fn(async () => ({
+      path: '/usr/local/bin/codex',
+      source: 'path' as const,
+      fallbackReason: null,
+      command: '/usr/local/bin/codex',
+      argsPrefix: []
+    }))
+    const manager = createRuntimeManager({
+      homeDir: fixture.homeDir,
+      config: fixture.config,
+      resolveCodexExecutable: resolveExecutable,
+      backendSelector: {
+        ensure: async () => ({
+          selected: false,
+          reason: 'daemon-unavailable'
+        })
+      },
+      commandFactory: () => ({
+        command: process.execPath,
+        args: ['-e', 'setInterval(() => {}, 1000)']
+      })
+    })
+    runningManagers.push(manager)
+
+    await manager.startProject('demo')
+
+    expect(resolveExecutable).toHaveBeenCalledOnce()
+    expect(manager.getRuntimeBackendStatus()).toMatchObject({
+      codexExecutable: {
+        path: '/usr/local/bin/codex',
+        source: 'path',
+        fallbackReason: null
+      }
     })
   })
 

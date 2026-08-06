@@ -35,6 +35,30 @@ const stateColor = computed(() =>
       ? 'warning'
       : 'neutral'
 )
+
+const executableSourceLabel = computed(() => {
+  const source = status.value.codexExecutable?.source
+  if (source === 'override') {
+    return 'CODORI_CODEX_BIN override'
+  }
+  if (source === 'path') {
+    return 'Discovered on PATH'
+  }
+  return source === 'bundle' ? 'Bundled dependency' : null
+})
+
+const executableFallbackMessage = computed(() => {
+  const reason = status.value.codexExecutable?.fallbackReason
+  return reason
+    ? ({
+        'path-not-found': 'No codex executable was found on PATH, so Codori selected its bundled dependency.',
+        'path-not-executable': 'The codex entry on PATH was not executable, so Codori selected its bundled dependency.',
+        'path-validation-failed': 'The codex entry on PATH failed validation, so Codori selected its bundled dependency.',
+        'path-validation-timeout': 'The codex entry on PATH timed out during validation, so Codori selected its bundled dependency.',
+        'path-resolved-to-bundle': 'The codex entry on PATH resolved to Codori\'s bundled dependency.'
+      })[reason]
+    : null
+})
 </script>
 
 <template>
@@ -98,6 +122,28 @@ const stateColor = computed(() =>
           {{ status.version }}
         </dd>
       </div>
+      <div
+        v-if="status.codexExecutable"
+        class="grid gap-1 py-5 sm:grid-cols-[12rem_1fr] sm:gap-6"
+      >
+        <dt class="text-sm font-medium text-highlighted">
+          Codex executable
+        </dt>
+        <dd class="break-all font-mono text-sm text-muted">
+          {{ status.codexExecutable.path }}
+        </dd>
+      </div>
+      <div
+        v-if="executableSourceLabel"
+        class="grid gap-1 py-5 sm:grid-cols-[12rem_1fr] sm:gap-6"
+      >
+        <dt class="text-sm font-medium text-highlighted">
+          Executable source
+        </dt>
+        <dd class="text-sm text-muted">
+          {{ executableSourceLabel }}
+        </dd>
+      </div>
     </dl>
 
     <p
@@ -105,6 +151,12 @@ const stateColor = computed(() =>
       class="border-t border-default py-5 text-sm leading-6 text-warning"
     >
       {{ fallbackMessage }}
+    </p>
+    <p
+      v-if="executableFallbackMessage"
+      class="border-t border-default py-5 text-sm leading-6 text-warning"
+    >
+      {{ executableFallbackMessage }}
     </p>
     <div
       v-if="loadError"
