@@ -86,15 +86,12 @@ const pathEntries = (
 const comparablePath = (path: string, platform: NodeJS.Platform) =>
   platform === 'win32' ? path.toLowerCase() : path
 
-const bundledBinDirectory = (
-  bundledPath: string,
-  platform: NodeJS.Platform
-) => {
+const bundledBinDirectory = (bundledPath: string) => {
   let current = dirname(resolve(bundledPath))
 
   while (true) {
     if (basename(current).toLowerCase() === 'node_modules') {
-      return comparablePath(resolve(current, '.bin'), platform)
+      return resolve(current, '.bin')
     }
     const parent = dirname(current)
     if (parent === current) {
@@ -278,9 +275,14 @@ export const resolveCodexExecutable = async (
   }
   const bundledBins = new Set<string>()
   for (const path of [bundledPath, bundledRealPath]) {
-    const directory = bundledBinDirectory(path, platform)
+    const directory = bundledBinDirectory(path)
     if (directory) {
-      bundledBins.add(directory)
+      bundledBins.add(comparablePath(directory, platform))
+      try {
+        bundledBins.add(comparablePath(await realpath(directory), platform))
+      } catch {
+        // The lexical directory is still useful when the package bin is absent.
+      }
     }
   }
 
