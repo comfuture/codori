@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -26,6 +26,26 @@ const createBinDirectory = async (executable = true) => {
   await writeFile(candidate, '#!/bin/sh\nexit 0\n')
   await chmod(candidate, executable ? 0o755 : 0o644)
   return { bin, candidate }
+}
+
+const waitForCondition = async (condition: () => boolean, timeoutMs = 2_000) => {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (condition()) {
+      return true
+    }
+    await new Promise(resolvePromise => setTimeout(resolvePromise, 25))
+  }
+  return condition()
+}
+
+const isPidAlive = (pid: number) => {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
 }
 
 describe('Codex executable resolution', () => {
@@ -74,6 +94,30 @@ describe('Codex executable resolution', () => {
       env: { PATH: bin },
       timeoutMs: 2_000
     }))
+  })
+
+  it('prefers Windows PATHEXT shims over an extensionless POSIX shim', async () => {
+    const { bin } = await createBinDirectory()
+    const commandShim = join(bin, 'codex.cmd')
+    await writeFile(commandShim, '@echo off\r\nexit /b 0\r\n')
+    const probe = vi.fn(async () => ({ usable: true as const }))
+
+    const executable = await resolveCodexExecutable({
+      platform: 'win32',
+      env: { PATH: bin, PATHEXT: '.CMD;.EXE' },
+      bundledPath: join(bin, 'bundle-codex.js'),
+      execPath: 'C:\\node.exe',
+      probe
+    })
+
+    expect(executable).toMatchObject({
+      path: commandShim,
+      source: 'path',
+      command: commandShim,
+      shell: true
+    })
+    expect(probe).toHaveBeenCalledOnce()
+    expect(probe).toHaveBeenCalledWith(commandShim, expect.any(Object))
   })
 
   it('uses the bundle when PATH has no codex entry', async () => {
@@ -156,6 +200,37 @@ describe('Codex executable resolution', () => {
     expect(executable.fallbackReason).toBe('path-not-executable')
     expect(probe).not.toHaveBeenCalled()
   })
+
+  if (process.platform !== 'win32') {
+    it('terminates and awaits a timed-out validation process group', async () => {
+      const { bin, candidate } = await createBinDirectory()
+      const childPidFile = join(bin, 'child.pid')
+      await writeFile(candidate, [
+        '#!/bin/sh',
+        '/bin/sleep 30 &',
+        `echo $! > "${childPidFile}"`,
+        'wait'
+      ].join('\n'))
+
+      const executable = await resolveCodexExecutable({
+        env: { PATH: bin },
+        bundledPath: '/bundle/codex.js',
+        execPath: '/usr/bin/node',
+        validationTimeoutMs: 2_000
+      })
+      expect(executable.source).toBe('bundle')
+      expect(executable.fallbackReason).toBe('path-validation-timeout')
+      const childPid = Number((await readFile(childPidFile, 'utf8')).trim())
+
+      try {
+        expect(await waitForCondition(() => !isPidAlive(childPid))).toBe(true)
+      } finally {
+        if (isPidAlive(childPid)) {
+          process.kill(childPid, 'SIGKILL')
+        }
+      }
+    })
+  }
 
   it('caches one resolution for daemon and managed launch commands', async () => {
     const { bin, candidate } = await createBinDirectory()
