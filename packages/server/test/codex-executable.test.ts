@@ -1,6 +1,6 @@
 import { chmod, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { resolveDaemonStartCommand } from '../src/app-server-backend.js'
 import {
@@ -31,14 +31,17 @@ const createBinDirectory = async (executable = true) => {
 const createBundledBinDirectory = async () => {
   const root = await mkdtemp(join(os.tmpdir(), 'codori-bundled-codex-bin-'))
   tempDirectories.push(root)
-  const bin = join(root, 'bin')
-  const bundledPath = join(root, 'codex.js')
+  const bin = join(root, 'node_modules', '.bin')
+  const bundledPath = join(root, 'node_modules', '@openai', 'codex', 'bin', 'codex.js')
   const candidate = join(bin, 'codex')
-  await mkdir(bin)
+  const commandShim = join(bin, 'codex.cmd')
+  await mkdir(bin, { recursive: true })
+  await mkdir(dirname(bundledPath), { recursive: true })
   await writeFile(bundledPath, '#!/usr/bin/env node\n')
   await chmod(bundledPath, 0o755)
   await symlink(bundledPath, candidate)
-  return { bin, bundledPath, candidate }
+  await writeFile(commandShim, '@echo off\r\nnode "%~dp0\\..\\@openai\\codex\\bin\\codex.js" %*\r\n')
+  return { bin, bundledPath, candidate, commandShim }
 }
 
 const waitForCondition = async (condition: () => boolean, timeoutMs = 2_000) => {
@@ -131,6 +134,35 @@ describe('Codex executable resolution', () => {
     })
     expect(probe).toHaveBeenCalledOnce()
     expect(probe).toHaveBeenCalledWith(commandShim, expect.any(Object))
+  })
+
+  it('skips a bundled Windows npm shim before a later installed wrapper', async () => {
+    const bundled = await createBundledBinDirectory()
+    const installed = await createBinDirectory()
+    const installedCommandShim = join(installed.bin, 'codex.cmd')
+    await writeFile(installedCommandShim, '@echo off\r\nexit /b 0\r\n')
+    const probe = vi.fn(async () => ({ usable: true as const }))
+
+    const executable = await resolveCodexExecutable({
+      platform: 'win32',
+      env: {
+        PATH: `${bundled.bin};${installed.bin}`,
+        PATHEXT: '.CMD'
+      },
+      bundledPath: bundled.bundledPath,
+      execPath: 'C:\\node.exe',
+      probe
+    })
+
+    expect(executable).toMatchObject({
+      path: installedCommandShim,
+      source: 'path',
+      fallbackReason: null,
+      command: installedCommandShim,
+      shell: true
+    })
+    expect(probe).toHaveBeenCalledOnce()
+    expect(probe).toHaveBeenCalledWith(installedCommandShim, expect.any(Object))
   })
 
   it('uses the bundle when PATH has no codex entry', async () => {

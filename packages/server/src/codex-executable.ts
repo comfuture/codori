@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process'
 import { access, realpath, stat } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import { createRequire } from 'node:module'
-import { delimiter, extname, resolve } from 'node:path'
+import { basename, delimiter, dirname, extname, resolve } from 'node:path'
 import type {
   CodexExecutableFallbackReason,
   CodexExecutableSource,
@@ -81,6 +81,28 @@ const pathEntries = (
       : entry
     return resolve(cwd, unquoted || '.')
   })
+}
+
+const comparablePath = (path: string, platform: NodeJS.Platform) =>
+  platform === 'win32' ? path.toLowerCase() : path
+
+const bundledBinDirectories = (
+  bundledPath: string,
+  platform: NodeJS.Platform
+) => {
+  const directories = new Set<string>()
+  let current = dirname(resolve(bundledPath))
+
+  while (true) {
+    if (basename(current).toLowerCase() === 'node_modules') {
+      directories.add(comparablePath(resolve(current, '.bin'), platform))
+    }
+    const parent = dirname(current)
+    if (parent === current) {
+      return directories
+    }
+    current = parent
+  }
 }
 
 const directExecutable = (
@@ -255,6 +277,10 @@ export const resolveCodexExecutable = async (
   } catch {
     bundledRealPath = bundledPath
   }
+  const bundledBins = bundledBinDirectories(bundledPath, platform)
+  for (const directory of bundledBinDirectories(bundledRealPath, platform)) {
+    bundledBins.add(directory)
+  }
 
   for (const directory of pathEntries(env.PATH, platform, cwd)) {
     for (const name of names) {
@@ -276,7 +302,11 @@ export const resolveCodexExecutable = async (
       } catch {
         candidateRealPath = candidate
       }
-      if (candidateRealPath === bundledRealPath) {
+      if (
+        comparablePath(candidateRealPath, platform)
+          === comparablePath(bundledRealPath, platform)
+        || bundledBins.has(comparablePath(dirname(candidate), platform))
+      ) {
         foundBundledCandidate = true
         continue
       }
