@@ -252,6 +252,56 @@ describe('Codex executable resolution', () => {
     )
   })
 
+  it('canonicalizes a bundled bin below a symlinked node_modules root', async () => {
+    const root = await mkdtemp(join(os.tmpdir(), 'codori-symlinked-node-modules-'))
+    tempDirectories.push(root)
+    const dependencies = join(root, 'deps')
+    const appRoot = join(root, 'app')
+    const physicalBin = join(dependencies, '.bin')
+    const bundledPath = join(
+      appRoot,
+      'node_modules',
+      '@openai',
+      'codex',
+      'bin',
+      'codex.js'
+    )
+    const physicalBundledPath = join(
+      dependencies,
+      '@openai',
+      'codex',
+      'bin',
+      'codex.js'
+    )
+    await mkdir(physicalBin, { recursive: true })
+    await mkdir(dirname(physicalBundledPath), { recursive: true })
+    await mkdir(appRoot)
+    await writeFile(physicalBundledPath, '#!/usr/bin/env node\n')
+    await writeFile(join(physicalBin, 'codex.cmd'), '@echo off\r\nexit /b 0\r\n')
+    await symlink(dependencies, join(appRoot, 'node_modules'))
+
+    const installed = await createBinDirectory()
+    const installedCommandShim = join(installed.bin, 'codex.cmd')
+    await writeFile(installedCommandShim, '@echo off\r\nexit /b 0\r\n')
+    const probe = vi.fn(async () => ({ usable: true as const }))
+
+    const executable = await resolveCodexExecutable({
+      platform: 'win32',
+      env: {
+        PATH: `${physicalBin};${installed.bin}`,
+        PATHEXT: '.CMD'
+      },
+      bundledPath,
+      execPath: 'C:\\node.exe',
+      probe
+    })
+
+    expect(executable.path).toBe(installedCommandShim)
+    expect(executable.source).toBe('path')
+    expect(probe).toHaveBeenCalledOnce()
+    expect(probe).toHaveBeenCalledWith(installedCommandShim, expect.any(Object))
+  })
+
   it('uses the bundle when PATH has no codex entry', async () => {
     const probe = vi.fn(async () => ({ usable: true as const }))
 
