@@ -52,10 +52,10 @@ vi.mock('beautiful-mermaid', () => {
 
 vi.mock('@comark/vue', () => {
   return {
-    Comark: defineComponent({
-      name: 'MockComark',
+    Markdown: defineComponent({
+      name: 'MockMarkdown',
       props: {
-        markdown: {
+        value: {
           type: String,
           required: true
         },
@@ -146,7 +146,7 @@ vi.mock('@comark/vue', () => {
         }
 
         return () => {
-          const text = props.markdown
+          const text = props.value
           const components = props.components as Record<string, Component>
           const mermaidMatch = text.match(/^([\s\S]*?)```mermaid\n([\s\S]*?)(?:\n```([\s\S]*))?$/)
 

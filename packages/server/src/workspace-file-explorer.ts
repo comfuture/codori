@@ -1,3 +1,4 @@
+import type { Stats } from 'node:fs'
 import { lstat, opendir, realpath, stat } from 'node:fs/promises'
 import { isAbsolute, resolve } from 'node:path'
 import { isPathInsideDirectory } from './attachment-store.js'
@@ -103,7 +104,7 @@ const toDirectoryError = (error: unknown): WorkspaceDirectoryError => {
   throw error
 }
 
-const classifyEntry = (entryStat: Awaited<ReturnType<typeof stat>>) => {
+const classifyEntry = (entryStat: Stats) => {
   if (entryStat.isDirectory()) {
     return 'directory' as const
   }
@@ -126,7 +127,7 @@ const inspectDirectoryEntry = async (input: {
   const hidden = input.name.startsWith('.')
   const ignoredName = IGNORED_PROJECT_DIRECTORY_NAMES.has(input.name)
 
-  let entryLstat: Awaited<ReturnType<typeof lstat>>
+  let entryLstat: Stats
   try {
     entryLstat = await lstat(entryPath)
   } catch (error) {
@@ -196,7 +197,7 @@ const inspectDirectoryEntry = async (input: {
     }
   }
 
-  let entryStat: Awaited<ReturnType<typeof stat>>
+  let entryStat: Stats
   try {
     entryStat = isSymlink ? await stat(resolvedEntryPath) : entryLstat
   } catch (error) {

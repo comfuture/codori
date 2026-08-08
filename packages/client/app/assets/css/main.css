@@ -1,6 +1,7 @@
 @import "tailwindcss";
 @import "@nuxt/ui";
 @import "katex/dist/katex.min.css";
+@import "@xterm/xterm/css/xterm.css";
 
 @font-face {
   font-family: "MesloLGS NF";

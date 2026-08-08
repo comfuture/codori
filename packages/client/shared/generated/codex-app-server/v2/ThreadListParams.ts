@@ -38,6 +38,11 @@ sourceKinds?: Array<ThreadSourceKind> | null,
  */
 archived?: boolean | null,
 /**
+ * Omit to include every section, set to `null` for unsectioned threads,
+ * or provide a section ID to return only threads in that section.
+ */
+sectionId?: string | null,
+/**
  * Optional cwd filter or filters; when set, only threads whose session cwd
  * exactly matches one of these paths are returned.
  */

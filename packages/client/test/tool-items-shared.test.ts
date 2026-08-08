@@ -16,6 +16,8 @@ const rpcNotification = (
 const command = (status: 'inProgress' | 'completed'): ThreadItem => ({
   type: 'commandExecution',
   id: 'command-1',
+  pluginId: null,
+  scriptPath: null,
   command: 'pnpm test',
   cwd: '/workspace',
   processId: 'process-1',
@@ -77,6 +79,7 @@ describe('shared tool notification reducer', () => {
         arguments: { path: 'README.md' },
         appContext: null,
         pluginId: null,
+        readOnlyHint: null,
         result: null,
         error: null,
         durationMs: 10

@@ -18,6 +18,11 @@ export type ThreadRealtimeStartParams = { threadId: string,
  */
 clientManagedHandoffs?: boolean | null,
 /**
+ * Controls whether a realtime V3 delegation produces an acknowledgement filler.
+ * Omitted values preserve the Realtime API's default behavior.
+ */
+delegationAckFiller?: boolean | null,
+/**
  * Routes any transcript tail remaining at session end through Codex. Defaults to false.
  * TODO: Remove this rollout knob once transcript-tail flushing is always enabled.
  */
@@ -36,6 +41,11 @@ codexResponseItemPrefix?: string | null,
  */
 codexResponseHandoffMode?: CodexResponseHandoffMode | null,
 /**
+ * Overrides BEM channel prefixes by `analysis`, `commentary`, or `final`.
+ * Omitted channels retain their default uppercase bracketed prefixes.
+ */
+codexResponseHandoffChannelPrefixes?: { [key in string]?: Array<string> } | null,
+/**
  * Overrides the configured realtime model for this session only.
  */
 model?: string | null,
@@ -53,7 +63,15 @@ includeStartupContext?: boolean | null,
  * This is only supported by realtime V3 and is sent during session startup. Requests are
  * limited to 128 items and 8,192 estimated text tokens in total.
  */
-initialItems?: Array<ThreadRealtimeInitialItem> | null, prompt?: string | null | null, realtimeSessionId?: string | null, transport?: ThreadRealtimeStartTransport | null,
+initialItems?: Array<ThreadRealtimeInitialItem> | null,
+/**
+ * Developer instructions given to the backing Codex model when this realtime session starts.
+ */
+realtimeStartInstructions?: string | null,
+/**
+ * Developer instructions given to the backing Codex model when this realtime session ends.
+ */
+realtimeEndInstructions?: string | null, prompt?: string | null | null, realtimeSessionId?: string | null, transport?: ThreadRealtimeStartTransport | null,
 /**
  * Overrides the configured realtime protocol version for this session only.
  */

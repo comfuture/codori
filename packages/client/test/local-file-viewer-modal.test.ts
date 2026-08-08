@@ -20,17 +20,17 @@ vi.mock('@comark/vue/plugins/highlight', () => ({
 }))
 
 vi.mock('@comark/vue', () => ({
-  Comark: defineComponent({
-    name: 'MockComark',
+  Markdown: defineComponent({
+    name: 'MockMarkdown',
     props: {
-      markdown: {
+      value: {
         type: String,
         required: true
       }
     },
     setup(props) {
       return () => {
-        const lines = props.markdown
+        const lines = props.value
           .split('\n')
           .slice(1, -1)
         return h('pre', { class: 'shiki' }, [

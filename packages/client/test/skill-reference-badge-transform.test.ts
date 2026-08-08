@@ -1,5 +1,4 @@
-import type { ComarkTree } from '@comark/vue'
-import { parse } from '@comark/vue/parse'
+import { parseMarkdown } from '@comark/vue/parse'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -8,9 +7,11 @@ import {
   transformSkillReferenceBadges
 } from '../app/utils/skill-reference-badge'
 
+type MarkdownTree = Parameters<typeof transformSkillReferenceBadges>[0]
+
 describe('transformSkillReferenceBadges', () => {
   it('replaces submitted skill markdown links with skill badge nodes', () => {
-    const tree: ComarkTree = {
+    const tree: MarkdownTree = {
       nodes: [
         ['p', {},
           'Use ',
@@ -40,7 +41,7 @@ describe('transformSkillReferenceBadges', () => {
   })
 
   it('decodes encoded local skill paths', () => {
-    const tree: ComarkTree = {
+    const tree: MarkdownTree = {
       nodes: [
         ['p', {},
           ['a', { href: '/Users/demo/My%20Skills/%ED%85%8C%EC%8A%A4%ED%8A%B8/SKILL.md' }, '$skill-name']
@@ -66,7 +67,7 @@ describe('transformSkillReferenceBadges', () => {
   })
 
   it('leaves non-skill links unchanged', () => {
-    const tree: ComarkTree = {
+    const tree: MarkdownTree = {
       nodes: [
         ['p', {},
           ['a', { href: 'https://example.com' }, '$imagegen'],
@@ -88,7 +89,7 @@ describe('transformSkillReferenceBadges', () => {
 
 describe('skillReferenceBadgePlugin', () => {
   it('parses submitted skill markdown links before raw skill matching can break link labels', async () => {
-    const tree = await parse('Use [$imagegen](/Users/demo/.codex/skills/.system/imagegen/SKILL.md) now.', {
+    const tree = await parseMarkdown('Use [$imagegen](/Users/demo/.codex/skills/.system/imagegen/SKILL.md) now.', {
       plugins: [
         skillReferenceBadgePlugin()
       ]
@@ -110,7 +111,7 @@ describe('skillReferenceBadgePlugin', () => {
   })
 
   it('parses raw skill references before math auto-close consumes them', async () => {
-    const tree = await parse('$skill-name additional text', {
+    const tree = await parseMarkdown('$skill-name additional text', {
       plugins: [
         skillReferenceBadgePlugin()
       ]
@@ -125,7 +126,7 @@ describe('skillReferenceBadgePlugin', () => {
   })
 
   it('accepts case-insensitive and digit-prefixed skill tokens', async () => {
-    const tree = await parse('Use $ImageGen and $1tool.', {
+    const tree = await parseMarkdown('Use $ImageGen and $1tool.', {
       plugins: [
         skillReferenceBadgePlugin()
       ]
@@ -143,7 +144,7 @@ describe('skillReferenceBadgePlugin', () => {
   })
 
   it('removes auto-close markers directly after raw skill badges', () => {
-    const tree: ComarkTree = {
+    const tree: MarkdownTree = {
       nodes: [
         ['p', {},
           [SKILL_REFERENCE_BADGE_TAG, { name: 'skill-name', raw: 'true' }],
@@ -165,7 +166,7 @@ describe('skillReferenceBadgePlugin', () => {
   })
 
   it('removes trailing auto-close markers after raw skill content', () => {
-    const tree: ComarkTree = {
+    const tree: MarkdownTree = {
       nodes: [
         ['p', {},
           [SKILL_REFERENCE_BADGE_TAG, { name: 'skill-name', raw: 'true' }],
@@ -187,7 +188,7 @@ describe('skillReferenceBadgePlugin', () => {
   })
 
   it('does not treat ordinary inline LaTeX as a skill reference', async () => {
-    const tree = await parse('Energy: $E = mc^2$.', {
+    const tree = await parseMarkdown('Energy: $E = mc^2$.', {
       plugins: [
         skillReferenceBadgePlugin()
       ]
@@ -199,7 +200,7 @@ describe('skillReferenceBadgePlugin', () => {
   })
 
   it('does not replace code spans or fenced code', async () => {
-    const tree = await parse([
+    const tree = await parseMarkdown([
       'Inline `$skill-name`.',
       '',
       '```text',

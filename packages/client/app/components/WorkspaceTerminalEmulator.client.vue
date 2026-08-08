@@ -2,7 +2,6 @@
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { Terminal, type ITheme } from '@xterm/xterm'
-import '@xterm/xterm/css/xterm.css'
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRpc } from '../composables/useRpc'
 import {

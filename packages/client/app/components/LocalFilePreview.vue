@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Comark } from '@comark/vue'
+import { Markdown } from '@comark/vue'
 import highlight from '@comark/vue/plugins/highlight'
 import { computed, nextTick, ref, watch } from 'vue'
 import { useRuntimeConfig } from '#imports'
@@ -255,9 +255,9 @@ watch(highlightedMarkdown, () => {
       :style="{ '--lfv-line-number-width': lineNumberWidth }"
     >
       <Suspense>
-        <Comark
+        <Markdown
           class="local-file-viewer-markdown"
-          :markdown="highlightedMarkdown"
+          :value="highlightedMarkdown"
           :plugins="viewerPlugins"
         />
       </Suspense>

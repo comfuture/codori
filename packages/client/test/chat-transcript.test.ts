@@ -45,6 +45,8 @@ const makeThread = (input: Pick<Thread, 'id' | 'preview' | 'cwd' | 'createdAt' |
   parentThreadId: null,
   preview: input.preview,
   ephemeral: false,
+  section: null,
+  sectionEnteredAt: null,
   historyMode: 'legacy',
   modelProvider: 'openai',
   createdAt: input.createdAt,
@@ -875,6 +877,8 @@ describe('chat transcript stability', () => {
     const command = itemToMessages({
       type: 'commandExecution',
       id: 'cmd-1',
+      pluginId: null,
+      scriptPath: null,
       command: 'rg groupTranscriptMessages',
       cwd: '/tmp',
       processId: null,
@@ -926,6 +930,8 @@ describe('chat transcript stability', () => {
     const command = itemToMessages({
       type: 'commandExecution',
       id: 'cmd-1',
+      pluginId: null,
+      scriptPath: null,
       command: 'pnpm test',
       cwd: '/tmp',
       processId: null,
@@ -977,6 +983,7 @@ describe('chat transcript stability', () => {
       arguments: { path: '/tmp/demo.txt' },
       appContext: null,
       pluginId: null,
+      readOnlyHint: null,
       result: null,
       error: null,
       status: 'inProgress',
@@ -1011,6 +1018,8 @@ describe('chat transcript stability', () => {
     const failedCommand = itemToMessages({
       type: 'commandExecution',
       id: 'cmd-failed',
+      pluginId: null,
+      scriptPath: null,
       command: 'pnpm test',
       cwd: '/tmp',
       processId: null,
@@ -1115,6 +1124,8 @@ describe('chat transcript stability', () => {
     const command = itemToMessages({
       type: 'commandExecution',
       id: 'cmd-1',
+      pluginId: null,
+      scriptPath: null,
       command: 'pnpm test',
       cwd: '/tmp',
       processId: null,

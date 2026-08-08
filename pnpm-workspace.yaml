@@ -1,5 +1,8 @@
 packages:
   - packages/*
+peerDependencyRules:
+  allowedVersions:
+    '@xterm/addon-web-fonts>@xterm/xterm': 6.0.x
 allowBuilds:
   '@parcel/watcher': true
   esbuild: true
@@ -7,3 +10,11 @@ allowBuilds:
 overrides:
   '@tailwindcss/postcss': 4.3.3
   '@tailwindcss/vite': 4.3.3
+  'fontless>esbuild': 0.28.1
+minimumReleaseAgeExclude:
+  - '@comark/vue@0.6.2'
+  - '@iconify-json/lucide@1.2.122'
+  - '@types/node@26.2.0'
+  - comark@0.6.2
+  - eslint@10.8.1
+  - ws@8.21.3

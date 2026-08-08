@@ -102,6 +102,8 @@ describe('immersive workspace runtime', () => {
     ): ThreadItem => ({
       type: 'commandExecution',
       id: 'command-1',
+      pluginId: null,
+      scriptPath: null,
       command: 'pnpm test',
       cwd: '/workspace',
       processId: 'process-1',

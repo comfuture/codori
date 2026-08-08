@@ -1,4 +1,3 @@
-import type { ComarkTree } from '@comark/vue'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -6,9 +5,11 @@ import {
   transformReviewPriorityBadges
 } from '../app/utils/review-priority-badge'
 
+type MarkdownTree = Parameters<typeof transformReviewPriorityBadges>[0]
+
 describe('transformReviewPriorityBadges', () => {
   it('replaces a leading priority span at the start of a list item', () => {
-    const tree: ComarkTree = {
+    const tree: MarkdownTree = {
       nodes: [
         ['ul', {},
           ['li', {},
@@ -34,7 +35,7 @@ describe('transformReviewPriorityBadges', () => {
   })
 
   it('replaces a leading priority span inside a paragraph-wrapped list item', () => {
-    const tree: ComarkTree = {
+    const tree: MarkdownTree = {
       nodes: [
         ['ul', {},
           ['li', {},
@@ -64,7 +65,7 @@ describe('transformReviewPriorityBadges', () => {
   })
 
   it('leaves non-leading and non-list priority spans unchanged', () => {
-    const tree: ComarkTree = {
+    const tree: MarkdownTree = {
       nodes: [
         ['p', {},
           ['span', {}, 'P3'],

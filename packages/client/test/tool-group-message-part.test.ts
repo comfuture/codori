@@ -70,6 +70,8 @@ describe('MessagePartToolGroup', () => {
               item: {
                 type: 'commandExecution',
                 id: 'cmd-1',
+                pluginId: null,
+                scriptPath: null,
                 command: 'rg grouped',
                 cwd: '/tmp',
                 processId: null,
