@@ -27,12 +27,16 @@ export const readCodoriDeveloperInstructions = async (
   cwd: string | null,
   additionalInstructions?: string | null
 ) => {
-  const response = await client.request<ConfigReadResponse>('config/read', {
-    includeLayers: false,
-    cwd
-  })
-  return composeCodoriDeveloperInstructions(
-    response.config.developer_instructions,
-    additionalInstructions
-  )
+  try {
+    const response = await client.request<ConfigReadResponse>('config/read', {
+      includeLayers: false,
+      cwd
+    })
+    return composeCodoriDeveloperInstructions(
+      response.config.developer_instructions,
+      additionalInstructions
+    )
+  } catch {
+    return composeCodoriDeveloperInstructions(null, additionalInstructions)
+  }
 }

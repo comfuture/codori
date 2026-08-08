@@ -55,4 +55,16 @@ describe('Codori web client developer instructions', () => {
     expect(composed).toContain('Configured instruction.')
     expect(composed).toContain(CODORI_WEB_CLIENT_INSTRUCTIONS)
   })
+
+  it('still composes the Codori block when config is unavailable', async () => {
+    const client: CodoriInstructionConfigClient = {
+      request: async () => {
+        throw new Error('config unavailable')
+      }
+    }
+
+    await expect(readCodoriDeveloperInstructions(client, '/workspace')).resolves.toBe(
+      CODORI_WEB_CLIENT_INSTRUCTIONS
+    )
+  })
 })

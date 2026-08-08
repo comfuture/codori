@@ -291,6 +291,7 @@ vi.mock('@comark/vue/plugins/mermaid', () => {
 })
 
 import MessagePartText from '../app/components/message-part/Text.vue'
+import MessagePartPlan from '../app/components/message-part/Plan.vue'
 
 const settle = async () => {
   await flushPromises()
@@ -521,6 +522,31 @@ describe('message part text markdown rendering', () => {
     await settle()
     expect(wrapper.find('a').exists()).toBe(false)
     await wrapper.get('button').trigger('click')
+    expect(openViewerMock).toHaveBeenCalledWith({
+      projectId: 'demo',
+      path: 'packages/client/app/components/message-part/Text.vue',
+      line: 18,
+      column: null
+    })
+  })
+
+  it('forwards workspace scope to local file links inside plan parts', async () => {
+    const wrapper = mount(MessagePartPlan, {
+      attachTo: document.body,
+      props: {
+        projectId: 'demo',
+        workspace: { kind: 'project', id: 'demo' },
+        part: {
+          type: 'plan',
+          text: '[Text.vue](packages/client/app/components/message-part/Text.vue:18)',
+          state: 'done'
+        }
+      }
+    })
+
+    await settle()
+    await wrapper.get('button').trigger('click')
+
     expect(openViewerMock).toHaveBeenCalledWith({
       projectId: 'demo',
       path: 'packages/client/app/components/message-part/Text.vue',
