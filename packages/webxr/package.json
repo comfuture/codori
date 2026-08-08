@@ -1,6 +1,6 @@
 {
   "name": "@codori/webxr",
-  "version": "0.13.4",
+  "version": "0.13.5",
   "private": false,
   "description": "Immersive WebXR voice coding workspace for Codori.",
   "type": "module",
