@@ -2,7 +2,7 @@
   "name": "codori-workspace",
   "private": true,
   "version": "0.13.6",
-  "packageManager": "pnpm@10.33.2",
+  "packageManager": "pnpm@11.20.0",
   "scripts": {
     "build": "pnpm --filter @codori/client build && pnpm --filter @codori/webxr build && pnpm --filter @codori/server build && pnpm --filter @codori/cli build",
     "dev": "pnpm --filter @codori/client dev",
@@ -14,24 +14,17 @@
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "pnpm -r --if-present test"
   },
-  "pnpm": {
-    "peerDependencyRules": {
-      "allowedVersions": {
-        "@xterm/addon-web-fonts>@xterm/xterm": "6.0.x"
-      }
-    }
-  },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@types/node": "^25.6.0",
+    "@types/node": "^26.2.0",
     "@types/ws": "^8.18.1",
-    "@vue/language-core": "^3.2.7",
-    "eslint": "^10.3.0",
-    "eslint-plugin-vue": "^10.9.0",
-    "globals": "^17.6.0",
-    "typescript": "^5.9.3",
-    "typescript-eslint": "^8.59.1",
-    "vitest": "^4.1.5",
-    "vue-eslint-parser": "^10.4.0"
+    "@vue/language-core": "^3.3.9",
+    "eslint": "^10.8.1",
+    "eslint-plugin-vue": "^10.10.0",
+    "globals": "^17.9.0",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.66.0",
+    "vitest": "^4.1.10",
+    "vue-eslint-parser": "^10.4.1"
   }
 }

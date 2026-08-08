@@ -1,4 +1,6 @@
-import type { ComarkElement, ComarkNode, ComarkPlugin, ComarkTree } from '@comark/vue'
+import type { ComarkPlugin, ElementNode, Node } from '@comark/vue'
+
+type MarkdownTree = Parameters<NonNullable<ComarkPlugin['post']>>[0]['tree']
 
 export const SKILL_REFERENCE_BADGE_TAG = 'skill-reference-badge'
 
@@ -30,7 +32,7 @@ type MarkdownItParser = {
   }
 }
 
-const isElementNode = (node: ComarkNode): node is ComarkElement => {
+const isElementNode = (node: Node): node is ElementNode => {
   return Array.isArray(node) && typeof node[0] === 'string'
 }
 
@@ -56,7 +58,7 @@ const createSkillReferenceBadgeNode = (input: {
   name: string
   path?: string | null
   raw?: boolean
-}): ComarkElement => {
+}): ElementNode => {
   return [
     SKILL_REFERENCE_BADGE_TAG,
     {
@@ -79,13 +81,13 @@ const decodeSkillHref = (href: unknown) => {
   }
 }
 
-const isRawSkillReferenceNode = (node: ComarkNode): node is ComarkElement => {
+const isRawSkillReferenceNode = (node: Node): node is ElementNode => {
   return isElementNode(node)
     && node[0] === SKILL_REFERENCE_BADGE_TAG
     && node[1].raw === 'true'
 }
 
-const getRawSkillReferenceNodeName = (node: ComarkNode) => {
+const getRawSkillReferenceNodeName = (node: Node) => {
   if (!isRawSkillReferenceNode(node)) {
     return null
   }
@@ -94,7 +96,7 @@ const getRawSkillReferenceNodeName = (node: ComarkNode) => {
   return typeof name === 'string' && name ? name : null
 }
 
-const getSkillLinkReference = (node: ComarkElement) => {
+const getSkillLinkReference = (node: ElementNode) => {
   if (node[0] !== 'a') {
     return null
   }
@@ -105,7 +107,7 @@ const getSkillLinkReference = (node: ComarkElement) => {
     return null
   }
 
-  const children = node.slice(2) as ComarkNode[]
+  const children = node.slice(2) as Node[]
   if (children.length !== 1) {
     return null
   }
@@ -136,7 +138,7 @@ const getSkillLinkReference = (node: ComarkElement) => {
   }
 }
 
-const removeRawSkillAutoCloseMarkers = (children: ComarkNode[]) => {
+const removeRawSkillAutoCloseMarkers = (children: Node[]) => {
   const nextChildren = [...children]
   let shouldTrimTrailingMarker = false
 
@@ -184,7 +186,7 @@ const removeRawSkillAutoCloseMarkers = (children: ComarkNode[]) => {
   return nextChildren
 }
 
-const transformNode = (node: ComarkNode): ComarkNode => {
+const transformNode = (node: Node): Node => {
   if (!isElementNode(node)) {
     return node
   }
@@ -206,7 +208,7 @@ const transformNode = (node: ComarkNode): ComarkNode => {
   ]
 }
 
-export const transformSkillReferenceBadges = (tree: ComarkTree): ComarkTree => {
+export const transformSkillReferenceBadges = (tree: MarkdownTree): MarkdownTree => {
   return {
     ...tree,
     nodes: tree.nodes.map(node => transformNode(node))

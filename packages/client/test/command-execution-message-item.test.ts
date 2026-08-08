@@ -38,6 +38,8 @@ const ChatToolStub = defineComponent({
 const makeCommandItem = (overrides: Partial<CommandExecutionItem> = {}): CommandExecutionItem => ({
   type: 'commandExecution',
   id: 'cmd-1',
+  pluginId: null,
+  scriptPath: null,
   command: 'rg missing-pattern',
   cwd: '/tmp',
   processId: null,

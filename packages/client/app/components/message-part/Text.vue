@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Comark } from '@comark/vue'
+import { Markdown } from '@comark/vue'
 import highlight from '@comark/vue/plugins/highlight'
 import math, { Math as ComarkMath } from '@comark/vue/plugins/math'
 import mermaid from '@comark/vue/plugins/mermaid'
@@ -88,9 +88,9 @@ const markdownClass = computed(() =>
 
 <template>
   <Suspense>
-    <Comark
+    <Markdown
       :class="markdownClass"
-      :markdown="part?.text ?? ''"
+      :value="part?.text ?? ''"
       :streaming="isStreaming"
       :components="components"
       :plugins="plugins"

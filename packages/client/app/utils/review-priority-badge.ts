@@ -1,14 +1,16 @@
-import type { ComarkElement, ComarkNode, ComarkPlugin, ComarkTree } from '@comark/vue'
+import type { ComarkPlugin, ElementNode, Node } from '@comark/vue'
+
+type MarkdownTree = Parameters<NonNullable<ComarkPlugin['post']>>[0]['tree']
 
 export const REVIEW_PRIORITY_BADGE_TAG = 'review-priority-badge'
 
 const REVIEW_PRIORITY_PATTERN = /^P([1-3])$/i
 
-const isElementNode = (node: ComarkNode): node is ComarkElement => {
+const isElementNode = (node: Node): node is ElementNode => {
   return Array.isArray(node) && typeof node[0] === 'string'
 }
 
-const getPriorityLabel = (node: ComarkElement) => {
+const getPriorityLabel = (node: ElementNode) => {
   if (node[0] !== 'span') {
     return null
   }
@@ -24,11 +26,11 @@ const getPriorityLabel = (node: ComarkElement) => {
   return REVIEW_PRIORITY_PATTERN.test(label) ? label as `P${1 | 2 | 3}` : null
 }
 
-const createPriorityBadgeNode = (label: `P${1 | 2 | 3}`): ComarkElement => {
+const createPriorityBadgeNode = (label: `P${1 | 2 | 3}`): ElementNode => {
   return [REVIEW_PRIORITY_BADGE_TAG, { priority: label.slice(1) }, label]
 }
 
-const replaceLeadingPriorityBadge = (children: ComarkNode[]) => {
+const replaceLeadingPriorityBadge = (children: Node[]) => {
   const targetIndex = children.findIndex((child) => {
     return typeof child !== 'string' || child.trim().length > 0
   })
@@ -58,7 +60,7 @@ const replaceLeadingPriorityBadge = (children: ComarkNode[]) => {
   })
 }
 
-const transformNode = (node: ComarkNode, parentTag?: string): ComarkNode => {
+const transformNode = (node: Node, parentTag?: string): Node => {
   if (!isElementNode(node)) {
     return node
   }
@@ -73,7 +75,7 @@ const transformNode = (node: ComarkNode, parentTag?: string): ComarkNode => {
   return [tag, props, ...nextChildren]
 }
 
-export const transformReviewPriorityBadges = (tree: ComarkTree): ComarkTree => {
+export const transformReviewPriorityBadges = (tree: MarkdownTree): MarkdownTree => {
   return {
     ...tree,
     nodes: tree.nodes.map(node => transformNode(node))

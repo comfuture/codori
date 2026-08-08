@@ -58,6 +58,8 @@ export const createFallbackCommandItemData = (
   item: {
     type: 'commandExecution',
     id: itemId,
+    pluginId: null,
+    scriptPath: null,
     command: 'Command',
     cwd: '',
     processId: null,
@@ -95,6 +97,7 @@ export const createFallbackMcpToolItemData = (
     arguments: null,
     appContext: null,
     pluginId: null,
+    readOnlyHint: null,
     result: null,
     error: null,
     status: 'inProgress',
