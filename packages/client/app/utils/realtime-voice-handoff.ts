@@ -22,6 +22,9 @@ export const shouldHandoffRealtimeVoiceConnect = (input: {
 
 export type RealtimeVoiceHandoffAction = 'wait' | 'connect' | 'clear'
 
+export const shouldDisposeRealtimeVoiceOnPageHide = (persisted: boolean) =>
+  !persisted
+
 export const resolveRealtimeVoiceHandoffAction = (input: {
   pendingThreadId: string | null
   routeThreadId: string | null

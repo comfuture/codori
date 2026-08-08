@@ -67,6 +67,7 @@ export const useRealtimeConversation = (options: ControllerOptions) => {
     setMicrophoneEnabled: controller.setMicrophoneEnabled,
     setOutputMuted: controller.setOutputMuted,
     stop: controller.stop,
+    recoverTransportFailure: controller.recoverTransportFailure,
     stopForReplacement: controller.stopForReplacement,
     stopForThreadChange: controller.stopForThreadChange,
     dispose: controller.dispose

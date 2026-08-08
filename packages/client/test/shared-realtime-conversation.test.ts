@@ -47,6 +47,7 @@ type MockController = {
   stop: ReturnType<typeof vi.fn>
   stopForReplacement: ReturnType<typeof vi.fn>
   stopForThreadChange: ReturnType<typeof vi.fn>
+  recoverTransportFailure: ReturnType<typeof vi.fn>
   dispose: ReturnType<typeof vi.fn>
 }
 
@@ -114,6 +115,7 @@ vi.mock('../app/composables/useRealtimeConversation', async () => {
           activeVoice.value = null
         }),
         stopForThreadChange: vi.fn(),
+        recoverTransportFailure: vi.fn(async () => null),
         dispose: vi.fn(async () => {
           owningThreadId.value = null
         })
@@ -269,6 +271,61 @@ describe('shared realtime conversation lifecycle', () => {
       .toBe('project:next-after-failure')
 
     await next.stop()
+    await nextTick()
+  })
+
+  it('reclaims shared ownership and restores audio state after an RPC transport failure', async () => {
+    const controllerOffset = mockControllers.length
+    const conversation = useSharedRealtimeConversation(
+      'project:transport-recovery',
+      () => client
+    )
+    const [controller] = mockControllers.slice(controllerOffset)
+    if (!controller) {
+      throw new Error('Expected a realtime controller fixture.')
+    }
+
+    await conversation.connect('thread-transport-recovery', {
+      voice: 'cove',
+      prompt: 'Continue the recovered session.'
+    })
+    controller.owningThreadId.value = null
+    controller.sessionKind.value = null
+    controller.activeVoice.value = null
+    controller.state.value = 'error'
+    await nextTick()
+
+    controller.recoverTransportFailure.mockResolvedValueOnce({
+      threadId: 'thread-transport-recovery',
+      options: {
+        voice: 'cove',
+        prompt: 'Continue the recovered session.'
+      },
+      microphoneEnabled: true,
+      outputMuted: true
+    })
+    controller.connect.mockImplementationOnce(async (threadId: string) => {
+      controller.owningThreadId.value = threadId
+      controller.sessionKind.value = 'conversation'
+      controller.activeVoice.value = 'cove'
+      controller.state.value = 'connected'
+    })
+
+    await expect(conversation.recoverTransportFailure()).resolves.toBe(true)
+
+    expect(controller.connect).toHaveBeenLastCalledWith(
+      'thread-transport-recovery',
+      {
+        voice: 'cove',
+        prompt: 'Continue the recovered session.'
+      }
+    )
+    expect(controller.setMicrophoneEnabled).toHaveBeenCalledWith(true)
+    expect(controller.setOutputMuted).toHaveBeenCalledWith(true)
+    expect(useActiveRealtimeConversation().activeThreadId.value)
+      .toBe('thread-transport-recovery')
+
+    await conversation.stop()
     await nextTick()
   })
 })

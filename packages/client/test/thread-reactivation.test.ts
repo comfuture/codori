@@ -2,11 +2,14 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  createThreadReactivationRecoveryCoordinator,
   findActiveTurn,
   hydrateThreadView,
   isConstrainedBrowserRequiringDeferredSync,
   isActiveTurnStatus,
+  recoverThreadAfterReactivation,
   resumeThreadStreamAfterReactivation,
+  resolveThreadReactivationDelay,
   resolveHydratedActiveTurn,
   shouldAttemptThreadReactivationSync
 } from '../app/utils/thread-reactivation'
@@ -38,6 +41,7 @@ const makeThreadSnapshot = (
 
 describe('thread reactivation policy', () => {
   afterEach(() => {
+    vi.useRealTimers()
     vi.restoreAllMocks()
   })
 
@@ -141,6 +145,69 @@ describe('thread reactivation policy', () => {
     })).toBe(false)
   })
 
+  it('uses the longer remaining throttle or deactivation grace as the trailing delay', () => {
+    expect(resolveThreadReactivationDelay({
+      now: 10_000,
+      lastRecoveryAt: 4_000,
+      deactivatedAt: 9_800,
+      minimumIntervalMs: 8_000,
+      inactiveGraceMs: 500
+    })).toBe(2_000)
+
+    expect(resolveThreadReactivationDelay({
+      now: 20_000,
+      lastRecoveryAt: 10_000,
+      deactivatedAt: 19_800,
+      minimumIntervalMs: 8_000,
+      inactiveGraceMs: 500
+    })).toBe(300)
+  })
+
+  it('coalesces lifecycle bursts into one trailing recovery attempt', async () => {
+    vi.useFakeTimers()
+    let now = 10_000
+    const recover = vi.fn(async () => {})
+    const coordinator = createThreadReactivationRecoveryCoordinator({
+      now: () => now,
+      recover
+    })
+
+    coordinator.request('window/pageshow', 500)
+    coordinator.request('window/visible', 700)
+    coordinator.request('window/focus', 600)
+
+    now += 499
+    await vi.advanceTimersByTimeAsync(499)
+    expect(recover).not.toHaveBeenCalled()
+
+    now += 1
+    await vi.advanceTimersByTimeAsync(1)
+    expect(recover).toHaveBeenCalledOnce()
+    expect(recover).toHaveBeenCalledWith('window/focus')
+
+    coordinator.dispose()
+  })
+
+  it('deduplicates recovery signals while one attempt is in flight', async () => {
+    let finishRecovery!: () => void
+    const recovery = new Promise<void>((resolve) => {
+      finishRecovery = resolve
+    })
+    const recover = vi.fn(async () => await recovery)
+    const coordinator = createThreadReactivationRecoveryCoordinator({ recover })
+
+    const first = coordinator.request('window/pageshow')
+    const second = coordinator.request('document/resume')
+    await Promise.resolve()
+
+    expect(first).toBe(second)
+    expect(recover).toHaveBeenCalledOnce()
+
+    finishRecovery()
+    await first
+    coordinator.dispose()
+  })
+
   it('resolves active turn state from resume before the read snapshot', () => {
     const readCompletedTurn = makeTurn('turn-read-completed', 'completed')
     const resumeActiveTurn = makeTurn('turn-resume-active', 'inProgress')
@@ -182,6 +249,8 @@ describe('thread reactivation policy', () => {
     const readResponse = { thread: { id: 'thread-1', turns: [] } } as unknown as ThreadReadResponse
     const calls: string[] = []
     const client = {
+      connect: vi.fn(async () => {}),
+      isConnected: vi.fn(() => true),
       reconnect: vi.fn(async () => {
         calls.push('reconnect')
       }),
@@ -214,6 +283,52 @@ describe('thread reactivation policy', () => {
       threadId: 'thread-1',
       includeTurns: true
     })
+  })
+
+  it('restores a disconnected idle thread transport without resuming the thread', async () => {
+    const client = {
+      connect: vi.fn(async () => {}),
+      reconnect: vi.fn(async () => {}),
+      isConnected: vi.fn(() => false),
+      request: vi.fn(async () => {
+        throw new Error('Idle recovery must not issue thread RPC requests.')
+      })
+    }
+
+    await expect(recoverThreadAfterReactivation(client, {
+      threadId: 'thread-idle',
+      cwd: '/tmp/project',
+      approvalPolicy: 'never'
+    }, {
+      reconcileThread: false
+    })).resolves.toBeNull()
+
+    expect(client.connect).toHaveBeenCalledOnce()
+    expect(client.reconnect).not.toHaveBeenCalled()
+    expect(client.request).not.toHaveBeenCalled()
+  })
+
+  it('lets connect preserve an already-open idle transport without resuming the thread', async () => {
+    const client = {
+      connect: vi.fn(async () => {}),
+      reconnect: vi.fn(async () => {}),
+      isConnected: vi.fn(() => true),
+      request: vi.fn(async () => {
+        throw new Error('Idle recovery must not issue thread RPC requests.')
+      })
+    }
+
+    await recoverThreadAfterReactivation(client, {
+      threadId: 'thread-idle',
+      cwd: '/tmp/project',
+      approvalPolicy: 'never'
+    }, {
+      reconcileThread: false
+    })
+
+    expect(client.connect).toHaveBeenCalledOnce()
+    expect(client.reconnect).not.toHaveBeenCalled()
+    expect(client.request).not.toHaveBeenCalled()
   })
 
   it('hydrates an ordinary thread view through resume and read', async () => {

@@ -143,6 +143,13 @@ export type RealtimeConnectOptions = {
   previewTimeoutMs?: number
 }
 
+export type RealtimeTransportRecovery = {
+  threadId: string
+  options: RealtimeConnectOptions
+  microphoneEnabled: boolean
+  outputMuted: boolean
+}
+
 const defaultEnvironment = (): RealtimeBrowserEnvironment => ({
   isSecureContext: () => window.isSecureContext,
   supportsRealtime: () =>
@@ -286,6 +293,8 @@ export const createRealtimeConversationController = (
   let startPromise: Promise<void> | null = null
   let pendingStartRequest: PendingStartRequest | null = null
   let teardownPromise: Promise<void> | null = null
+
+  let recoverableTransportFailure = false
   let connectClaim: Promise<void> | null = null
   let releasePersistentConnection: (() => void) | null = null
   let startedReceived = false
@@ -295,6 +304,8 @@ export const createRealtimeConversationController = (
   let previewSpeechRequested = false
   let activePreviewText: string | null = null
   let activePreviewTimeoutMs = DEFAULT_PREVIEW_TIMEOUT_MS
+  let activeConnectOptions: RealtimeConnectOptions = {}
+  let transportRecovery: RealtimeTransportRecovery | null = null
   const pendingCloseBarriers = new Map<string, PendingCloseBarrier>()
 
   const isCurrent = (candidateGeneration: number, threadId?: string) =>
@@ -376,7 +387,21 @@ export const createRealtimeConversationController = (
       invalidateVoiceCatalog()
       clearPendingCloseBarriers()
       if (activeGeneration !== null) {
-        void fail(activeGeneration, 'The Codex RPC connection closed.', false)
+        const threadId = owningThreadId.value
+        const recovery = threadId && sessionKind.value === 'conversation'
+          ? {
+              threadId,
+              options: { ...activeConnectOptions },
+              microphoneEnabled: microphoneEnabled.value,
+              outputMuted: outputMuted.value
+            }
+          : null
+        void fail(
+          activeGeneration,
+          'The Codex RPC connection closed.',
+          false,
+          recovery
+        )
       }
     })
   }
@@ -595,6 +620,7 @@ export const createRealtimeConversationController = (
     terminalState: 'closed' | 'error'
     message?: string | null
     preservePreviewFailure?: boolean
+    transportRecovery?: RealtimeTransportRecovery | null
   }) => {
     if (!isCurrent(input.candidateGeneration)) {
       return
@@ -681,6 +707,12 @@ export const createRealtimeConversationController = (
         ? input.message || 'The realtime voice session failed.'
         : null
       state.value = input.terminalState
+      recoverableTransportFailure = input.terminalState === 'error'
+        && input.transportRecovery !== null
+        && input.transportRecovery !== undefined
+      transportRecovery = recoverableTransportFailure
+        ? input.transportRecovery ?? null
+        : null
     })().finally(() => {
       teardownPromise = null
     })
@@ -688,7 +720,12 @@ export const createRealtimeConversationController = (
     return await teardownPromise
   }
 
-  const fail = async (candidateGeneration: number, message: string, sendStop = startAccepted) => {
+  const fail = async (
+    candidateGeneration: number,
+    message: string,
+    sendStop = startAccepted,
+    recovery: RealtimeTransportRecovery | null = null
+  ) => {
     const previewFailed = sessionKind.value === 'preview'
     if (previewFailed) {
       previewError.value = message
@@ -698,7 +735,8 @@ export const createRealtimeConversationController = (
       sendStop,
       terminalState: previewFailed ? 'closed' : 'error',
       message: previewFailed ? null : message,
-      preservePreviewFailure: previewFailed
+      preservePreviewFailure: previewFailed,
+      transportRecovery: recovery
     })
   }
 
@@ -927,6 +965,7 @@ export const createRealtimeConversationController = (
     owningThreadId.value = threadId
     sessionKind.value = nextSessionKind
     activeVoice.value = connectOptions.voice ?? null
+    activeConnectOptions = { ...connectOptions }
     transcriptState = resetRealtimeTranscript(transcriptState, candidateGeneration)
     transcripts.value = transcriptState.segments
     error.value = null
@@ -1180,6 +1219,24 @@ export const createRealtimeConversationController = (
     })
   }
 
+  const recoverTransportFailure = async () => {
+    if (teardownPromise) {
+      await teardownPromise
+    }
+    if (!recoverableTransportFailure
+      || activeGeneration !== null
+      || state.value !== 'error') {
+      return null
+    }
+
+    recoverableTransportFailure = false
+    error.value = null
+    state.value = 'closed'
+    const recovery = transportRecovery
+    transportRecovery = null
+    return recovery
+  }
+
   const stopForThreadChange = async (nextThreadId: string | null) => {
     if (owningThreadId.value && owningThreadId.value !== nextThreadId) {
       await stop()
@@ -1265,6 +1322,7 @@ export const createRealtimeConversationController = (
     setMicrophoneEnabled,
     setOutputMuted,
     stop,
+    recoverTransportFailure,
     stopForReplacement,
     stopForThreadChange,
     dispose,

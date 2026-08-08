@@ -1,10 +1,16 @@
 import { describe, expect, it } from 'vitest'
 import {
   resolveRealtimeVoiceHandoffAction,
+  shouldDisposeRealtimeVoiceOnPageHide,
   shouldHandoffRealtimeVoiceConnect
 } from '../app/utils/realtime-voice-handoff'
 
 describe('realtime voice route handoff', () => {
+  it('keeps voice state alive when pagehide enters the back-forward cache', () => {
+    expect(shouldDisposeRealtimeVoiceOnPageHide(true)).toBe(false)
+    expect(shouldDisposeRealtimeVoiceOnPageHide(false)).toBe(true)
+  })
+
   it('hands a draft project voice request to the auto-redirected workspace', () => {
     expect(shouldHandoffRealtimeVoiceConnect({
       workspaceKind: 'project',

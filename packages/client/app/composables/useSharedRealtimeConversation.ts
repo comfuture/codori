@@ -314,6 +314,35 @@ export const useSharedRealtimeConversation = (
     setOutputMuted: (muted: boolean) =>
       activeController().setOutputMuted(muted),
     stop: () => activeController().stop(),
+    recoverTransportFailure: async () => {
+      const recovery = await entry.controller.recoverTransportFailure()
+      if (!recovery) {
+        return false
+      }
+
+      let releaseMicrophoneRecovery = () => {}
+      if (recovery.microphoneEnabled) {
+        releaseMicrophoneRecovery = watch(entry.controller.state, (state) => {
+          if (state === 'connected') {
+            releaseMicrophoneRecovery()
+            entry.controller.setMicrophoneEnabled(true)
+            return
+          }
+          if (state === 'closed' || state === 'error') {
+            releaseMicrophoneRecovery()
+          }
+        }, { flush: 'sync' })
+      }
+
+      try {
+        await connect(recovery.threadId, recovery.options)
+        await entry.controller.setOutputMuted(recovery.outputMuted)
+        return true
+      } catch {
+        releaseMicrophoneRecovery()
+        return false
+      }
+    },
     dispose: () => activeController().dispose()
   }
 }
