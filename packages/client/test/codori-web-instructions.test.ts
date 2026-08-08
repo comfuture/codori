@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { ConfigReadParams } from '../shared/generated/codex-app-server/v2/ConfigReadParams'
 import {
+  CODORI_CONFIG_READ_TIMEOUT_MS,
   CODORI_WEB_CLIENT_INSTRUCTIONS,
   composeCodoriDeveloperInstructions,
   readCodoriDeveloperInstructions,
@@ -66,5 +67,21 @@ describe('Codori web client developer instructions', () => {
     await expect(readCodoriDeveloperInstructions(client, '/workspace')).resolves.toBe(
       CODORI_WEB_CLIENT_INSTRUCTIONS
     )
+  })
+
+  it('bounds a pending config read before falling back', async () => {
+    vi.useFakeTimers()
+    try {
+      const client: CodoriInstructionConfigClient = {
+        request: async () => await new Promise<never>(() => {})
+      }
+
+      const instructions = readCodoriDeveloperInstructions(client, '/workspace')
+      await vi.advanceTimersByTimeAsync(CODORI_CONFIG_READ_TIMEOUT_MS)
+
+      await expect(instructions).resolves.toBe(CODORI_WEB_CLIENT_INSTRUCTIONS)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

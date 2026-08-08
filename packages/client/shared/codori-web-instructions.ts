@@ -8,6 +8,7 @@ Only use an absolute path when linking a temporary artifact that is genuinely ou
 </codori_web_client_instructions>`
 
 const CODORI_INSTRUCTIONS_RE = /<codori_web_client_instructions>[\s\S]*?<\/codori_web_client_instructions>/gu
+export const CODORI_CONFIG_READ_TIMEOUT_MS = 5_000
 
 export const composeCodoriDeveloperInstructions = (
   configuredInstructions: string | null | undefined,
@@ -27,16 +28,28 @@ export const readCodoriDeveloperInstructions = async (
   cwd: string | null,
   additionalInstructions?: string | null
 ) => {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined
   try {
-    const response = await client.request<ConfigReadResponse>('config/read', {
-      includeLayers: false,
-      cwd
-    })
+    const response = await Promise.race([
+      client.request<ConfigReadResponse>('config/read', {
+        includeLayers: false,
+        cwd
+      }),
+      new Promise<never>((_resolve, reject) => {
+        timeoutId = setTimeout(() => {
+          reject(new Error('Timed out waiting for Codex app-server configuration.'))
+        }, CODORI_CONFIG_READ_TIMEOUT_MS)
+      })
+    ])
     return composeCodoriDeveloperInstructions(
       response.config.developer_instructions,
       additionalInstructions
     )
   } catch {
     return composeCodoriDeveloperInstructions(null, additionalInstructions)
+  } finally {
+    if (timeoutId !== undefined) {
+      clearTimeout(timeoutId)
+    }
   }
 }
