@@ -128,6 +128,81 @@ afterEach(() => {
 })
 
 describe('realtime voice startup ownership handoff', () => {
+  it('starts realtime voice from a completed non-voice thread after route capability recovery', async () => {
+    const events: string[] = []
+    FakePeerConnection.events = events
+    const stream = new FakeMediaStream()
+    const getUserMedia = vi.fn(async () => {
+      events.push('get-user-media')
+      return stream
+    })
+    Object.defineProperty(window, 'isSecureContext', {
+      configurable: true,
+      value: true
+    })
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: { getUserMedia }
+    })
+    vi.stubGlobal('RTCPeerConnection', FakePeerConnection)
+    vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => {})
+
+    const threadId = 'thread-completed-without-voice'
+    const workspaceKey = 'project:completed-without-voice'
+    const rpc = new FakeRpcClient()
+    const conversation = useSharedRealtimeConversation(
+      workspaceKey,
+      () => rpc as unknown as CodexRpcClient
+    )
+    const activeThreadId = ref<string | null>(threadId)
+    const rpcConnectionEpoch = ref(0)
+    const contextEpoch = ref(0)
+    const refreshThreadCapability = vi.fn(async (nextThreadId: string) => {
+      await conversation.refreshCapability(nextThreadId, true)
+    })
+    useRealtimeVoiceCapabilityLifecycle({
+      activeThreadId,
+      rpcConnectionEpoch,
+      contextEpoch,
+      activeElsewhere: computed(() => false),
+      capability: conversation.capability,
+      cancelPendingRefresh: vi.fn(),
+      refreshThreadCapability,
+      refreshDraftCatalog: vi.fn(async () => {})
+    })
+    await settle()
+
+    conversation.capability.value = {
+      status: 'failed',
+      message: 'The cached route capability probe used a closed socket.'
+    }
+    contextEpoch.value += 1
+    await settle()
+
+    expect(refreshThreadCapability).toHaveBeenCalledTimes(2)
+    expect(conversation.capability.value.status).toBe('available')
+    expect(conversation.state.value).toBe('idle')
+
+    await conversation.connect(threadId)
+
+    expect(getUserMedia).toHaveBeenCalledOnce()
+    expect(events).toEqual([
+      'get-user-media',
+      'create-offer',
+      'realtime-start'
+    ])
+    expect(rpc.requests.filter(request =>
+      request.method === 'thread/realtime/start'
+    )).toHaveLength(1)
+
+    await conversation.stop()
+    rpc.emit('thread/realtime/closed', {
+      threadId,
+      reason: 'user'
+    })
+    await settle()
+  })
+
   it('keeps the verified capability through the shared claim and starts exactly once', async () => {
     const events: string[] = []
     FakePeerConnection.events = events
@@ -156,6 +231,7 @@ describe('realtime voice startup ownership handoff', () => {
     )
     const activeThreadId = ref<string | null>(threadId)
     const rpcConnectionEpoch = ref(0)
+    const contextEpoch = ref(0)
     const activeElsewhere = computed(() =>
       isRealtimeVoiceActiveElsewhere({
         activeWorkspaceKey: conversation.activeWorkspaceKey.value,
@@ -170,6 +246,7 @@ describe('realtime voice startup ownership handoff', () => {
     useRealtimeVoiceCapabilityLifecycle({
       activeThreadId,
       rpcConnectionEpoch,
+      contextEpoch,
       activeElsewhere,
       capability: conversation.capability,
       cancelPendingRefresh: vi.fn(),
@@ -224,6 +301,15 @@ describe('realtime voice startup ownership handoff', () => {
     rpcConnectionEpoch.value += 1
     await settle()
     expect(refreshThreadCapability).toHaveBeenCalledTimes(2)
+
+    conversation.capability.value = {
+      status: 'failed',
+      message: 'The previous route probe used a disconnected transport.'
+    }
+    contextEpoch.value += 1
+    await settle()
+    expect(refreshThreadCapability).toHaveBeenCalledTimes(3)
+    expect(conversation.capability.value.status).toBe('available')
 
     releaseCapabilityWatch()
   })

@@ -14,6 +14,72 @@ afterEach(() => {
 })
 
 describe('Codex RPC payload parsing', () => {
+  it('reinitializes one socket after a connected transport closes', async () => {
+    class RecoverableWebSocket extends EventTarget {
+      static readonly CONNECTING = 0
+      static readonly OPEN = 1
+      static readonly CLOSED = 3
+      static readonly instances: RecoverableWebSocket[] = []
+
+      readyState = RecoverableWebSocket.CONNECTING
+
+      constructor() {
+        super()
+        RecoverableWebSocket.instances.push(this)
+        queueMicrotask(() => {
+          this.readyState = RecoverableWebSocket.OPEN
+          this.dispatchEvent(new Event('open'))
+        })
+      }
+
+      close() {
+        if (this.readyState === RecoverableWebSocket.CLOSED) {
+          return
+        }
+        this.readyState = RecoverableWebSocket.CLOSED
+        this.dispatchEvent(new Event('close'))
+      }
+
+      send(raw: string) {
+        const request = JSON.parse(raw) as { id?: number, method?: string }
+        if (request.method !== 'initialize' || request.id === undefined) {
+          return
+        }
+        queueMicrotask(() => {
+          const event = new Event('message') as Event & { data: string }
+          Object.defineProperty(event, 'data', {
+            value: JSON.stringify({ id: request.id, result: {} })
+          })
+          this.dispatchEvent(event)
+        })
+      }
+    }
+
+    vi.stubGlobal('WebSocket', RecoverableWebSocket)
+    const client = new CodexRpcClient('ws://example.test')
+    const states: string[] = []
+    client.subscribeConnectionState(state => states.push(state))
+
+    await Promise.all([client.connect(), client.connect()])
+    expect(RecoverableWebSocket.instances).toHaveLength(1)
+    expect(client.isConnected()).toBe(true)
+
+    RecoverableWebSocket.instances[0]?.close()
+    expect(client.isConnected()).toBe(false)
+
+    await Promise.all([client.connect(), client.connect()])
+    expect(RecoverableWebSocket.instances).toHaveLength(2)
+    expect(client.isConnected()).toBe(true)
+    expect(states).toEqual([
+      'idle',
+      'connecting',
+      'connected',
+      'disconnected',
+      'connecting',
+      'connected'
+    ])
+  })
+
   it('rejects a connection closed before initialization', async () => {
     class ConnectingWebSocket extends EventTarget {
       static readonly CONNECTING = 0

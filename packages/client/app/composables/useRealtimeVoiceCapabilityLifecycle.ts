@@ -4,6 +4,7 @@ import type { RealtimeCapability } from './useRealtimeConversation'
 type RealtimeVoiceCapabilityLifecycleOptions = {
   activeThreadId: Readonly<Ref<string | null>>
   rpcConnectionEpoch: Readonly<Ref<number>>
+  contextEpoch: Readonly<Ref<number>>
   activeElsewhere: Readonly<Ref<boolean>>
   capability: Ref<RealtimeCapability>
   cancelPendingRefresh: () => void
@@ -35,7 +36,8 @@ export const useRealtimeVoiceCapabilityLifecycle = (
 
   watch([
     options.activeThreadId,
-    options.rpcConnectionEpoch
+    options.rpcConnectionEpoch,
+    options.contextEpoch
   ], ([threadId]) => {
     refreshCurrentContext(threadId)
   }, { immediate: true })

@@ -38,6 +38,7 @@ import {
 import { isFocusWithinContainer } from '../utils/slash-prompt-focus'
 import {
   resolveRealtimeVoiceHandoffAction,
+  shouldDisposeRealtimeVoiceOnPageHide,
   shouldHandoffRealtimeVoiceConnect
 } from '../utils/realtime-voice-handoff'
 import {
@@ -52,11 +53,13 @@ import {
   type ChatScrollMetrics
 } from '../utils/chat-scroll'
 import {
+  createThreadReactivationRecoveryCoordinator,
   hydrateThreadView,
   isConstrainedBrowserRequiringDeferredSync,
   isActiveTurnStatus,
-  resumeThreadStreamAfterReactivation,
+  recoverThreadAfterReactivation,
   resolveHydratedActiveTurn,
+  resolveThreadReactivationDelay,
   shouldAttemptThreadReactivationSync,
   type ThreadReactivationReason
 } from '../utils/thread-reactivation'
@@ -406,6 +409,7 @@ const realtimeVoiceActiveElsewhere = computed(() =>
 )
 let realtimeVoiceCapabilityRequest = 0
 const realtimeVoiceRpcConnectionEpoch = ref(0)
+const realtimeVoiceContextEpoch = ref(0)
 let releaseRealtimeVoicePageListeners: (() => void) | null = null
 
 const realtimeVoiceCapabilitiesUrl = () => {
@@ -1398,7 +1402,6 @@ const ensurePromptControlsReady = async () => {
 const optimisticAttachmentSnapshots = new Map<string, DraftAttachment[]>()
 let promptControlsPromise: Promise<void> | null = null
 let pendingThreadHydration: Promise<void> | null = null
-let pendingThreadReactivationSync: Promise<void> | null = null
 let releaseServerRequestHandler: (() => void) | null = null
 let releaseSkillNotificationSubscription: (() => void) | null = null
 let releaseRealtimeVoiceConnectionStateSubscription: (() => void) | null = null
@@ -3083,6 +3086,7 @@ const hydrateThread = async (threadId: string) => {
 
       refreshWorkspaceGitBranchesInBackground('thread/resume')
       syncThreadSnapshot(response.thread)
+      realtimeVoiceContextEpoch.value += 1
       markAwaitingAssistantOutput(false)
       const activeTurn = resolveHydratedActiveTurn({
         readThread: response.thread,
@@ -3151,153 +3155,167 @@ const hasPotentiallyMissedThreadOutput = () =>
     )
   )
 
-const shouldSyncThreadAfterReactivation = (
-  now: number,
-  reason: ThreadReactivationReason,
-  transportConnected: boolean
-) => {
-  if (sendMessageLocked.value || pendingThreadHydration || session.pendingLiveStream) {
-    return false
+const performActiveThreadReactivation = async (reason: ThreadReactivationReason) => {
+  const threadId = activeThreadId.value
+  if (!threadId) {
+    return
   }
 
-  if (!hasPotentiallyMissedThreadOutput()) {
-    return false
-  }
+  const client = getRuntimeClient()
+  const shouldReconcileThread = hasPotentiallyMissedThreadOutput()
+  lastThreadReactivationSyncAt = Date.now()
 
-  if (import.meta.client && document.visibilityState === 'hidden') {
-    return false
-  }
+  try {
+    await ensureProjectRuntime()
+    if (!shouldReconcileThread) {
+      await recoverThreadAfterReactivation(
+        client,
+        buildThreadResumeParams(threadId),
+        { reconcileThread: false }
+      )
+      if (activeThreadId.value === threadId) {
+        lastWorkspaceDeactivatedAt = null
+      }
+      return
+    }
 
-  if (now - lastThreadReactivationSyncAt < THREAD_REACTIVATION_SYNC_MIN_INTERVAL_MS) {
-    return false
-  }
+    await ensureObservedThreadSubscription()
 
-  const deactivatedAt = lastWorkspaceDeactivatedAt
-  const hadDocumentDeactivation = deactivatedAt !== null
-  if (!shouldAttemptThreadReactivationSync({
-    reason,
-    browserRequiresDeferredSync: isConstrainedBrowserRequiringDeferredSync(),
-    transportConnected,
-    hadDocumentDeactivation
-  })) {
-    return false
-  }
+    const { resumeResponse, readResponse } = await runThreadHydrationWithoutPromptControlsGate(
+      ensurePromptControlsReady,
+      async () => {
+        const recoveredThread = await recoverThreadAfterReactivation(
+          client,
+          buildThreadResumeParams(threadId),
+          { reconcileThread: true }
+        )
+        if (!recoveredThread) {
+          throw new Error('The active thread did not return a recovery snapshot.')
+        }
+        return recoveredThread
+      },
+      ({ resumeResponse }) => {
+        if (activeThreadId.value !== threadId) {
+          return
+        }
 
-  if (!transportConnected) {
-    return true
-  }
+        syncPromptSelectionFromThread(
+          resumeResponse.model ?? null,
+          (resumeResponse.reasoningEffort as ReasoningEffort | null | undefined) ?? null,
+          resumeResponse.serviceTier ?? null
+        )
+      }
+    )
+    if (activeThreadId.value !== threadId) {
+      return
+    }
 
-  return !hadDocumentDeactivation
-    || now - deactivatedAt >= THREAD_REACTIVATION_INACTIVE_GRACE_MS
+    refreshWorkspaceGitBranchesInBackground('thread/resume')
+    syncThreadSnapshot(readResponse.thread)
+    markAwaitingAssistantOutput(false)
+    lastWorkspaceDeactivatedAt = null
+
+    const activeTurn = resolveHydratedActiveTurn({
+      readThread: readResponse.thread,
+      resumeThread: resumeResponse.thread
+    })
+    const liveStream = await ensureObservedThreadSubscription()
+    const activeTurnId = activeTurn?.id ?? null
+
+    if (!activeTurnId) {
+      if (session.liveStream === liveStream) {
+        clearLiveStream()
+      }
+      if (!error.value) {
+        status.value = 'ready'
+      }
+      if (pinnedToBottom.value) {
+        void scheduleScrollToBottom('auto')
+      }
+      return
+    }
+
+    const restoredTurnId = liveStream
+      ? restoreHydratedLiveStreamTurn(liveStream, activeTurnId)
+      : activeTurnId
+
+    if (!restoredTurnId) {
+      if (!error.value) {
+        status.value = 'ready'
+      }
+      if (pinnedToBottom.value) {
+        void scheduleScrollToBottom('auto')
+      }
+      return
+    }
+
+    status.value = 'streaming'
+    if (pinnedToBottom.value) {
+      void scheduleScrollToBottom('auto')
+    }
+  } catch (caughtError) {
+    if (activeThreadId.value !== threadId) {
+      return
+    }
+
+    const messageText = caughtError instanceof Error ? caughtError.message : String(caughtError)
+    if (!shouldReconcileThread) {
+      realtimeVoiceCapability.value = {
+        status: 'failed',
+        message: `Could not restore the Codex RPC connection after ${reason}: ${messageText}`
+      }
+      return
+    }
+
+    error.value = `Could not resume the live thread after ${reason}: ${messageText}`
+    status.value = 'error'
+  }
 }
 
-const syncActiveThreadAfterReactivation = (reason: ThreadReactivationReason) => {
-  if (pendingThreadReactivationSync) {
-    return pendingThreadReactivationSync
-  }
+const threadReactivationRecovery = createThreadReactivationRecoveryCoordinator({
+  recover: performActiveThreadReactivation
+})
 
+const syncActiveThreadAfterReactivation = (reason: ThreadReactivationReason) => {
   const threadId = activeThreadId.value
   if (!threadId) {
     return null
   }
 
-  const client = getRuntimeClient()
-  const now = Date.now()
-  if (!shouldSyncThreadAfterReactivation(now, reason, client.isConnected())) {
+  if (sendMessageLocked.value || pendingThreadHydration || session.pendingLiveStream) {
     return null
   }
 
-  lastThreadReactivationSyncAt = now
+  if (import.meta.client && document.visibilityState === 'hidden') {
+    return null
+  }
 
-  const syncPromise = (async () => {
-    try {
-      await ensureProjectRuntime()
-      await ensureObservedThreadSubscription()
+  if (import.meta.client && navigator.onLine === false) {
+    return null
+  }
 
-      const { resumeResponse, readResponse } = await runThreadHydrationWithoutPromptControlsGate(
-        ensurePromptControlsReady,
-        async () => await resumeThreadStreamAfterReactivation(
-          client,
-          buildThreadResumeParams(threadId)
-        ),
-        ({ resumeResponse }) => {
-          if (activeThreadId.value !== threadId) {
-            return
-          }
+  const client = getRuntimeClient()
+  const now = Date.now()
+  const deactivatedAt = lastWorkspaceDeactivatedAt
+  const hadDocumentDeactivation = deactivatedAt !== null
+  if (!shouldAttemptThreadReactivationSync({
+    reason,
+    browserRequiresDeferredSync: isConstrainedBrowserRequiringDeferredSync(),
+    transportConnected: client.isConnected(),
+    hadDocumentDeactivation
+  })) {
+    return null
+  }
 
-          syncPromptSelectionFromThread(
-            resumeResponse.model ?? null,
-            (resumeResponse.reasoningEffort as ReasoningEffort | null | undefined) ?? null,
-            resumeResponse.serviceTier ?? null
-          )
-        }
-      )
-      if (activeThreadId.value !== threadId) {
-        return
-      }
-
-      refreshWorkspaceGitBranchesInBackground('thread/resume')
-      syncThreadSnapshot(readResponse.thread)
-      markAwaitingAssistantOutput(false)
-      lastWorkspaceDeactivatedAt = null
-
-      const activeTurn = resolveHydratedActiveTurn({
-        readThread: readResponse.thread,
-        resumeThread: resumeResponse.thread
-      })
-      const liveStream = await ensureObservedThreadSubscription()
-      const activeTurnId = activeTurn?.id ?? null
-
-      if (!activeTurnId) {
-        if (session.liveStream === liveStream) {
-          clearLiveStream()
-        }
-        if (!error.value) {
-          status.value = 'ready'
-        }
-        if (pinnedToBottom.value) {
-          void scheduleScrollToBottom('auto')
-        }
-        return
-      }
-
-      const restoredTurnId = liveStream
-        ? restoreHydratedLiveStreamTurn(liveStream, activeTurnId)
-        : activeTurnId
-
-      if (!restoredTurnId) {
-        if (!error.value) {
-          status.value = 'ready'
-        }
-        if (pinnedToBottom.value) {
-          void scheduleScrollToBottom('auto')
-        }
-        return
-      }
-
-      status.value = 'streaming'
-      if (pinnedToBottom.value) {
-        void scheduleScrollToBottom('auto')
-      }
-    } catch (caughtError) {
-      if (activeThreadId.value !== threadId) {
-        return
-      }
-
-      const messageText = caughtError instanceof Error ? caughtError.message : String(caughtError)
-      error.value = `Could not resume the live thread after ${reason}: ${messageText}`
-      status.value = 'error'
-    }
-  })()
-
-  pendingThreadReactivationSync = syncPromise
-  syncPromise.finally(() => {
-    if (pendingThreadReactivationSync === syncPromise) {
-      pendingThreadReactivationSync = null
-    }
+  const delayMs = resolveThreadReactivationDelay({
+    now,
+    lastRecoveryAt: lastThreadReactivationSyncAt,
+    deactivatedAt,
+    minimumIntervalMs: THREAD_REACTIVATION_SYNC_MIN_INTERVAL_MS,
+    inactiveGraceMs: THREAD_REACTIVATION_INACTIVE_GRACE_MS
   })
 
-  return syncPromise
+  return threadReactivationRecovery.request(reason, delayMs)
 }
 
 const resetDraftThread = () => {
@@ -4396,7 +4414,9 @@ const ensureRuntimeSubscriptions = () => {
   }
 
   const nextKey = `${scope.kind}:${scope.id}`
+  const client = getRuntimeClient()
   if (runtimeSubscriptionKey === nextKey) {
+    void client.connect().catch(() => {})
     return true
   }
 
@@ -4404,7 +4424,6 @@ const ensureRuntimeSubscriptions = () => {
   releaseServerRequestHandler?.()
   releaseSkillNotificationSubscription?.()
   releaseRealtimeVoiceConnectionStateSubscription?.()
-  const client = getRuntimeClient()
   releaseServerRequestHandler = client.setServerRequestHandler(handleServerRequest)
   releaseSkillNotificationSubscription = client.subscribe((notification) => {
     if (notification.method !== 'skills/changed') {
@@ -4421,7 +4440,9 @@ const ensureRuntimeSubscriptions = () => {
     }
     if (connectionState === 'connected' && realtimeVoiceRpcWasDisconnected) {
       realtimeVoiceRpcWasDisconnected = false
-      realtimeVoiceRpcConnectionEpoch.value += 1
+      void realtimeVoice.recoverTransportFailure().finally(() => {
+        realtimeVoiceRpcConnectionEpoch.value += 1
+      })
     }
   })
   runtimeSubscriptionKey = nextKey
@@ -4447,14 +4468,20 @@ onMounted(() => {
   void scheduleScrollToBottom('auto')
 
   if (import.meta.client) {
-    const stopRealtimeVoiceForPageExit = () => {
+    const stopRealtimeVoiceForPageHide = (event: PageTransitionEvent) => {
+      if (!shouldDisposeRealtimeVoiceOnPageHide(event.persisted)) {
+        return
+      }
       void realtimeVoice.dispose()
     }
-    window.addEventListener('pagehide', stopRealtimeVoiceForPageExit)
-    window.addEventListener('beforeunload', stopRealtimeVoiceForPageExit)
+    const stopRealtimeVoiceBeforeUnload = () => {
+      void realtimeVoice.dispose()
+    }
+    window.addEventListener('pagehide', stopRealtimeVoiceForPageHide)
+    window.addEventListener('beforeunload', stopRealtimeVoiceBeforeUnload)
     releaseRealtimeVoicePageListeners = () => {
-      window.removeEventListener('pagehide', stopRealtimeVoiceForPageExit)
-      window.removeEventListener('beforeunload', stopRealtimeVoiceForPageExit)
+      window.removeEventListener('pagehide', stopRealtimeVoiceForPageHide)
+      window.removeEventListener('beforeunload', stopRealtimeVoiceBeforeUnload)
     }
 
     const handleWorkspaceVisibilityChange = () => {
@@ -4562,6 +4589,7 @@ onBeforeUnmount(() => {
   releaseWorkspaceGitBranchEnvironmentListeners = null
   releaseThreadReactivationListeners?.()
   releaseThreadReactivationListeners = null
+  threadReactivationRecovery.dispose()
   footerResizeObserver?.disconnect()
   footerResizeObserver = null
   transcriptContentResizeObserver?.disconnect()
@@ -4575,6 +4603,7 @@ onBeforeUnmount(() => {
 useRealtimeVoiceCapabilityLifecycle({
   activeThreadId,
   rpcConnectionEpoch: realtimeVoiceRpcConnectionEpoch,
+  contextEpoch: realtimeVoiceContextEpoch,
   activeElsewhere: realtimeVoiceActiveElsewhere,
   capability: realtimeVoiceCapability,
   cancelPendingRefresh: () => {

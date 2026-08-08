@@ -1265,6 +1265,8 @@ describe('realtime conversation controller', () => {
   it('cleans up on RPC disconnect without trying to send stop', async () => {
     const fixture = createFixture()
     await connectFixture(fixture)
+    fixture.controller.setMicrophoneEnabled(true)
+    await fixture.controller.setOutputMuted(true)
 
     fixture.rpc.disconnect()
     await Promise.resolve()
@@ -1274,6 +1276,16 @@ describe('realtime conversation controller', () => {
     expect(fixture.controller.error.value).toMatch(/RPC connection closed/)
     expect(fixture.stream.track.stop).toHaveBeenCalledTimes(1)
     expect(fixture.rpc.requests.some(request => request.method === 'thread/realtime/stop')).toBe(false)
+
+    await expect(fixture.controller.recoverTransportFailure()).resolves.toEqual({
+      threadId: 'thread-1',
+      options: {},
+      microphoneEnabled: true,
+      outputMuted: true
+    })
+    expect(fixture.controller.state.value).toBe('closed')
+    expect(fixture.controller.error.value).toBeNull()
+    await expect(fixture.controller.recoverTransportFailure()).resolves.toBeNull()
   })
 
   it('does not wait on an in-flight start after the RPC transport disconnects', async () => {
@@ -1316,6 +1328,8 @@ describe('realtime conversation controller', () => {
     expect(fixture.controller.error.value).toMatch(/Microphone permission was denied/)
     expect(fixture.rpc.notificationListeners.size).toBe(0)
     expect(fixture.rpc.connectionListeners.size).toBe(1)
+    await expect(fixture.controller.recoverTransportFailure()).resolves.toBeNull()
+    expect(fixture.controller.state.value).toBe('error')
   })
 
   it('fails safely when microphone permission or the input device is lost', async () => {
