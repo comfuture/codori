@@ -1,7 +1,11 @@
 <script setup lang="ts">
 import MessagePartText from './Text.vue'
+import type { WorkspaceAttachmentScope } from '~~/shared/chat-attachments'
 
 defineProps<{
+  projectId?: string
+  workspace?: WorkspaceAttachmentScope
+  workspaceRootPath?: string | null
   part?: {
     type: 'plan'
     text: string
@@ -23,6 +27,9 @@ defineProps<{
     <div class="px-3 py-3">
       <MessagePartText
         role="assistant"
+        :project-id="projectId"
+        :workspace="workspace"
+        :workspace-root-path="workspaceRootPath"
         :part="part ? { type: 'text', text: part.text, state: part.state } : null"
       />
     </div>

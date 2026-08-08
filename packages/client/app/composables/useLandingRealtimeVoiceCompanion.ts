@@ -152,16 +152,21 @@ export const createLandingRealtimeVoiceCompanion = (
       const chat = await dependencies.createChat()
       dependencies.activeChatId.value = chat.chatId
       const client = dependencies.getChatClient(chat.chatId)
-      const configResponse = await withPromptControlsTimeout(
-        client.request<ConfigReadResponse>('config/read', {
-          includeLayers: false,
-          cwd: null
-        } satisfies ConfigReadParams),
-        'configuration',
-        5_000
-      )
+      let configResponse: ConfigReadResponse | null = null
+      try {
+        configResponse = await withPromptControlsTimeout(
+          client.request<ConfigReadResponse>('config/read', {
+            includeLayers: false,
+            cwd: null
+          } satisfies ConfigReadParams),
+          'configuration',
+          5_000
+        )
+      } catch {
+        // Keep the existing voice startup fallback when config is unavailable.
+      }
       const developerInstructions = composeCodoriDeveloperInstructions(
-        configResponse.config.developer_instructions,
+        configResponse?.config.developer_instructions,
         LANDING_VOICE_DEVELOPER_INSTRUCTIONS
       )
       const startResponse = await client.request<ThreadStartResponse>('thread/start', {
@@ -194,7 +199,9 @@ export const createLandingRealtimeVoiceCompanion = (
       await dependencies.realtimeVoice.refreshVoiceCatalog(true)
 
       const startPrompt = resolveRealtimeVoiceStartPrompt({
-        configuredPrompt: resolveConfiguredRealtimeVoicePrompt(configResponse.config),
+        configuredPrompt: configResponse
+          ? resolveConfiguredRealtimeVoicePrompt(configResponse.config)
+          : null,
         localOverride: dependencies.savedPrompt.value
       })
 

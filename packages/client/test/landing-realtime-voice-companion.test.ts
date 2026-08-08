@@ -33,6 +33,7 @@ const chat: ChatSessionRecord = {
 
 const createFixture = (input?: {
   configured?: boolean
+  configError?: Error
   connectError?: Error
   ownsActiveSession?: boolean
   hasActiveSession?: boolean
@@ -48,6 +49,9 @@ const createFixture = (input?: {
       }
     }
     if (method === 'config/read') {
+      if (input?.configError) {
+        throw input.configError
+      }
       return {
         config: {}
       }
@@ -218,6 +222,25 @@ describe('landing realtime voice companion startup', () => {
       'A voice session is already active in another thread.'
     )
     expect(active.dependencies.fetchCapabilities).not.toHaveBeenCalled()
+  })
+
+  it('keeps voice startup available when configuration cannot be read', async () => {
+    const fixture = createFixture({ configError: new Error('config unavailable') })
+    const companion = createLandingRealtimeVoiceCompanion(fixture.dependencies)
+
+    await companion.start()
+
+    expect(companion.error.value).toBeNull()
+    expect(fixture.request).toHaveBeenNthCalledWith(2, 'thread/start', expect.objectContaining({
+      developerInstructions: composeCodoriDeveloperInstructions(
+        null,
+        LANDING_VOICE_DEVELOPER_INSTRUCTIONS
+      )
+    }))
+    expect(fixture.connect).toHaveBeenCalledWith('thread-voice', {
+      voice: 'cove',
+      prompt: 'Use the saved landing prompt.'
+    })
   })
 
   it('cleans up provisional ownership and exposes a connection failure', async () => {

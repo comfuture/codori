@@ -58,6 +58,9 @@ export default defineComponent({
           })
         case 'plan':
           return h(MessagePartPlan, {
+            projectId: props.projectId,
+            workspace: props.workspace,
+            workspaceRootPath: props.workspaceRootPath,
             part: props.part
           })
         case 'reasoning':
