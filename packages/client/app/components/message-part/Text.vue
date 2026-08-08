@@ -8,6 +8,7 @@ import { ChatMarkdownMermaid } from './ChatMarkdownMermaid'
 import ReviewPriorityBadge from './ReviewPriorityBadge.vue'
 import SkillReferenceBadge from './SkillReferenceBadge.vue'
 import { createChatMarkdownLocalFileLink } from './createChatMarkdownLocalFileLink'
+import { createChatMarkdownLocalFileImage } from './createChatMarkdownLocalFileImage'
 import { reviewPriorityBadgePlugin } from '../../utils/review-priority-badge'
 import { skillReferenceBadgePlugin } from '../../utils/skill-reference-badge'
 import type { WorkspaceLocalFileScope } from '../../../shared/local-files'
@@ -26,8 +27,12 @@ const props = defineProps<{
 
 const ChatMarkdownLocalFileLink = createChatMarkdownLocalFileLink(() => ({
   projectId: props.projectId ?? null,
-  workspace: props.workspace ?? null,
-  workspaceRootPath: props.workspaceRootPath ?? null
+  workspace: props.workspace ?? null
+}))
+
+const ChatMarkdownLocalFileImage = createChatMarkdownLocalFileImage(() => ({
+  projectId: props.projectId ?? null,
+  workspace: props.workspace ?? null
 }))
 
 const ChatMarkdownSkillReferenceBadge = defineComponent({
@@ -59,6 +64,7 @@ const ChatMarkdownSkillReferenceBadge = defineComponent({
 
 const components = {
   a: ChatMarkdownLocalFileLink,
+  img: ChatMarkdownLocalFileImage,
   math: ComarkMath,
   mermaid: ChatMarkdownMermaid,
   'review-priority-badge': ReviewPriorityBadge,

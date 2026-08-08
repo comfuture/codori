@@ -303,6 +303,7 @@ describe('client package', () => {
 
   it('detects project-local absolute file links and optional line suffixes', () => {
     expect(parseLocalFileHref('/Users/demo/Project/codori/src/app.ts:18')).toEqual({
+      kind: 'local-absolute',
       path: '/Users/demo/Project/codori/src/app.ts',
       line: 18,
       column: null
@@ -311,10 +312,31 @@ describe('client package', () => {
     expect(parseLocalFileHref('https://example.com/docs')).toBeNull()
     expect(parseLocalFileHref('%')).toBeNull()
     expect(parseLocalFileHref('file:///C:/Users/demo/Project/codori/src/app.ts:9:2')).toEqual({
+      kind: 'local-absolute',
       path: 'C:/Users/demo/Project/codori/src/app.ts',
       line: 9,
       column: 2
     })
+    expect(parseLocalFileHref('packages/client/app.vue:7')).toEqual({
+      kind: 'workspace-relative',
+      path: 'packages/client/app.vue',
+      line: 7,
+      column: null
+    })
+    expect(parseLocalFileHref('README.md:1')).toEqual({
+      kind: 'workspace-relative',
+      path: 'README.md',
+      line: 1,
+      column: null
+    })
+    expect(parseLocalFileHref('Dockerfile:12:3')).toEqual({
+      kind: 'workspace-relative',
+      path: 'Dockerfile',
+      line: 12,
+      column: 3
+    })
+    expect(parseLocalFileHref('tel:123')).toBeNull()
+    expect(parseLocalFileHref('#local-file')).toBeNull()
     expect(isLocalFileWithinProject(
       '/Users/demo/Project/codori/src/app.ts',
       '/Users/demo/Project/codori'

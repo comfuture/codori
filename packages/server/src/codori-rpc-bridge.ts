@@ -6,6 +6,7 @@ import {
   ServerAvatarResolver,
   type ResolvedServerAvatar
 } from './server-avatar.js'
+import { LocalFileViewError, readProjectLocalFile } from './local-file-viewer.js'
 import type {
   AppServerTarget,
   RuntimeBridgeTarget
@@ -304,10 +305,50 @@ class CodoriAvatarRpcExtension {
           this.sendResult(id, { watching: false })
           return
         }
+        case 'codori/localFile/read': {
+          const request = asRecord(params)
+          if (!request || typeof request.path !== 'string' || !request.path.trim()) {
+            this.sendError(id, -32602, 'Invalid local file read request.')
+            return
+          }
+          if (!this.workspacePath) {
+            this.sendError(id, -32004, 'The active workspace path is unavailable.')
+            return
+          }
+          const file = await readProjectLocalFile(this.workspacePath, request.path, {
+            allowTemporaryPaths: true,
+            readFile: async (absolutePath) => {
+              const response = asRecord(await this.requestInternal('fs/readFile', {
+                path: absolutePath
+              }))
+              if (!response || typeof response.dataBase64 !== 'string') {
+                throw new Error('The app-server returned an invalid local file response.')
+              }
+              return Buffer.from(response.dataBase64, 'base64')
+            }
+          })
+          this.sendResult(id, {
+            file: {
+              ...file,
+              path: file.relativePath || file.name
+            }
+          })
+          return
+        }
         default:
           this.sendError(id, -32601, `Unknown Codori method: ${method}`)
       }
-    } catch {
+    } catch (error) {
+      if (method === 'codori/localFile/read') {
+        this.sendError(
+          id,
+          error instanceof LocalFileViewError ? -32040 : -32050,
+          error instanceof LocalFileViewError
+            ? error.message
+            : 'The local file is temporarily unavailable.'
+        )
+        return
+      }
       this.sendError(id, -32050, 'The selected server avatar is temporarily unavailable.')
     }
   }

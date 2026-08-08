@@ -156,6 +156,7 @@ import type { TurnStartResponse } from '~~/shared/generated/codex-app-server/v2/
 import type { TurnSteerParams } from '~~/shared/generated/codex-app-server/v2/TurnSteerParams'
 import type { TurnSteerResponse } from '~~/shared/generated/codex-app-server/v2/TurnSteerResponse'
 import type { ReasoningEffort } from '~~/shared/generated/codex-app-server/ReasoningEffort'
+import { readCodoriDeveloperInstructions } from '~~/shared/codori-web-instructions'
 import {
   notificationRequestId,
   notificationTurnStatus,
@@ -3363,11 +3364,16 @@ const ensureThread = async () => {
 
   await ensureProjectRuntime()
   const client = getRuntimeClient()
+  const developerInstructions = await readCodoriDeveloperInstructions(
+    client,
+    selectedProject.value?.projectPath ?? null
+  )
   const response = await client.request<ThreadStartResponse>('thread/start', {
     model: selectedModel.value,
     serviceTier: selectedServiceTier.value,
     cwd: selectedProject.value?.projectPath ?? null,
     approvalPolicy: 'never',
+    developerInstructions,
     experimentalRawEvents: false
   } satisfies ThreadStartParams)
 

@@ -2,6 +2,7 @@ import { encodeChatIdSegment, encodeProjectIdSegment } from './codori'
 import { resolveApiUrl, shouldUseServerProxy } from './network'
 
 export type LocalFileLinkTarget = {
+  kind: 'workspace-relative' | 'local-absolute'
   path: string
   line: number | null
   column: number | null
@@ -35,6 +36,9 @@ export type WorkspaceLocalFileScope =
   | { kind: 'chat', id: string }
 
 const WINDOWS_ABSOLUTE_PATH_RE = /^[A-Za-z]:[\\/]/u
+const URL_SCHEME_RE = /^[A-Za-z][A-Za-z\d+.-]*:/u
+const NON_FILE_URL_SCHEME_RE = /^(?:https?|mailto|tel|sms|data|blob|ftp|ftps|ssh|git|vscode(?:-insiders)?):/iu
+const FILE_LOCATION_SUFFIX_RE = /:\d+(?::\d+)?$/u
 
 const normalizeComparablePath = (value: string) => {
   const normalized = value.replace(/\\/g, '/').replace(/\/+$/, '')
@@ -64,7 +68,20 @@ export const parseLocalFileHref = (href: string): LocalFileLinkTarget | null => 
     return parseLocalFileHref(filePath)
   }
 
-  if (decoded.startsWith('http://') || decoded.startsWith('https://') || decoded.startsWith('mailto:')) {
+  if (
+    decoded.startsWith('#')
+    || decoded.startsWith('?')
+    || decoded.startsWith('//')
+    || (
+      URL_SCHEME_RE.test(decoded)
+      && !WINDOWS_ABSOLUTE_PATH_RE.test(decoded)
+      && (
+        decoded.includes('://')
+        || NON_FILE_URL_SCHEME_RE.test(decoded)
+        || !FILE_LOCATION_SUFFIX_RE.test(decoded)
+      )
+    )
+  ) {
     return null
   }
 
@@ -75,23 +92,26 @@ export const parseLocalFileHref = (href: string): LocalFileLinkTarget | null => 
     }
 
     return {
+      kind: 'local-absolute',
       path: match.groups.path,
       line: match.groups.line ? Number.parseInt(match.groups.line, 10) : null,
       column: match.groups.column ? Number.parseInt(match.groups.column, 10) : null
     }
   }
 
-  if (!decoded.startsWith('/')) {
-    return null
-  }
-
-  const match = /^(?<path>\/.*?)(?::(?<line>\d+))?(?::(?<column>\d+))?$/u.exec(decoded)
+  const match = /^(?<path>.+?)(?::(?<line>\d+))?(?::(?<column>\d+))?$/u.exec(decoded)
   if (!match?.groups?.path) {
     return null
   }
 
+  const path = match.groups.path
+  if (!path.trim() || path === '.' || path === '..') {
+    return null
+  }
+
   return {
-    path: match.groups.path,
+    kind: path.startsWith('/') ? 'local-absolute' : 'workspace-relative',
+    path,
     line: match.groups.line ? Number.parseInt(match.groups.line, 10) : null,
     column: match.groups.column ? Number.parseInt(match.groups.column, 10) : null
   }

@@ -32,6 +32,7 @@ const isOpen = computed({
         :workspace="state.workspace"
         :path="state.path"
         :line="state.line"
+        transport="rpc"
       >
         <template #actions>
           <UButton

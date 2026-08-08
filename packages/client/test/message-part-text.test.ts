@@ -3,9 +3,12 @@
 
 import { flushPromises, mount } from '@vue/test-utils'
 import { defineComponent, h, nextTick, type Component } from 'vue'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const openViewerMock = vi.fn()
+const rpcRequestMock = vi.fn()
+const createObjectUrlMock = vi.fn(() => 'blob:codori-local-image')
+const revokeObjectUrlMock = vi.fn()
 
 vi.mock('../app/composables/useProjects', () => {
   return {
@@ -24,6 +27,12 @@ vi.mock('../app/composables/useLocalFileViewer', () => {
     })
   }
 })
+
+vi.mock('../app/composables/useRpc', () => ({
+  useRpc: () => ({
+    getWorkspaceClient: () => ({ request: rpcRequestMock })
+  })
+}))
 
 vi.mock('beautiful-mermaid', () => {
   return {
@@ -185,6 +194,17 @@ vi.mock('@comark/vue', () => {
             ])
           }
 
+          const imageMatch = text.match(/^!\[(.*?)\]\((\S+?)(?:\s+"(.*?)")?\)$/)
+          if (imageMatch && components.img) {
+            return h('div', { class: 'mock-comark', 'data-streaming': String(props.streaming) }, [
+              h(components.img, {
+                src: imageMatch[2],
+                alt: imageMatch[1],
+                title: imageMatch[3] ?? ''
+              })
+            ])
+          }
+
           const linkMatch = text.match(/^\[(.+?)\]\((.+?)\)$/)
           if (linkMatch && components.a) {
             return h('div', { class: 'mock-comark', 'data-streaming': String(props.streaming) }, [
@@ -305,6 +325,16 @@ afterEach(() => {
   document.body.innerHTML = ''
   document.documentElement.className = ''
   openViewerMock.mockReset()
+  rpcRequestMock.mockReset()
+  createObjectUrlMock.mockClear()
+  revokeObjectUrlMock.mockClear()
+})
+
+beforeEach(() => {
+  vi.stubGlobal('URL', Object.assign(URL, {
+    createObjectURL: createObjectUrlMock,
+    revokeObjectURL: revokeObjectUrlMock
+  }))
 })
 
 describe('message part text markdown rendering', () => {
@@ -392,7 +422,7 @@ describe('message part text markdown rendering', () => {
     })
 
     await settle()
-    await wrapper.get('a').trigger('click')
+    await wrapper.get('button').trigger('click')
 
     expect(openViewerMock).toHaveBeenCalledWith({
       projectId: 'demo',
@@ -418,7 +448,7 @@ describe('message part text markdown rendering', () => {
     })
 
     await settle()
-    await wrapper.get('a').trigger('click')
+    await wrapper.get('button').trigger('click')
 
     expect(openViewerMock).toHaveBeenCalledWith({
       workspace: { kind: 'chat', id: 'chat-demo' },
@@ -443,7 +473,7 @@ describe('message part text markdown rendering', () => {
     })
 
     await settle()
-    await wrapper.get('a').trigger('click')
+    await wrapper.get('button').trigger('click')
 
     expect(openViewerMock).toHaveBeenCalledWith({
       projectId: 'demo',
@@ -472,6 +502,96 @@ describe('message part text markdown rendering', () => {
     expect(wrapper.find('[data-test="skill-reference-badge"]').exists()).toBe(false)
     expect(wrapper.get('a').attributes('href')).toBe('https://example.com/docs')
     expect(wrapper.get('a').text()).toBe('docs')
+  })
+
+  it('routes workspace-relative file links without exposing a browser href', async () => {
+    const wrapper = mount(MessagePartText, {
+      attachTo: document.body,
+      props: {
+        role: 'assistant',
+        projectId: 'demo',
+        part: {
+          type: 'text',
+          text: '[Text.vue](packages/client/app/components/message-part/Text.vue:18)',
+          state: 'done'
+        }
+      }
+    })
+
+    await settle()
+    expect(wrapper.find('a').exists()).toBe(false)
+    await wrapper.get('button').trigger('click')
+    expect(openViewerMock).toHaveBeenCalledWith({
+      projectId: 'demo',
+      path: 'packages/client/app/components/message-part/Text.vue',
+      line: 18,
+      column: null
+    })
+  })
+
+  it('renders local Markdown images from a safe Blob URL and opens the full viewer', async () => {
+    rpcRequestMock.mockResolvedValue({
+      file: {
+        kind: 'image',
+        path: 'assets/pixel.png',
+        relativePath: 'assets/pixel.png',
+        name: 'pixel.png',
+        size: 68,
+        updatedAt: 1,
+        mediaType: 'image/png',
+        base64: 'iVBORw0KGgo='
+      }
+    })
+    const wrapper = mount(MessagePartText, {
+      attachTo: document.body,
+      props: {
+        role: 'assistant',
+        projectId: 'demo',
+        part: {
+          type: 'text',
+          text: '![Pixel](assets/pixel.png "Preview")',
+          state: 'done'
+        }
+      }
+    })
+
+    await settle()
+    expect(rpcRequestMock).toHaveBeenCalledWith('codori/localFile/read', {
+      path: 'assets/pixel.png'
+    })
+    const image = wrapper.get('img')
+    expect(image.attributes('src')).toBe('blob:codori-local-image')
+    expect(image.attributes('alt')).toBe('Pixel')
+    expect(image.attributes('title')).toBe('Preview')
+    await wrapper.get('button').trigger('click')
+    expect(openViewerMock).toHaveBeenCalledWith({
+      projectId: 'demo',
+      path: 'assets/pixel.png',
+      line: null,
+      column: null
+    })
+
+    wrapper.unmount()
+    expect(revokeObjectUrlMock).toHaveBeenCalledWith('blob:codori-local-image')
+  })
+
+  it('keeps remote Markdown images on their original URL without local RPC', async () => {
+    const wrapper = mount(MessagePartText, {
+      attachTo: document.body,
+      props: {
+        role: 'assistant',
+        projectId: 'demo',
+        part: {
+          type: 'text',
+          text: '![Remote](https://example.com/image.png)',
+          state: 'done'
+        }
+      }
+    })
+
+    await settle()
+    expect(wrapper.get('img').attributes('src')).toBe('https://example.com/image.png')
+    expect(rpcRequestMock).not.toHaveBeenCalled()
   })
 
   it('renders multiple skill references without collapsing surrounding text', async () => {
