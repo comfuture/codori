@@ -1,6 +1,7 @@
 import { basename, isAbsolute, relative, resolve } from 'node:path'
 import { constants as fsConstants } from 'node:fs'
 import { open, realpath } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { lookup as lookupMimeType } from 'mime-types'
 import { isPathInsideDirectory } from './attachment-store.js'
 import { normalizeWorkspaceRelativePath, WorkspaceDirectoryError } from './workspace-file-explorer.js'
@@ -28,6 +29,11 @@ export type LocalFileImageReadResult = LocalFileReadResultBase & {
 
 export type LocalFileReadResult = LocalFileTextReadResult | LocalFileImageReadResult
 
+export type LocalFileReadOptions = {
+  allowTemporaryPaths?: boolean
+  readFile?: (absolutePath: string) => Promise<Buffer>
+}
+
 export class LocalFileViewError extends Error {
   readonly code: 'FORBIDDEN' | 'NOT_FOUND' | 'NOT_A_FILE' | 'TOO_LARGE' | 'BINARY' | 'UNSUPPORTED_MEDIA_TYPE'
 
@@ -40,6 +46,11 @@ export class LocalFileViewError extends Error {
     this.code = code
   }
 }
+
+const localFileScopeMessage = (allowTemporaryPaths: boolean | undefined) =>
+  allowTemporaryPaths
+    ? 'Local file access is limited to the active workspace and temporary directories.'
+    : 'Local file access is limited to the active project root.'
 
 const hasBinaryContent = (buffer: Buffer) => {
   for (const byte of buffer) {
@@ -69,6 +80,21 @@ const readFileWithinLimit = async (fileHandle: Awaited<ReturnType<typeof open>>)
   }
 
   return buffer.subarray(0, offset)
+}
+
+const resolveTemporaryRoots = async () => {
+  const candidates = process.platform === 'win32'
+    ? [tmpdir()]
+    : [tmpdir(), '/tmp', '/var/tmp']
+  const roots = await Promise.all(candidates.map(async candidate => {
+    try {
+      return await realpath(resolve(candidate))
+    } catch {
+      return null
+    }
+  }))
+
+  return [...new Set(roots.filter((root): root is string => root !== null))]
 }
 
 const SUPPORTED_IMAGE_MEDIA_TYPES = new Set([
@@ -124,11 +150,13 @@ const hasValidImageContent = (buffer: Buffer, mediaType: string) => {
 
 export const readProjectLocalFile = async (
   projectRoot: string,
-  requestedPath: string
+  requestedPath: string,
+  options: LocalFileReadOptions = {}
 ): Promise<LocalFileReadResult> => {
   const resolvedProjectRoot = await realpath(resolve(projectRoot))
+  const requestedAbsolutePath = isAbsolute(requestedPath)
   let resolvedRequestPath: string
-  if (isAbsolute(requestedPath)) {
+  if (requestedAbsolutePath) {
     resolvedRequestPath = resolve(requestedPath)
   } else {
     try {
@@ -138,7 +166,10 @@ export const readProjectLocalFile = async (
         : resolvedProjectRoot
     } catch (error) {
       if (error instanceof WorkspaceDirectoryError) {
-        throw new LocalFileViewError('FORBIDDEN', 'Local file access is limited to the active project root.')
+        throw new LocalFileViewError(
+          'FORBIDDEN',
+          localFileScopeMessage(options.allowTemporaryPaths)
+        )
       }
       throw error
     }
@@ -151,8 +182,16 @@ export const readProjectLocalFile = async (
     throw new LocalFileViewError('NOT_FOUND', 'Local file not found.')
   }
 
-  if (!isPathInsideDirectory(resolvedTargetPath, resolvedProjectRoot)) {
-    throw new LocalFileViewError('FORBIDDEN', 'Local file access is limited to the active project root.')
+  const isWorkspaceFile = isPathInsideDirectory(resolvedTargetPath, resolvedProjectRoot)
+  const isTemporaryFile = requestedAbsolutePath
+    && options.allowTemporaryPaths === true
+    && (await resolveTemporaryRoots()).some(root => isPathInsideDirectory(resolvedTargetPath, root))
+
+  if (!isWorkspaceFile && !isTemporaryFile) {
+    throw new LocalFileViewError(
+      'FORBIDDEN',
+      localFileScopeMessage(options.allowTemporaryPaths)
+    )
   }
 
   const fileHandle = await open(
@@ -178,7 +217,9 @@ export const readProjectLocalFile = async (
       )
     }
 
-    buffer = await readFileWithinLimit(fileHandle)
+    buffer = options.readFile
+      ? await options.readFile(resolvedTargetPath)
+      : await readFileWithinLimit(fileHandle)
     if (buffer.length > MAX_LOCAL_FILE_VIEW_BYTES) {
       throw new LocalFileViewError(
         'TOO_LARGE',
@@ -190,7 +231,9 @@ export const readProjectLocalFile = async (
   }
   const baseFile = {
     path: resolvedTargetPath,
-    relativePath: relative(resolvedProjectRoot, resolvedTargetPath),
+    relativePath: isWorkspaceFile
+      ? relative(resolvedProjectRoot, resolvedTargetPath)
+      : basename(resolvedTargetPath),
     name: basename(resolvedTargetPath),
     size: fileStat.size,
     updatedAt: fileStat.mtimeMs

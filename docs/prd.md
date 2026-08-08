@@ -335,6 +335,8 @@ Behavior:
 
 The matching `/local-file` project/chat routes accept both existing absolute transcript-link paths and workspace-relative explorer paths. Both forms are canonicalized against the active workspace before preview.
 
+Transcript-local file references use the workspace WebSocket bridge's `codori/localFile/read` extension. It resolves relative paths from the server-authoritative workspace root, preserves canonical workspace-local absolute links, permits absolute temporary artifacts only inside canonical platform temp roots, applies the existing regular-file/type/size checks, and delegates the approved byte read to app-server `fs/readFile`. Inline Markdown images render those validated bytes through short-lived Blob URLs; raw host paths are never used as browser image sources.
+
 ### `WS /api/projects/:projectId/rpc`
 
 Behavior:

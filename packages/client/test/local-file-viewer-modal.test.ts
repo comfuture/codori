@@ -7,7 +7,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import LocalFileViewerModal from '../app/components/LocalFileViewerModal.vue'
 import { useLocalFileViewer } from '../app/composables/useLocalFileViewer'
 
-const fetchMock = vi.fn()
+const rpcRequestMock = vi.fn()
+
+vi.mock('../app/composables/useRpc', () => ({
+  useRpc: () => ({
+    getWorkspaceClient: () => ({ request: rpcRequestMock })
+  })
+}))
 
 vi.mock('@comark/vue/plugins/highlight', () => ({
   default: () => ({ name: 'highlight' })
@@ -102,7 +108,7 @@ const mountModal = () =>
 
 describe('LocalFileViewerModal', () => {
   beforeEach(() => {
-    fetchMock.mockReset()
+    rpcRequestMock.mockReset()
     const { state } = useLocalFileViewer()
     state.value = {
       open: false,
@@ -112,7 +118,6 @@ describe('LocalFileViewerModal', () => {
       line: null,
       column: null
     }
-    vi.stubGlobal('$fetch', fetchMock)
     vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
       setTimeout(() => callback(0), 0)
       return 1
@@ -125,7 +130,7 @@ describe('LocalFileViewerModal', () => {
       path: '/Users/demo/Project/codori/src/viewer.ts',
       line: 2
     })
-    fetchMock.mockResolvedValue({
+    rpcRequestMock.mockResolvedValue({
       file: {
         kind: 'text',
         path: '/Users/demo/Project/codori/src/viewer.ts',
@@ -144,9 +149,9 @@ describe('LocalFileViewerModal', () => {
     await nextTick()
     await new Promise(resolve => setTimeout(resolve, 0))
 
-    const requestedUrl = new URL(String(fetchMock.mock.calls[0]?.[0]), 'http://localhost')
-    expect(requestedUrl.pathname).toBe('/api/projects/demo/local-file')
-    expect(requestedUrl.searchParams.get('path')).toBe('/Users/demo/Project/codori/src/viewer.ts')
+    expect(rpcRequestMock).toHaveBeenCalledWith('codori/localFile/read', {
+      path: '/Users/demo/Project/codori/src/viewer.ts'
+    })
     expect(wrapper.find('.local-file-viewer-code').exists()).toBe(true)
     expect(wrapper.find('img').exists()).toBe(false)
     expect(wrapper.text()).toContain('src/viewer.ts')
@@ -160,7 +165,7 @@ describe('LocalFileViewerModal', () => {
     openViewer({
       path: '/Users/demo/Project/codori/assets/pixel.png'
     })
-    fetchMock.mockResolvedValue({
+    rpcRequestMock.mockResolvedValue({
       file: {
         kind: 'image',
         path: '/Users/demo/Project/codori/assets/pixel.png',

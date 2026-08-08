@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
 import {
   createServer as createNodeHttpServer,
@@ -7,7 +7,7 @@ import {
 } from 'node:http'
 import { createServer as createNetServer } from 'node:net'
 import os from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import WebSocket, { WebSocketServer } from 'ws'
 import { resolveProjectAttachmentsDir } from '../src/attachment-store.js'
@@ -1226,6 +1226,153 @@ describe('createHttpServer', () => {
     expect(backendMethods).not.toContain('codori/avatar/sprites')
     expect(backendMethods).not.toContain('codori/avatar/unknown')
     expect(invalidate).not.toHaveBeenCalled()
+    client.close()
+  })
+
+  it('reads canonical workspace and temporary files through the app-server RPC extension', async () => {
+    const workspacePath = mkdtempSync(join(os.tmpdir(), 'codori-rpc-files-workspace-'))
+    const outsidePath = mkdtempSync(join(os.tmpdir(), 'codori-rpc-files-outside-'))
+    tempDirs.push(workspacePath, outsidePath)
+    writeFileSync(join(workspacePath, 'notes.md'), '# Workspace\n', 'utf8')
+    writeFileSync(join(outsidePath, 'temporary.txt'), 'temporary artifact\n', 'utf8')
+    writeFileSync(join(outsidePath, 'blocked.txt'), 'blocked traversal\n', 'utf8')
+
+    const backend = new WebSocketServer({ host: '127.0.0.1', port: 0 })
+    startedSocketServers.push(backend)
+    await new Promise<void>(resolvePromise => backend.once('listening', resolvePromise))
+    const address = backend.address()
+    if (!address || typeof address === 'string') {
+      throw new Error('Failed to get test server address.')
+    }
+
+    const appServerReadPaths: string[] = []
+    backend.on('connection', (socket: WebSocket) => {
+      socket.on('message', (message: WebSocket.RawData) => {
+        const payload = JSON.parse(rawDataToString(message)) as {
+          id?: string | number
+          method?: string
+          params?: { path?: string }
+        }
+        if (payload.method === 'initialize') {
+          socket.send(JSON.stringify({
+            id: payload.id,
+            result: {
+              codexHome: '/tmp/codori-rpc-files-home',
+              userAgent: 'codex-test'
+            }
+          }))
+          return
+        }
+        if (payload.method === 'fs/readFile' && payload.params?.path) {
+          appServerReadPaths.push(payload.params.path)
+          socket.send(JSON.stringify({
+            id: payload.id,
+            result: {
+              dataBase64: readFileSync(payload.params.path).toString('base64')
+            }
+          }))
+        }
+      })
+    })
+
+    const app = await createHttpServer(createManager({
+      getProjectBridgeTarget: () => ({
+        target: {
+          kind: 'codori-managed',
+          transport: 'tcp-websocket',
+          port: address.port,
+          pid: 4321,
+          ownedByCodori: true,
+          appServerVersion: '0.145.0'
+        },
+        workspacePath
+      })
+    }))
+    startedApps.push(app)
+    await app.listen({ host: '127.0.0.1', port: 0 })
+    const serverAddress = app.addresses()[0]
+    const client = new WebSocket(`ws://127.0.0.1:${serverAddress.port}/api/projects/demo/rpc`)
+    const pending = new Map<string | number, (payload: Record<string, unknown>) => void>()
+    client.on('message', (message: WebSocket.RawData) => {
+      const payload = JSON.parse(rawDataToString(message)) as Record<string, unknown>
+      const id = payload.id
+      if ((typeof id === 'string' || typeof id === 'number') && pending.has(id)) {
+        pending.get(id)!(payload)
+        pending.delete(id)
+      }
+    })
+    await new Promise<void>((resolvePromise, reject) => {
+      client.once('open', resolvePromise)
+      client.once('error', reject)
+    })
+    const request = (id: number, method: string, params?: unknown) =>
+      new Promise<Record<string, unknown>>((resolvePromise, reject) => {
+        const timer = setTimeout(() => {
+          pending.delete(id)
+          reject(new Error(`Timed out waiting for ${method}.`))
+        }, 2000)
+        pending.set(id, payload => {
+          clearTimeout(timer)
+          resolvePromise(payload)
+        })
+        client.send(JSON.stringify({ id, method, ...(params === undefined ? {} : { params }) }))
+      })
+
+    await request(1, 'initialize', {})
+    client.send(JSON.stringify({ method: 'initialized' }))
+
+    expect(await request(2, 'codori/localFile/read', { path: 'notes.md' })).toMatchObject({
+      result: {
+        file: {
+          kind: 'text',
+          path: 'notes.md',
+          relativePath: 'notes.md',
+          text: '# Workspace\n'
+        }
+      }
+    })
+    expect(await request(3, 'codori/localFile/read', {
+      path: join(workspacePath, 'notes.md')
+    })).toMatchObject({
+      result: {
+        file: {
+          kind: 'text',
+          path: 'notes.md',
+          relativePath: 'notes.md'
+        }
+      }
+    })
+    expect(await request(4, 'codori/localFile/read', {
+      path: join(outsidePath, 'temporary.txt')
+    })).toMatchObject({
+      result: {
+        file: {
+          kind: 'text',
+          path: 'temporary.txt',
+          relativePath: 'temporary.txt',
+          text: 'temporary artifact\n'
+        }
+      }
+    })
+    expect(await request(5, 'codori/localFile/read', {
+      path: `../${outsidePath.split('/').pop()}/blocked.txt`
+    })).toMatchObject({
+      error: {
+        code: -32040,
+        message: 'Local file access is limited to the active workspace and temporary directories.'
+      }
+    })
+    expect(await request(6, 'codori/localFile/read', {
+      path: resolve(process.cwd(), '../../README.md')
+    })).toMatchObject({
+      error: {
+        code: -32040,
+        message: 'Local file access is limited to the active workspace and temporary directories.'
+      }
+    })
+    expect(appServerReadPaths).toHaveLength(3)
+    expect(appServerReadPaths).toContain(realpathSync(join(workspacePath, 'notes.md')))
+    expect(appServerReadPaths).toContain(realpathSync(join(outsidePath, 'temporary.txt')))
     client.close()
   })
 

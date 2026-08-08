@@ -11,6 +11,7 @@ import {
 import { matchesLandingRealtimeVoicePresentation } from '../app/composables/useLandingRealtimeVoicePresentation'
 import type { CodexRpcClient } from '../shared/codex-rpc'
 import type { ChatSessionRecord } from '../shared/codori'
+import { composeCodoriDeveloperInstructions } from '../shared/codori-web-instructions'
 
 const chat: ChatSessionRecord = {
   chatId: 'chat-voice',
@@ -151,25 +152,32 @@ describe('landing realtime voice companion startup', () => {
       'capabilities',
       'create-chat',
       'get-chat-client',
+      'config/read',
       'thread/start',
       'thread/settings/update',
       'set-chat-thread',
       'promote-conversation',
       'refresh-capability',
       'refresh-voice-catalog',
-      'config/read',
       'show-presentation',
       'connect',
       'request-microphone-activation'
     ])
-    expect(fixture.request).toHaveBeenNthCalledWith(1, 'thread/start', {
+    expect(fixture.request).toHaveBeenNthCalledWith(1, 'config/read', {
+      includeLayers: false,
+      cwd: null
+    })
+    expect(fixture.request).toHaveBeenNthCalledWith(2, 'thread/start', {
       model: LANDING_VOICE_MODEL,
       cwd: null,
       approvalPolicy: 'never',
-      developerInstructions: LANDING_VOICE_DEVELOPER_INSTRUCTIONS,
+      developerInstructions: composeCodoriDeveloperInstructions(
+        null,
+        LANDING_VOICE_DEVELOPER_INSTRUCTIONS
+      ),
       experimentalRawEvents: false
     })
-    expect(fixture.request).toHaveBeenNthCalledWith(2, 'thread/settings/update', {
+    expect(fixture.request).toHaveBeenNthCalledWith(3, 'thread/settings/update', {
       threadId: 'thread-voice',
       model: LANDING_VOICE_MODEL,
       effort: LANDING_VOICE_REASONING_EFFORT

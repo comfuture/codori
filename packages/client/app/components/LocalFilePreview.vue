@@ -3,12 +3,14 @@ import { Comark } from '@comark/vue'
 import highlight from '@comark/vue/plugins/highlight'
 import { computed, nextTick, ref, watch } from 'vue'
 import { useRuntimeConfig } from '#imports'
+import { useRpc } from '../composables/useRpc'
 import {
   formatLocalFileSize,
   resolveProjectLocalFileUrl,
   type ProjectLocalFileResponse,
   type WorkspaceLocalFileScope
 } from '../../shared/local-files'
+import { readWorkspaceLocalFile } from '../../shared/local-file-rpc'
 import {
   buildHighlightedFileMarkdown,
   inferLocalFileLanguage,
@@ -20,12 +22,15 @@ const props = withDefaults(defineProps<{
   path: string
   line?: number | null
   eyebrow?: string
+  transport?: 'http' | 'rpc'
 }>(), {
   line: null,
-  eyebrow: 'Local file viewer'
+  eyebrow: 'Local file viewer',
+  transport: 'http'
 })
 
 const runtimeConfig = useRuntimeConfig()
+const { getWorkspaceClient } = useRpc()
 const loading = ref(false)
 const error = ref<string | null>(null)
 const file = ref<ProjectLocalFileResponse['file'] | null>(null)
@@ -141,11 +146,13 @@ watch(
     file.value = null
 
     try {
-      const response = await $fetch<ProjectLocalFileResponse>(resolveProjectLocalFileUrl({
-        workspace,
-        path,
-        configuredBase: String(runtimeConfig.public.serverBase ?? '')
-      }))
+      const response = props.transport === 'rpc'
+        ? await readWorkspaceLocalFile(getWorkspaceClient(workspace), path)
+        : await $fetch<ProjectLocalFileResponse>(resolveProjectLocalFileUrl({
+            workspace,
+            path,
+            configuredBase: String(runtimeConfig.public.serverBase ?? '')
+          }))
       if (!isCurrentPreview(workspace, path)) {
         return
       }

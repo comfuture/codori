@@ -41,6 +41,7 @@ import type {
   ServerCapabilitiesResponse
 } from '~~/shared/codori'
 import { resolveApiUrl, shouldUseServerProxy } from '~~/shared/network'
+import { composeCodoriDeveloperInstructions } from '~~/shared/codori-web-instructions'
 
 export const LANDING_VOICE_MODEL = 'gpt-5.6-luna'
 export const LANDING_VOICE_REASONING_EFFORT = 'xhigh'
@@ -151,11 +152,23 @@ export const createLandingRealtimeVoiceCompanion = (
       const chat = await dependencies.createChat()
       dependencies.activeChatId.value = chat.chatId
       const client = dependencies.getChatClient(chat.chatId)
+      const configResponse = await withPromptControlsTimeout(
+        client.request<ConfigReadResponse>('config/read', {
+          includeLayers: false,
+          cwd: null
+        } satisfies ConfigReadParams),
+        'configuration',
+        5_000
+      )
+      const developerInstructions = composeCodoriDeveloperInstructions(
+        configResponse.config.developer_instructions,
+        LANDING_VOICE_DEVELOPER_INSTRUCTIONS
+      )
       const startResponse = await client.request<ThreadStartResponse>('thread/start', {
         model: LANDING_VOICE_MODEL,
         cwd: null,
         approvalPolicy: 'never',
-        developerInstructions: LANDING_VOICE_DEVELOPER_INSTRUCTIONS,
+        developerInstructions,
         experimentalRawEvents: false
       } satisfies ThreadStartParams)
       const threadId = startResponse.thread.id
@@ -180,23 +193,10 @@ export const createLandingRealtimeVoiceCompanion = (
       }
       await dependencies.realtimeVoice.refreshVoiceCatalog(true)
 
-      let startPrompt: string | undefined
-      try {
-        const configResponse = await withPromptControlsTimeout(
-          client.request<ConfigReadResponse>('config/read', {
-            includeLayers: false,
-            cwd: null
-          } satisfies ConfigReadParams),
-          'voice prompt configuration',
-          5_000
-        )
-        startPrompt = resolveRealtimeVoiceStartPrompt({
-          configuredPrompt: resolveConfiguredRealtimeVoicePrompt(configResponse.config),
-          localOverride: dependencies.savedPrompt.value
-        })
-      } catch {
-        startPrompt = dependencies.savedPrompt.value ?? undefined
-      }
+      const startPrompt = resolveRealtimeVoiceStartPrompt({
+        configuredPrompt: resolveConfiguredRealtimeVoicePrompt(configResponse.config),
+        localOverride: dependencies.savedPrompt.value
+      })
 
       presentation = {
         workspaceKey,

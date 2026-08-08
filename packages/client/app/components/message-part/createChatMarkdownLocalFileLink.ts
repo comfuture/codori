@@ -5,7 +5,6 @@ import LocalFileLink from './LocalFileLink.vue'
 type LocalFileLinkScope = {
   projectId: string | null
   workspace: WorkspaceLocalFileScope | null
-  workspaceRootPath: string | null
 }
 
 export const createChatMarkdownLocalFileLink = (resolveScope: () => LocalFileLinkScope) => defineComponent({

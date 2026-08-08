@@ -546,6 +546,10 @@ The client dashboard provides:
 
 The file explorer loads one directory at a time, hides common generated folders by default, and opens supported text and image files in the existing preview. All browser requests use workspace-relative paths; the server canonicalizes each target and rejects traversal and symlink escapes outside the active workspace root.
 
+Codori also injects thread guidance that asks Codex to link workspace files with root-relative Markdown destinations. Transcript links are resolved by the active workspace RPC bridge, while historical absolute workspace links remain compatible. Absolute paths are accepted outside the workspace only for regular files inside canonical platform temporary directories. The bridge validates scope and preview size before asking the selected app-server to read the file with `fs/readFile`; rejected local references never fall through to browser navigation.
+
+Local Markdown images use the same policy. Comark's `img` node is rendered with a short-lived Blob URL created from validated app-server bytes, preserving alt/title text without putting a host filesystem path in the browser-loadable `src`. Ordinary HTTP(S) images keep their normal browser URL.
+
 When you open a stopped project and start chatting, Codori ensures the shared app-server is running and then connects the UI through the Codori WebSocket proxy.
 
 ## What Codori Does
