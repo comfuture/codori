@@ -19,7 +19,7 @@ type ThreadReactivationRecoveryCoordinatorOptions = {
   now?: () => number
   setTimeout?: (handler: () => void, delayMs: number) => ThreadReactivationTimer
   clearTimeout?: (timer: ThreadReactivationTimer) => void
-  recover: (reason: ThreadReactivationReason) => Promise<void>
+  recover: (reason: ThreadReactivationReason) => Promise<boolean>
 }
 
 type BrowserRuntime = {
@@ -166,6 +166,7 @@ export const createThreadReactivationRecoveryCoordinator = (
   let scheduledTimer: ThreadReactivationTimer | null = null
   let scheduledAt = 0
   let scheduledReason: ThreadReactivationReason | null = null
+  let queuedReason: ThreadReactivationReason | null = null
   let disposed = false
 
   const clearScheduledRecovery = () => {
@@ -185,6 +186,7 @@ export const createThreadReactivationRecoveryCoordinator = (
       return null
     }
     if (pendingRecovery) {
+      queuedReason = reason
       return pendingRecovery
     }
 
@@ -212,11 +214,22 @@ export const createThreadReactivationRecoveryCoordinator = (
     }
 
     clearScheduledRecovery()
-    const recovery = Promise.resolve().then(() => options.recover(reason))
+    let retryReason: ThreadReactivationReason | null = null
+    const recovery = Promise.resolve()
+      .then(() => options.recover(reason))
+      .then((succeeded) => {
+        if (!succeeded && !disposed) {
+          retryReason = queuedReason
+        }
+        queuedReason = null
+      })
     pendingRecovery = recovery
     void recovery.finally(() => {
       if (pendingRecovery === recovery) {
         pendingRecovery = null
+      }
+      if (retryReason && !disposed) {
+        void request(retryReason)?.catch(() => {})
       }
     }).catch(() => {})
     return recovery
@@ -224,6 +237,7 @@ export const createThreadReactivationRecoveryCoordinator = (
 
   const dispose = () => {
     disposed = true
+    queuedReason = null
     clearScheduledRecovery()
   }
 

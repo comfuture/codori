@@ -166,7 +166,7 @@ describe('thread reactivation policy', () => {
   it('coalesces lifecycle bursts into one trailing recovery attempt', async () => {
     vi.useFakeTimers()
     let now = 10_000
-    const recover = vi.fn(async () => {})
+    const recover = vi.fn(async () => true)
     const coordinator = createThreadReactivationRecoveryCoordinator({
       now: () => now,
       recover
@@ -193,7 +193,10 @@ describe('thread reactivation policy', () => {
     const recovery = new Promise<void>((resolve) => {
       finishRecovery = resolve
     })
-    const recover = vi.fn(async () => await recovery)
+    const recover = vi.fn(async () => {
+      await recovery
+      return true
+    })
     const coordinator = createThreadReactivationRecoveryCoordinator({ recover })
 
     const first = coordinator.request('window/pageshow')
@@ -205,6 +208,36 @@ describe('thread reactivation policy', () => {
 
     finishRecovery()
     await first
+    await Promise.resolve()
+    expect(recover).toHaveBeenCalledOnce()
+    coordinator.dispose()
+  })
+
+  it('retries the latest queued signal only when the in-flight recovery fails', async () => {
+    let finishRecovery!: (succeeded: boolean) => void
+    const recovery = new Promise<boolean>((resolve) => {
+      finishRecovery = resolve
+    })
+    const recover = vi.fn()
+      .mockImplementationOnce(async () => await recovery)
+      .mockResolvedValueOnce(true)
+    const coordinator = createThreadReactivationRecoveryCoordinator({ recover })
+
+    const first = coordinator.request('window/pageshow')
+    const second = coordinator.request('document/resume')
+    coordinator.request('window/online')
+    await Promise.resolve()
+
+    expect(first).toBe(second)
+    expect(recover).toHaveBeenCalledOnce()
+
+    finishRecovery(false)
+    await first
+    await vi.waitFor(() => {
+      expect(recover).toHaveBeenCalledTimes(2)
+    })
+    expect(recover).toHaveBeenNthCalledWith(2, 'window/online')
+
     coordinator.dispose()
   })
 

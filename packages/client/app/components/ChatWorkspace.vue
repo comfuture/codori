@@ -3158,7 +3158,7 @@ const hasPotentiallyMissedThreadOutput = () =>
 const performActiveThreadReactivation = async (reason: ThreadReactivationReason) => {
   const threadId = activeThreadId.value
   if (!threadId) {
-    return
+    return true
   }
 
   const client = getRuntimeClient()
@@ -3176,7 +3176,7 @@ const performActiveThreadReactivation = async (reason: ThreadReactivationReason)
       if (activeThreadId.value === threadId) {
         lastWorkspaceDeactivatedAt = null
       }
-      return
+      return true
     }
 
     await ensureObservedThreadSubscription()
@@ -3207,7 +3207,7 @@ const performActiveThreadReactivation = async (reason: ThreadReactivationReason)
       }
     )
     if (activeThreadId.value !== threadId) {
-      return
+      return true
     }
 
     refreshWorkspaceGitBranchesInBackground('thread/resume')
@@ -3232,7 +3232,7 @@ const performActiveThreadReactivation = async (reason: ThreadReactivationReason)
       if (pinnedToBottom.value) {
         void scheduleScrollToBottom('auto')
       }
-      return
+      return true
     }
 
     const restoredTurnId = liveStream
@@ -3246,16 +3246,17 @@ const performActiveThreadReactivation = async (reason: ThreadReactivationReason)
       if (pinnedToBottom.value) {
         void scheduleScrollToBottom('auto')
       }
-      return
+      return true
     }
 
     status.value = 'streaming'
     if (pinnedToBottom.value) {
       void scheduleScrollToBottom('auto')
     }
+    return true
   } catch (caughtError) {
     if (activeThreadId.value !== threadId) {
-      return
+      return true
     }
 
     const messageText = caughtError instanceof Error ? caughtError.message : String(caughtError)
@@ -3264,11 +3265,12 @@ const performActiveThreadReactivation = async (reason: ThreadReactivationReason)
         status: 'failed',
         message: `Could not restore the Codex RPC connection after ${reason}: ${messageText}`
       }
-      return
+      return false
     }
 
     error.value = `Could not resume the live thread after ${reason}: ${messageText}`
     status.value = 'error'
+    return false
   }
 }
 
@@ -4416,7 +4418,6 @@ const ensureRuntimeSubscriptions = () => {
   const nextKey = `${scope.kind}:${scope.id}`
   const client = getRuntimeClient()
   if (runtimeSubscriptionKey === nextKey) {
-    void client.connect().catch(() => {})
     return true
   }
 
