@@ -31,6 +31,12 @@ That is the whole setup. Codori prints where it is listening:
 
 Open the dashboard and pick a project. Nothing else to configure.
 
+The HTTPS line appears when the host is already on a tailnet with MagicDNS and
+Codori is allowed to write a Serve config. Without that, Codori keeps serving on
+loopback and prints why. [Remote Access](https://github.com/comfuture/codori/wiki/Remote-Access)
+covers the prerequisites, including the one-time
+`sudo tailscale set --operator=$USER` step.
+
 Prefer not to install anything?
 
 ```bash
@@ -42,8 +48,10 @@ separate `codex` install is not required.
 
 ## What it looks like
 
-Every Git project under your root directory shows up in the sidebar, ready to
-open.
+Every Git project Codori discovers under your root directory shows up in the
+sidebar, ready to open. Scanning skips generated directories such as
+`node_modules`, `dist`, and `build`, so a repository nested inside one of those
+stays hidden.
 
 ![Codori dashboard listing discovered Git projects](docs/images/dashboard.png)
 
@@ -59,8 +67,10 @@ The same session on a phone, because a laptop is not always within reach.
 
 And the part that is hard to go back from: open any thread's immersive action and
 Codori hands it to the WebXR workspace at `/xr/`, where you can keep talking to
-Codex hands-free. That is what the video at the top shows. Headsets need an
-HTTPS origin, which the Tailscale line above already gives you.
+Codex hands-free. That is what the video at the top shows. Headsets need a
+secure HTTPS origin, so set up
+[Remote Access](https://github.com/comfuture/codori/wiki/Remote-Access) before
+reaching `/xr/` from a device other than the Codori host.
 
 ## Who this is for
 
