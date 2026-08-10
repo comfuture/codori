@@ -4,7 +4,7 @@
   "version": "0.13.6",
   "packageManager": "pnpm@11.20.0",
   "engines": {
-    "node": "^22.22.2 || ^24.15.0 || >=26.0.0"
+    "node": ">=22.22.2"
   },
   "scripts": {
     "build": "pnpm --filter @codori/client build && pnpm --filter @codori/webxr build && pnpm --filter @codori/server build && pnpm --filter @codori/cli build",

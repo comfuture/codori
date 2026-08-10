@@ -29,7 +29,7 @@ Codori follows a few hard constraints:
 
 ## Requirements
 
-- Node.js `^22.22.2`, `^24.15.0`, or `>=26.0.0`
+- Node.js 22.22.2+
 
 The server package includes a matching Codex CLI runtime, so a separate
 host-global `codex` installation is not required. When launching Codex, Codori
