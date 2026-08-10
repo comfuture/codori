@@ -16,6 +16,9 @@
   "bugs": {
     "url": "https://github.com/comfuture/codori/issues"
   },
+  "engines": {
+    "node": "^22.22.2 || ^24.15.0 || >=26.0.0"
+  },
   "exports": {
     ".": "./nuxt.config.ts",
     "./package.json": "./package.json",
