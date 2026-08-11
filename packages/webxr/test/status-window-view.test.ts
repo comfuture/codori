@@ -1,11 +1,13 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
+  drawStatusToggle,
   drawStatusWindowFrame,
   STATUS_WINDOW_ACTION_APPEARANCE,
   STATUS_WINDOW_APPEARANCE,
   STATUS_WINDOW_CORNER_RADIUS_PIXELS,
   STATUS_WINDOW_HEIGHT_METERS,
   STATUS_WINDOW_HIT_DEPTH_METERS,
+  STATUS_WINDOW_TOGGLE_APPEARANCE,
   STATUS_WINDOW_WIDTH_METERS
 } from '../src/status-window-view'
 
@@ -53,5 +55,30 @@ describe('status window view', () => {
       .toContain('0.42')
     expect(STATUS_WINDOW_ACTION_APPEARANCE.pressedBorder)
       .toContain('0.96')
+  })
+
+  it('moves a real toggle knob between off and on states', () => {
+    const context = {
+      beginPath: vi.fn(),
+      roundRect: vi.fn(),
+      fill: vi.fn(),
+      fillStyle: ''
+    }
+    drawStatusToggle(context, {
+      checked: false,
+      available: true,
+      centerY: 620
+    })
+    const offKnobX = context.roundRect.mock.calls[1]?.[0] as number
+    expect(context.fillStyle).toBe(STATUS_WINDOW_TOGGLE_APPEARANCE.knob)
+
+    context.roundRect.mockClear()
+    drawStatusToggle(context, {
+      checked: true,
+      available: true,
+      centerY: 620
+    })
+    const onKnobX = context.roundRect.mock.calls[1]?.[0] as number
+    expect(onKnobX).toBeGreaterThan(offKnobX)
   })
 })

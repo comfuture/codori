@@ -111,11 +111,33 @@ describe('XR status window model', () => {
       voiceState: 'resume-audio',
       reducedEffects: true
     })).toEqual([
-      expect.objectContaining({ id: 'passthrough', available: false, state: 'Off' }),
-      expect.objectContaining({ id: 'recenter' }),
-      expect.objectContaining({ id: 'voice', label: 'Resume audio' }),
-      expect.objectContaining({ id: 'reduced-effects', state: 'On' }),
-      expect.objectContaining({ id: 'exit' })
+      expect.objectContaining({
+        id: 'passthrough',
+        available: false,
+        presentation: 'toggle',
+        checked: false
+      }),
+      expect.objectContaining({
+        id: 'recenter',
+        presentation: 'button',
+        checked: null
+      }),
+      expect.objectContaining({
+        id: 'voice',
+        label: 'Voice',
+        presentation: 'toggle',
+        checked: false
+      }),
+      expect.objectContaining({
+        id: 'reduced-effects',
+        presentation: 'toggle',
+        checked: true
+      }),
+      expect.objectContaining({
+        id: 'exit',
+        presentation: 'button',
+        checked: null
+      })
     ])
   })
 

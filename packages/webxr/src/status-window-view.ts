@@ -36,6 +36,13 @@ export const STATUS_WINDOW_ACTION_APPEARANCE = {
   pressedFill: 'rgba(210, 255, 112, 0.42)',
   pressedBorder: 'rgba(226, 255, 166, 0.96)'
 } as const
+export const STATUS_WINDOW_TOGGLE_APPEARANCE = {
+  onTrack: 'rgba(200, 255, 77, 0.88)',
+  offTrack: 'rgba(184, 220, 120, 0.2)',
+  disabledTrack: 'rgba(128, 153, 92, 0.12)',
+  knob: '#efffc2',
+  disabledKnob: 'rgba(220, 236, 188, 0.46)'
+} as const
 
 const WIDTH_METERS = STATUS_WINDOW_WIDTH_METERS
 const HEIGHT_METERS = STATUS_WINDOW_HEIGHT_METERS
@@ -48,6 +55,71 @@ export const STATUS_WINDOW_HIT_DEPTH_METERS = 0.004
 const HIT_DEPTH_METERS = STATUS_WINDOW_HIT_DEPTH_METERS
 
 const clamp01 = (value: number) => Math.min(1, Math.max(0, value))
+
+export const resolveStatusToggleLayout = (
+  checked: boolean,
+  centerY: number
+) => {
+  const track = {
+    x: WIDTH_PIXELS - 146,
+    y: centerY - 18,
+    width: 88,
+    height: 36,
+    radius: 18
+  }
+  const knobSize = 28
+  return {
+    track,
+    knob: {
+      x: checked
+        ? track.x + track.width - knobSize - 4
+        : track.x + 4,
+      y: centerY - (knobSize / 2),
+      size: knobSize,
+      radius: knobSize / 2
+    }
+  }
+}
+
+export const drawStatusToggle = (
+  context: Pick<
+    CanvasRenderingContext2D,
+    'beginPath' | 'roundRect' | 'fill' | 'fillStyle'
+  >,
+  input: {
+    checked: boolean
+    available: boolean
+    centerY: number
+  }
+) => {
+  const layout = resolveStatusToggleLayout(input.checked, input.centerY)
+  context.beginPath()
+  context.roundRect(
+    layout.track.x,
+    layout.track.y,
+    layout.track.width,
+    layout.track.height,
+    layout.track.radius
+  )
+  context.fillStyle = input.available
+    ? input.checked
+      ? STATUS_WINDOW_TOGGLE_APPEARANCE.onTrack
+      : STATUS_WINDOW_TOGGLE_APPEARANCE.offTrack
+    : STATUS_WINDOW_TOGGLE_APPEARANCE.disabledTrack
+  context.fill()
+  context.beginPath()
+  context.roundRect(
+    layout.knob.x,
+    layout.knob.y,
+    layout.knob.size,
+    layout.knob.size,
+    layout.knob.radius
+  )
+  context.fillStyle = input.available
+    ? STATUS_WINDOW_TOGGLE_APPEARANCE.knob
+    : STATUS_WINDOW_TOGGLE_APPEARANCE.disabledKnob
+  context.fill()
+}
 
 export const drawStatusWindowFrame = (
   context: Pick<
@@ -370,13 +442,21 @@ export class StatusWindowView {
       : 'rgba(220, 236, 188, 0.56)'
     context.font = '600 27px Inter, system-ui, sans-serif'
     context.fillText(action.label, 56, y + Math.min(39, rowPixels * 0.68))
-    context.textAlign = 'right'
-    context.fillText(
-      action.available ? (action.state ?? '›') : 'Unavailable',
-      WIDTH_PIXELS - 56,
-      y + Math.min(39, rowPixels * 0.68)
-    )
-    context.textAlign = 'left'
+    if (action.presentation === 'toggle' && action.checked !== null) {
+      drawStatusToggle(context, {
+        checked: action.checked,
+        available: action.available,
+        centerY: y + (rowPixels / 2)
+      })
+    } else {
+      context.textAlign = 'right'
+      context.fillText(
+        action.available ? '›' : 'Unavailable',
+        WIDTH_PIXELS - 56,
+        y + Math.min(39, rowPixels * 0.68)
+      )
+      context.textAlign = 'left'
+    }
   }
 
   private render() {
