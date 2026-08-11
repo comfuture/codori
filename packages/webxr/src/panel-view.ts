@@ -3,12 +3,17 @@ import {
   BufferGeometry,
   BoxGeometry,
   Color,
+  EdgesGeometry,
   Float32BufferAttribute,
   Group,
+  LineBasicMaterial,
+  LineSegments,
   Mesh,
   MeshBasicMaterial,
   Points,
   PointsMaterial,
+  Shape,
+  ShapeGeometry,
   Vector3
 } from 'three'
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js'
@@ -23,7 +28,11 @@ import type {
   SpatialPanelPhase,
   SpatialPanelSnapshot
 } from './panel-model'
-import { CanvasTextSurface } from './text-surface'
+import {
+  CanvasTextSurface,
+  resolveTextViewportMetrics,
+  type TextViewportMetrics
+} from './text-surface'
 
 const easeOutCubic = (value: number) => 1 - ((1 - value) ** 3)
 const easeInCubic = (value: number) => value ** 3
@@ -35,10 +44,10 @@ const PANEL_MAX_SURFACE_HEIGHT_PIXELS = 896
 const PANEL_BODY_COLUMNS = 72
 const PANEL_CHROME_PIXELS = 160
 const PANEL_LINE_HEIGHT_PIXELS = 36
+export const PANEL_WORLD_DEPTH_RENDER_ORDER = 0
 export const PANEL_CONTROL_SIZE_METERS = 0.15
 export const PANEL_CONTROL_DEPTH_METERS = 0.028
 export const PANEL_CONTROL_RADIUS_METERS = 0.022
-const PANEL_CONTROL_GAP_METERS = 0.02
 
 export const resolvePanelControlLayout = (
   width: number,
@@ -48,10 +57,6 @@ export const resolvePanelControlLayout = (
   return {
     dismiss: {
       x: dismissX,
-      y: (height / 2) + (PANEL_CONTROL_SIZE_METERS / 2) + 0.01
-    },
-    drag: {
-      x: dismissX - PANEL_CONTROL_SIZE_METERS - PANEL_CONTROL_GAP_METERS,
       y: (height / 2) + (PANEL_CONTROL_SIZE_METERS / 2) + 0.01
     }
   }
@@ -106,8 +111,44 @@ export const resolvePanelInteractionLayout = (
       width: width - (inset * 2),
       height: contentTop - contentBottom,
       y: (contentTop + contentBottom) / 2
+    },
+    move: {
+      width,
+      height,
+      y: 0
     }
   }
+}
+
+export const createPanelContentRenderSignature = (input: {
+  title: string
+  status: string
+  body: string
+  scrollLine?: number
+}) => [
+  input.title,
+  input.status,
+  input.body,
+  input.scrollLine ?? ''
+].join('\u0000')
+
+export const resolvePanelViewportStart = (
+  metrics: TextViewportMetrics,
+  scrollLine?: number
+) => resolveTextViewportMetrics(
+  metrics.totalLineCount,
+  metrics.visibleLineCount,
+  scrollLine
+).startLine
+
+const triangleGeometry = (pointingUp: boolean) => {
+  const shape = new Shape()
+  const direction = pointingUp ? 1 : -1
+  shape.moveTo(-0.035, -0.018 * direction)
+  shape.lineTo(0.035, -0.018 * direction)
+  shape.lineTo(0, 0.025 * direction)
+  shape.closePath()
+  return new ShapeGeometry(shape)
 }
 
 export type PanelVisualState = {
@@ -163,13 +204,13 @@ const statusLabel = (status: SpatialPanelSnapshot['status']) =>
 export class SpatialPanelView {
   readonly group = new Group()
 
-  readonly contentHit: Mesh
-
-  readonly grabHit: Mesh
-
-  readonly titleGrabHit: Mesh
+  readonly moveHit: Mesh
 
   readonly dismissHit: Mesh
+
+  readonly scrollUpHit: Mesh
+
+  readonly scrollDownHit: Mesh
 
   private readonly width = PANEL_WIDTH_METERS
 
@@ -192,6 +233,31 @@ export class SpatialPanelView {
     ),
     this.titleBarMaterial
   )
+
+  private outlineGeometry: EdgesGeometry
+
+  private readonly outlineMaterial = new LineBasicMaterial({
+    color: '#2abfe7',
+    transparent: true,
+    opacity: 0,
+    depthTest: true,
+    depthWrite: false
+  })
+
+  private readonly outline: LineSegments
+
+  private glowGeometry: EdgesGeometry
+
+  private readonly glowMaterial = new LineBasicMaterial({
+    color: '#8cecff',
+    transparent: true,
+    opacity: 0,
+    blending: AdditiveBlending,
+    depthTest: true,
+    depthWrite: false
+  })
+
+  private readonly glow: LineSegments
 
   private readonly surface = new CanvasTextSurface({
     widthMeters: this.width - 0.035,
@@ -220,33 +286,9 @@ export class SpatialPanelView {
     radiusPixels: 22
   })
 
-  private readonly dragSurface = new CanvasTextSurface({
-    widthMeters: 0.13,
-    heightMeters: 0.13,
-    widthPixels: 192,
-    heightPixels: 192,
-    background: 'rgba(5, 24, 36, 0.92)',
-    border: 'rgba(77, 197, 226, 0.9)',
-    color: '#bdf4ff',
-    font: 'Inter, system-ui, sans-serif',
-    lineHeightPixels: 92,
-    paddingPixels: 44,
-    bodyFontSizePixels: 84,
-    glow: true,
-    radiusPixels: 22
-  })
-
   private readonly dismissControl = new Group()
 
-  private readonly dragControl = new Group()
-
   private readonly dismissButtonMaterial = new MeshBasicMaterial({
-    color: '#0b4058',
-    transparent: true,
-    opacity: 0.96
-  })
-
-  private readonly dragButtonMaterial = new MeshBasicMaterial({
     color: '#0b4058',
     transparent: true,
     opacity: 0.96
@@ -263,15 +305,22 @@ export class SpatialPanelView {
     this.dismissButtonMaterial
   )
 
-  private readonly dragButton = new Mesh(
-    new RoundedBoxGeometry(
-      PANEL_CONTROL_SIZE_METERS,
-      PANEL_CONTROL_SIZE_METERS,
-      PANEL_CONTROL_DEPTH_METERS,
-      4,
-      PANEL_CONTROL_RADIUS_METERS
-    ),
-    this.dragButtonMaterial
+  private readonly overflowMaterial = new MeshBasicMaterial({
+    color: '#72e6ff',
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+    toneMapped: false
+  })
+
+  private readonly overflowDown = new Mesh(
+    triangleGeometry(false),
+    this.overflowMaterial
+  )
+
+  private readonly overflowUp = new Mesh(
+    triangleGeometry(true),
+    this.overflowMaterial.clone()
   )
 
   private readonly particleOrigins: Float32Array
@@ -295,15 +344,28 @@ export class SpatialPanelView {
 
   private hovered = false
 
-  private grabHovered = false
-
   private grabbed = false
 
   private active = false
 
-  private titleBarOpacity = 0.42
+  private outlineOpacity = 0
+
+  private glowOpacity = 0
+
+  private handControlsVisible = false
+
+  private hasContentAbove = false
+
+  private hasContentBelow = false
+
+  get maximumScrollStart() {
+    const metrics = this.surface.metrics
+    return Math.max(0, metrics.totalLineCount - metrics.visibleLineCount)
+  }
 
   private lastRenderedContent = ''
+
+  private lastRenderedLayout = ''
 
   private animationNow = 0
 
@@ -321,6 +383,30 @@ export class SpatialPanelView {
     this.snapshot = snapshot
     this.group.name = `panel:${snapshot.id}`
     this.group.userData.panelId = snapshot.id
+    const chromeGeometry = new RoundedBoxGeometry(
+      this.width + 0.018,
+      this.height + 0.018,
+      0.012,
+      4,
+      0.05
+    )
+    this.outlineGeometry = new EdgesGeometry(chromeGeometry, 24)
+    this.glowGeometry = new EdgesGeometry(chromeGeometry, 24)
+    chromeGeometry.dispose()
+    this.outline = new LineSegments(
+      this.outlineGeometry,
+      this.outlineMaterial
+    )
+    this.glow = new LineSegments(this.glowGeometry, this.glowMaterial)
+    this.outline.name = `panel-outline:${snapshot.id}`
+    this.glow.name = `panel-glow:${snapshot.id}`
+    this.outline.position.z = (PANEL_DEPTH_METERS / 2) + 0.012
+    this.glow.position.z = (PANEL_DEPTH_METERS / 2) + 0.013
+    this.glow.scale.setScalar(1.008)
+    this.surface.mesh.renderOrder = PANEL_WORLD_DEPTH_RENDER_ORDER
+    this.titleBar.renderOrder = PANEL_WORLD_DEPTH_RENDER_ORDER
+    this.outline.renderOrder = PANEL_WORLD_DEPTH_RENDER_ORDER
+    this.glow.renderOrder = PANEL_WORLD_DEPTH_RENDER_ORDER
     const interactionLayout = resolvePanelInteractionLayout(
       this.width,
       this.height
@@ -328,61 +414,34 @@ export class SpatialPanelView {
     this.surface.mesh.position.z = (PANEL_DEPTH_METERS / 2) + 0.002
     this.titleBar.name = `panel-title-bar:${snapshot.id}`
     this.titleBar.position.set(0, interactionLayout.titleBar.y, 0.002)
-    this.group.add(this.titleBar, this.surface.mesh)
+    this.group.add(
+      this.titleBar,
+      this.surface.mesh,
+      this.glow,
+      this.outline
+    )
     this.dismissSurface.mesh.position.z = (
       PANEL_CONTROL_DEPTH_METERS / 2
     ) + 0.001
-    this.dragSurface.mesh.position.z = (
-      PANEL_CONTROL_DEPTH_METERS / 2
-    ) + 0.001
     this.dismissSurface.render({ body: '', icon: 'close' })
-    this.dragSurface.render({ body: '', icon: 'drag' })
 
     const invisibleMaterial = new MeshBasicMaterial({
       transparent: true,
       opacity: 0,
       depthWrite: false
     })
-    this.contentHit = new Mesh(
+    this.moveHit = new Mesh(
       new BoxGeometry(
-        interactionLayout.content.width,
-        interactionLayout.content.height,
+        interactionLayout.move.width,
+        interactionLayout.move.height,
         0.06
       ),
       invisibleMaterial
     )
-    this.contentHit.position.y = interactionLayout.content.y
-    this.contentHit.userData = {
+    this.moveHit.position.y = interactionLayout.move.y
+    this.moveHit.userData = {
       panelId: snapshot.id,
-      hitZone: 'content'
-    }
-    this.titleGrabHit = new Mesh(
-      new BoxGeometry(
-        interactionLayout.titleBar.width,
-        interactionLayout.titleBar.height,
-        0.075
-      ),
-      invisibleMaterial.clone()
-    )
-    this.titleGrabHit.name = `panel-title-bar-grab:${snapshot.id}`
-    this.titleGrabHit.position.y = interactionLayout.titleBar.y
-    this.titleGrabHit.userData = {
-      panelId: snapshot.id,
-      hitZone: 'grab'
-    }
-    this.grabHit = new Mesh(
-      new BoxGeometry(
-        PANEL_CONTROL_SIZE_METERS + 0.02,
-        PANEL_CONTROL_SIZE_METERS + 0.02,
-        0.075
-      ),
-      invisibleMaterial.clone()
-    )
-    this.grabHit.name = `panel-drag-control:${snapshot.id}`
-    this.grabHit.position.z = 0.01
-    this.grabHit.userData = {
-      panelId: snapshot.id,
-      hitZone: 'grab'
+      hitZone: 'move'
     }
     this.dismissHit = new Mesh(
       new BoxGeometry(
@@ -392,26 +451,44 @@ export class SpatialPanelView {
       ),
       invisibleMaterial.clone()
     )
-    this.dismissHit.position.z = 0.01
+    this.dismissHit.position.z = 0.045
     this.dismissHit.userData = {
       panelId: snapshot.id,
       hitZone: 'dismiss'
     }
     this.dismissControl.name = `panel-dismiss:${snapshot.id}`
-    this.dragControl.name = `panel-drag:${snapshot.id}`
     this.positionActiveControls()
     this.dismissControl.visible = false
-    this.dragControl.visible = false
     this.dismissControl.add(
       this.dismissButton,
       this.dismissSurface.mesh,
       this.dismissHit
     )
-    this.dragControl.add(
-      this.dragButton,
-      this.dragSurface.mesh,
-      this.grabHit
+    this.overflowUp.name = `panel-scroll-up:${snapshot.id}`
+    this.overflowDown.name = `panel-scroll-down:${snapshot.id}`
+    this.overflowUp.position.z = 0.05
+    this.overflowDown.position.z = 0.05
+    this.scrollUpHit = new Mesh(
+      new BoxGeometry(0.13, 0.075, 0.07),
+      invisibleMaterial.clone()
     )
+    this.scrollDownHit = new Mesh(
+      new BoxGeometry(0.13, 0.075, 0.07),
+      invisibleMaterial.clone()
+    )
+    this.scrollUpHit.position.z = 0.045
+    this.scrollDownHit.position.z = 0.045
+    this.scrollUpHit.userData = {
+      panelId: snapshot.id,
+      hitZone: 'scroll-up'
+    }
+    this.scrollDownHit.userData = {
+      panelId: snapshot.id,
+      hitZone: 'scroll-down'
+    }
+    this.overflowUp.add(this.scrollUpHit)
+    this.overflowDown.add(this.scrollDownHit)
+    this.positionOverflowControls()
 
     const particleCount = 28
     this.particleOrigins = new Float32Array(particleCount * 3)
@@ -449,10 +526,10 @@ export class SpatialPanelView {
     this.particles.name = `panel-dismiss-particles:${snapshot.id}`
     this.particles.visible = false
     this.group.add(
-      this.contentHit,
-      this.titleGrabHit,
+      this.moveHit,
       this.dismissControl,
-      this.dragControl,
+      this.overflowUp,
+      this.overflowDown,
       this.particles
     )
     this.update(snapshot)
@@ -488,25 +565,41 @@ export class SpatialPanelView {
     const scrollLine = snapshot.fileChange || snapshot.autoFollow
       ? undefined
       : snapshot.scrollOffset
-    const signature = [
-      snapshot.title,
-      snapshot.status,
+    const layoutSignature = createPanelContentRenderSignature({
+      title: snapshot.title,
+      status: snapshot.status,
+      body
+    })
+    const layoutChanged = layoutSignature !== this.lastRenderedLayout
+    const effectiveScrollLine = layoutChanged
+      ? scrollLine
+      : resolvePanelViewportStart(this.surface.metrics, scrollLine)
+    const signature = createPanelContentRenderSignature({
+      title: snapshot.title,
+      status: snapshot.status,
       body,
-      scrollLine ?? '',
-      this.active
-    ].join('\u0000')
+      scrollLine: effectiveScrollLine
+    })
     if (signature === this.lastRenderedContent) {
       return
     }
-    this.lastRenderedContent = signature
-    this.surface.render({
+    const metrics = this.surface.render({
       title: snapshot.title,
       status: statusLabel(snapshot.status),
       body,
       ansi: true,
-      scrollLine,
-      active: this.active
+      scrollLine: effectiveScrollLine
     })
+    this.lastRenderedLayout = layoutSignature
+    this.lastRenderedContent = createPanelContentRenderSignature({
+      title: snapshot.title,
+      status: snapshot.status,
+      body,
+      scrollLine: metrics.startLine
+    })
+    this.hasContentAbove = metrics.hasAbove
+    this.hasContentBelow = metrics.hasBelow
+    this.updateOverflowVisibility()
   }
 
   private resizeHeight(height: number) {
@@ -537,21 +630,29 @@ export class SpatialPanelView {
       0.045
     )
     this.titleBar.position.y = interactionLayout.titleBar.y
-    this.contentHit.geometry.dispose()
-    this.contentHit.geometry = new BoxGeometry(
-      interactionLayout.content.width,
-      interactionLayout.content.height,
+    this.moveHit.geometry.dispose()
+    this.moveHit.geometry = new BoxGeometry(
+      interactionLayout.move.width,
+      interactionLayout.move.height,
       0.06
     )
-    this.contentHit.position.y = interactionLayout.content.y
-    this.titleGrabHit.geometry.dispose()
-    this.titleGrabHit.geometry = new BoxGeometry(
-      interactionLayout.titleBar.width,
-      interactionLayout.titleBar.height,
-      0.075
+    this.moveHit.position.y = interactionLayout.move.y
+    const chromeGeometry = new RoundedBoxGeometry(
+      this.width + 0.018,
+      this.height + 0.018,
+      0.012,
+      4,
+      0.05
     )
-    this.titleGrabHit.position.y = interactionLayout.titleBar.y
+    this.outlineGeometry.dispose()
+    this.glowGeometry.dispose()
+    this.outlineGeometry = new EdgesGeometry(chromeGeometry, 24)
+    this.glowGeometry = new EdgesGeometry(chromeGeometry, 24)
+    this.outline.geometry = this.outlineGeometry
+    this.glow.geometry = this.glowGeometry
+    chromeGeometry.dispose()
     this.positionActiveControls()
+    this.positionOverflowControls()
 
     const position = this.particleGeometry.getAttribute('position')
     for (let index = 0; index < position.count; index += 1) {
@@ -573,14 +674,30 @@ export class SpatialPanelView {
       layout.dismiss.y,
       0.025
     )
-    this.dragControl.position.set(
-      layout.drag.x,
-      layout.drag.y,
-      0.025
-    )
   }
 
-  updateAnimation(now: number) {
+  private positionOverflowControls() {
+    const inset = 0.055
+    this.overflowUp.position.set(0, (this.height / 2) - inset, 0.045)
+    this.overflowDown.position.set(0, (-this.height / 2) + inset, 0.045)
+  }
+
+  private updateOverflowVisibility() {
+    this.overflowUp.visible = this.handControlsVisible && this.hasContentAbove
+    this.overflowDown.visible = this.hasContentBelow
+    this.scrollDownHit.visible = this.handControlsVisible && this.hasContentBelow
+    this.scrollUpHit.visible = this.handControlsVisible && this.hasContentAbove
+  }
+
+  setHandControlsVisible(visible: boolean) {
+    if (this.handControlsVisible === visible) {
+      return
+    }
+    this.handControlsVisible = visible
+    this.updateOverflowVisibility()
+  }
+
+  updateAnimation(now: number, reducedEffects = false) {
     this.animationNow = now
     if (this.layoutAnimating) {
       const progress = resolvePanelSlotTransition(
@@ -619,7 +736,18 @@ export class SpatialPanelView {
     )
     this.surface.material.opacity = visual.opacity
     this.dismissSurface.material.opacity = visual.opacity
-    this.titleBarMaterial.opacity = this.titleBarOpacity * visual.opacity
+    this.titleBarMaterial.opacity = 0.42 * visual.opacity
+    const overflowOpacity = reducedEffects
+      ? 0.62
+      : 0.38 + (0.42 * ((Math.sin(now / 260) + 1) / 2))
+    this.overflowMaterial.opacity = this.hasContentBelow
+      ? overflowOpacity * visual.opacity
+      : 0
+    ;(this.overflowUp.material as MeshBasicMaterial).opacity = (
+      this.hasContentAbove ? overflowOpacity * visual.opacity : 0
+    )
+    this.outlineMaterial.opacity = this.outlineOpacity * visual.opacity
+    this.glowMaterial.opacity = this.glowOpacity * visual.opacity
     this.updateDismissParticles(visual.particleProgress)
   }
 
@@ -653,57 +781,31 @@ export class SpatialPanelView {
   setInteraction(
     hovered: boolean,
     grabbed: boolean,
-    grabHovered = false,
     active = false
   ) {
     if (
       hovered === this.hovered
       && grabbed === this.grabbed
-      && grabHovered === this.grabHovered
       && active === this.active
     ) {
       return
     }
-    const activeChanged = active !== this.active
     this.hovered = hovered
     this.grabbed = grabbed
-    this.grabHovered = grabHovered
     this.active = active
     this.dismissControl.visible = active
       && this.snapshot.phase !== 'bursting'
-    this.dragControl.visible = active
-      && this.snapshot.phase !== 'bursting'
     const color = grabbed
-      ? new Color('#8cecff')
-      : grabHovered
-        ? new Color('#2abfe7')
-        : hovered
-          ? new Color('#184b62')
-          : new Color('#0c3347')
-    this.titleBarMaterial.color.copy(color)
-    this.titleBarOpacity = grabbed
-      ? 0.78
-      : grabHovered
-        ? 0.66
-        : hovered
-          ? 0.52
-          : 0.42
-    this.titleBarMaterial.opacity = this.titleBarOpacity
-    this.dragButtonMaterial.color.set(
-      grabbed
-        ? '#37c7ea'
-        : grabHovered
-          ? '#1a8cab'
-          : '#0b4058'
-    )
-    this.dragButtonMaterial.opacity = grabbed
-      ? 1
-      : grabHovered
-        ? 0.98
-        : 0.96
-    if (activeChanged) {
-      this.renderContent(this.animationNow)
-    }
+      ? new Color('#b7f4ff')
+      : hovered
+        ? new Color('#63dcff')
+        : new Color('#2abfe7')
+    this.outlineMaterial.color.copy(color)
+    this.glowMaterial.color.copy(color)
+    this.outlineOpacity = grabbed ? 1 : hovered ? 0.78 : active ? 0.64 : 0
+    this.glowOpacity = grabbed ? 0.5 : hovered ? 0.3 : active ? 0.22 : 0
+    this.outlineMaterial.opacity = this.outlineOpacity
+    this.glowMaterial.opacity = this.glowOpacity
   }
 
   moveTo(position: Vector3) {
@@ -739,26 +841,17 @@ export class SpatialPanelView {
   dispose() {
     this.surface.dispose()
     this.dismissSurface.dispose()
-    this.dragSurface.dispose()
     this.titleBar.geometry.dispose()
     this.titleBarMaterial.dispose()
-    this.contentHit.geometry.dispose()
-    if (Array.isArray(this.contentHit.material)) {
-      this.contentHit.material.forEach(material => material.dispose())
+    this.outlineGeometry.dispose()
+    this.glowGeometry.dispose()
+    this.outlineMaterial.dispose()
+    this.glowMaterial.dispose()
+    this.moveHit.geometry.dispose()
+    if (Array.isArray(this.moveHit.material)) {
+      this.moveHit.material.forEach(material => material.dispose())
     } else {
-      this.contentHit.material.dispose()
-    }
-    this.grabHit.geometry.dispose()
-    if (Array.isArray(this.grabHit.material)) {
-      this.grabHit.material.forEach(material => material.dispose())
-    } else {
-      this.grabHit.material.dispose()
-    }
-    this.titleGrabHit.geometry.dispose()
-    if (Array.isArray(this.titleGrabHit.material)) {
-      this.titleGrabHit.material.forEach(material => material.dispose())
-    } else {
-      this.titleGrabHit.material.dispose()
+      this.moveHit.material.dispose()
     }
     this.dismissHit.geometry.dispose()
     if (Array.isArray(this.dismissHit.material)) {
@@ -768,8 +861,14 @@ export class SpatialPanelView {
     }
     this.dismissButton.geometry.dispose()
     this.dismissButtonMaterial.dispose()
-    this.dragButton.geometry.dispose()
-    this.dragButtonMaterial.dispose()
+    this.overflowUp.geometry.dispose()
+    this.overflowDown.geometry.dispose()
+    this.overflowMaterial.dispose()
+    ;(this.overflowUp.material as MeshBasicMaterial).dispose()
+    this.scrollUpHit.geometry.dispose()
+    this.scrollDownHit.geometry.dispose()
+    ;(this.scrollUpHit.material as MeshBasicMaterial).dispose()
+    ;(this.scrollDownHit.material as MeshBasicMaterial).dispose()
     this.particleGeometry.dispose()
     this.particleMaterial.dispose()
     this.group.clear()

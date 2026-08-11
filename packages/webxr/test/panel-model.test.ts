@@ -173,6 +173,11 @@ describe('spatial panel model', () => {
       }), 0)
     }
 
+    const before = new Map(model.snapshots().map(snapshot => [
+      snapshot.id,
+      { slot: snapshot.slot, position: snapshot.position }
+    ]))
+    const movedSlot = before.get('command:3')?.slot
     expect(model.focus('command:3', {
       x: 0.6,
       y: 1.4,
@@ -182,6 +187,7 @@ describe('spatial panel model', () => {
       snapshot => snapshot.id === 'command:3'
     )).toMatchObject({
       userMoved: true,
+      slot: movedSlot,
       position: {
         x: 0.6,
         y: 1.4,
@@ -190,7 +196,25 @@ describe('spatial panel model', () => {
     })
     expect(model.snapshots().filter(
       snapshot => snapshot.id !== 'command:3'
-    ).every(snapshot => snapshot.position === null)).toBe(true)
+    ).every(snapshot => (
+      snapshot.position === before.get(snapshot.id)?.position
+      && snapshot.slot === before.get(snapshot.id)?.slot
+    ))).toBe(true)
+  })
+
+  it('uses rendered viewport bounds for wrapped-content scrolling', () => {
+    const model = new SpatialPanelModel()
+    model.upsert(panel({ text: 'one very long wrapped source line' }), 0)
+    model.scroll('command:1', -2, 1, 8)
+    expect(model.snapshots()[0]).toMatchObject({
+      autoFollow: false,
+      scrollOffset: 6
+    })
+    model.scroll('command:1', 2, 2, 8)
+    expect(model.snapshots()[0]).toMatchObject({
+      autoFollow: true,
+      scrollOffset: Number.POSITIVE_INFINITY
+    })
   })
 
   it('opens a new panel in front of a nearby existing panel', () => {

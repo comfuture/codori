@@ -21,8 +21,8 @@ const panel = (
     ? 'visible'
     : 'dwelling',
   phaseStartedAt: now,
-  scrollOffset: Number.POSITIVE_INFINITY,
-  autoFollow: true,
+  scrollOffset: input.id === 'kitchen-command' ? 8 : Number.POSITIVE_INFINITY,
+  autoFollow: input.id !== 'kitchen-command',
   userMoved: false,
   position: null,
   slot,
@@ -40,7 +40,11 @@ export const createDevelopmentKitchenSink = (now: number) => {
         '\u001B[36mRUN\u001B[0m packages/webxr',
         '✓ transcript visibility',
         '✓ spatial panel lifecycle',
-        '⠼ rendering high-density text surfaces…'
+        '⠼ rendering high-density text surfaces…',
+        ...Array.from(
+          { length: 24 },
+          (_, index) => `overflow ${String(index + 1).padStart(2, '0')} · deterministic wrapped-line viewport fixture`
+        )
       ].join('\n'),
       cwd: '/Users/comfuture/Project/codori',
       background: false

@@ -1,5 +1,9 @@
 export type InteractionSourceId = string
-export type PanelHitZone = 'content' | 'grab' | 'dismiss'
+export type PanelHitZone =
+  | 'move'
+  | 'dismiss'
+  | 'scroll-up'
+  | 'scroll-down'
 
 export type PanelHit = {
   panelId: string
@@ -74,7 +78,7 @@ export class PanelInteractionModel {
   }
 
   grabStart(sourceId: InteractionSourceId, hit: PanelHit | null) {
-    if (!hit || hit.zone !== 'grab') {
+    if (!hit || hit.zone !== 'move') {
       return false
     }
     const owner = this.grabOwners.get(hit.panelId)
@@ -87,6 +91,10 @@ export class PanelInteractionModel {
     this.grabOwners.set(hit.panelId, sourceId)
     this.activePanelId = hit.panelId
     return true
+  }
+
+  activatePanel(panelId: string) {
+    this.activePanelId = panelId
   }
 
   releaseGrab(sourceId: InteractionSourceId) {
@@ -123,6 +131,17 @@ export class PanelInteractionModel {
   }
 
   reconcilePanels(panelIds: ReadonlySet<string>) {
+    for (const [sourceId, source] of this.sources) {
+      if (source.hover && !panelIds.has(source.hover.panelId)) {
+        source.hover = null
+      }
+      if (source.selected && !panelIds.has(source.selected.panelId)) {
+        source.selected = null
+      }
+      if (source.grabbedPanelId && !panelIds.has(source.grabbedPanelId)) {
+        this.releaseGrab(sourceId)
+      }
+    }
     if (
       this.activePanelId
       && !panelIds.has(this.activePanelId)

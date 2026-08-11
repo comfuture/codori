@@ -24,6 +24,18 @@ import {
   type PanelHit
 } from './panel-interaction'
 import type { SpatialPanelView } from './panel-view'
+import {
+  classifyPaneGrabIntent,
+  isMeaningfulTouchDrag,
+  PANE_GRAB_CLASSIFICATION_THRESHOLD_METERS,
+  PreferredPaneInputModel,
+  resolveDepthLockedPanePosition,
+  resolveHandScrollRate,
+  resolvePaneDepthActivationOffset,
+  resolvePrimaryThumbstickY,
+  resolveThumbstickScrollDelta,
+  type PaneGrabIntent
+} from './pane-manipulation'
 import type { WorldControlAction } from './world-controls'
 import {
   canActivateStatusAction,
@@ -47,12 +59,23 @@ type SourceRuntime = {
   inputSource: XRInputSource | null
   selecting: boolean
   pinching: boolean
-  grabbedBy: 'select' | 'squeeze' | 'pinch' | null
-  lastPointerY: number
+  grabbedBy: 'select' | 'squeeze' | 'pinch' | 'touch' | null
   grabOffset: Vector3
   grabSphere: Sphere
   grabInitialPosition: Vector3
+  grabInitialWorldPosition: Vector3
+  grabInitialSourcePosition: Vector3
+  grabInitialViewerPosition: Vector3
+  grabViewerInverseQuaternion: Quaternion
+  grabSightLine: Vector3
+  grabDirectNormal: Vector3
+  grabIntent: PaneGrabIntent
+  grabDepthActivation: number
+  grabDepthActivationOffset: Vector3
   grabMoved: boolean
+  handScrollPanelId: string | null
+  handScrollDirection: -1 | 1 | 0
+  handScrollStartedAt: number
   menuPressed: boolean
   contactActionId: StatusActionId | null
   listeners: {
@@ -74,7 +97,11 @@ export type InteractionSystemOptions = {
   getStatusMenuTarget: () => Mesh | null
   isStatusOpen: () => boolean
   getStatusInvocation: () => StatusWindowInvocation | null
-  onScroll: (panelId: string, deltaLines: number) => void
+  onScroll: (
+    panelId: string,
+    deltaLines: number,
+    maximumStart?: number
+  ) => void
   onPanelInteracted: (panelId: string) => void
   onPanelMoved: (panelId: string, position: Vector3) => void
   onPanelFocused: (panelId: string, position: Vector3) => void
@@ -106,7 +133,14 @@ const jointQuaternion = new Quaternion()
 const handBackNormal = new Vector3()
 const wristToViewer = new Vector3()
 const contactBounds = new Box3()
-const PANEL_GRAB_TAP_MAX_DISTANCE_METERS = 0.12
+const sourceDisplacement = new Vector3()
+const viewerLocalDisplacement = new Vector3()
+const panelWorldPosition = new Vector3()
+const contactDelta = new Vector3()
+const viewerQuaternion = new Quaternion()
+const PANEL_GRAB_TAP_MAX_DISTANCE_METERS = (
+  PANE_GRAB_CLASSIFICATION_THRESHOLD_METERS * 0.75
+)
 const PANEL_FOCUSED_DISTANCE_METERS = 1.8
 
 export const isPanelGrabTap = (
@@ -239,6 +273,8 @@ export class ImmersiveInteractionSystem {
 
   private readonly statusControllerArm = new StatusControllerArmModel()
 
+  private readonly preferredInput = new PreferredPaneInputModel()
+
   private lastInputCapabilities = ''
 
   private disposed = false
@@ -293,38 +329,46 @@ export class ImmersiveInteractionSystem {
       selecting: false,
       pinching: false,
       grabbedBy: null,
-      lastPointerY: 0,
       grabOffset: new Vector3(),
       grabSphere: new Sphere(),
       grabInitialPosition: new Vector3(),
+      grabInitialWorldPosition: new Vector3(),
+      grabInitialSourcePosition: new Vector3(),
+      grabInitialViewerPosition: new Vector3(),
+      grabViewerInverseQuaternion: new Quaternion(),
+      grabSightLine: new Vector3(),
+      grabDirectNormal: new Vector3(),
+      grabIntent: 'neutral',
+      grabDepthActivation: 0,
+      grabDepthActivationOffset: new Vector3(),
       grabMoved: false,
+      handScrollPanelId: null,
+      handScrollDirection: 0,
+      handScrollStartedAt: 0,
       menuPressed: false,
       contactActionId: null,
       listeners: null
     }
     const listeners = {
       connected: (event: unknown) => {
+        this.preferredInput.lose(id)
         runtime.inputSource = (
           event as unknown as { data: XRInputSource }
         ).data
+        this.preferredInput.connect({
+          id,
+          handedness: runtime.inputSource.handedness,
+          kind: runtime.inputSource.hand ? 'hand' : 'controller'
+        }, performance.now())
       },
       disconnected: () => {
-        const grabbedPanelId = this.model.snapshot().sources
-          .get(id)?.grabbedPanelId
-        runtime.inputSource = null
         runtime.selecting = false
         runtime.pinching = false
-        runtime.grabbedBy = null
+        this.finalizeGrab(runtime, { refresh: false })
+        runtime.inputSource = null
+        this.stopHandScroll(runtime)
+        this.preferredInput.lose(id)
         this.model.sourceLost(id)
-        if (grabbedPanelId) {
-          const panel = this.options.getPanels().get(grabbedPanelId)
-          if (panel) {
-            this.options.onPanelMoved(
-              grabbedPanelId,
-              panel.group.position.clone()
-            )
-          }
-        }
         this.refreshPanelInteraction()
       },
       selectstart: () => {
@@ -334,7 +378,7 @@ export class ImmersiveInteractionSystem {
         runtime.selecting = false
         this.model.selectEnd(id)
         if (runtime.grabbedBy === 'select') {
-          this.releaseGrab(runtime, true)
+          this.finalizeGrab(runtime, { focusSelectTap: true })
         }
       },
       squeezestart: () => {
@@ -342,7 +386,7 @@ export class ImmersiveInteractionSystem {
       },
       squeezeend: () => {
         if (runtime.grabbedBy === 'squeeze') {
-          this.releaseGrab(runtime)
+          this.finalizeGrab(runtime)
         }
       }
     }
@@ -362,13 +406,18 @@ export class ImmersiveInteractionSystem {
       if (!panel.group.visible) {
         continue
       }
-      targets.push(panel.contentHit, panel.titleGrabHit)
-      if (panel.grabHit.visible && panel.grabHit.parent?.visible) {
-        targets.push(panel.grabHit)
-      }
+      // Child actions protrude in front of the whole-pane move target, so
+      // distance ordering preserves their priority even at overlapping edges.
       if (panel.dismissHit.visible && panel.dismissHit.parent?.visible) {
         targets.push(panel.dismissHit)
       }
+      if (panel.scrollUpHit.visible && panel.scrollUpHit.parent?.visible) {
+        targets.push(panel.scrollUpHit)
+      }
+      if (panel.scrollDownHit.visible && panel.scrollDownHit.parent?.visible) {
+        targets.push(panel.scrollDownHit)
+      }
+      targets.push(panel.moveHit)
     }
     targets.push(...this.options.getControlTargets())
     if (this.options.isStatusOpen()) {
@@ -388,9 +437,10 @@ export class ImmersiveInteractionSystem {
     if (
       typeof panelId === 'string'
       && (
-        hitZone === 'content'
-        || hitZone === 'grab'
+        hitZone === 'move'
         || hitZone === 'dismiss'
+        || hitZone === 'scroll-up'
+        || hitZone === 'scroll-down'
       )
     ) {
       return {
@@ -462,11 +512,11 @@ export class ImmersiveInteractionSystem {
       return
     }
     if (hit) {
+      this.preferredInput.use(runtime.id, now)
       this.options.onPanelInteracted(hit.panelId)
     }
     runtime.selecting = true
-    runtime.lastPointerY = intersection?.point.y ?? 0
-    if (hit?.zone === 'grab') {
+    if (hit?.zone === 'move') {
       this.handleGrabStart(runtime, native ? 'select' : 'pinch')
     }
   }
@@ -560,6 +610,178 @@ export class ImmersiveInteractionSystem {
     runtime.contactActionId = action
   }
 
+  private nearestPanelContact(
+    point: Vector3,
+    maximumDistance: number,
+    zones: readonly PanelHit['zone'][]
+  ) {
+    let nearest: {
+      panel: SpatialPanelView
+      hit: PanelHit
+      distance: number
+    } | null = null
+    for (const [panelId, panel] of this.options.getPanels()) {
+      if (!panel.group.visible) {
+        continue
+      }
+      const candidates = zones.map((zone) => ({
+        zone,
+        target: zone === 'scroll-up'
+          ? panel.scrollUpHit
+          : zone === 'scroll-down'
+            ? panel.scrollDownHit
+            : panel.moveHit
+      }))
+      for (const candidate of candidates) {
+        if (!candidate.target.visible || candidate.target.parent?.visible === false) {
+          continue
+        }
+        candidate.target.updateWorldMatrix(true, false)
+        contactBounds.setFromObject(candidate.target)
+        const distance = contactBounds.distanceToPoint(point)
+        if (
+          distance <= maximumDistance
+          && (!nearest || distance < nearest.distance)
+        ) {
+          nearest = {
+            panel,
+            hit: { panelId, zone: candidate.zone },
+            distance
+          }
+        }
+      }
+    }
+    return nearest
+  }
+
+  private stopHandScroll(runtime: SourceRuntime) {
+    runtime.handScrollPanelId = null
+    runtime.handScrollDirection = 0
+    runtime.handScrollStartedAt = 0
+  }
+
+  private updateHandPaneContact(
+    runtime: SourceRuntime,
+    now: number,
+    deltaSeconds: number
+  ) {
+    if (!runtime.inputSource?.hand) {
+      this.stopHandScroll(runtime)
+      return
+    }
+    if (runtime.contactActionId) {
+      this.stopHandScroll(runtime)
+      return
+    }
+    const index = resolveTrackedHandJoint(runtime.hand, 'index-finger-tip')
+    if (!index) {
+      this.stopHandScroll(runtime)
+      if (runtime.grabbedBy === 'touch') {
+        this.finalizeGrab(runtime)
+      }
+      return
+    }
+    if (this.options.isStatusOpen()) {
+      this.stopHandScroll(runtime)
+      if (runtime.grabbedBy === 'touch') {
+        this.finalizeGrab(runtime)
+      }
+      return
+    }
+    index.getWorldPosition(indexPosition)
+    const radius = Math.max(0.006, index.jointRadius ?? 0.009)
+    const scrollContact = this.nearestPanelContact(
+      indexPosition,
+      radius + 0.012,
+      ['scroll-up', 'scroll-down']
+    )
+    if (scrollContact) {
+      if (runtime.grabbedBy === 'touch') {
+        this.finalizeGrab(runtime)
+      }
+      const direction = scrollContact.hit.zone === 'scroll-up' ? -1 : 1
+      if (
+        runtime.handScrollPanelId !== scrollContact.hit.panelId
+        || runtime.handScrollDirection !== direction
+      ) {
+        runtime.handScrollPanelId = scrollContact.hit.panelId
+        runtime.handScrollDirection = direction
+        runtime.handScrollStartedAt = now
+        this.model.activatePanel(scrollContact.hit.panelId)
+        this.preferredInput.use(runtime.id, now)
+        this.options.onPanelInteracted(scrollContact.hit.panelId)
+      }
+      this.options.onScroll(
+        scrollContact.hit.panelId,
+        direction * resolveHandScrollRate(now - runtime.handScrollStartedAt)
+          * Math.max(0, deltaSeconds),
+        scrollContact.panel.maximumScrollStart
+      )
+      return
+    }
+    this.stopHandScroll(runtime)
+
+    if (runtime.grabbedBy === 'touch') {
+      const grabbedPanelId = this.model.snapshot().sources
+        .get(runtime.id)?.grabbedPanelId
+      const panel = grabbedPanelId
+        ? this.options.getPanels().get(grabbedPanelId)
+        : null
+      if (!panel) {
+        this.finalizeGrab(runtime)
+        return
+      }
+      panel.group.getWorldPosition(panelWorldPosition)
+      if (
+        Math.abs(
+          contactDelta.subVectors(indexPosition, panelWorldPosition)
+            .dot(runtime.grabDirectNormal)
+        ) > radius + 0.055
+      ) {
+        this.finalizeGrab(runtime)
+        return
+      }
+      sourceDisplacement.subVectors(
+        indexPosition,
+        runtime.grabInitialSourcePosition
+      )
+      sourceDisplacement.addScaledVector(
+        runtime.grabDirectNormal,
+        -sourceDisplacement.dot(runtime.grabDirectNormal)
+      )
+      runtime.grabMoved ||= isMeaningfulTouchDrag(sourceDisplacement)
+      panelWorldPosition.copy(runtime.grabInitialWorldPosition)
+        .add(sourceDisplacement)
+      worldPointToPanelLocal(panel.group, panelWorldPosition, panelWorldPosition)
+      panel.moveTo(panelWorldPosition)
+      return
+    }
+    if (runtime.pinching || runtime.selecting) {
+      return
+    }
+    const moveContact = this.nearestPanelContact(
+      indexPosition,
+      radius + 0.008,
+      ['move']
+    )
+    if (!moveContact || !this.model.grabStart(runtime.id, moveContact.hit)) {
+      return
+    }
+    runtime.grabbedBy = 'touch'
+    runtime.grabInitialPosition.copy(moveContact.panel.group.position)
+    moveContact.panel.group.getWorldPosition(runtime.grabInitialWorldPosition)
+    runtime.grabInitialSourcePosition.copy(indexPosition)
+    moveContact.panel.group.getWorldQuaternion(panelPlaneQuaternion)
+    runtime.grabDirectNormal.set(0, 0, 1)
+      .applyQuaternion(panelPlaneQuaternion)
+      .normalize()
+    runtime.grabMoved = false
+    this.model.activatePanel(moveContact.hit.panelId)
+    this.preferredInput.use(runtime.id, now)
+    this.options.onPanelInteracted(moveContact.hit.panelId)
+    this.refreshPanelInteraction()
+  }
+
   private updateMenuButton(runtime: SourceRuntime) {
     const source = runtime.inputSource
     const index = source
@@ -584,8 +806,14 @@ export class ImmersiveInteractionSystem {
       Boolean(runtime.inputSource?.hand)
       && resolveTrackedHandJoint(runtime.hand, 'wrist') !== null
     )
+    const preferredHand = (['left', 'right', 'none'] as const).some(
+      handedness => this.preferredInput.preferred(handedness)?.kind === 'hand'
+    )
     const fallbackMenu = resolveStatusFallbackMenuVisibility(this.sources)
-    const key = `${controller}:${hand}:${fallbackMenu}`
+    const key = `${controller}:${hand}:${preferredHand}:${fallbackMenu}`
+    for (const panel of this.options.getPanels().values()) {
+      panel.setHandControlsVisible(preferredHand)
+    }
     if (key !== this.lastInputCapabilities) {
       this.lastInputCapabilities = key
       this.options.onInputCapabilitiesChanged({
@@ -700,45 +928,67 @@ export class ImmersiveInteractionSystem {
       this.options.onPanelInteracted(hit!.panelId)
     }
     runtime.grabInitialPosition.copy(panel.group.position)
+    panel.group.getWorldPosition(runtime.grabInitialWorldPosition)
     runtime.grabMoved = false
-    if (activation === 'select' || activation === 'pinch') {
-      this.options.renderer.xr.getCamera()
-        .getWorldPosition(viewerPosition)
-      runtime.grabSphere.center.copy(viewerPosition)
+    runtime.grabIntent = 'neutral'
+    runtime.grabDepthActivation = 0
+    runtime.grabDepthActivationOffset.set(0, 0, 0)
+    const camera = this.options.renderer.xr.getCamera()
+    camera.getWorldPosition(runtime.grabInitialViewerPosition)
+    camera.getWorldQuaternion(viewerQuaternion)
+    runtime.grabViewerInverseQuaternion.copy(viewerQuaternion).invert()
+    runtime.grabSightLine.subVectors(
+      runtime.grabInitialWorldPosition,
+      runtime.grabInitialViewerPosition
+    ).normalize()
+    if (runtime.inputSource?.hand) {
+      runtime.grabSphere.center.copy(runtime.grabInitialViewerPosition)
       runtime.grabSphere.radius = Math.max(
         0.25,
-        viewerPosition.distanceTo(intersection!.point)
+        runtime.grabInitialViewerPosition.distanceTo(intersection!.point)
       )
       panel.group.getWorldPosition(sourcePosition)
       runtime.grabOffset.copy(sourcePosition).sub(intersection!.point)
       this.refreshPanelInteraction()
       return
     }
-    runtime.grip.getWorldPosition(sourcePosition)
-    if (!runtime.inputSource?.gripSpace) {
-      runtime.targetRay.getWorldPosition(sourcePosition)
-    }
+    this.sourceAnchorPosition(runtime, sourcePosition)
+    runtime.grabInitialSourcePosition.copy(sourcePosition)
     panel.group.getWorldPosition(runtime.grabOffset)
     runtime.grabOffset.sub(sourcePosition)
     this.refreshPanelInteraction()
   }
 
-  private releaseGrab(runtime: SourceRuntime, focusOnTap = false) {
+  private sourceAnchorPosition(runtime: SourceRuntime, target: Vector3) {
+    const anchor = runtime.inputSource?.gripSpace
+      ? runtime.grip
+      : runtime.targetRay
+    return anchor.getWorldPosition(target)
+  }
+
+  private finalizeGrab(
+    runtime: SourceRuntime,
+    options: {
+      focusSelectTap?: boolean
+      refresh?: boolean
+    } = {}
+  ) {
     const grabbedPanelId = this.model.snapshot().sources
       .get(runtime.id)?.grabbedPanelId
     const activation = runtime.grabbedBy
+    const moved = runtime.grabMoved
     this.model.releaseGrab(runtime.id)
     runtime.grabbedBy = null
     if (grabbedPanelId) {
       const panel = this.options.getPanels().get(grabbedPanelId)
       if (panel) {
         if (
-          focusOnTap
+          options.focusSelectTap
           && (
             activation === 'select'
             || activation === 'pinch'
           )
-          && !runtime.grabMoved
+          && !moved
         ) {
           this.options.renderer.xr.getCamera()
             .getWorldPosition(viewerPosition)
@@ -746,19 +996,26 @@ export class ImmersiveInteractionSystem {
             grabbedPanelId,
             resolveFocusedPanelLocalPosition(viewerPosition, panel.group)
           )
-        } else {
+        } else if (moved) {
           this.options.onPanelMoved(
             grabbedPanelId,
             panel.group.position.clone()
           )
+        } else if (activation) {
+          panel.moveTo(runtime.grabInitialPosition)
         }
       }
     }
-    this.refreshPanelInteraction()
+    if (options.refresh !== false) {
+      this.refreshPanelInteraction()
+    }
   }
 
   private updatePinch(runtime: SourceRuntime, now: number) {
     if (!runtime.inputSource?.hand) {
+      return
+    }
+    if (runtime.grabbedBy === 'touch') {
       return
     }
     const thumb = resolveTrackedHandJoint(runtime.hand, 'thumb-tip')
@@ -772,6 +1029,7 @@ export class ImmersiveInteractionSystem {
     const distance = thumbPosition.distanceTo(indexPosition)
     if (!runtime.pinching && distance <= 0.026) {
       runtime.pinching = true
+      this.preferredInput.use(runtime.id, now)
       this.handleSelectStart(runtime, now, false)
     } else if (runtime.pinching && distance >= 0.038) {
       this.endSynthesizedPinch(runtime, true)
@@ -789,49 +1047,91 @@ export class ImmersiveInteractionSystem {
     runtime.selecting = false
     this.model.selectEnd(runtime.id)
     if (runtime.grabbedBy === 'pinch') {
-      this.releaseGrab(runtime, focusOnTap)
+      this.finalizeGrab(runtime, { focusSelectTap: focusOnTap })
     }
   }
 
-  private updateGamepadScroll(runtime: SourceRuntime) {
-    const axes = runtime.inputSource?.gamepad?.axes
-    if (!axes || axes.length === 0) {
+  private updateGamepadScroll(
+    runtime: SourceRuntime,
+    now: number,
+    deltaSeconds: number
+  ) {
+    const source = runtime.inputSource
+    if (!source) {
       return
     }
-    const axis = axes.at(-1) ?? 0
-    if (Math.abs(axis) < 0.22) {
+    const axis = resolvePrimaryThumbstickY(source)
+    if (axis == null) {
       return
     }
-    const hover = this.model.snapshot().sources.get(runtime.id)?.hover
-    if (hover?.zone === 'content') {
-      this.options.onScroll(hover.panelId, axis * 0.5)
+    const delta = resolveThumbstickScrollDelta(axis, deltaSeconds)
+    if (delta === 0) {
+      return
+    }
+    const activePanelId = this.model.snapshot().activePanelId
+    const activePanel = activePanelId
+      ? this.options.getPanels().get(activePanelId)
+      : null
+    if (activePanelId && activePanel?.group.visible) {
+      this.preferredInput.use(runtime.id, now)
+      this.options.onScroll(
+        activePanelId,
+        delta,
+        activePanel.maximumScrollStart
+      )
     }
   }
 
   private refreshPanelInteraction() {
     const panels = this.options.getPanels()
-    this.model.reconcilePanels(new Set(panels.keys()))
+    const interactivePanelIds = new Set(
+      [...panels.entries()]
+        .filter(([, panel]) => panel.group.visible)
+        .map(([panelId]) => panelId)
+    )
+    const preReconcileSnapshot = this.model.snapshot()
+    for (const runtime of this.sources) {
+      const grabbedPanelId = preReconcileSnapshot.sources
+        .get(runtime.id)?.grabbedPanelId
+      if (
+        runtime.grabbedBy
+        && grabbedPanelId
+        && !interactivePanelIds.has(grabbedPanelId)
+      ) {
+        this.finalizeGrab(runtime, { refresh: false })
+      }
+    }
+    this.model.reconcilePanels(interactivePanelIds)
     const snapshot = this.model.snapshot()
+    for (const runtime of this.sources) {
+      if (
+        runtime.grabbedBy
+        && !snapshot.sources.get(runtime.id)?.grabbedPanelId
+      ) {
+        runtime.grabbedBy = null
+      }
+      if (
+        runtime.handScrollPanelId
+        && !interactivePanelIds.has(runtime.handScrollPanelId)
+      ) {
+        this.stopHandScroll(runtime)
+      }
+    }
     for (const [panelId, panel] of panels.entries()) {
       const sourceStates = [...snapshot.sources.values()]
       const hovered = sourceStates.some(
         source => source.hover?.panelId === panelId
       )
-      const grabHovered = sourceStates.some(source =>
-        source.hover?.panelId === panelId
-        && source.hover.zone === 'grab'
-      )
       const grabbed = snapshot.grabOwners.has(panelId)
       panel.setInteraction(
         hovered,
         grabbed,
-        grabHovered,
         snapshot.activePanelId === panelId
       )
     }
   }
 
-  update(now: number) {
+  update(now: number, deltaSeconds = 0) {
     if (this.disposed) {
       return
     }
@@ -841,42 +1141,20 @@ export class ImmersiveInteractionSystem {
         runtime.id,
         intersection ? this.hitFromObject(intersection.object) : null
       )
-      this.updatePinch(runtime, now)
       this.updateHandStatusContact(runtime)
+      this.updateHandPaneContact(runtime, now, deltaSeconds)
+      this.updatePinch(runtime, now)
       this.updateMenuButton(runtime)
-      this.updateGamepadScroll(runtime)
+      this.updateGamepadScroll(runtime, now, deltaSeconds)
 
       const sourceState = this.model.snapshot().sources.get(runtime.id)
-      if (sourceState?.selected?.zone === 'content' && runtime.selecting) {
-        const panel = this.options.getPanels().get(
-          sourceState.selected.panelId
-        )
-        const pointer = panel
-          ? resolveRayPanelPosition(
-              this.raycaster.ray,
-              panel.contentHit,
-              sourcePosition
-            )
-          : null
-        const delta = pointer
-          ? runtime.lastPointerY - pointer.y
-          : 0
-        if (pointer && Math.abs(delta) > 0.0025) {
-          this.options.onScroll(
-            sourceState.selected.panelId,
-            delta * 42
-          )
-          runtime.lastPointerY = pointer.y
-        }
-      }
-
       if (sourceState?.grabbedPanelId) {
         const panel = this.options.getPanels().get(sourceState.grabbedPanelId)
-        if (panel) {
-          if (
-            runtime.grabbedBy === 'select'
-            || runtime.grabbedBy === 'pinch'
-          ) {
+        if (panel?.group.visible) {
+          if (runtime.grabbedBy === 'touch') {
+            continue
+          }
+          if (runtime.inputSource?.hand) {
             this.updateTargetRay(runtime)
             this.options.renderer.xr.getCamera()
               .getWorldPosition(runtime.grabSphere.center)
@@ -899,11 +1177,44 @@ export class ImmersiveInteractionSystem {
               panel.moveTo(position)
             }
           } else {
-            runtime.grip.getWorldPosition(sourcePosition)
-            if (!runtime.inputSource?.gripSpace) {
-              runtime.targetRay.getWorldPosition(sourcePosition)
+            this.sourceAnchorPosition(runtime, sourcePosition)
+            sourceDisplacement.subVectors(
+              sourcePosition,
+              runtime.grabInitialSourcePosition
+            )
+            viewerLocalDisplacement.copy(sourceDisplacement)
+              .applyQuaternion(runtime.grabViewerInverseQuaternion)
+            const previousIntent = runtime.grabIntent
+            runtime.grabIntent = classifyPaneGrabIntent(
+              viewerLocalDisplacement,
+              runtime.grabIntent
+            )
+            const physicalDepth = sourceDisplacement.dot(runtime.grabSightLine)
+            if (
+              previousIntent === 'neutral'
+              && runtime.grabIntent === 'depth'
+            ) {
+              runtime.grabDepthActivation = physicalDepth
+              resolvePaneDepthActivationOffset({
+                initialPanelPosition: runtime.grabInitialWorldPosition,
+                initialViewerPosition: runtime.grabInitialViewerPosition,
+                sightLine: runtime.grabSightLine,
+                sourceDisplacement,
+                target: runtime.grabDepthActivationOffset
+              })
             }
-            const position = sourcePosition.add(runtime.grabOffset)
+            const position = runtime.grabIntent === 'depth'
+              ? resolveDepthLockedPanePosition({
+                  initialPanelPosition: runtime.grabInitialWorldPosition,
+                  initialViewerPosition: runtime.grabInitialViewerPosition,
+                  sightLine: runtime.grabSightLine,
+                  physicalDepth,
+                  activationPhysicalDepth: runtime.grabDepthActivation,
+                  activationOffset: runtime.grabDepthActivationOffset,
+                  target: panelWorldPosition
+                })
+              : panelWorldPosition.copy(runtime.grabInitialWorldPosition)
+                .add(sourceDisplacement)
             worldPointToPanelLocal(
               panel.group,
               position,
@@ -927,6 +1238,7 @@ export class ImmersiveInteractionSystem {
   dispose() {
     this.disposed = true
     this.model.clear()
+    this.preferredInput.clear()
     for (const runtime of this.sources) {
       if (runtime.listeners) {
         runtime.targetRay.removeEventListener(

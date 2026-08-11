@@ -65,7 +65,11 @@ export type ImmersiveSceneOptions = {
   canvas: HTMLCanvasElement
   reducedEffects: () => boolean
   onAction: (action: WorldControlAction) => void
-  onPanelScroll: (panelId: string, deltaLines: number) => void
+  onPanelScroll: (
+    panelId: string,
+    deltaLines: number,
+    maximumStart?: number
+  ) => void
   onPanelInteracted: (panelId: string) => void
   onPanelMoved: (panelId: string, position: Vector3) => void
   onPanelFocused: (panelId: string, position: Vector3) => void
@@ -143,6 +147,13 @@ export class ImmersiveScene {
   private environmentBlendMode: XREnvironmentBlendMode = 'opaque'
 
   private statusInvocation: StatusWindowInvocation | null = null
+
+  private panelInteractionPreview: {
+    panelId: string
+    state: 'idle' | 'active' | 'hover' | 'grab'
+  } | null = null
+
+  private panelHandControlsPreview = false
 
   constructor(private readonly options: ImmersiveSceneOptions) {
     this.renderer = new WebGLRenderer({
@@ -523,6 +534,37 @@ export class ImmersiveScene {
     }
   }
 
+  setPanelInteractionPreview(
+    panelId: string,
+    state: 'idle' | 'active' | 'hover' | 'grab'
+  ) {
+    this.panelInteractionPreview = { panelId, state }
+    this.applyPanelInteractionPreview()
+  }
+
+  private applyPanelInteractionPreview() {
+    const preview = this.panelInteractionPreview
+    if (!preview) {
+      return
+    }
+    for (const [id, panel] of this.panels) {
+      if (this.panelHandControlsPreview) {
+        panel.setHandControlsVisible(true)
+      }
+      panel.setInteraction(
+        id === preview.panelId
+          && (preview.state === 'hover' || preview.state === 'grab'),
+        id === preview.panelId && preview.state === 'grab',
+        id === preview.panelId && preview.state !== 'idle'
+      )
+    }
+  }
+
+  setPanelHandControlsPreview(visible: boolean) {
+    this.panelHandControlsPreview = visible
+    this.applyPanelInteractionPreview()
+  }
+
   resize() {
     const width = Math.max(1, this.options.canvas.clientWidth || window.innerWidth)
     const height = Math.max(1, this.options.canvas.clientHeight || window.innerHeight)
@@ -649,14 +691,15 @@ export class ImmersiveScene {
     )
 
     for (const view of this.panels.values()) {
-      view.updateAnimation(now)
+      view.updateAnimation(now, this.options.reducedEffects())
       smoothViewerFacingQuaternion(
         view.group.quaternion,
         viewerFacingLocalQuaternion(view.group, viewerPosition),
         deltaSeconds
       )
     }
-    this.interaction.update(now)
+    this.interaction.update(now, deltaSeconds)
+    this.applyPanelInteractionPreview()
     this.renderer.render(this.scene, this.camera)
   }
 

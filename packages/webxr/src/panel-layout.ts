@@ -112,6 +112,16 @@ export const allocatePanelSlots = (
       continue
     }
 
+    if (panel.userMoved && panel.position) {
+      placements.push({
+        id: panel.id,
+        slot: panel.slot ?? -1,
+        position: { ...panel.position },
+        overflow: false
+      })
+      continue
+    }
+
     let slot = panel.slot
     if (slot == null || slot < 0 || slot >= slots.length || occupied.has(slot)) {
       slot = slots.findIndex((_candidate, candidateIndex) => !occupied.has(candidateIndex))

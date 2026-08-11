@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { truncateCanvasText } from '../src/text-surface'
+import {
+  resolveTextViewportMetrics,
+  truncateCanvasText
+} from '../src/text-surface'
 
 const context = {
   measureText: (text: string) => ({
@@ -30,5 +33,28 @@ describe('canvas text surface', () => {
 
   it('returns an empty label when even an ellipsis cannot fit', () => {
     expect(truncateCanvasText(context, 'title', 0)).toBe('')
+  })
+
+  it('reports exact overflow metrics at top, middle, and live tail', () => {
+    expect(resolveTextViewportMetrics(10, 4, 0)).toEqual({
+      totalLineCount: 10,
+      visibleLineCount: 4,
+      startLine: 0,
+      endLine: 4,
+      hasAbove: false,
+      hasBelow: true
+    })
+    expect(resolveTextViewportMetrics(10, 4, 3)).toMatchObject({
+      startLine: 3,
+      endLine: 7,
+      hasAbove: true,
+      hasBelow: true
+    })
+    expect(resolveTextViewportMetrics(10, 4)).toMatchObject({
+      startLine: 6,
+      endLine: 10,
+      hasAbove: true,
+      hasBelow: false
+    })
   })
 })

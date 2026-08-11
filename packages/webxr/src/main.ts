@@ -67,6 +67,14 @@ const developmentBlendPreview = developmentKitchenSink
   ? searchParams.get('blend') as 'alpha-blend' | 'additive'
   : null
 const developmentStatusPreview = searchParams.get('status') !== '0'
+const developmentPaneState = (() => {
+  const state = searchParams.get('paneState')
+  return state === 'idle' || state === 'hover' || state === 'grab'
+    ? state
+    : 'active'
+})()
+const developmentPaneId = searchParams.get('paneId') || 'kitchen-command'
+const developmentHandControls = searchParams.get('handControls') !== '0'
 const soundEffects = new ImmersiveSoundEffects()
 window.addEventListener('pagehide', () => {
   void soundEffects.dispose()
@@ -233,8 +241,8 @@ const ensureScene = async () => {
               void exitImmersive()
             }
           },
-          onPanelScroll: (panelId, deltaLines) => {
-            workspaceRuntime?.scrollPanel(panelId, deltaLines)
+          onPanelScroll: (panelId, deltaLines, maximumStart) => {
+            workspaceRuntime?.scrollPanel(panelId, deltaLines, maximumStart)
           },
           onPanelInteracted: (panelId) => {
             workspaceRuntime?.touchPanel(panelId)
@@ -582,6 +590,8 @@ const enterDebugScene = async () => {
     scene.setActivity('speaking')
     scene.setTranscript(fixture.transcripts, fixture.generation)
     scene.setPanels(fixture.panels)
+    scene.setPanelInteractionPreview(developmentPaneId, developmentPaneState)
+    scene.setPanelHandControlsPreview(developmentHandControls)
     scene.setStatus(
       'Kitchen sink · non-immersive texture and layout preview'
     )
@@ -610,7 +620,7 @@ const enterDebugScene = async () => {
       connection: 'connected',
       voice: 'active',
       activePaneCount: fixture.panels.length,
-      threadLabel: 'Issue #142 kitchen sink',
+      threadLabel: 'Issue #143 kitchen sink',
       workspaceLabel: 'project:codori',
       sessionLabel: developmentBlendPreview
         ? `immersive-ar · ${developmentBlendPreview}`
