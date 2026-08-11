@@ -50,6 +50,7 @@ import { WorldStatus } from './world-status'
 import {
   StatusWindowView
 } from './status-window-view'
+import { resolveStatusWindowAnchorPosition } from './status-window-placement'
 import type {
   StatusActionId,
   StatusWindowInvocation,
@@ -89,7 +90,7 @@ const floorCenter = new Vector3()
 const statusAnchorPosition = new Vector3()
 const menuWorldPosition = new Vector3()
 const menuOffset = new Vector3(0.52, -0.32, -1.15)
-const fallbackStatusOffset = new Vector3(-0.18, 0, -1.12)
+const fallbackStatusOffset = new Vector3(-0.08, 0, -0.4)
 
 export class ImmersiveScene {
   readonly scene = new Scene()
@@ -605,8 +606,11 @@ export class ImmersiveScene {
     const anchor = this.interaction.statusAnchor()
     if (anchor && this.statusWindow.group.visible) {
       anchor.getWorldPosition(statusAnchorPosition)
-      this.statusWindow.group.position.copy(statusAnchorPosition)
-      this.statusWindow.group.position.y += 0.34
+      resolveStatusWindowAnchorPosition(
+        statusAnchorPosition,
+        viewerPosition,
+        this.statusWindow.group.position
+      )
       const statusTarget = viewerFacingQuaternion(
         this.statusWindow.group.position,
         viewerPosition

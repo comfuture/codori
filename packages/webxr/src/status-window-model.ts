@@ -355,12 +355,9 @@ export class StatusActionInteractionModel {
 export const STATUS_GESTURE_THRESHOLDS = {
   openHeightMeters: -0.2,
   closeHeightMeters: -0.5,
-  closePoseHeightMeters: -0.34,
   openFacingDot: 0.68,
-  closeFacingDot: 0.05,
   holdMs: 700,
   lowerHoldMs: 350,
-  trackingLossGraceMs: 500,
   cooldownMs: 750
 } as const
 
@@ -368,8 +365,6 @@ export class StatusGestureModel {
   private candidateSince: number | null = null
   private lowerSince: number | null = null
   private cooldownUntil = 0
-
-  private trackingLostSince: number | null = null
 
   suppress(now: number) {
     this.candidateSince = null
@@ -383,38 +378,21 @@ export class StatusGestureModel {
     if (sample.controllerActive) {
       this.candidateSince = null
       this.lowerSince = null
-      this.trackingLostSince = null
       return null
     }
     if (state.open && state.invocation !== 'hand') {
       this.candidateSince = null
       this.lowerSince = null
-      this.trackingLostSince = null
       return null
     }
     if (!sample.tracked) {
       this.candidateSince = null
       this.lowerSince = null
-      if (!state.open || state.invocation !== 'hand') {
-        this.trackingLostSince = null
-        return null
-      }
-      this.trackingLostSince ??= sample.now
-      return sample.now - this.trackingLostSince
-        >= STATUS_GESTURE_THRESHOLDS.trackingLossGraceMs
-        ? 'close' as const
-        : null
+      return null
     }
-    this.trackingLostSince = null
     if (state.open) {
       const lowered = sample.wristHeightFromEyes
         <= STATUS_GESTURE_THRESHOLDS.closeHeightMeters
-        || (
-          sample.wristHeightFromEyes
-            <= STATUS_GESTURE_THRESHOLDS.closePoseHeightMeters
-          && sample.handBackFacingViewer
-            <= STATUS_GESTURE_THRESHOLDS.closeFacingDot
-        )
       if (!lowered) {
         this.lowerSince = null
         return null

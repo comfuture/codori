@@ -286,7 +286,7 @@ describe('XR status window model', () => {
     expect(lost.update({ ...state, now: 1_300, tracked: false, gripHeightFromEyes: -1 })).toBe('close')
   })
 
-  it('gives hand tracking loss a grace period before dismissal', () => {
+  it('keeps a hand-opened window available through tracking loss', () => {
     const gesture = new StatusGestureModel()
     const state = { open: true, invocation: 'hand' as const }
     const sample = {
@@ -296,7 +296,7 @@ describe('XR status window model', () => {
       handBackFacingViewer: -1
     }
     expect(gesture.update({ ...sample, now: 0 }, state)).toBe(null)
-    expect(gesture.update({ ...sample, now: 499 }, state)).toBe(null)
-    expect(gesture.update({ ...sample, now: 500 }, state)).toBe('close')
+    expect(gesture.update({ ...sample, now: 500 }, state)).toBe(null)
+    expect(gesture.update({ ...sample, now: 5_000 }, state)).toBe(null)
   })
 })
