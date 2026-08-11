@@ -93,7 +93,7 @@ Tracked hand:
 
 - WebXR exposes articulated joint poses and radii; it does not guarantee a compositor-rendered hand. Codori therefore draws a lightweight connected outline for each tracked hand, hides it when tracking is lost or a same-handed controller is active, and excludes every outline primitive from raycasts and collisions.
 - direct `index-finger-tip` contact moves a nearby pane from any non-actionable point
-- index/thumb pinch remotely grabs a distant pane; opening the pinch releases it
+- index/thumb pinch remotely grabs a distant pane from the physical fingertip midpoint; lateral motion remains 1:1 while pulling the pinched hand toward the viewer enters the same sticky `3.2×` accelerated depth movement and `0.65–4.5 m` clamps as a controller grab. Opening the pinch releases it
 - visible top/bottom triangles are direct fingertip scroll controls. Scrolling starts slowly, accelerates smoothly to a cap while contact remains, and stops immediately on leave or tracking/source loss
 - remote pinch never activates status-window actions, which retain the direct-touch-only hand policy
 
@@ -125,7 +125,7 @@ Web Audio synthesizes a one-second agent-awakening cue whose low mechanical chor
 
 ## Panel semantics and caps
 
-Foreground command, file-change, MCP, dynamic-tool, and web-search panels appear near the central field of view on `item/started`, update continuously from progress/output deltas, stay visible while active, dwell for one minute after terminal completion, then shrink and dispose. Four screen-space anchors each have a front/back depth pair: when a new panel reaches an occupied anchor, the existing panel eases `0.55 m` back and the new panel opens in front. Scrolling, moving, or focusing a completed panel restarts that one-minute dwell. A manually dismissed panel does not reappear when late deltas arrive.
+Foreground command, file-change, MCP, dynamic-tool, and web-search panels appear near the central field of view on `item/started`, update continuously from progress/output deltas, stay visible while active, dwell for one minute after terminal completion, then shrink and dispose. Four screen-space anchors each have a front/back depth pair. New panes prefer an anchor whose projected area is clear of both automatic and manually positioned panes. If overlap is unavoidable, the new pane receives the nearer depth; when every automatic slot is full, the newest pane takes a front slot, its previous occupant moves back, and the displaced back pane remains queued as overflow rather than covering the latest information. Scrolling, moving, or focusing a completed panel restarts that one-minute dwell. A manually dismissed panel does not reappear when late deltas arrive.
 
 Panel height follows the estimated wrapped output, including double-width CJK characters. Short results use a compact `0.44 m` panel and grow with their content; the previous `0.92 m` height is the maximum.
 

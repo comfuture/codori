@@ -130,12 +130,23 @@ export class SpatialPanelModel {
     const existing = this.panels.get(input.id)
     if (!existing) {
       const assignment = assignNewPanelToFrontSlot(this.snapshots())
+      if (assignment?.overflowed) {
+        const overflowed = this.panels.get(assignment.overflowed.id)
+        if (overflowed) {
+          this.panels.set(overflowed.id, {
+            ...overflowed,
+            slot: null,
+            position: null
+          })
+        }
+      }
       if (assignment?.displaced) {
         const displaced = this.panels.get(assignment.displaced.id)
         if (displaced) {
           this.panels.set(displaced.id, {
             ...displaced,
-            slot: assignment.displaced.slot
+            slot: assignment.displaced.slot,
+            position: null
           })
         }
       }
@@ -148,7 +159,7 @@ export class SpatialPanelModel {
         scrollOffset: Number.POSITIVE_INFINITY,
         autoFollow: true,
         userMoved: false,
-        position: null,
+        position: assignment?.position ?? null,
         slot: assignment?.slot ?? null,
         fileTransitionStartedAt: now
       }

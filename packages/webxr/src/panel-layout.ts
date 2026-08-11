@@ -20,6 +20,10 @@ export type NewPanelSlotAssignment = {
     id: string
     slot: number
   } | null
+  overflowed: {
+    id: string
+  } | null
+  position: SpatialPoint | null
 }
 
 const slots: SpatialPoint[] = [
@@ -34,6 +38,53 @@ const slots: SpatialPoint[] = [
 ]
 
 const frontSlots = [0, 1, 2, 3] as const
+const PANEL_PROJECTED_WIDTH_METERS = 1.55
+const PANEL_PROJECTED_HEIGHT_METERS = 0.92
+const PANEL_FORWARD_LAYER_GAP_METERS = 0.28
+const PANEL_MAX_AUTOMATIC_FORWARD_Z = 1.7
+
+const projectedManualOverlaps = (
+  frontSlot: number,
+  panels: readonly SpatialPanelSnapshot[]
+) => {
+  const anchor = slots[frontSlot]!
+  return panels.filter(panel =>
+    panel.userMoved
+    && panel.position !== null
+    && Math.abs(panel.position.x - anchor.x) < PANEL_PROJECTED_WIDTH_METERS
+    && Math.abs(panel.position.y - anchor.y) < PANEL_PROJECTED_HEIGHT_METERS
+  )
+}
+
+const rankedFrontSlots = (
+  panels: readonly SpatialPanelSnapshot[]
+) => [...frontSlots].sort((first, second) => (
+  projectedManualOverlaps(first, panels).length
+    - projectedManualOverlaps(second, panels).length
+) || first - second)
+
+const resolveNewPanelPosition = (
+  frontSlot: number,
+  panels: readonly SpatialPanelSnapshot[]
+) => {
+  const overlapping = projectedManualOverlaps(frontSlot, panels)
+  if (overlapping.length === 0) {
+    return null
+  }
+  const anchor = slots[frontSlot]!
+  return {
+    ...anchor,
+    z: Math.min(
+      PANEL_MAX_AUTOMATIC_FORWARD_Z,
+      Math.max(
+        anchor.z,
+        ...overlapping.map(panel => (
+          panel.position!.z + PANEL_FORWARD_LAYER_GAP_METERS
+        ))
+      )
+    )
+  }
+}
 
 export const assignNewPanelToFrontSlot = (
   panels: readonly SpatialPanelSnapshot[]
@@ -48,41 +99,53 @@ export const assignNewPanelToFrontSlot = (
       )
       .map(panel => [panel.slot!, panel])
   )
-  const emptyAnchor = frontSlots.find(frontSlot =>
+  const ranked = rankedFrontSlots(panels)
+  const result = (
+    slot: number,
+    displaced: NewPanelSlotAssignment['displaced'] = null,
+    overflowed: NewPanelSlotAssignment['overflowed'] = null
+  ): NewPanelSlotAssignment => ({
+    slot,
+    displaced,
+    overflowed,
+    position: resolveNewPanelPosition(slot, panels)
+  })
+  const emptyAnchor = ranked.find(frontSlot =>
     !occupantBySlot.has(frontSlot)
     && !occupantBySlot.has(frontSlot + frontSlots.length)
   )
   if (emptyAnchor != null) {
-    return {
-      slot: emptyAnchor,
-      displaced: null
-    }
+    return result(emptyAnchor)
   }
 
-  const openFront = frontSlots.find(frontSlot =>
+  const openFront = ranked.find(frontSlot =>
     !occupantBySlot.has(frontSlot)
   )
   if (openFront != null) {
-    return {
-      slot: openFront,
-      displaced: null
-    }
+    return result(openFront)
   }
 
-  for (const frontSlot of frontSlots) {
+  for (const frontSlot of ranked) {
     const backSlot = frontSlot + frontSlots.length
     const occupant = occupantBySlot.get(frontSlot)
     if (occupant && !occupantBySlot.has(backSlot)) {
-      return {
-        slot: frontSlot,
-        displaced: {
-          id: occupant.id,
-          slot: backSlot
-        }
-      }
+      return result(frontSlot, {
+        id: occupant.id,
+        slot: backSlot
+      })
     }
   }
-  return null
+
+  const frontSlot = ranked[0]!
+  const backSlot = frontSlot + frontSlots.length
+  const frontOccupant = occupantBySlot.get(frontSlot)!
+  const backOccupant = occupantBySlot.get(backSlot)!
+  return result(frontSlot, {
+    id: frontOccupant.id,
+    slot: backSlot
+  }, {
+    id: backOccupant.id
+  })
 }
 
 export const allocatePanelSlots = (
@@ -90,11 +153,11 @@ export const allocatePanelSlots = (
   center: SpatialPoint
 ): PanelPlacement[] => {
   const stable = [...panels].sort((first, second) => {
-    if (first.background !== second.background) {
-      return first.background ? -1 : 1
-    }
     if (first.slot != null !== (second.slot != null)) {
       return first.slot != null ? -1 : 1
+    }
+    if (first.background !== second.background) {
+      return first.background ? -1 : 1
     }
     return first.id.localeCompare(second.id)
   })
@@ -116,6 +179,17 @@ export const allocatePanelSlots = (
       placements.push({
         id: panel.id,
         slot: panel.slot ?? -1,
+        position: { ...panel.position },
+        overflow: false
+      })
+      continue
+    }
+
+    if (panel.position && panel.slot != null && !occupied.has(panel.slot)) {
+      occupied.add(panel.slot)
+      placements.push({
+        id: panel.id,
+        slot: panel.slot,
         position: { ...panel.position },
         overflow: false
       })

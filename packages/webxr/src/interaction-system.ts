@@ -10,7 +10,6 @@ import {
   Quaternion,
   Raycaster,
   type Ray,
-  Sphere,
   SphereGeometry,
   Vector3,
   type Object3D,
@@ -64,8 +63,6 @@ type SourceRuntime = {
   pinching: boolean
   statusPressActive: boolean
   grabbedBy: 'select' | 'squeeze' | 'pinch' | 'touch' | null
-  grabOffset: Vector3
-  grabSphere: Sphere
   grabInitialPosition: Vector3
   grabInitialWorldPosition: Vector3
   grabInitialSourcePosition: Vector3
@@ -158,16 +155,6 @@ export const isPanelGrabTap = (
   currentPosition: Vector3
 ) => initialPosition.distanceTo(currentPosition)
   <= PANEL_GRAB_TAP_MAX_DISTANCE_METERS
-
-export const resolveRayGrabPosition = (
-  ray: Ray,
-  sphere: Sphere,
-  offset: Vector3,
-  target = new Vector3()
-) => {
-  const intersection = ray.intersectSphere(sphere, target)
-  return intersection?.add(offset) ?? null
-}
 
 export const resolveTrackedHandJoint = (
   hand: XRHandSpace,
@@ -349,8 +336,6 @@ export class ImmersiveInteractionSystem {
       pinching: false,
       statusPressActive: false,
       grabbedBy: null,
-      grabOffset: new Vector3(),
-      grabSphere: new Sphere(),
       grabInitialPosition: new Vector3(),
       grabInitialWorldPosition: new Vector3(),
       grabInitialSourcePosition: new Vector3(),
@@ -1105,21 +1090,83 @@ export class ImmersiveInteractionSystem {
       runtime.grabInitialViewerPosition
     ).normalize()
     if (runtime.inputSource?.hand) {
-      runtime.grabSphere.center.copy(runtime.grabInitialViewerPosition)
-      runtime.grabSphere.radius = Math.max(
-        0.25,
-        runtime.grabInitialViewerPosition.distanceTo(intersection!.point)
-      )
-      panel.group.getWorldPosition(sourcePosition)
-      runtime.grabOffset.copy(sourcePosition).sub(intersection!.point)
+      if (!this.handPinchPosition(runtime, runtime.grabInitialSourcePosition)) {
+        runtime.grabbedBy = null
+        this.model.releaseGrab(runtime.id)
+        this.refreshPanelInteraction()
+        return
+      }
       this.refreshPanelInteraction()
       return
     }
     this.sourceAnchorPosition(runtime, sourcePosition)
     runtime.grabInitialSourcePosition.copy(sourcePosition)
-    panel.group.getWorldPosition(runtime.grabOffset)
-    runtime.grabOffset.sub(sourcePosition)
     this.refreshPanelInteraction()
+  }
+
+  private handPinchPosition(runtime: SourceRuntime, target: Vector3) {
+    const thumb = resolveTrackedHandJoint(runtime.hand, 'thumb-tip')
+    const index = resolveTrackedHandJoint(runtime.hand, 'index-finger-tip')
+    if (!thumb || !index) {
+      return null
+    }
+    thumb.getWorldPosition(thumbPosition)
+    index.getWorldPosition(indexPosition)
+    return target.copy(thumbPosition).add(indexPosition).multiplyScalar(0.5)
+  }
+
+  private updateSpatialGrab(
+    runtime: SourceRuntime,
+    panel: SpatialPanelView,
+    currentSourcePosition: Vector3
+  ) {
+    sourceDisplacement.subVectors(
+      currentSourcePosition,
+      runtime.grabInitialSourcePosition
+    )
+    viewerLocalDisplacement.copy(sourceDisplacement)
+      .applyQuaternion(runtime.grabViewerInverseQuaternion)
+    const previousIntent = runtime.grabIntent
+    runtime.grabIntent = classifyPaneGrabIntent(
+      viewerLocalDisplacement,
+      runtime.grabIntent
+    )
+    const physicalDepth = sourceDisplacement.dot(runtime.grabSightLine)
+    if (
+      previousIntent === 'neutral'
+      && runtime.grabIntent === 'depth'
+    ) {
+      runtime.grabDepthActivation = physicalDepth
+      resolvePaneDepthActivationOffset({
+        initialPanelPosition: runtime.grabInitialWorldPosition,
+        initialViewerPosition: runtime.grabInitialViewerPosition,
+        sightLine: runtime.grabSightLine,
+        sourceDisplacement,
+        target: runtime.grabDepthActivationOffset
+      })
+    }
+    const position = runtime.grabIntent === 'depth'
+      ? resolveDepthLockedPanePosition({
+          initialPanelPosition: runtime.grabInitialWorldPosition,
+          initialViewerPosition: runtime.grabInitialViewerPosition,
+          sightLine: runtime.grabSightLine,
+          physicalDepth,
+          activationPhysicalDepth: runtime.grabDepthActivation,
+          activationOffset: runtime.grabDepthActivationOffset,
+          target: panelWorldPosition
+        })
+      : panelWorldPosition.copy(runtime.grabInitialWorldPosition)
+        .add(sourceDisplacement)
+    worldPointToPanelLocal(
+      panel.group,
+      position,
+      position
+    )
+    runtime.grabMoved ||= !isPanelGrabTap(
+      runtime.grabInitialPosition,
+      position
+    )
+    panel.moveTo(position)
   }
 
   private sourceAnchorPosition(runtime: SourceRuntime, target: Vector3) {
@@ -1328,76 +1375,16 @@ export class ImmersiveInteractionSystem {
             continue
           }
           if (runtime.inputSource?.hand) {
-            this.updateTargetRay(runtime)
-            this.options.renderer.xr.getCamera()
-              .getWorldPosition(runtime.grabSphere.center)
-            const position = resolveRayGrabPosition(
-              this.raycaster.ray,
-              runtime.grabSphere,
-              runtime.grabOffset,
+            const pinchPosition = this.handPinchPosition(
+              runtime,
               sourcePosition
             )
-            if (position) {
-              worldPointToPanelLocal(
-                panel.group,
-                position,
-                position
-              )
-              runtime.grabMoved ||= !isPanelGrabTap(
-                runtime.grabInitialPosition,
-                position
-              )
-              panel.moveTo(position)
+            if (pinchPosition) {
+              this.updateSpatialGrab(runtime, panel, pinchPosition)
             }
           } else {
             this.sourceAnchorPosition(runtime, sourcePosition)
-            sourceDisplacement.subVectors(
-              sourcePosition,
-              runtime.grabInitialSourcePosition
-            )
-            viewerLocalDisplacement.copy(sourceDisplacement)
-              .applyQuaternion(runtime.grabViewerInverseQuaternion)
-            const previousIntent = runtime.grabIntent
-            runtime.grabIntent = classifyPaneGrabIntent(
-              viewerLocalDisplacement,
-              runtime.grabIntent
-            )
-            const physicalDepth = sourceDisplacement.dot(runtime.grabSightLine)
-            if (
-              previousIntent === 'neutral'
-              && runtime.grabIntent === 'depth'
-            ) {
-              runtime.grabDepthActivation = physicalDepth
-              resolvePaneDepthActivationOffset({
-                initialPanelPosition: runtime.grabInitialWorldPosition,
-                initialViewerPosition: runtime.grabInitialViewerPosition,
-                sightLine: runtime.grabSightLine,
-                sourceDisplacement,
-                target: runtime.grabDepthActivationOffset
-              })
-            }
-            const position = runtime.grabIntent === 'depth'
-              ? resolveDepthLockedPanePosition({
-                  initialPanelPosition: runtime.grabInitialWorldPosition,
-                  initialViewerPosition: runtime.grabInitialViewerPosition,
-                  sightLine: runtime.grabSightLine,
-                  physicalDepth,
-                  activationPhysicalDepth: runtime.grabDepthActivation,
-                  activationOffset: runtime.grabDepthActivationOffset,
-                  target: panelWorldPosition
-                })
-              : panelWorldPosition.copy(runtime.grabInitialWorldPosition)
-                .add(sourceDisplacement)
-            worldPointToPanelLocal(
-              panel.group,
-              position,
-              position
-            )
-            runtime.grabMoved ||= !isPanelGrabTap(
-              runtime.grabInitialPosition,
-              position
-            )
-            panel.moveTo(position)
+            this.updateSpatialGrab(runtime, panel, sourcePosition)
           }
         }
       }
