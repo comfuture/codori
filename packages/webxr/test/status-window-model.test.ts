@@ -194,22 +194,21 @@ describe('XR status window model', () => {
       tracked: true,
       controllerActive: false,
       wristHeightFromEyes: -0.2,
-      handBackFacingViewer: 0.7
+      handBackFacingViewer: 0.7,
+      gazeAtHandDot: 0.95
     }
     const closed = { open: false, invocation: null }
     expect(gesture.update({ ...posed, now: 0 }, closed)).toBe(null)
     expect(gesture.update({ ...posed, now: 699 }, closed)).toBe(null)
     expect(gesture.update({ ...posed, now: 700 }, closed)).toBe('open')
-    const lowered = {
-      ...posed,
-      wristHeightFromEyes: -0.6,
-      handBackFacingViewer: 0.1
-    }
     const handOpen = { open: true, invocation: 'hand' as const }
-    expect(gesture.update({ ...lowered, now: 500 }, handOpen)).toBe(null)
-    expect(gesture.update({ ...lowered, now: 849 }, handOpen)).toBe(null)
-    expect(gesture.update({ ...lowered, now: 850 }, handOpen)).toBe('close')
-    expect(gesture.update({ ...posed, now: 1_599 }, closed)).toBe(null)
+    expect(gesture.update({ ...posed, now: 701 }, handOpen)).toBe(null)
+    expect(gesture.update({ ...posed, now: 881 }, handOpen)).toBe(null)
+    expect(gesture.update({ ...posed, now: 981, wristHeightFromEyes: -0.3 }, handOpen)).toBe(null)
+    expect(gesture.update({ ...posed, now: 1_081, wristHeightFromEyes: -0.42 }, handOpen)).toBe(null)
+    expect(gesture.update({ ...posed, now: 1_400, wristHeightFromEyes: -0.42 }, handOpen)).toBe(null)
+    expect(gesture.update({ ...posed, now: 1_401, wristHeightFromEyes: -0.42 }, handOpen)).toBe('close')
+    expect(gesture.update({ ...posed, now: 2_150 }, closed)).toBe(null)
   })
 
   it('keeps modest post-open motion inside the pose hysteresis', () => {
@@ -219,10 +218,85 @@ describe('XR status window model', () => {
       tracked: true,
       controllerActive: false,
       wristHeightFromEyes: -0.3,
-      handBackFacingViewer: -0.2
+      handBackFacingViewer: -0.2,
+      gazeAtHandDot: 0.95
     }
     expect(gesture.update({ ...moved, now: 0 }, open)).toBe(null)
     expect(gesture.update({ ...moved, now: 1_000 }, open)).toBe(null)
+  })
+
+  it('requires the viewer to keep looking toward the raised hand during reveal dwell', () => {
+    const gesture = new StatusGestureModel()
+    const closed = { open: false, invocation: null }
+    const sample = {
+      tracked: true,
+      controllerActive: false,
+      wristHeightFromEyes: -0.15,
+      handBackFacingViewer: 0.8,
+      gazeAtHandDot: 0.5
+    }
+    expect(gesture.update({ ...sample, now: 0 }, closed)).toBe(null)
+    expect(gesture.update({ ...sample, now: 1_000 }, closed)).toBe(null)
+    expect(gesture.update({ ...sample, now: 1_001, gazeAtHandDot: 0.95 }, closed)).toBe(null)
+    expect(gesture.update({ ...sample, now: 1_700, gazeAtHandDot: 0.95 }, closed)).toBe(null)
+    expect(gesture.update({ ...sample, now: 1_701, gazeAtHandDot: 0.95 }, closed)).toBe('open')
+  })
+
+  it('dismisses only after the hand back is deliberately turned away', () => {
+    const gesture = new StatusGestureModel()
+    const open = { open: true, invocation: 'hand' as const }
+    const sample = {
+      tracked: true,
+      controllerActive: false,
+      wristHeightFromEyes: -0.15,
+      handBackFacingViewer: 0.8,
+      gazeAtHandDot: 0.95
+    }
+    expect(gesture.update({ ...sample, now: 0 }, open)).toBe(null)
+    expect(gesture.update({ ...sample, now: 180 }, open)).toBe(null)
+    expect(gesture.update({ ...sample, now: 200, handBackFacingViewer: -0.4 }, open)).toBe(null)
+    expect(gesture.update({ ...sample, now: 759, handBackFacingViewer: -0.4 }, open)).toBe(null)
+    expect(gesture.update({ ...sample, now: 760, handBackFacingViewer: -0.4 }, open)).toBe('close')
+  })
+
+  it('cancels dismissal motion while the right hand is selecting', () => {
+    const gesture = new StatusGestureModel()
+    const open = { open: true, invocation: 'hand' as const }
+    const sample = {
+      tracked: true,
+      controllerActive: false,
+      wristHeightFromEyes: -0.15,
+      handBackFacingViewer: 0.8,
+      gazeAtHandDot: 0.95
+    }
+    expect(gesture.update({ ...sample, now: 0 }, open)).toBe(null)
+    expect(gesture.update({ ...sample, now: 180 }, open)).toBe(null)
+    expect(gesture.update({
+      ...sample,
+      now: 300,
+      wristHeightFromEyes: -0.4,
+      handBackFacingViewer: -0.5,
+      rightHandEngaged: true
+    }, open)).toBe(null)
+    expect(gesture.update({
+      ...sample,
+      now: 1_000,
+      wristHeightFromEyes: -0.4,
+      handBackFacingViewer: -0.5,
+      rightHandEngaged: true
+    }, open)).toBe(null)
+    expect(gesture.update({
+      ...sample,
+      now: 1_699,
+      wristHeightFromEyes: -0.4,
+      handBackFacingViewer: -0.5
+    }, open)).toBe(null)
+    expect(gesture.update({
+      ...sample,
+      now: 1_700,
+      wristHeightFromEyes: -0.4,
+      handBackFacingViewer: 0.8
+    }, open)).toBe(null)
   })
 
   it('arms only after emergence and snapshots stale press/contact state', () => {
@@ -269,7 +343,8 @@ describe('XR status window model', () => {
       tracked: false,
       controllerActive: true,
       wristHeightFromEyes: -1,
-      handBackFacingViewer: -1
+      handBackFacingViewer: -1,
+      gazeAtHandDot: -1
     }, { open: true, invocation: 'controller' })).toBe(null)
   })
 
@@ -293,7 +368,8 @@ describe('XR status window model', () => {
       tracked: false,
       controllerActive: false,
       wristHeightFromEyes: -1,
-      handBackFacingViewer: -1
+      handBackFacingViewer: -1,
+      gazeAtHandDot: -1
     }
     expect(gesture.update({ ...sample, now: 0 }, state)).toBe(null)
     expect(gesture.update({ ...sample, now: 500 }, state)).toBe(null)

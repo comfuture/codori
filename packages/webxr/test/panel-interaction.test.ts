@@ -114,7 +114,8 @@ const createInteractionHarness = (
     onPanelDismiss: vi.fn(),
     onStatusToggle: vi.fn(),
     onStatusDismiss: vi.fn(),
-    onStatusAction: vi.fn()
+    onStatusAction: vi.fn(),
+    onStatusPressedChanged: vi.fn()
   }
   const system = new ImmersiveInteractionSystem({
     renderer,
@@ -521,7 +522,11 @@ describe('panel interaction model', () => {
     const wrist = Object.assign(new Group(), {
       jointRadius: 0.014
     }) as unknown as XRJointSpace
-    wrist.position.set(0, -0.15, -0.04)
+    wrist.position.set(0, -0.15, -0.5)
+    wrist.quaternion.setFromUnitVectors(
+      new Vector3(0, 1, 0),
+      wrist.position.clone().negate().normalize()
+    )
     wrist.visible = true
     hands[0]!.visible = true
     hands[0]!.joints.wrist = wrist
@@ -595,6 +600,68 @@ describe('panel interaction model', () => {
     system.update(344, 1 / 60)
     expect(callbacks.onStatusAction).toHaveBeenCalledTimes(1)
     expect(callbacks.onStatusAction).toHaveBeenCalledWith('passthrough')
+    system.dispose()
+  })
+
+  it('treats approach as engagement but activates only at fingertip surface contact', () => {
+    const target = new Mesh(
+      new BoxGeometry(0.2, 0.1, 0.004),
+      new MeshBasicMaterial({ transparent: true, opacity: 0 })
+    )
+    target.position.set(0, 0, -1.002)
+    target.userData.statusActionId = 'passthrough'
+    target.userData.statusActionAvailable = true
+    target.userData.statusInputPolicy = 'controller-or-touch'
+    target.updateMatrixWorld(true)
+    const statusState = {
+      open: true,
+      fullyOpen: true,
+      invocation: 'hand' as const
+    }
+    const { system, hands, callbacks } = createInteractionHarness(
+      new Map(),
+      { targets: [target], state: statusState }
+    )
+    const internals = system as unknown as {
+      sources: Array<{
+        listeners: { connected: (event: unknown) => void }
+      }>
+    }
+    internals.sources[0]!.listeners.connected({
+      data: {
+        handedness: 'right',
+        hand: {},
+        targetRayMode: 'tracked-pointer',
+        profiles: ['generic-hand-select']
+      } as unknown as XRInputSource
+    })
+    const index = Object.assign(new Group(), {
+      jointRadius: 0.009
+    }) as unknown as XRJointSpace
+    index.position.set(0, 0, -0.97)
+    index.visible = true
+    hands[0]!.visible = true
+    hands[0]!.joints['index-finger-tip'] = index
+    hands[0]!.add(index)
+    hands[0]!.updateMatrixWorld(true)
+
+    system.update(0, 1 / 60)
+    system.update(180, 1 / 60)
+    system.update(181, 1 / 60)
+    expect(system.isStatusHandEngaged()).toBe(true)
+    expect(callbacks.onStatusAction).not.toHaveBeenCalled()
+    expect(callbacks.onStatusPressedChanged).not.toHaveBeenCalledWith(
+      'passthrough'
+    )
+
+    index.position.z = -0.99
+    hands[0]!.updateMatrixWorld(true)
+    system.update(182, 1 / 60)
+    expect(callbacks.onStatusAction).toHaveBeenCalledTimes(1)
+    expect(callbacks.onStatusAction).toHaveBeenCalledWith('passthrough')
+    expect(callbacks.onStatusPressedChanged).toHaveBeenCalledWith(
+      'passthrough'
+    )
     system.dispose()
   })
 
@@ -809,16 +876,23 @@ describe('panel interaction model', () => {
     const wrist = Object.assign(new Group(), {
       jointRadius: 0.014
     }) as unknown as XRJointSpace
-    wrist.position.set(0, -0.6, -0.1)
+    wrist.position.set(0, -0.15, -0.5)
     wrist.visible = true
     hands[0]!.visible = true
     hands[0]!.joints.wrist = wrist
     hands[0]!.add(wrist)
     hands[0]!.updateMatrixWorld(true)
     system.update(0, 1 / 60)
-    system.update(349, 1 / 60)
+    system.update(180, 1 / 60)
+    wrist.position.y = -0.3
+    hands[0]!.updateMatrixWorld(true)
+    system.update(280, 1 / 60)
+    wrist.position.y = -0.4
+    hands[0]!.updateMatrixWorld(true)
+    system.update(380, 1 / 60)
+    system.update(699, 1 / 60)
     expect(callbacks.onStatusDismiss).not.toHaveBeenCalled()
-    system.update(350, 1 / 60)
+    system.update(700, 1 / 60)
     expect(callbacks.onStatusDismiss).toHaveBeenCalledTimes(1)
     expect(callbacks.onStatusAction).not.toHaveBeenCalled()
     system.dispose()

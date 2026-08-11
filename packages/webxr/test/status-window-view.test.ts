@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   drawStatusWindowFrame,
+  STATUS_WINDOW_ACTION_APPEARANCE,
   STATUS_WINDOW_APPEARANCE,
   STATUS_WINDOW_CORNER_RADIUS_PIXELS,
   STATUS_WINDOW_HEIGHT_METERS,
+  STATUS_WINDOW_HIT_DEPTH_METERS,
   STATUS_WINDOW_WIDTH_METERS
 } from '../src/status-window-view'
 
@@ -11,6 +13,7 @@ describe('status window view', () => {
   it('uses the requested one-third physical size', () => {
     expect(STATUS_WINDOW_WIDTH_METERS).toBeCloseTo(0.72 / 3)
     expect(STATUS_WINDOW_HEIGHT_METERS).toBeCloseTo(0.96 / 3)
+    expect(STATUS_WINDOW_HIT_DEPTH_METERS).toBeLessThan(0.01)
   })
 
   it('draws one rounded saturated lime frame with a soft glow', () => {
@@ -41,5 +44,14 @@ describe('status window view', () => {
     expect(context.stroke).toHaveBeenCalledTimes(1)
     expect(context.shadowBlur).toBe(0)
     expect(STATUS_WINDOW_APPEARANCE.accent).toBe('#c8ff4d')
+  })
+
+  it('uses a distinctly brighter lime fill for direct-touch feedback', () => {
+    expect(STATUS_WINDOW_ACTION_APPEARANCE.pressedFill)
+      .not.toBe(STATUS_WINDOW_ACTION_APPEARANCE.idleFill)
+    expect(STATUS_WINDOW_ACTION_APPEARANCE.pressedFill)
+      .toContain('0.42')
+    expect(STATUS_WINDOW_ACTION_APPEARANCE.pressedBorder)
+      .toContain('0.96')
   })
 })

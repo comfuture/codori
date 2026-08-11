@@ -213,6 +213,8 @@ export type StatusGestureSample = {
   controllerActive: boolean
   wristHeightFromEyes: number
   handBackFacingViewer: number
+  gazeAtHandDot: number
+  rightHandEngaged?: boolean
 }
 
 export type StatusWindowInvocation = 'controller' | 'hand' | 'fallback'
@@ -354,21 +356,59 @@ export class StatusActionInteractionModel {
 
 export const STATUS_GESTURE_THRESHOLDS = {
   openHeightMeters: -0.2,
-  closeHeightMeters: -0.5,
   openFacingDot: 0.68,
+  openGazeDot: 0.86,
+  closeFacingDot: -0.3,
+  closeFacingResetDot: 0.05,
+  lowerTravelMeters: 0.18,
+  lowerEndHeightMeters: -0.36,
+  maximumPoseJumpMeters: 0.08,
+  maximumWristSpeedMetersPerSecond: 1.6,
   holdMs: 700,
-  lowerHoldMs: 350,
+  turnAwayHoldMs: 560,
+  lowerHoldMs: 320,
+  trackingRecoveryMs: 180,
+  selectionProtectionMs: 700,
   cooldownMs: 750
 } as const
 
 export class StatusGestureModel {
   private candidateSince: number | null = null
+
+  private turnAwaySince: number | null = null
+
   private lowerSince: number | null = null
+
+  private openReferenceHeight: number | null = null
+
+  private lastTrackedHeight: number | null = null
+
+  private lastTrackedAt: number | null = null
+
+  private trackingStableSince: number | null = null
+
+  private selectionProtectedUntil = 0
+
+  private wasOpen = false
+
   private cooldownUntil = 0
 
   suppress(now: number) {
     this.candidateSince = null
+    this.resetDismissalIntent()
     this.cooldownUntil = now + STATUS_GESTURE_THRESHOLDS.cooldownMs
+  }
+
+  private resetDismissalIntent() {
+    this.turnAwaySince = null
+    this.lowerSince = null
+  }
+
+  private resetTrackingContinuity() {
+    this.resetDismissalIntent()
+    this.lastTrackedHeight = null
+    this.lastTrackedAt = null
+    this.trackingStableSince = null
   }
 
   update(
@@ -377,38 +417,120 @@ export class StatusGestureModel {
   ) {
     if (sample.controllerActive) {
       this.candidateSince = null
-      this.lowerSince = null
+      this.resetDismissalIntent()
       return null
     }
     if (state.open && state.invocation !== 'hand') {
       this.candidateSince = null
-      this.lowerSince = null
+      this.resetDismissalIntent()
       return null
     }
     if (!sample.tracked) {
       this.candidateSince = null
-      this.lowerSince = null
+      this.resetTrackingContinuity()
       return null
     }
     if (state.open) {
-      const lowered = sample.wristHeightFromEyes
-        <= STATUS_GESTURE_THRESHOLDS.closeHeightMeters
-      if (!lowered) {
-        this.lowerSince = null
+      if (!this.wasOpen) {
+        this.openReferenceHeight = sample.wristHeightFromEyes
+        this.resetTrackingContinuity()
+      }
+      this.wasOpen = true
+      this.candidateSince = null
+
+      const previousHeight = this.lastTrackedHeight
+      const previousTrackedAt = this.lastTrackedAt
+      this.lastTrackedHeight = sample.wristHeightFromEyes
+      this.lastTrackedAt = sample.now
+      const trackingIntervalSeconds = previousTrackedAt === null
+        ? 0
+        : Math.max(0, sample.now - previousTrackedAt) / 1_000
+      const maximumContinuousMovement = (
+        STATUS_GESTURE_THRESHOLDS.maximumPoseJumpMeters
+        + trackingIntervalSeconds
+          * STATUS_GESTURE_THRESHOLDS.maximumWristSpeedMetersPerSecond
+      )
+      if (
+        previousHeight !== null
+        && Math.abs(sample.wristHeightFromEyes - previousHeight)
+        > maximumContinuousMovement
+      ) {
+        // A large single-frame wrist jump is characteristic of hand
+        // occlusion/reacquisition, not a deliberate lowering trajectory.
+        this.openReferenceHeight = null
+        this.resetDismissalIntent()
+        this.trackingStableSince = sample.now
         return null
       }
-      this.lowerSince ??= sample.now
-      if (sample.now - this.lowerSince >= STATUS_GESTURE_THRESHOLDS.lowerHoldMs) {
+
+      this.trackingStableSince ??= sample.now
+      this.openReferenceHeight = Math.max(
+        this.openReferenceHeight ?? sample.wristHeightFromEyes,
+        sample.wristHeightFromEyes
+      )
+
+      if (sample.rightHandEngaged) {
+        this.selectionProtectedUntil = sample.now
+          + STATUS_GESTURE_THRESHOLDS.selectionProtectionMs
+        this.openReferenceHeight = sample.wristHeightFromEyes
+        this.resetDismissalIntent()
+        return null
+      }
+      if (
+        sample.now < this.selectionProtectedUntil
+        || sample.now - this.trackingStableSince
+        < STATUS_GESTURE_THRESHOLDS.trackingRecoveryMs
+      ) {
+        this.openReferenceHeight = sample.wristHeightFromEyes
+        this.resetDismissalIntent()
+        return null
+      }
+
+      if (
+        sample.handBackFacingViewer
+        <= STATUS_GESTURE_THRESHOLDS.closeFacingDot
+      ) {
+        this.turnAwaySince ??= sample.now
+      } else if (
+        sample.handBackFacingViewer
+        >= STATUS_GESTURE_THRESHOLDS.closeFacingResetDot
+      ) {
+        this.turnAwaySince = null
+      }
+
+      const lowered = (
+        (this.openReferenceHeight - sample.wristHeightFromEyes)
+          >= STATUS_GESTURE_THRESHOLDS.lowerTravelMeters
+        && sample.wristHeightFromEyes
+          <= STATUS_GESTURE_THRESHOLDS.lowerEndHeightMeters
+      )
+      if (lowered) {
+        this.lowerSince ??= sample.now
+      } else {
         this.lowerSince = null
+      }
+
+      const turnedAwayLongEnough = this.turnAwaySince !== null
+        && sample.now - this.turnAwaySince
+          >= STATUS_GESTURE_THRESHOLDS.turnAwayHoldMs
+      const loweredLongEnough = this.lowerSince !== null
+        && sample.now - this.lowerSince
+          >= STATUS_GESTURE_THRESHOLDS.lowerHoldMs
+      if (turnedAwayLongEnough || loweredLongEnough) {
+        this.resetDismissalIntent()
         this.cooldownUntil = sample.now + STATUS_GESTURE_THRESHOLDS.cooldownMs
         return 'close' as const
       }
       return null
     }
+    this.wasOpen = false
+    this.openReferenceHeight = null
+    this.resetTrackingContinuity()
     const posed = sample.wristHeightFromEyes
       >= STATUS_GESTURE_THRESHOLDS.openHeightMeters
       && sample.handBackFacingViewer
       >= STATUS_GESTURE_THRESHOLDS.openFacingDot
+      && sample.gazeAtHandDot >= STATUS_GESTURE_THRESHOLDS.openGazeDot
     if (!posed || sample.now < this.cooldownUntil) {
       this.candidateSince = null
       return null
@@ -416,6 +538,7 @@ export class StatusGestureModel {
     this.candidateSince ??= sample.now
     if (sample.now - this.candidateSince >= STATUS_GESTURE_THRESHOLDS.holdMs) {
       this.candidateSince = null
+      this.openReferenceHeight = sample.wristHeightFromEyes
       return 'open' as const
     }
     return null
