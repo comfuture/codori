@@ -27,6 +27,8 @@ export type SoundEffectPlan = {
 
 const awakeningPlan = soundEffectPlans.awakening as SoundEffectPlan
 const panelAppearPlan = soundEffectPlans.panelAppear as SoundEffectPlan
+const statusOpenPlan = soundEffectPlans.statusOpen as SoundEffectPlan
+const statusClosePlan = soundEffectPlans.statusClose as SoundEffectPlan
 
 const easeOutCubic = (progress: number) =>
   1 - ((1 - progress) ** 3)
@@ -70,6 +72,16 @@ export const resolvePanelAppearSoundPlan = (
     1 + (Math.max(1, panelCount) - 1) * 0.12
   ),
   tones: panelAppearPlan.tones.map(tone => ({ ...tone }))
+})
+
+export const resolveStatusOpenSoundPlan = (): SoundEffectPlan => ({
+  ...statusOpenPlan,
+  tones: statusOpenPlan.tones.map(tone => ({ ...tone }))
+})
+
+export const resolveStatusCloseSoundPlan = (): SoundEffectPlan => ({
+  ...statusClosePlan,
+  tones: statusClosePlan.tones.map(tone => ({ ...tone }))
 })
 
 type AudioContextConstructor = new () => AudioContext
@@ -235,6 +247,14 @@ export class ImmersiveSoundEffects {
 
   playPanelAppear(panelCount = 1) {
     return this.play(resolvePanelAppearSoundPlan(panelCount))
+  }
+
+  playStatusOpen() {
+    return this.play(resolveStatusOpenSoundPlan())
+  }
+
+  playStatusClose() {
+    return this.play(resolveStatusCloseSoundPlan())
   }
 
   async dispose() {

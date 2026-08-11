@@ -163,7 +163,9 @@ await mkdir(outputDirectory, { recursive: true })
 
 for (const [name, plan] of [
   ['agent-awakening.wav', soundEffectPlans.awakening],
-  ['panel-appear.wav', soundEffectPlans.panelAppear]
+  ['panel-appear.wav', soundEffectPlans.panelAppear],
+  ['status-open.wav', soundEffectPlans.statusOpen],
+  ['status-close.wav', soundEffectPlans.statusClose]
 ]) {
   const outputPath = path.join(outputDirectory, name)
   await writeFile(outputPath, wavBuffer(renderPlan(plan)))
