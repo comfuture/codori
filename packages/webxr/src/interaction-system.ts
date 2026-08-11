@@ -115,6 +115,7 @@ export type InteractionSystemOptions = {
   onStatusToggle: (invocation: StatusWindowInvocation) => void
   onStatusDismiss: () => void
   onStatusAction: (action: StatusActionId) => void
+  onStatusPressedChanged?: (action: StatusActionId | null) => void
   onInputCapabilitiesChanged: (input: {
     controller: boolean
     hand: boolean
@@ -137,6 +138,8 @@ const panelPlaneQuaternion = new Quaternion()
 const jointQuaternion = new Quaternion()
 const handBackNormal = new Vector3()
 const wristToViewer = new Vector3()
+const viewerToWrist = new Vector3()
+const viewerForward = new Vector3()
 const contactBounds = new Box3()
 const sourceDisplacement = new Vector3()
 const viewerLocalDisplacement = new Vector3()
@@ -147,6 +150,8 @@ const PANEL_GRAB_TAP_MAX_DISTANCE_METERS = (
   PANE_GRAB_CLASSIFICATION_THRESHOLD_METERS * 0.75
 )
 const PANEL_FOCUSED_DISTANCE_METERS = 1.8
+const STATUS_HAND_TOUCH_SLOP_METERS = 0.0015
+const STATUS_HAND_ENGAGEMENT_DISTANCE_METERS = 0.18
 
 export const isPanelGrabTap = (
   initialPosition: Vector3,
@@ -281,6 +286,10 @@ export class ImmersiveInteractionSystem {
   private readonly statusControllerArm = new StatusControllerArmModel()
 
   private readonly preferredInput = new PreferredPaneInputModel()
+
+  private statusHandEngaged = false
+
+  private statusPressedAction: StatusActionId | null = null
 
   private lastInputCapabilities = ''
 
@@ -652,7 +661,11 @@ export class ImmersiveInteractionSystem {
       return
     }
     index.getWorldPosition(indexPosition)
-    const target = this.nearestStatusContact(indexPosition, 0.018)
+    const radius = Math.max(0.006, index.jointRadius ?? 0.009)
+    const target = this.nearestStatusContact(
+      indexPosition,
+      radius + STATUS_HAND_TOUCH_SLOP_METERS
+    )
     const action = typeof target?.userData.statusActionId === 'string'
       ? target.userData.statusActionId as StatusActionId
       : null
@@ -930,6 +943,7 @@ export class ImmersiveInteractionSystem {
     this.options.renderer.xr.getCamera().getWorldPosition(viewerPosition)
     let height = Number.NEGATIVE_INFINITY
     let facing = Number.NEGATIVE_INFINITY
+    let gaze = Number.NEGATIVE_INFINITY
     if (wrist) {
       wrist.getWorldPosition(sourcePosition)
       wrist.getWorldQuaternion(jointQuaternion)
@@ -937,13 +951,18 @@ export class ImmersiveInteractionSystem {
       wristToViewer.subVectors(viewerPosition, sourcePosition).normalize()
       height = sourcePosition.y - viewerPosition.y
       facing = handBackNormal.dot(wristToViewer)
+      this.options.renderer.xr.getCamera().getWorldDirection(viewerForward)
+      viewerToWrist.subVectors(sourcePosition, viewerPosition).normalize()
+      gaze = viewerForward.dot(viewerToWrist)
     }
     const event = this.statusGesture.update({
       now,
       tracked: Boolean(wrist),
       controllerActive: leftController,
       wristHeightFromEyes: height,
-      handBackFacingViewer: facing
+      handBackFacingViewer: facing,
+      gazeAtHandDot: gaze,
+      rightHandEngaged: this.statusHandEngaged
     }, {
       open: this.options.isStatusOpen(),
       invocation: this.options.getStatusInvocation()
@@ -1008,6 +1027,48 @@ export class ImmersiveInteractionSystem {
     return hand
       ? resolveTrackedHandJoint(hand.hand, 'wrist')
       : null
+  }
+
+  isStatusHandEngaged() {
+    return this.statusHandEngaged
+  }
+
+  private updateStatusHandEngagement() {
+    this.statusHandEngaged = false
+    if (!this.options.isStatusOpen()) {
+      return
+    }
+    const rightHand = this.sources.find(runtime =>
+      runtime.inputSource?.handedness === 'right'
+      && Boolean(runtime.inputSource.hand)
+    )
+    const index = rightHand
+      ? resolveTrackedHandJoint(rightHand.hand, 'index-finger-tip')
+      : null
+    if (!index) {
+      return
+    }
+    index.getWorldPosition(indexPosition)
+    this.statusHandEngaged = this.nearestStatusContact(
+      indexPosition,
+      STATUS_HAND_ENGAGEMENT_DISTANCE_METERS
+    ) !== null
+  }
+
+  private updateStatusPressedVisual() {
+    const pressed = this.sources.find(runtime =>
+      runtime.inputSource?.handedness === 'right'
+      && Boolean(runtime.inputSource.hand)
+      && !runtime.statusPressActive
+      && !runtime.pinching
+      && !runtime.selecting
+      && runtime.contactActionId !== null
+    )?.contactActionId ?? null
+    if (pressed === this.statusPressedAction) {
+      return
+    }
+    this.statusPressedAction = pressed
+    this.options.onStatusPressedChanged?.(pressed)
   }
 
   private handleGrabStart(
@@ -1242,6 +1303,7 @@ export class ImmersiveInteractionSystem {
       open: this.options.isStatusOpen(),
       fullyOpen: this.options.isStatusFullyOpen?.() ?? false
     })
+    this.updateStatusHandEngagement()
     for (const runtime of this.sources) {
       this.statusActions.updatePress(
         runtime.id,
@@ -1340,6 +1402,7 @@ export class ImmersiveInteractionSystem {
         }
       }
     }
+    this.updateStatusPressedVisual()
     this.updateHandOutlines()
     this.updateInputCapabilities()
     this.updateStatusGesture(now)
@@ -1352,6 +1415,7 @@ export class ImmersiveInteractionSystem {
     this.disposed = true
     this.model.clear()
     this.preferredInput.clear()
+    this.options.onStatusPressedChanged?.(null)
     for (const runtime of this.sources) {
       if (runtime.listeners) {
         runtime.targetRay.removeEventListener(

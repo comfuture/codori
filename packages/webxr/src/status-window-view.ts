@@ -31,6 +31,11 @@ export const STATUS_WINDOW_APPEARANCE = {
   muted: 'rgba(222, 255, 166, 0.78)',
   glow: 'rgba(194, 255, 67, 0.58)'
 } as const
+export const STATUS_WINDOW_ACTION_APPEARANCE = {
+  idleFill: 'rgba(177, 255, 61, 0.14)',
+  pressedFill: 'rgba(210, 255, 112, 0.42)',
+  pressedBorder: 'rgba(226, 255, 166, 0.96)'
+} as const
 
 const WIDTH_METERS = STATUS_WINDOW_WIDTH_METERS
 const HEIGHT_METERS = STATUS_WINDOW_HEIGHT_METERS
@@ -39,7 +44,8 @@ const HEIGHT_PIXELS = 960
 const ACTION_TOP_PIXELS = 570
 const ACTION_AREA_PIXELS = 310
 const HIT_INSET_METERS = 0.027
-const HIT_DEPTH_METERS = 0.015
+export const STATUS_WINDOW_HIT_DEPTH_METERS = 0.004
+const HIT_DEPTH_METERS = STATUS_WINDOW_HIT_DEPTH_METERS
 
 const clamp01 = (value: number) => Math.min(1, Math.max(0, value))
 
@@ -156,6 +162,8 @@ export class StatusWindowView {
 
   private snapshot: StatusWindowSnapshot | null = null
 
+  private pressedAction: StatusAction['id'] | null = null
+
   private phase: StatusWindowPhase = 'closed'
 
   private phaseStartedAt = 0
@@ -224,7 +232,9 @@ export class StatusWindowView {
           depthWrite: false
         })
       )
-      hit.position.z = HIT_DEPTH_METERS / 2
+      // Keep the touch volume behind the visible surface. A fingertip is a
+      // direct touch only when its tracked joint radius reaches z=0.
+      hit.position.z = -HIT_DEPTH_METERS / 2
       hit.name = `status-action-${index}`
       this.actionHits.push(hit)
       this.windowGroup.add(hit)
@@ -259,6 +269,17 @@ export class StatusWindowView {
         hit.userData.statusInputPolicy = action.inputPolicy
       }
     })
+    this.render()
+  }
+
+  setPressedAction(action: StatusAction['id'] | null) {
+    if (action === null && this.phase === 'closing') {
+      return
+    }
+    if (this.pressedAction === action) {
+      return
+    }
+    this.pressedAction = action
     this.render()
   }
 
@@ -306,6 +327,7 @@ export class StatusWindowView {
       this.windowGroup.scale.set(scale.x, scale.y, 1)
       if (progressValue >= 1) {
         this.phase = 'closed'
+        this.pressedAction = null
         this.group.visible = false
         this.menuGroup.visible = this.menuRequested
       }
@@ -326,12 +348,23 @@ export class StatusWindowView {
     )[index]!
     const rowPixels = row.height
     const y = row.top
-    context.fillStyle = action.available
-      ? 'rgba(177, 255, 61, 0.14)'
-      : 'rgba(128, 153, 92, 0.08)'
+    const pressed = action.available && action.id === this.pressedAction
+    context.fillStyle = pressed
+      ? STATUS_WINDOW_ACTION_APPEARANCE.pressedFill
+      : action.available
+        ? STATUS_WINDOW_ACTION_APPEARANCE.idleFill
+        : 'rgba(128, 153, 92, 0.08)'
     context.beginPath()
     context.roundRect(38, y + 4, WIDTH_PIXELS - 76, rowPixels - 8, 14)
     context.fill()
+    if (pressed) {
+      context.strokeStyle = STATUS_WINDOW_ACTION_APPEARANCE.pressedBorder
+      context.lineWidth = 4
+      context.shadowColor = STATUS_WINDOW_APPEARANCE.glow
+      context.shadowBlur = 18
+      context.stroke()
+      context.shadowBlur = 0
+    }
     context.fillStyle = action.available
       ? STATUS_WINDOW_APPEARANCE.text
       : 'rgba(220, 236, 188, 0.56)'

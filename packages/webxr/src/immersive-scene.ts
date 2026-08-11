@@ -50,7 +50,10 @@ import { WorldStatus } from './world-status'
 import {
   StatusWindowView
 } from './status-window-view'
-import { resolveStatusWindowAnchorPosition } from './status-window-placement'
+import {
+  resolveStatusWindowAnchorPosition,
+  StatusWindowAnchorTracker
+} from './status-window-placement'
 import type {
   StatusActionId,
   StatusWindowInvocation,
@@ -151,6 +154,8 @@ export class ImmersiveScene {
 
   private statusInvocation: StatusWindowInvocation | null = null
 
+  private readonly statusAnchorTracker = new StatusWindowAnchorTracker()
+
   private panelInteractionPreview: {
     panelId: string
     state: 'idle' | 'active' | 'hover' | 'grab'
@@ -210,6 +215,9 @@ export class ImmersiveScene {
       onStatusAction: (action) => {
         this.closeStatusWindow()
         options.onStatusAction(action)
+      },
+      onStatusPressedChanged: action => {
+        this.statusWindow.setPressedAction(action)
       },
       onInputCapabilitiesChanged: ({ fallbackMenu }) => {
         this.statusWindow.setMenuVisible(fallbackMenu)
@@ -369,6 +377,7 @@ export class ImmersiveScene {
   private toggleStatusWindow(invocation: StatusWindowInvocation) {
     if (this.statusWindow.toggle(performance.now())) {
       if (this.statusWindow.isOpen) {
+        this.statusAnchorTracker.reset()
         this.statusInvocation = invocation
         this.options.onStatusOpened()
       } else {
@@ -390,6 +399,7 @@ export class ImmersiveScene {
 
   private closeStatusWindow() {
     if (this.statusWindow.close(performance.now())) {
+      this.statusAnchorTracker.reset()
       this.statusInvocation = null
       this.options.onStatusClosed()
     }
@@ -604,7 +614,36 @@ export class ImmersiveScene {
     camera.getWorldPosition(viewerPosition)
     const now = performance.now()
     const anchor = this.interaction.statusAnchor()
-    if (anchor && this.statusWindow.group.visible) {
+    if (
+      this.statusInvocation === 'hand'
+      && this.statusWindow.group.visible
+    ) {
+      const trackedWrist = anchor
+        ? anchor.getWorldPosition(statusAnchorPosition)
+        : null
+      const trackedPosition = this.statusAnchorTracker.update({
+        wristPosition: trackedWrist,
+        viewerPosition,
+        selectionEngaged: this.interaction.isStatusHandEngaged(),
+        deltaSeconds
+      })
+      if (trackedPosition) {
+        this.statusWindow.group.position.copy(trackedPosition)
+      } else {
+        this.statusWindow.group.position.copy(fallbackStatusOffset)
+          .applyQuaternion(camera.quaternion)
+          .add(viewerPosition)
+      }
+      const statusTarget = viewerFacingQuaternion(
+        this.statusWindow.group.position,
+        viewerPosition
+      )
+      smoothViewerFacingQuaternion(
+        this.statusWindow.group.quaternion,
+        statusTarget,
+        deltaSeconds
+      )
+    } else if (anchor && this.statusWindow.group.visible) {
       anchor.getWorldPosition(statusAnchorPosition)
       resolveStatusWindowAnchorPosition(
         statusAnchorPosition,
