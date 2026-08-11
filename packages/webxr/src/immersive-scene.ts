@@ -90,6 +90,37 @@ const viewerDirection = new Vector3()
 const worldCenter = new Vector3(0, 1.65, 0)
 const worldForward = new Vector3(0, 0, -1)
 const floorCenter = new Vector3()
+export const ROOM_FLOOR_RENDER_ORDER = -100
+export const ROOM_GRID_RENDER_ORDER = -99
+export const ROOM_WALL_RENDER_ORDER = -101
+
+export const configureRoomSurfaceRendering = (
+  floor: Mesh,
+  grid: GridHelper,
+  walls: readonly Mesh[] = []
+) => {
+  const floorMaterials = Array.isArray(floor.material)
+    ? floor.material
+    : [floor.material]
+  const gridMaterials = Array.isArray(grid.material)
+    ? grid.material
+    : [grid.material]
+  const wallMaterials = walls.flatMap(wall => (
+    Array.isArray(wall.material) ? wall.material : [wall.material]
+  ))
+  for (const material of [
+    ...floorMaterials,
+    ...gridMaterials,
+    ...wallMaterials
+  ]) {
+    material.depthWrite = false
+  }
+  floor.renderOrder = ROOM_FLOOR_RENDER_ORDER
+  grid.renderOrder = ROOM_GRID_RENDER_ORDER
+  for (const wall of walls) {
+    wall.renderOrder = ROOM_WALL_RENDER_ORDER
+  }
+}
 const statusAnchorPosition = new Vector3()
 const menuWorldPosition = new Vector3()
 const menuOffset = new Vector3(0.52, -0.32, -1.15)
@@ -275,6 +306,7 @@ export class ImmersiveScene {
     const right = new Mesh(wallGeometry.clone(), wallMaterial.clone())
     right.position.set(ROOM_SIZE_METERS / 2, 1.8, 0)
     right.rotation.y = -Math.PI / 2
+    configureRoomSurfaceRendering(floor, grid, [back, front, left, right])
     this.room.add(back, front, left, right)
   }
 
