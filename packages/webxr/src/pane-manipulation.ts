@@ -101,6 +101,36 @@ export const resolveDepthLockedPanePosition = (input: {
   )
   .add(input.activationOffset)
 
+/**
+ * Accelerates only the sight-line component of a physical hand pull. Unlike
+ * controller depth lock, the live lateral fingertip displacement remains 1:1
+ * so a held pinch can still place the pane left/right and up/down.
+ */
+export const resolveHandPinchDepthPanePosition = (input: {
+  initialPanelPosition: Vector3
+  initialViewerPosition: Vector3
+  sightLine: Vector3
+  sourceDisplacement: Vector3
+  activationPhysicalDepth: number
+  target?: Vector3
+}) => {
+  const physicalDepth = input.sourceDisplacement.dot(input.sightLine)
+  return (input.target ?? new Vector3())
+    .copy(input.initialViewerPosition)
+    .addScaledVector(
+      input.sightLine,
+      resolveAcceleratedPaneDepth({
+        initialDistance: input.initialViewerPosition.distanceTo(
+          input.initialPanelPosition
+        ),
+        physicalDepth,
+        activationPhysicalDepth: input.activationPhysicalDepth
+      })
+    )
+    .add(input.sourceDisplacement)
+    .addScaledVector(input.sightLine, -physicalDepth)
+}
+
 export const applyThumbstickDeadZone = (
   value: number,
   deadZone = PANE_SCROLL_DEAD_ZONE
