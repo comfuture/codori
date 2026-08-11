@@ -124,7 +124,11 @@ const normalizeRateLimitBucket = (value: unknown): RateLimitBucket | null => {
 
 const collectRateLimitCandidates = (value: unknown) => {
   const root = isObjectRecord(value) ? value : null
-  const rateLimits = Array.isArray(root?.rateLimits) ? root.rateLimits : []
+  const rateLimits = Array.isArray(root?.rateLimits)
+    ? root.rateLimits
+    : isObjectRecord(root?.rateLimits)
+      ? [root.rateLimits]
+      : []
   const rateLimitsByLimitId = isObjectRecord(root?.rateLimitsByLimitId)
     ? Object.values(root.rateLimitsByLimitId)
     : []
@@ -133,7 +137,13 @@ const collectRateLimitCandidates = (value: unknown) => {
     return [...rateLimits, ...rateLimitsByLimitId]
   }
 
-  return Array.isArray(value) ? value : []
+  if (Array.isArray(value)) {
+    return value
+  }
+
+  return root && ('primary' in root || 'secondary' in root)
+    ? [root]
+    : []
 }
 
 export const normalizeAccountRateLimits = (value: unknown): RateLimitBucket[] => {
@@ -165,6 +175,18 @@ export const normalizeAccountRateLimits = (value: unknown): RateLimitBucket[] =>
     return leftLabel.localeCompare(rightLabel)
   })
 }
+
+/**
+ * Merge a sparse rolling update into the last authoritative snapshot.
+ * Missing/null values in an update never erase facts already observed.
+ */
+export const mergeAccountRateLimits = (
+  existing: readonly RateLimitBucket[],
+  update: unknown
+): RateLimitBucket[] => normalizeAccountRateLimits([
+  ...existing,
+  ...normalizeAccountRateLimits(update)
+])
 
 export const formatRateLimitWindowDuration = (value: number | null) => {
   if (value == null || value <= 0) {

@@ -4,6 +4,7 @@ import { useProjects } from '../composables/useProjects'
 import { useRpc } from '../composables/useRpc'
 import {
   normalizeAccountRateLimits,
+  mergeAccountRateLimits,
   formatRateLimitWindowDuration,
   type RateLimitBucket
 } from '../../shared/account-rate-limits'
@@ -99,8 +100,10 @@ const closeUsageStatus = () => {
   resetUsageStatusState()
 }
 
-const applyUsageStatusSnapshot = (value: unknown) => {
-  buckets.value = normalizeAccountRateLimits(value)
+const applyUsageStatusSnapshot = (value: unknown, sparse = false) => {
+  buckets.value = sparse
+    ? mergeAccountRateLimits(buckets.value, value)
+    : normalizeAccountRateLimits(value)
   error.value = null
 }
 
@@ -130,7 +133,7 @@ const openUsageStatus = async () => {
       return
     }
 
-    applyUsageStatusSnapshot(notification.params)
+    applyUsageStatusSnapshot(notification.params, true)
     loading.value = false
   })
 
