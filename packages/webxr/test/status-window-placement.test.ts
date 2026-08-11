@@ -115,4 +115,24 @@ describe('status window placement', () => {
     expect(reacquired.x).toBeGreaterThan(first.x)
     expect(reacquired.y).toBeLessThan(first.y)
   })
+
+  it('does not reacquire while the wrist keeps drifting', () => {
+    const tracker = new StatusWindowAnchorTracker()
+    const first = tracker.update({
+      wristPosition: new Vector3(-0.18, 1.44, -0.34),
+      selectionEngaged: false,
+      deltaSeconds: 1 / 60
+    })!.clone()
+
+    let tracked = first
+    for (let index = 0; index < 12; index += 1) {
+      tracked = tracker.update({
+        wristPosition: new Vector3(0.2 + index * 0.03, 1.2, -0.5),
+        selectionEngaged: false,
+        deltaSeconds: 1 / 60
+      })!.clone()
+    }
+
+    expect(tracked).toEqual(first)
+  })
 })

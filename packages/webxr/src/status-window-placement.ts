@@ -91,7 +91,6 @@ export class StatusWindowAnchorTracker {
         this.reacquireSeconds = 0
         return this.hasPosition ? this.position : null
       }
-      this.reacquireCandidate.copy(candidate)
       this.reacquireSeconds += Math.max(0, input.deltaSeconds)
       if (this.reacquireSeconds < STATUS_WINDOW_REACQUIRE_SECONDS) {
         return this.hasPosition ? this.position : null
