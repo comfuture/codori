@@ -35,6 +35,7 @@ import {
   PANE_GRAB_CLASSIFICATION_THRESHOLD_METERS,
   PreferredPaneInputModel,
   resolveDepthLockedPanePosition,
+  resolveHandPinchDepthPanePosition,
   resolveHandScrollRate,
   resolvePaneDepthActivationOffset,
   resolvePrimaryThumbstickY,
@@ -1183,24 +1184,37 @@ export class ImmersiveInteractionSystem {
       && runtime.grabIntent === 'depth'
     ) {
       runtime.grabDepthActivation = physicalDepth
-      resolvePaneDepthActivationOffset({
-        initialPanelPosition: runtime.grabInitialWorldPosition,
-        initialViewerPosition: runtime.grabInitialViewerPosition,
-        sightLine: runtime.grabSightLine,
-        sourceDisplacement,
-        target: runtime.grabDepthActivationOffset
-      })
-    }
-    const position = runtime.grabIntent === 'depth'
-      ? resolveDepthLockedPanePosition({
+      if (runtime.inputSource?.hand) {
+        runtime.grabDepthActivationOffset.set(0, 0, 0)
+      } else {
+        resolvePaneDepthActivationOffset({
           initialPanelPosition: runtime.grabInitialWorldPosition,
           initialViewerPosition: runtime.grabInitialViewerPosition,
           sightLine: runtime.grabSightLine,
-          physicalDepth,
-          activationPhysicalDepth: runtime.grabDepthActivation,
-          activationOffset: runtime.grabDepthActivationOffset,
-          target: panelWorldPosition
+          sourceDisplacement,
+          target: runtime.grabDepthActivationOffset
         })
+      }
+    }
+    const position = runtime.grabIntent === 'depth'
+      ? runtime.inputSource?.hand
+        ? resolveHandPinchDepthPanePosition({
+            initialPanelPosition: runtime.grabInitialWorldPosition,
+            initialViewerPosition: runtime.grabInitialViewerPosition,
+            sightLine: runtime.grabSightLine,
+            sourceDisplacement,
+            activationPhysicalDepth: runtime.grabDepthActivation,
+            target: panelWorldPosition
+          })
+        : resolveDepthLockedPanePosition({
+            initialPanelPosition: runtime.grabInitialWorldPosition,
+            initialViewerPosition: runtime.grabInitialViewerPosition,
+            sightLine: runtime.grabSightLine,
+            physicalDepth,
+            activationPhysicalDepth: runtime.grabDepthActivation,
+            activationOffset: runtime.grabDepthActivationOffset,
+            target: panelWorldPosition
+          })
       : panelWorldPosition.copy(runtime.grabInitialWorldPosition)
         .add(sourceDisplacement)
     worldPointToPanelLocal(

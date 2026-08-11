@@ -8,6 +8,7 @@ import {
   PreferredPaneInputModel,
   resolveAcceleratedPaneDepth,
   resolveDepthLockedPanePosition,
+  resolveHandPinchDepthPanePosition,
   resolveHandScrollRate,
   resolvePaneDepthActivationOffset,
   resolvePrimaryThumbstickY,
@@ -106,6 +107,36 @@ describe('pane manipulation helpers', () => {
     expect(later.x).toBeCloseTo(freeAtActivation.x, 8)
     expect(later.y).toBeCloseTo(freeAtActivation.y, 8)
     expect(later.z).toBeLessThan(freeAtActivation.z - 0.2)
+  })
+
+  it('keeps live hand-pinch lateral coordinates while accelerating depth', () => {
+    const initialViewerPosition = new Vector3(0, 1.6, 0)
+    const initialPanelPosition = new Vector3(0, 1.6, -2)
+    const sightLine = new Vector3(0, 0, -1)
+    const activation = new Vector3(0.01, -0.005, 0.06)
+    const activationPhysicalDepth = activation.dot(sightLine)
+    const atActivation = resolveHandPinchDepthPanePosition({
+      initialPanelPosition,
+      initialViewerPosition,
+      sightLine,
+      sourceDisplacement: activation,
+      activationPhysicalDepth
+    })
+    expect(atActivation).toEqual(
+      initialPanelPosition.clone().add(activation)
+    )
+
+    const moved = new Vector3(0.24, 0.08, 0.16)
+    const later = resolveHandPinchDepthPanePosition({
+      initialPanelPosition,
+      initialViewerPosition,
+      sightLine,
+      sourceDisplacement: moved,
+      activationPhysicalDepth
+    })
+    expect(later.x).toBeCloseTo(initialPanelPosition.x + moved.x)
+    expect(later.y).toBeCloseTo(initialPanelPosition.y + moved.y)
+    expect(later.z).toBeGreaterThan(initialPanelPosition.z + moved.z)
   })
 
   it('maps only the right xr-standard primary thumbstick Y axis', () => {
