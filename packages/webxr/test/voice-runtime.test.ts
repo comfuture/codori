@@ -84,6 +84,7 @@ vi.mock('@codori/client/shared/realtime', () => ({
 
 import {
   resolveImmersiveVoiceActivity,
+  voiceSessionActive,
   VoiceRuntime
 } from '../src/voice-runtime'
 
@@ -164,6 +165,23 @@ describe('voice runtime', () => {
         final: false
       }]
     })).toBe('speaking')
+  })
+
+  it.each([
+    'requesting-permission',
+    'creating-offer',
+    'starting',
+    'connected',
+    'stopping'
+  ] as const)('treats %s as an active voice session', (state) => {
+    expect(voiceSessionActive(snapshot(state))).toBe(true)
+  })
+
+  it.each([
+    'idle',
+    'error'
+  ] as const)('allows orb voice start while %s', (state) => {
+    expect(voiceSessionActive(snapshot(state))).toBe(false)
   })
 
   it('enables the microphone after an idle capability refresh connects', async () => {

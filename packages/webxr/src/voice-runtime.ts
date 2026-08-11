@@ -29,7 +29,7 @@ export type VoiceRuntimeOptions = {
 
 const DEFAULT_CONFIG_READ_TIMEOUT_MS = 5_000
 
-const voiceSessionActive = (snapshot: RealtimeConversationSnapshot) =>
+export const voiceSessionActive = (snapshot: RealtimeConversationSnapshot) =>
   snapshot.state === 'requesting-permission'
   || snapshot.state === 'creating-offer'
   || snapshot.state === 'starting'
