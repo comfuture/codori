@@ -124,9 +124,9 @@ describe('XR status window model', () => {
       }),
       expect.objectContaining({
         id: 'voice',
-        label: 'Voice',
-        presentation: 'toggle',
-        checked: false
+        label: 'Resume audio',
+        presentation: 'button',
+        checked: null
       }),
       expect.objectContaining({
         id: 'reduced-effects',

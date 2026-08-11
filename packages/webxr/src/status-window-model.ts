@@ -161,10 +161,14 @@ export const createStatusActions = (
   inputPolicy: 'controller-or-touch'
 }, {
   id: 'voice',
-  label: 'Voice',
-  state: state.voiceState === 'active' ? 'On' : 'Off',
-  presentation: 'toggle',
-  checked: state.voiceState === 'active',
+  label: state.voiceState === 'resume-audio' ? 'Resume audio' : 'Voice',
+  state: state.voiceState === 'resume-audio'
+    ? null
+    : state.voiceState === 'active' ? 'On' : 'Off',
+  presentation: state.voiceState === 'resume-audio' ? 'button' : 'toggle',
+  checked: state.voiceState === 'resume-audio'
+    ? null
+    : state.voiceState === 'active',
   available: state.voiceState !== 'unavailable',
   disabledReason: state.voiceState === 'unavailable'
     ? 'Realtime voice is unavailable.'
