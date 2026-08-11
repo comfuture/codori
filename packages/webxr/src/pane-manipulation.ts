@@ -107,7 +107,7 @@ export const resolveDepthLockedPanePosition = (input: {
  * controller depth lock, the live lateral fingertip displacement remains 1:1
  * so a held pinch can still place the pane left/right and up/down.
  */
-export const resolveHandPinchDepthPanePosition = (input: {
+export const resolveHandPinchPanePosition = (input: {
   initialPanelPosition: Vector3
   initialViewerPosition: Vector3
   initialSourcePosition: Vector3
@@ -115,16 +115,20 @@ export const resolveHandPinchDepthPanePosition = (input: {
   sourceDisplacement: Vector3
   activationPhysicalDepth: number
   activationSourceDisplacement: Vector3
+  accelerateDepth: boolean
   target?: Vector3
 }) => {
   const physicalDepth = input.sourceDisplacement.dot(input.sightLine)
-  const resolvedDepth = resolveAcceleratedPaneDepth({
-    initialDistance: input.initialViewerPosition.distanceTo(
-      input.initialPanelPosition
-    ),
-    physicalDepth,
-    activationPhysicalDepth: input.activationPhysicalDepth
-  })
+  const initialDistance = input.initialViewerPosition.distanceTo(
+    input.initialPanelPosition
+  )
+  const resolvedDepth = input.accelerateDepth
+    ? resolveAcceleratedPaneDepth({
+        initialDistance,
+        physicalDepth,
+        activationPhysicalDepth: input.activationPhysicalDepth
+      })
+    : initialDistance + physicalDepth
   const currentSourceDistance = Math.hypot(
     input.initialSourcePosition.x + input.sourceDisplacement.x
       - input.initialViewerPosition.x,
