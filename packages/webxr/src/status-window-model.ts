@@ -217,14 +217,151 @@ export type StatusGestureSample = {
 
 export type StatusWindowInvocation = 'controller' | 'hand' | 'fallback'
 
+export type StatusWindowPhase = 'closed' | 'opening' | 'open' | 'closing'
+
+export type StatusActionInteractionPhase =
+  | 'closed'
+  | 'emerging'
+  | 'arming'
+  | 'armed'
+
+export const STATUS_ACTION_ARMING_GRACE_MS = 180
+
+type StatusActionSourceState = {
+  pressActive: boolean
+  pressNeutral: boolean
+  contactAction: StatusActionId | null
+  contactNeutral: boolean
+}
+
+const createStatusActionSourceState = (): StatusActionSourceState => ({
+  pressActive: false,
+  pressNeutral: false,
+  contactAction: null,
+  contactNeutral: false
+})
+
+/**
+ * Keeps status-window presentation separate from activation. The gate does not
+ * arm until the opening animation and an additional grace period have both
+ * completed. At that boundary it snapshots every observed press/contact so an
+ * input that was already held or overlapping cannot become a fresh action.
+ */
+export class StatusActionInteractionModel {
+  private currentPhase: StatusActionInteractionPhase = 'closed'
+
+  private armAt: number | null = null
+
+  private readonly sources = new Map<string, StatusActionSourceState>()
+
+  get phase() {
+    return this.currentPhase
+  }
+
+  private source(sourceId: string) {
+    let source = this.sources.get(sourceId)
+    if (!source) {
+      source = createStatusActionSourceState()
+      this.sources.set(sourceId, source)
+    }
+    return source
+  }
+
+  private close() {
+    this.currentPhase = 'closed'
+    this.armAt = null
+    this.sources.clear()
+  }
+
+  updateWindow(input: {
+    now: number
+    open: boolean
+    fullyOpen: boolean
+  }) {
+    if (!input.open) {
+      this.close()
+      return
+    }
+    if (this.currentPhase === 'closed') {
+      this.currentPhase = 'emerging'
+    }
+    if (!input.fullyOpen) {
+      this.currentPhase = 'emerging'
+      this.armAt = null
+      return
+    }
+    if (this.currentPhase === 'emerging') {
+      this.currentPhase = 'arming'
+      this.armAt = input.now + STATUS_ACTION_ARMING_GRACE_MS
+    }
+  }
+
+  finishFrame(now: number) {
+    if (
+      this.currentPhase !== 'arming'
+      || this.armAt == null
+      || now < this.armAt
+    ) {
+      return
+    }
+    this.currentPhase = 'armed'
+    for (const source of this.sources.values()) {
+      source.pressNeutral = !source.pressActive
+      source.contactNeutral = source.contactAction === null
+    }
+  }
+
+  updatePress(sourceId: string, pressed: boolean) {
+    const source = this.source(sourceId)
+    const freshPress = pressed && !source.pressActive
+    source.pressActive = pressed
+    if (this.currentPhase !== 'armed') {
+      return false
+    }
+    if (!pressed) {
+      source.pressNeutral = true
+      return false
+    }
+    if (!freshPress || !source.pressNeutral) {
+      return false
+    }
+    source.pressNeutral = false
+    return true
+  }
+
+  updateContact(sourceId: string, action: StatusActionId | null) {
+    const source = this.source(sourceId)
+    const freshContact = action !== null && source.contactAction === null
+    source.contactAction = action
+    if (this.currentPhase !== 'armed') {
+      return null
+    }
+    if (action === null) {
+      source.contactNeutral = true
+      return null
+    }
+    if (!freshContact || !source.contactNeutral) {
+      return null
+    }
+    source.contactNeutral = false
+    return action
+  }
+
+  loseSource(sourceId: string) {
+    this.sources.delete(sourceId)
+  }
+}
+
 export const STATUS_GESTURE_THRESHOLDS = {
-  openHeightMeters: -0.28,
-  closeHeightMeters: -0.48,
-  openFacingDot: 0.55,
-  closeFacingDot: 0.25,
-  holdMs: 450,
-  lowerHoldMs: 180,
-  cooldownMs: 650
+  openHeightMeters: -0.2,
+  closeHeightMeters: -0.5,
+  closePoseHeightMeters: -0.34,
+  openFacingDot: 0.68,
+  closeFacingDot: 0.05,
+  holdMs: 700,
+  lowerHoldMs: 350,
+  trackingLossGraceMs: 500,
+  cooldownMs: 750
 } as const
 
 export class StatusGestureModel {
@@ -263,7 +400,8 @@ export class StatusGestureModel {
         return null
       }
       this.trackingLostSince ??= sample.now
-      return sample.now - this.trackingLostSince >= 300
+      return sample.now - this.trackingLostSince
+        >= STATUS_GESTURE_THRESHOLDS.trackingLossGraceMs
         ? 'close' as const
         : null
     }
@@ -271,8 +409,12 @@ export class StatusGestureModel {
     if (state.open) {
       const lowered = sample.wristHeightFromEyes
         <= STATUS_GESTURE_THRESHOLDS.closeHeightMeters
-        || sample.handBackFacingViewer
-        <= STATUS_GESTURE_THRESHOLDS.closeFacingDot
+        || (
+          sample.wristHeightFromEyes
+            <= STATUS_GESTURE_THRESHOLDS.closePoseHeightMeters
+          && sample.handBackFacingViewer
+            <= STATUS_GESTURE_THRESHOLDS.closeFacingDot
+        )
       if (!lowered) {
         this.lowerSince = null
         return null

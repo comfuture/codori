@@ -35,8 +35,12 @@ framebuffer scaling or fixed foveation.
 The kitchen-sink fixture also opens the lime status window with primary and
 secondary quota windows, context state, and the initial action registry.
 Append `&blend=alpha-blend` or `&blend=additive` to preview the two
-development-only agent contrast treatments. These are visual fixtures, not
-claims that a camera or optical display is active.
+development-only agent contrast treatments. The fixture also shows both
+application-rendered hand outlines. For alpha blend, add
+`&background=bright`, `&background=dark`, or `&background=textured` to compare
+the transparent composition against deterministic surrogate environments.
+These are visual fixtures, not claims that a camera or optical display is
+active.
 
 Vite proxies `/api` HTTP and WebSocket traffic to
 `http://127.0.0.1:4310` by default. Point it at another running Codori server
@@ -64,10 +68,11 @@ Users sensitive to motion or flicker should enable reduced effects before enteri
 Status window:
 
 - The verified `menu` component on the left `htc-vive-focus` input profile toggles the window. Codori does not guess extra gamepad indices on other profiles, and WebXR-reserved app/system buttons may be absent.
-- With a tracked left hand and no active left controller, hold the raised back-of-hand pose for `450 ms`. Lowering it for `180 ms` dismisses the window; short pose/tracking gaps use hysteresis and a `300 ms` tracking-loss grace.
+- With a tracked left hand and no active left controller, hold the raised back-of-hand pose for `700 ms`. Lowering it beyond the close threshold for `350 ms` dismisses the window; wrist rotation alone does not close a normally raised window, and tracking loss has a `500 ms` grace.
 - A controller-opened window remains open until reinvoked, an action is selected, or the left grip is held below the lowering threshold for `250 ms`.
-- Placement uses the left grip or WebXR `wrist` joint plus a viewer-facing vertical offset. WebXR exposes no elbow joint, so this is a wrist/grip-and-view approximation rather than full forearm tracking.
-- Right controller rays and direct controller contact can activate actions. Tracked hands require direct `index-finger-tip` contact; remote pinch/ray activation is rejected for status actions.
+- Placement uses the left grip or WebXR `wrist` joint plus a viewer-facing vertical offset. A hand-opened window keeps following that wrist while the arm moves inside the open hysteresis. WebXR exposes no elbow joint, so this is a wrist/grip-and-view approximation rather than full forearm tracking.
+- Presentation and activation use separate states. Actions remain inert while the window emerges and for an additional `180 ms` arming grace. The gate snapshots held presses and fingertip overlaps at the armed boundary; each input channel must cross neutral/release before a new transition can activate anything.
+- Only a right controller ray/direct-controller contact click or fresh right `index-finger-tip` contact can activate an action. Left-hand input, screen/gaze action input, native or synthesized hand pinch, held select, and stale contact are rejected. One press/contact transition can activate at most once.
 - When no exposed mapped menu component or gesture-eligible tracked left hand can invoke status, an in-canvas bottom-right `Menu` is shown. This includes right-hand-only tracking and controllers whose app/system button is reserved or unmapped; their target ray can select the fallback. A left controller takes precedence over the left-hand gesture, so an unmapped left controller keeps the fallback available for ray selection. A DOM-overlay button mirrors it when the optional DOM Overlays feature is granted. Both disappear when a mapped menu control or eligible left-hand gesture becomes usable; screen/gaze can open the menu but cannot bypass `controller-or-touch` action policy.
 
 The status view uses a translucent pale lime treatment distinct from cyan panes. It shows the authoritative primary and secondary Codex quota windows, localized reset times, current-thread context remaining only when known, connection/voice state, pane count, and thread/workspace identity. Sparse `account/rateLimits/updated` buckets merge by `limitId` into the last `account/rateLimits/read` snapshot; unknown quota or context is labeled unavailable rather than rendered as zero/full.
@@ -86,6 +91,7 @@ Controller:
 
 Tracked hand:
 
+- WebXR exposes articulated joint poses and radii; it does not guarantee a compositor-rendered hand. Codori therefore draws a lightweight connected outline for each tracked hand, hides it when tracking is lost or a same-handed controller is active, and excludes every outline primitive from raycasts and collisions.
 - direct `index-finger-tip` contact moves a nearby pane from any non-actionable point
 - index/thumb pinch remotely grabs a distant pane; opening the pinch releases it
 - visible top/bottom triangles are direct fingertip scroll controls. Scrolling starts slowly, accelerates smoothly to a cap while contact remains, and stops immediately on leave or tracking/source loss
@@ -93,9 +99,23 @@ Tracked hand:
 
 Native and synthesized primary actions are de-duplicated. Preferred hints follow the most recently used connected source independently per hand, so a valid hand can replace an unused/disconnected controller without a session restart. Competing grabs have one deterministic owner, and input-source or required-joint loss releases hover, grab, and held-scroll state.
 
+The palm-up per-hand `Menu`/Meta suggestions seen on Quest are Meta Horizon OS
+trusted UI, not the Codori fallback menu. Standard WebXR exposes joint poses and
+platform-defined `select*` events but no API for repositioning, freezing,
+suppressing, or restyling those system icons. Codori therefore does not imitate
+or intercept them, and its hand outline remains thin and non-interactive so it
+does not compete with the trusted suggestion. Meta's v66 documentation
+described an experimental wrist Meta-button setting, but setting names and
+availability vary by Horizon OS rollout; inspect the current headset under
+Movement Tracking rather than assuming a portable application control. See the
+[WebXR trusted-environment requirements](https://immersive-web.github.io/webxr/),
+[WebXR Hand Input](https://immersive-web.github.io/webxr-hand-input/),
+[Meta native system-gesture guidance](https://developers.meta.com/horizon/documentation/native/android/mobile-hand-tracking/),
+and [Meta Quest v66 release notes](https://communityforums.atmeta.com/blog/AnnouncementsBlog/meta-quest-build-v66-release-notes/1209566).
+
 `Recenter workspace` rotates and translates one shared anchor into the current horizontal gaze at clamped eye height. The agent light, transcript, status surfaces, automatic panes, and manually moved pane-local transforms move together without reallocating pane ids. A `local-floor` reference-space `reset` schedules exactly one anchor refresh; Codori does not emulate or require a reserved platform recenter button.
 
-`Passthrough` is a real session-mode transition, not a background toggle. When `immersive-ar` is supported, Codori ends the current session and requests the other mode while retaining the same workspace and voice runtimes/subscriptions. If the browser cannot complete that transition within the action, the entry surface explains that state and offers explicit re-entry without recreating the RPC runtime. In a non-opaque AR session, transparent renderer pixels expose the environment and room geometry plus the boundary Exit door are hidden. `alpha-blend` uses a restrained dark stipple shell outside the agent light; `additive` uses a bright magenta shape outline because dark pixels cannot occlude an optical display. An AR session reporting `opaque` is never described as passthrough. The normal projection path remains correct without WebXR Layers.
+`Passthrough` is a real session-mode transition, not a background toggle. When `immersive-ar` is supported, Codori ends the current session and requests the other mode while retaining the same workspace and voice runtimes/subscriptions. If the browser cannot complete that transition within the action, the entry surface explains that state and offers explicit re-entry without recreating the RPC runtime. In a non-opaque AR session, transparent renderer pixels expose the environment and room geometry plus the boundary Exit door are hidden. `alpha-blend` uses one neutral-dark, low-opacity radial feather that fades continuously to transparent outside the agent light's flare; it contains no dots, noise, checker, stipple, or hard ring. `additive` uses a bright magenta shape outline because dark pixels cannot occlude an optical display. An AR session reporting `opaque` is never described as passthrough. The normal projection path remains correct without WebXR Layers.
 
 Immersive entry starts the realtime voice session automatically after at least `500 ms` and as soon as the workspace runtime is ready. New XR sessions reuse the voice selection and browser-only voice-instruction override saved by Settings → Voice. The selected voice is sent only when the connected server advertises it; prompt precedence remains browser override, `experimental_realtime_ws_backend_prompt` from `config.toml`, then the Codori default. Selecting the central light stops the active session and re-arms the dormant visual state; selecting it again replays the full awakening before restarting voice. A door-sized rounded `Exit` surface sits on the `10 m × 10 m` room boundary, beyond the agent light along the initial view direction. The 2D fallback remains available before immersive entry.
 
@@ -122,6 +142,6 @@ Growing output follows the live tail until manual scrolling. Later deltas preser
 
 ## Current validation boundary
 
-Automated tests cover session options/failure states, deterministic light bounds and reduced effects, transcript generation plus 30-second visibility and 250 ms scale transitions, streaming panel lifecycle plus 60-second dwell and 125 ms forced dismissal, panel retention/layout/scroll state, input ownership and source loss, shared notification adapters, `/xr/` server routing, and package builds.
+Automated tests cover session options/failure states, deterministic light bounds and reduced effects, transcript generation plus 30-second visibility and 250 ms scale transitions, streaming panel lifecycle plus 60-second dwell and 125 ms forced dismissal, panel retention/layout/scroll state, input ownership and source loss, status reveal/arming/neutral transitions, right-only action activation, hand-outline geometry and lifecycle, the smooth passthrough feather contract, shared notification adapters, `/xr/` server routing, and package builds.
 
 Real headset validation is still required before making device-specific support, transition, input-component, blend-mode, or performance claims. For each controller, hand-tracking, and screen/gaze device/browser combination, record headset/device, OS, browser version, supported session modes, actual `environmentBlendMode` and `interactionMode`, optional features granted, exposed input profiles/components, app-visible buttons, target refresh rate, median frame time, sustained worst frame-time band, status anchoring/direct-touch behavior, alpha/additive contrast readability, text legibility, and a 15-minute mixed voice/tool memory observation. Browser kitchen-sink QA proves only canvas layout, colors, typography, and animation; it cannot prove headset poses, camera passthrough, additive optics, reserved buttons, or seamless session switching.

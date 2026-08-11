@@ -23,7 +23,7 @@ export type ImmersiveModeSupport = {
 export type PassthroughAvailability = {
   supported: boolean
   active: boolean
-  contrast: 'dither' | 'additive-shape' | 'opaque'
+  contrast: 'dark-feather' | 'additive-shape' | 'opaque'
   disabledReason: string | null
 }
 
@@ -71,7 +71,7 @@ export const resolvePassthroughAvailability = (input: {
       contrast: input.environmentBlendMode === 'additive'
         ? 'additive-shape'
         : input.environmentBlendMode === 'alpha-blend'
-          ? 'dither'
+          ? 'dark-feather'
           : 'opaque',
       disabledReason: 'Immersive VR is unavailable; exit immersive to leave AR.'
     }
@@ -89,7 +89,7 @@ export const resolvePassthroughAvailability = (input: {
     active: true,
     contrast: input.environmentBlendMode === 'additive'
       ? 'additive-shape'
-      : 'dither',
+      : 'dark-feather',
     disabledReason: null
   }
 }

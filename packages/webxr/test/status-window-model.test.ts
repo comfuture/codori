@@ -12,6 +12,7 @@ import {
   resolveStatusContext,
   resolveStatusWindowScale,
   shouldShowStatusFallbackMenu,
+  StatusActionInteractionModel,
   StatusControllerArmModel,
   StatusGestureModel
 } from '../src/status-window-model'
@@ -197,8 +198,8 @@ describe('XR status window model', () => {
     }
     const closed = { open: false, invocation: null }
     expect(gesture.update({ ...posed, now: 0 }, closed)).toBe(null)
-    expect(gesture.update({ ...posed, now: 449 }, closed)).toBe(null)
-    expect(gesture.update({ ...posed, now: 450 }, closed)).toBe('open')
+    expect(gesture.update({ ...posed, now: 699 }, closed)).toBe(null)
+    expect(gesture.update({ ...posed, now: 700 }, closed)).toBe('open')
     const lowered = {
       ...posed,
       wristHeightFromEyes: -0.6,
@@ -206,8 +207,59 @@ describe('XR status window model', () => {
     }
     const handOpen = { open: true, invocation: 'hand' as const }
     expect(gesture.update({ ...lowered, now: 500 }, handOpen)).toBe(null)
-    expect(gesture.update({ ...lowered, now: 680 }, handOpen)).toBe('close')
-    expect(gesture.update({ ...posed, now: 1_000 }, closed)).toBe(null)
+    expect(gesture.update({ ...lowered, now: 849 }, handOpen)).toBe(null)
+    expect(gesture.update({ ...lowered, now: 850 }, handOpen)).toBe('close')
+    expect(gesture.update({ ...posed, now: 1_599 }, closed)).toBe(null)
+  })
+
+  it('keeps modest post-open motion inside the pose hysteresis', () => {
+    const gesture = new StatusGestureModel()
+    const open = { open: true, invocation: 'hand' as const }
+    const moved = {
+      tracked: true,
+      controllerActive: false,
+      wristHeightFromEyes: -0.3,
+      handBackFacingViewer: -0.2
+    }
+    expect(gesture.update({ ...moved, now: 0 }, open)).toBe(null)
+    expect(gesture.update({ ...moved, now: 1_000 }, open)).toBe(null)
+  })
+
+  it('arms only after emergence and snapshots stale press/contact state', () => {
+    const interaction = new StatusActionInteractionModel()
+    interaction.updateWindow({ now: 0, open: true, fullyOpen: false })
+    expect(interaction.phase).toBe('emerging')
+    expect(interaction.updatePress('right-controller', true)).toBe(false)
+    expect(interaction.updateContact('right-hand', 'passthrough')).toBe(null)
+
+    interaction.updateWindow({ now: 160, open: true, fullyOpen: true })
+    expect(interaction.phase).toBe('arming')
+    interaction.finishFrame(339)
+    expect(interaction.phase).toBe('arming')
+    interaction.finishFrame(340)
+    expect(interaction.phase).toBe('armed')
+
+    expect(interaction.updatePress('right-controller', true)).toBe(false)
+    expect(interaction.updateContact('right-hand', 'passthrough')).toBe(null)
+
+    expect(interaction.updatePress('right-controller', false)).toBe(false)
+    expect(interaction.updatePress('right-controller', true)).toBe(true)
+    expect(interaction.updatePress('right-controller', true)).toBe(false)
+
+    expect(interaction.updateContact('right-hand', null)).toBe(null)
+    expect(interaction.updateContact('right-hand', 'passthrough'))
+      .toBe('passthrough')
+    expect(interaction.updateContact('right-hand', 'passthrough')).toBe(null)
+  })
+
+  it('resets action arming completely when the window closes', () => {
+    const interaction = new StatusActionInteractionModel()
+    interaction.updateWindow({ now: 0, open: true, fullyOpen: true })
+    interaction.finishFrame(180)
+    expect(interaction.phase).toBe('armed')
+    interaction.updateWindow({ now: 181, open: false, fullyOpen: false })
+    expect(interaction.phase).toBe('closed')
+    expect(interaction.updatePress('right-controller', true)).toBe(false)
   })
 
   it('does not let the hand gesture close a controller-opened window', () => {
@@ -244,7 +296,7 @@ describe('XR status window model', () => {
       handBackFacingViewer: -1
     }
     expect(gesture.update({ ...sample, now: 0 }, state)).toBe(null)
-    expect(gesture.update({ ...sample, now: 299 }, state)).toBe(null)
-    expect(gesture.update({ ...sample, now: 300 }, state)).toBe('close')
+    expect(gesture.update({ ...sample, now: 499 }, state)).toBe(null)
+    expect(gesture.update({ ...sample, now: 500 }, state)).toBe('close')
   })
 })
