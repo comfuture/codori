@@ -1185,7 +1185,7 @@ export class ImmersiveInteractionSystem {
     ) {
       runtime.grabDepthActivation = physicalDepth
       if (runtime.inputSource?.hand) {
-        runtime.grabDepthActivationOffset.set(0, 0, 0)
+        runtime.grabDepthActivationOffset.copy(sourceDisplacement)
       } else {
         resolvePaneDepthActivationOffset({
           initialPanelPosition: runtime.grabInitialWorldPosition,
@@ -1201,9 +1201,11 @@ export class ImmersiveInteractionSystem {
         ? resolveHandPinchDepthPanePosition({
             initialPanelPosition: runtime.grabInitialWorldPosition,
             initialViewerPosition: runtime.grabInitialViewerPosition,
+            initialSourcePosition: runtime.grabInitialSourcePosition,
             sightLine: runtime.grabSightLine,
             sourceDisplacement,
             activationPhysicalDepth: runtime.grabDepthActivation,
+            activationSourceDisplacement: runtime.grabDepthActivationOffset,
             target: panelWorldPosition
           })
         : resolveDepthLockedPanePosition({
