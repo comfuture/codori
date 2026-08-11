@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
   resolveAwakeningSoundPlan,
-  resolvePanelAppearSoundPlan
+  resolvePanelAppearSoundPlan,
+  resolveStatusCloseSoundPlan,
+  resolveStatusOpenSoundPlan
 } from '../src/sound-effects'
 
 describe('immersive sound effects', () => {
@@ -46,5 +48,16 @@ describe('immersive sound effects', () => {
     )).toBe(true)
     expect(grouped.peakGain).toBeGreaterThan(single.peakGain)
     expect(grouped.peakGain).toBeLessThanOrEqual(single.peakGain * 1.5)
+  })
+
+  it('uses longer mirrored pitch-up and pitch-down status cues', () => {
+    const open = resolveStatusOpenSoundPlan()
+    const close = resolveStatusCloseSoundPlan()
+    expect(open.durationSeconds).toBe(0.38)
+    expect(close.durationSeconds).toBe(0.3)
+    expect(open.durationSeconds).toBeGreaterThan(0.25)
+    expect(open.tones.every(tone => tone.endFrequency > tone.startFrequency)).toBe(true)
+    expect(close.tones.every(tone => tone.endFrequency < tone.startFrequency)).toBe(true)
+    expect(Math.min(...close.tones.map(tone => tone.endFrequency))).toBeGreaterThanOrEqual(260)
   })
 })

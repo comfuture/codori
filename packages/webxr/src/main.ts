@@ -4,7 +4,10 @@ import {
 import type { RealtimeConversationSnapshot } from '@codori/client/shared/realtime'
 import {
   detectImmersiveCapability,
-  requestImmersiveSession
+  requestImmersiveSession,
+  resolvePassthroughAvailability,
+  type ImmersiveModeSupport,
+  type ImmersiveSessionMode
 } from './xr-capability'
 import type { ImmersiveScene } from './immersive-scene'
 import {
@@ -13,7 +16,14 @@ import {
 } from './voice-runtime'
 import { coordinateRealtimeAutoStart } from './realtime-auto-start'
 import { ImmersiveSoundEffects } from './sound-effects'
-import { WorkspaceRuntime } from './workspace-runtime'
+import {
+  WorkspaceRuntime,
+  type WorkspaceRuntimeSnapshot
+} from './workspace-runtime'
+import {
+  createStatusActions,
+  type StatusActionId
+} from './status-window-model'
 import './style.css'
 
 const requiredElement = <T extends HTMLElement>(id: string) => {
@@ -38,6 +48,8 @@ const canvas = requiredElement<HTMLCanvasElement>('xr-canvas')
 const sceneStatus = requiredElement<HTMLDivElement>('scene-status')
 const sceneControls = requiredElement<HTMLDivElement>('scene-controls')
 const exitButton = requiredElement<HTMLButtonElement>('exit-xr')
+const fallbackMenu = requiredElement<HTMLButtonElement>('fallback-menu')
+const domOverlayRoot = requiredElement<HTMLElement>('app')
 
 const route = parseImmersiveWorkspaceRoute(window.location.href)
 const returnTo = route?.returnTo ?? '/'
@@ -47,6 +59,14 @@ const developmentDebug = import.meta.env.DEV
   && searchParams.get('debug') === '1'
 const developmentKitchenSink = developmentDebug
   && searchParams.get('kitchenSink') === '1'
+const developmentBlendPreview = developmentKitchenSink
+  && (
+    searchParams.get('blend') === 'alpha-blend'
+    || searchParams.get('blend') === 'additive'
+  )
+  ? searchParams.get('blend') as 'alpha-blend' | 'additive'
+  : null
+const developmentStatusPreview = searchParams.get('status') !== '0'
 const soundEffects = new ImmersiveSoundEffects()
 window.addEventListener('pagehide', () => {
   void soundEffects.dispose()
@@ -60,6 +80,10 @@ let immersiveScenePromise: Promise<ImmersiveScene> | null = null
 let workspaceRuntime: WorkspaceRuntime | null = null
 let voiceRuntime: VoiceRuntime | null = null
 let activeSession: XRSession | null = null
+let activeSessionMode: ImmersiveSessionMode = 'immersive-vr'
+let supportedModes: ImmersiveModeSupport = { vr: false, ar: false }
+let defaultEntryMode: ImmersiveSessionMode = 'immersive-vr'
+let transitionTarget: ImmersiveSessionMode | null = null
 let releaseSessionListeners: (() => void) | null = null
 let releaseWorkspace: (() => void) | null = null
 let releaseVoice: (() => void) | null = null
@@ -67,6 +91,8 @@ let startingRuntime: Promise<void> | null = null
 let returningTo2d = false
 let voiceRequested = false
 let lastWorkspaceError: string | null = null
+let latestWorkspace: WorkspaceRuntimeSnapshot | null = null
+let latestVoice: RealtimeConversationSnapshot | null = null
 
 const disposeConnectedRuntimes = async () => {
   releaseWorkspace?.()
@@ -89,6 +115,50 @@ const sessionActive = (snapshot: RealtimeConversationSnapshot) =>
   || snapshot.state === 'starting'
   || snapshot.state === 'connected'
   || snapshot.state === 'stopping'
+
+const statusVoiceState = () => {
+  if (!latestVoice) {
+    return 'unavailable' as const
+  }
+  if (latestVoice.autoplayBlocked) {
+    return 'resume-audio' as const
+  }
+  return sessionActive(latestVoice) ? 'active' as const : 'inactive' as const
+}
+
+const updateStatusWindow = () => {
+  if (!immersiveScene || !latestWorkspace) {
+    return
+  }
+  const blendMode = activeSession?.environmentBlendMode ?? 'opaque'
+  const passthrough = resolvePassthroughAvailability({
+    arSupported: supportedModes.ar,
+    vrSupported: supportedModes.vr,
+    mode: activeSessionMode,
+    environmentBlendMode: blendMode
+  })
+  immersiveScene.setStatusWindowSnapshot({
+    rateLimits: latestWorkspace.rateLimits,
+    context: latestWorkspace.context,
+    connection: latestWorkspace.connection,
+    voice: statusVoiceState(),
+    activePaneCount: latestWorkspace.panels.length,
+    threadLabel: latestWorkspace.thread?.preview
+      || latestWorkspace.thread?.id
+      || null,
+    workspaceLabel: route
+      ? `${route.identity.workspace.kind}:${route.identity.workspace.id}`
+      : null,
+    sessionLabel: `${activeSessionMode} · ${blendMode}`,
+    actions: createStatusActions({
+      passthroughSupported: passthrough.supported,
+      passthroughActive: passthrough.active,
+      passthroughDisabledReason: passthrough.disabledReason,
+      voiceState: statusVoiceState(),
+      reducedEffects: reducedEffects.checked
+    })
+  })
+}
 
 const setEntryMessage = (message: string) => {
   entryMessage.textContent = message
@@ -115,6 +185,8 @@ const showEntry = () => {
 }
 
 const updateVoiceUi = (snapshot: RealtimeConversationSnapshot) => {
+  latestVoice = snapshot
+  updateStatusWindow()
   immersiveScene?.setTranscript(snapshot.transcripts, snapshot.generation)
   immersiveScene?.setActivity(
     snapshot.state === 'error'
@@ -178,8 +250,25 @@ const ensureScene = async () => {
           },
           onPanelAppeared: (panelCount) => {
             soundEffects.playPanelAppear(panelCount)
+          },
+          onStatusAction: (action) => {
+            void handleStatusAction(action)
+          },
+          onStatusOpened: () => {
+            soundEffects.playStatusOpen()
+          },
+          onStatusClosed: () => {
+            soundEffects.playStatusClose()
+          },
+          onStatusFallbackChanged: (visible) => {
+            fallbackMenu.hidden = !(
+              visible
+              && activeSession
+              && activeSession.domOverlayState
+            )
           }
         })
+        updateStatusWindow()
         return immersiveScene
       })
   }
@@ -203,6 +292,7 @@ const startWorkspaceRuntime = async () => {
     })
     workspaceRuntime = runtime
     releaseWorkspace = runtime.subscribe((snapshot) => {
+      latestWorkspace = snapshot
       lastWorkspaceError = snapshot.error
       immersiveScene?.setPanels(snapshot.panels)
       if (!voiceRuntime || !sessionActive(voiceRuntime.getSnapshot())) {
@@ -215,6 +305,7 @@ const startWorkspaceRuntime = async () => {
       if (snapshot.error) {
         setSceneStatus(snapshot.error, true)
       }
+      updateStatusWindow()
     })
     await runtime.start()
 
@@ -263,6 +354,102 @@ const toggleVoice = async () => {
   }
 }
 
+const transitionSessionMode = async (mode: ImmersiveSessionMode) => {
+  const previous = activeSession
+  if (!previous || transitionTarget) {
+    return
+  }
+  if (mode === 'immersive-ar' && !supportedModes.ar) {
+    setSceneStatus('This device does not report immersive AR support.', true)
+    return
+  }
+  if (mode === 'immersive-vr' && !supportedModes.vr) {
+    setSceneStatus('This device does not report immersive VR support.', true)
+    return
+  }
+  transitionTarget = mode
+  let replacement: XRSession | null = null
+  try {
+    await previous.end()
+  } catch (error) {
+    transitionTarget = null
+    setSceneStatus(
+      `Could not end the current XR session for transition: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+      true
+    )
+    return
+  }
+  try {
+    replacement = await requestImmersiveSession({
+      secureContext: window.isSecureContext,
+      xr: navigator.xr
+    }, mode, domOverlayRoot)
+    activeSession = replacement
+    activeSessionMode = mode
+    bindSessionListeners(replacement)
+    const scene = await ensureScene()
+    await scene.setSession(replacement, mode)
+    workspaceRuntime?.setSuspended(false)
+    showScene()
+    updateStatusWindow()
+  } catch (error) {
+    if (replacement) {
+      releaseSessionListeners?.()
+      releaseSessionListeners = null
+      if (activeSession === replacement) {
+        activeSession = null
+      }
+      await immersiveScene?.setSession(null).catch(() => {})
+      await replacement.end().catch(() => {})
+    }
+    workspaceRuntime?.setSuspended(true)
+    showEntry()
+    entryActions.hidden = false
+    enterButton.hidden = false
+    retryButton.hidden = true
+    enterButton.textContent = mode === 'immersive-ar'
+      ? 'Re-enter passthrough'
+      : 'Re-enter immersive VR'
+    enterButton.onclick = () => {
+      void enterImmersive(mode)
+    }
+    setEntryMessage(
+      `The browser could not switch XR sessions in-place. Your Codori workspace and voice session are preserved; use the explicit re-entry action. ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    )
+  } finally {
+    transitionTarget = null
+  }
+}
+
+const handleStatusAction = async (action: StatusActionId) => {
+  switch (action) {
+    case 'passthrough':
+      await transitionSessionMode(
+        activeSessionMode === 'immersive-ar'
+          ? 'immersive-vr'
+          : 'immersive-ar'
+      )
+      break
+    case 'recenter':
+      immersiveScene?.recenterWorkspace()
+      break
+    case 'voice':
+      await toggleVoice()
+      break
+    case 'reduced-effects':
+      reducedEffects.checked = !reducedEffects.checked
+      updateStatusWindow()
+      break
+    case 'exit':
+      await exitImmersive()
+      break
+  }
+}
+
 const returnTo2d = () => {
   if (returningTo2d) {
     return
@@ -275,6 +462,10 @@ const handleSessionEnded = () => {
   releaseSessionListeners?.()
   releaseSessionListeners = null
   activeSession = null
+  fallbackMenu.hidden = true
+  if (transitionTarget) {
+    return
+  }
   workspaceRuntime?.setSuspended(true)
   returnTo2d()
 }
@@ -310,7 +501,9 @@ const exitImmersive = async () => {
   returnTo2d()
 }
 
-const enterImmersive = async () => {
+const enterImmersive = async (
+  mode: ImmersiveSessionMode = defaultEntryMode
+) => {
   enterButton.disabled = true
   retryButton.hidden = true
   setEntryMessage('Requesting an immersive session…')
@@ -319,13 +512,19 @@ const enterImmersive = async () => {
     const session = await requestImmersiveSession({
       secureContext: window.isSecureContext,
       xr: navigator.xr
-    })
+    }, mode, domOverlayRoot)
     await soundUnlock
     activeSession = session
+    activeSessionMode = mode
     bindSessionListeners(session)
     showScene()
     const scene = await ensureScene()
-    await scene.setSession(session)
+    await scene.setSession(session, mode)
+    if (workspaceRuntime && voiceRuntime) {
+      workspaceRuntime.setSuspended(false)
+      updateStatusWindow()
+      return
+    }
     await coordinateRealtimeAutoStart({
       prepare: startWorkspaceRuntime,
       isCurrent: () => activeSession === session,
@@ -386,6 +585,53 @@ const enterDebugScene = async () => {
     scene.setStatus(
       'Kitchen sink · non-immersive texture and layout preview'
     )
+    scene.setStatusWindowSnapshot({
+      rateLimits: [{
+        limitId: 'codex',
+        limitName: 'Codex',
+        primary: {
+          usedPercent: 34,
+          resetsAt: '2026-08-11T15:00:00+09:00',
+          windowDurationMins: 300
+        },
+        secondary: {
+          usedPercent: 61,
+          resetsAt: '2026-08-18T09:00:00+09:00',
+          windowDurationMins: 10_080
+        }
+      }],
+      context: {
+        contextWindow: 258_400,
+        usedTokens: 81_400,
+        remainingTokens: 177_000,
+        usedPercent: 31.5,
+        remainingPercent: 68.5
+      },
+      connection: 'connected',
+      voice: 'active',
+      activePaneCount: fixture.panels.length,
+      threadLabel: 'Issue #142 kitchen sink',
+      workspaceLabel: 'project:codori',
+      sessionLabel: developmentBlendPreview
+        ? `immersive-ar · ${developmentBlendPreview}`
+        : 'preview · opaque',
+      actions: createStatusActions({
+        passthroughSupported: false,
+        passthroughActive: false,
+        passthroughDisabledReason: 'Preview is not an immersive AR session.',
+        voiceState: 'active',
+        reducedEffects: reducedEffects.checked
+      })
+    })
+    if (developmentStatusPreview) {
+      scene.openStatusForPreview()
+    }
+    if (developmentBlendPreview) {
+      canvas.style.background = developmentBlendPreview === 'alpha-blend'
+        ? 'linear-gradient(135deg, #e9e2cb, #7ea0b0)'
+        : 'linear-gradient(135deg, #d9c995, #446d82)'
+      scene.setSessionVisualMode('immersive-ar', developmentBlendPreview)
+    }
     return
   }
   scene.setStatus(
@@ -435,14 +681,20 @@ const checkCapability = async () => {
     xr: navigator.xr
   })
   if (capability.status === 'available') {
+    supportedModes = capability.modes
+    defaultEntryMode = capability.entryMode
     enterButton.hidden = false
-    enterButton.textContent = 'Enter immersive Codori'
+    enterButton.textContent = capability.entryMode === 'immersive-ar'
+      ? 'Enter immersive AR Codori'
+      : 'Enter immersive Codori'
     enterButton.onclick = () => {
-      void enterImmersive()
+      void enterImmersive(capability.entryMode)
     }
     entryActions.hidden = false
     setEntryMessage(
-      'Your browser reports immersive VR support. Entry and microphone access remain explicit actions.'
+      capability.entryMode === 'immersive-ar'
+        ? 'Your browser reports immersive AR support. Transparent pixels will reveal the environment only when the session blend mode permits it.'
+        : 'Your browser reports immersive VR support. Entry and microphone access remain explicit actions.'
     )
     return
   }
@@ -469,6 +721,10 @@ retryButton.addEventListener('click', () => {
 exitButton.addEventListener('click', () => {
   void exitImmersive()
 })
+fallbackMenu.addEventListener('click', () => {
+  immersiveScene?.toggleStatusFromFallback()
+})
+reducedEffects.addEventListener('change', updateStatusWindow)
 window.addEventListener('resize', () => {
   immersiveScene?.resize()
 })

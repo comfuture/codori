@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { Vector3 } from 'three'
+import { Quaternion, Vector3 } from 'three'
 import { resolveExitDoorPosition } from '../src/world-controls'
 
 describe('world exit door placement', () => {
@@ -26,5 +26,25 @@ describe('world exit door placement', () => {
       .toBeCloseTo(4.965)
     expect(Math.min(Math.abs(offset.x), Math.abs(offset.z)))
       .toBeGreaterThan(0.9)
+  })
+
+  it('lays out the exit once in anchor-local space at 90-degree workspace yaw', () => {
+    const localCenter = new Vector3(0, 1.65, 0)
+    const localDoor = resolveExitDoorPosition(
+      localCenter,
+      new Vector3(0, 0, -1)
+    )
+    const yaw = new Quaternion().setFromUnitVectors(
+      new Vector3(0, 0, -1),
+      new Vector3(1, 0, 0)
+    )
+    const anchorPosition = new Vector3(1.5, 0, 0)
+    const worldDoor = localDoor.clone().applyQuaternion(yaw).add(anchorPosition)
+    const recoveredLocal = worldDoor.clone().sub(anchorPosition)
+      .applyQuaternion(yaw.clone().invert())
+
+    expect(recoveredLocal.distanceTo(localDoor)).toBeLessThan(1e-9)
+    expect(Math.max(Math.abs(recoveredLocal.x), Math.abs(recoveredLocal.z)))
+      .toBeCloseTo(4.965)
   })
 })

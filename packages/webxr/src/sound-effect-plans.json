@@ -144,5 +144,95 @@
         "gain": 0.12
       }
     ]
+  },
+  "statusOpen": {
+    "durationSeconds": 0.38,
+    "attackSeconds": 0.008,
+    "releaseStartSeconds": 0.225,
+    "peakGain": 0.075,
+    "echoDelaySeconds": 0,
+    "echoFeedback": 0,
+    "echoWetGain": 0,
+    "tones": [
+      {
+        "wave": "sine",
+        "delaySeconds": 0,
+        "startFrequency": 148,
+        "peakFrequency": 420,
+        "peakSeconds": 0.38,
+        "endFrequency": 420,
+        "gain": 0.46
+      },
+      {
+        "wave": "triangle",
+        "delaySeconds": 0.018,
+        "attackSeconds": 0.012,
+        "startFrequency": 222,
+        "peakFrequency": 632,
+        "peakSeconds": 0.38,
+        "endFrequency": 632,
+        "gain": 0.18
+      },
+      {
+        "wave": "sine",
+        "delaySeconds": 0.052,
+        "attackSeconds": 0.018,
+        "startFrequency": 296,
+        "peakFrequency": 844,
+        "peakSeconds": 0.38,
+        "endFrequency": 844,
+        "gain": 0.1
+      }
+    ]
+  },
+  "statusClose": {
+    "durationSeconds": 0.3,
+    "attackSeconds": 0.008,
+    "releaseStartSeconds": 0.19,
+    "peakGain": 0.105,
+    "echoDelaySeconds": 0,
+    "echoFeedback": 0,
+    "echoWetGain": 0,
+    "tones": [
+      {
+        "wave": "sine",
+        "delaySeconds": 0,
+        "startFrequency": 430,
+        "peakFrequency": 260,
+        "peakSeconds": 0.3,
+        "endFrequency": 260,
+        "gain": 0.62
+      },
+      {
+        "wave": "triangle",
+        "delaySeconds": 0.014,
+        "attackSeconds": 0.012,
+        "startFrequency": 646,
+        "peakFrequency": 390,
+        "peakSeconds": 0.3,
+        "endFrequency": 390,
+        "gain": 0.27
+      },
+      {
+        "wave": "sine",
+        "delaySeconds": 0.044,
+        "attackSeconds": 0.018,
+        "startFrequency": 884,
+        "peakFrequency": 520,
+        "peakSeconds": 0.3,
+        "endFrequency": 520,
+        "gain": 0.17
+      },
+      {
+        "wave": "sine",
+        "delaySeconds": 0.058,
+        "attackSeconds": 0.016,
+        "startFrequency": 1120,
+        "peakFrequency": 640,
+        "peakSeconds": 0.3,
+        "endFrequency": 640,
+        "gain": 0.11
+      }
+    ]
   }
 }

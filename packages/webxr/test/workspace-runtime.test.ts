@@ -38,6 +38,17 @@ describe('immersive workspace runtime', () => {
         if (method === 'thread/read') {
           return { thread }
         }
+        if (method === 'account/rateLimits/read') {
+          return {
+            rateLimits: {
+              limitId: 'codex',
+              limitName: 'Codex',
+              primary: { usedPercent: 20 },
+              secondary: null
+            },
+            rateLimitsByLimitId: null
+          }
+        }
         if (method === 'thread/backgroundTerminals/list') {
           return {
             data: [],
@@ -72,6 +83,7 @@ describe('immersive workspace runtime', () => {
     expect(requests).toEqual([
       'thread/resume',
       'thread/read',
+      'account/rateLimits/read',
       'thread/backgroundTerminals/list'
     ])
     expect(runtime.snapshot()).toMatchObject({
@@ -135,6 +147,9 @@ describe('immersive workspace runtime', () => {
             data: [],
             nextCursor: null
           }
+        }
+        if (method === 'account/rateLimits/read') {
+          return { rateLimits: [], rateLimitsByLimitId: null }
         }
         throw new Error(`Unexpected request: ${method}`)
       })
@@ -285,6 +300,87 @@ describe('immersive workspace runtime', () => {
       sourceId: 'file-2',
       phase: 'appearing',
       fileTransitionStartedAt: 3_200
+    })
+    await runtime.dispose()
+  })
+
+  it('tracks active-thread context and singular sparse quota updates', async () => {
+    const threadId = 'thread-142'
+    const thread = { id: threadId, ephemeral: false, turns: [] } as unknown as Thread
+    let notify: (notification: CodexRpcNotification) => void = () => {}
+    const client = {
+      connect: vi.fn(async () => {}),
+      close: vi.fn(),
+      subscribe: vi.fn((listener: typeof notify) => {
+        notify = listener
+        return () => {}
+      }),
+      subscribeConnectionState: vi.fn(() => () => {}),
+      request: vi.fn(async (method: string) => {
+        if (method === 'thread/resume' || method === 'thread/read') return { thread }
+        if (method === 'account/rateLimits/read') {
+          return {
+            rateLimits: {
+              limitId: 'codex',
+              limitName: 'Codex',
+              primary: { usedPercent: 10, resetsAt: '2026-08-12T00:00:00Z' },
+              secondary: null
+            },
+            rateLimitsByLimitId: null
+          }
+        }
+        if (method === 'thread/backgroundTerminals/list') return { data: [], nextCursor: null }
+        throw new Error(`Unexpected request: ${method}`)
+      })
+    } as unknown as CodexRpcClient
+    const runtime = new WorkspaceRuntime({
+      identity: { workspace: { kind: 'project', id: 'codori' }, threadId },
+      client,
+      setInterval: vi.fn(() => 1) as unknown as typeof globalThis.setInterval,
+      clearInterval: vi.fn() as unknown as typeof globalThis.clearInterval
+    })
+    await runtime.start()
+
+    notify({
+      method: 'thread/tokenUsage/updated',
+      params: {
+        threadId: 'another-thread',
+        turnId: 'turn-other',
+        tokenUsage: { total: {}, last: { totalTokens: 9_000 }, modelContextWindow: 10_000 }
+      }
+    } as CodexRpcNotification)
+    expect(runtime.snapshot().context.remainingPercent).toBe(null)
+
+    notify({
+      method: 'thread/tokenUsage/updated',
+      params: {
+        threadId,
+        turnId: 'turn-1',
+        tokenUsage: { total: {}, last: { totalTokens: 2_500 }, modelContextWindow: 10_000 }
+      }
+    } as CodexRpcNotification)
+    notify({
+      method: 'account/rateLimits/updated',
+      params: {
+        rateLimits: {
+          limitId: 'codex',
+          limitName: null,
+          primary: { usedPercent: 25 },
+          secondary: null
+        }
+      }
+    } as CodexRpcNotification)
+
+    expect(runtime.snapshot()).toMatchObject({
+      context: { remainingPercent: 75, remainingTokens: 7_500 },
+      rateLimits: [{
+        limitId: 'codex',
+        limitName: 'Codex',
+        primary: {
+          usedPercent: 25,
+          resetsAt: '2026-08-12T00:00:00Z'
+        }
+      }]
     })
     await runtime.dispose()
   })

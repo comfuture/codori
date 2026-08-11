@@ -1,4 +1,5 @@
 import {
+  Box3,
   BufferGeometry,
   Line,
   LineBasicMaterial,
@@ -24,6 +25,17 @@ import {
 } from './panel-interaction'
 import type { SpatialPanelView } from './panel-view'
 import type { WorldControlAction } from './world-controls'
+import {
+  canActivateStatusAction,
+  mappedMenuButtonIndex,
+  shouldShowStatusFallbackMenu,
+  StatusControllerArmModel,
+  StatusGestureModel,
+  type StatusActionId,
+  type StatusActionInputPolicy,
+  type StatusWindowInvocation,
+  type StatusActivation
+} from './status-window-model'
 
 type SourceRuntime = {
   id: string
@@ -41,6 +53,8 @@ type SourceRuntime = {
   grabSphere: Sphere
   grabInitialPosition: Vector3
   grabMoved: boolean
+  menuPressed: boolean
+  contactActionId: StatusActionId | null
   listeners: {
     connected: (event: unknown) => void
     disconnected: () => void
@@ -56,12 +70,24 @@ export type InteractionSystemOptions = {
   root: Object3D
   getPanels: () => ReadonlyMap<string, SpatialPanelView>
   getControlTargets: () => readonly Mesh[]
+  getStatusTargets: () => readonly Mesh[]
+  getStatusMenuTarget: () => Mesh | null
+  isStatusOpen: () => boolean
+  getStatusInvocation: () => StatusWindowInvocation | null
   onScroll: (panelId: string, deltaLines: number) => void
   onPanelInteracted: (panelId: string) => void
   onPanelMoved: (panelId: string, position: Vector3) => void
   onPanelFocused: (panelId: string, position: Vector3) => void
   onPanelDismiss: (panelId: string) => void
   onAction: (action: WorldControlAction) => void
+  onStatusToggle: (invocation: StatusWindowInvocation) => void
+  onStatusDismiss: () => void
+  onStatusAction: (action: StatusActionId) => void
+  onInputCapabilitiesChanged: (input: {
+    controller: boolean
+    hand: boolean
+    fallbackMenu: boolean
+  }) => void
 }
 
 const rayOrigin = new Vector3()
@@ -76,6 +102,10 @@ const panelPlane = new Plane()
 const panelPlaneNormal = new Vector3()
 const panelPlanePosition = new Vector3()
 const panelPlaneQuaternion = new Quaternion()
+const jointQuaternion = new Quaternion()
+const handBackNormal = new Vector3()
+const wristToViewer = new Vector3()
+const contactBounds = new Box3()
 const PANEL_GRAB_TAP_MAX_DISTANCE_METERS = 0.12
 const PANEL_FOCUSED_DISTANCE_METERS = 1.8
 
@@ -95,6 +125,48 @@ export const resolveRayGrabPosition = (
   return intersection?.add(offset) ?? null
 }
 
+export const resolveTrackedHandJoint = (
+  hand: XRHandSpace,
+  name: XRHandJoint
+) => {
+  const joint = hand.joints[name]
+  return hand.visible && joint?.visible ? joint : null
+}
+
+export const mappedStatusMenuButtonIndex = (
+  source: Pick<XRInputSource, 'handedness' | 'profiles' | 'gamepad'>
+) => {
+  const index = mappedMenuButtonIndex(source.handedness, source.profiles)
+  return index != null && source.gamepad?.buttons[index]
+    ? index
+    : null
+}
+
+export const resolveStatusFallbackMenuVisibility = (
+  sources: readonly Pick<SourceRuntime, 'inputSource' | 'hand'>[]
+) => {
+  const trackedLeftHand = sources.some(runtime =>
+    runtime.inputSource?.handedness === 'left'
+    && Boolean(runtime.inputSource.hand)
+    && resolveTrackedHandJoint(runtime.hand, 'wrist') !== null
+  )
+  const leftControllerActive = sources.some(runtime =>
+    runtime.inputSource?.handedness === 'left'
+    && !runtime.inputSource.hand
+    && runtime.inputSource.targetRayMode === 'tracked-pointer'
+  )
+  const mappedMenuController = sources.some(runtime =>
+    runtime.inputSource != null
+    && !runtime.inputSource.hand
+    && mappedStatusMenuButtonIndex(runtime.inputSource) !== null
+  )
+  return shouldShowStatusFallbackMenu({
+    mappedMenuController,
+    trackedLeftHand,
+    leftControllerActive
+  })
+}
+
 export const resolveFocusedPanelPosition = (
   viewer: Vector3,
   panel: Vector3,
@@ -112,6 +184,30 @@ export const resolveFocusedPanelPosition = (
     focusedPanelDirection.divideScalar(distance),
     PANEL_FOCUSED_DISTANCE_METERS
   )
+}
+
+export const worldPointToPanelLocal = (
+  panel: Object3D,
+  worldPoint: Vector3,
+  target = new Vector3()
+) => {
+  target.copy(worldPoint)
+  panel.parent?.worldToLocal(target)
+  return target
+}
+
+export const resolveFocusedPanelLocalPosition = (
+  viewerWorld: Vector3,
+  panel: Object3D,
+  target = new Vector3()
+) => {
+  panel.getWorldPosition(panelPlanePosition)
+  resolveFocusedPanelPosition(
+    viewerWorld,
+    panelPlanePosition,
+    target
+  )
+  return worldPointToPanelLocal(panel, target, target)
 }
 
 export const resolveRayPanelPosition = (
@@ -138,6 +234,12 @@ export class ImmersiveInteractionSystem {
   private readonly raycaster = new Raycaster()
 
   private readonly sources: SourceRuntime[] = []
+
+  private readonly statusGesture = new StatusGestureModel()
+
+  private readonly statusControllerArm = new StatusControllerArmModel()
+
+  private lastInputCapabilities = ''
 
   private disposed = false
 
@@ -196,6 +298,8 @@ export class ImmersiveInteractionSystem {
       grabSphere: new Sphere(),
       grabInitialPosition: new Vector3(),
       grabMoved: false,
+      menuPressed: false,
+      contactActionId: null,
       listeners: null
     }
     const listeners = {
@@ -267,6 +371,14 @@ export class ImmersiveInteractionSystem {
       }
     }
     targets.push(...this.options.getControlTargets())
+    if (this.options.isStatusOpen()) {
+      targets.push(...this.options.getStatusTargets())
+    } else {
+      const menu = this.options.getStatusMenuTarget()
+      if (menu?.visible && menu.parent?.visible) {
+        targets.push(menu)
+      }
+    }
     return targets
   }
 
@@ -307,6 +419,23 @@ export class ImmersiveInteractionSystem {
     native: boolean
   ) {
     const intersection = this.raycast(runtime)
+    if (intersection?.object.userData.statusMenu === true) {
+      this.options.onStatusToggle('fallback')
+      return
+    }
+    const statusAction = intersection?.object.userData.statusActionId
+    if (typeof statusAction === 'string') {
+      this.activateStatusAction(
+        runtime,
+        statusAction as StatusActionId,
+        native ? 'ray' : 'pinch',
+        intersection!.object
+      )
+      return
+    }
+    if (native && this.activateControllerContact(runtime)) {
+      return
+    }
     const action = intersection?.object.userData.action
     if (action === 'toggle-voice' || action === 'exit-xr') {
       this.options.onAction(action)
@@ -340,6 +469,215 @@ export class ImmersiveInteractionSystem {
     if (hit?.zone === 'grab') {
       this.handleGrabStart(runtime, native ? 'select' : 'pinch')
     }
+  }
+
+  private activationSource(runtime: SourceRuntime): StatusActivation['source'] {
+    if (runtime.inputSource?.hand) {
+      return 'hand'
+    }
+    if (runtime.inputSource?.targetRayMode === 'gaze') {
+      return 'gaze'
+    }
+    if (runtime.inputSource?.targetRayMode === 'screen') {
+      return 'screen'
+    }
+    return 'controller'
+  }
+
+  private activateStatusAction(
+    runtime: SourceRuntime,
+    action: StatusActionId,
+    method: StatusActivation['method'],
+    target: Object3D
+  ) {
+    if (target.userData.statusActionAvailable !== true) {
+      return false
+    }
+    const policy = target.userData.statusInputPolicy as StatusActionInputPolicy | undefined
+    if (!canActivateStatusAction({
+      source: this.activationSource(runtime),
+      method
+    }, policy)) {
+      return false
+    }
+    if (this.activationSource(runtime) === 'hand') {
+      this.statusGesture.suppress(performance.now())
+    }
+    this.options.onStatusAction(action)
+    return true
+  }
+
+  private nearestStatusContact(point: Vector3, maximumDistance: number) {
+    let nearest: { target: Mesh, distance: number } | null = null
+    for (const target of this.options.getStatusTargets()) {
+      target.updateWorldMatrix(true, false)
+      contactBounds.setFromObject(target)
+      const distance = contactBounds.distanceToPoint(point)
+      if (distance <= maximumDistance && (!nearest || distance < nearest.distance)) {
+        nearest = { target, distance }
+      }
+    }
+    return nearest?.target ?? null
+  }
+
+  private activateControllerContact(runtime: SourceRuntime) {
+    if (
+      !this.options.isStatusOpen()
+      || runtime.inputSource?.hand
+      || runtime.inputSource?.targetRayMode !== 'tracked-pointer'
+    ) {
+      return false
+    }
+    runtime.grip.getWorldPosition(sourcePosition)
+    const target = this.nearestStatusContact(sourcePosition, 0.055)
+    const action = target?.userData.statusActionId
+    return typeof action === 'string'
+      ? this.activateStatusAction(runtime, action as StatusActionId, 'contact', target!)
+      : false
+  }
+
+  private updateHandStatusContact(runtime: SourceRuntime) {
+    if (!runtime.inputSource?.hand || !this.options.isStatusOpen()) {
+      runtime.contactActionId = null
+      return
+    }
+    const index = resolveTrackedHandJoint(
+      runtime.hand,
+      'index-finger-tip'
+    )
+    if (!index) {
+      runtime.contactActionId = null
+      return
+    }
+    index.getWorldPosition(indexPosition)
+    const target = this.nearestStatusContact(indexPosition, 0.018)
+    const action = typeof target?.userData.statusActionId === 'string'
+      ? target.userData.statusActionId as StatusActionId
+      : null
+    if (action && runtime.contactActionId !== action) {
+      this.activateStatusAction(runtime, action, 'contact', target!)
+    }
+    runtime.contactActionId = action
+  }
+
+  private updateMenuButton(runtime: SourceRuntime) {
+    const source = runtime.inputSource
+    const index = source
+      ? mappedStatusMenuButtonIndex(source)
+      : null
+    const pressed = index == null
+      ? false
+      : source?.gamepad?.buttons[index]?.pressed === true
+    if (pressed && !runtime.menuPressed) {
+      this.options.onStatusToggle('controller')
+    }
+    runtime.menuPressed = pressed
+  }
+
+  private updateInputCapabilities() {
+    const controller = this.sources.some(runtime =>
+      Boolean(runtime.inputSource)
+      && !runtime.inputSource?.hand
+      && runtime.inputSource?.targetRayMode === 'tracked-pointer'
+    )
+    const hand = this.sources.some(runtime =>
+      Boolean(runtime.inputSource?.hand)
+      && resolveTrackedHandJoint(runtime.hand, 'wrist') !== null
+    )
+    const fallbackMenu = resolveStatusFallbackMenuVisibility(this.sources)
+    const key = `${controller}:${hand}:${fallbackMenu}`
+    if (key !== this.lastInputCapabilities) {
+      this.lastInputCapabilities = key
+      this.options.onInputCapabilitiesChanged({
+        controller,
+        hand,
+        fallbackMenu
+      })
+    }
+  }
+
+  private updateStatusGesture(now: number) {
+    const leftController = this.sources.some(runtime =>
+      runtime.inputSource?.handedness === 'left'
+      && !runtime.inputSource.hand
+      && runtime.inputSource.targetRayMode === 'tracked-pointer'
+    )
+    const leftHand = this.sources.find(runtime =>
+      runtime.inputSource?.handedness === 'left'
+      && Boolean(runtime.inputSource.hand)
+    )
+    const wrist = leftHand
+      ? resolveTrackedHandJoint(leftHand.hand, 'wrist')
+      : null
+    this.options.renderer.xr.getCamera().getWorldPosition(viewerPosition)
+    let height = Number.NEGATIVE_INFINITY
+    let facing = Number.NEGATIVE_INFINITY
+    if (wrist) {
+      wrist.getWorldPosition(sourcePosition)
+      wrist.getWorldQuaternion(jointQuaternion)
+      handBackNormal.set(0, 1, 0).applyQuaternion(jointQuaternion).normalize()
+      wristToViewer.subVectors(viewerPosition, sourcePosition).normalize()
+      height = sourcePosition.y - viewerPosition.y
+      facing = handBackNormal.dot(wristToViewer)
+    }
+    const event = this.statusGesture.update({
+      now,
+      tracked: Boolean(wrist),
+      controllerActive: leftController,
+      wristHeightFromEyes: height,
+      handBackFacingViewer: facing
+    }, {
+      open: this.options.isStatusOpen(),
+      invocation: this.options.getStatusInvocation()
+    })
+    if (event === 'open') {
+      this.options.onStatusToggle('hand')
+    } else if (event === 'close') {
+      this.options.onStatusDismiss()
+    }
+  }
+
+  private updateControllerArmDismissal(now: number) {
+    const leftController = this.sources.find(runtime =>
+      runtime.inputSource?.handedness === 'left'
+      && !runtime.inputSource.hand
+      && runtime.inputSource.targetRayMode === 'tracked-pointer'
+    )
+    this.options.renderer.xr.getCamera().getWorldPosition(viewerPosition)
+    let height = Number.NEGATIVE_INFINITY
+    if (leftController) {
+      const anchor = leftController.inputSource?.gripSpace
+        ? leftController.grip
+        : leftController.targetRay
+      anchor.getWorldPosition(sourcePosition)
+      height = sourcePosition.y - viewerPosition.y
+    }
+    if (this.statusControllerArm.update({
+      now,
+      tracked: Boolean(leftController),
+      gripHeightFromEyes: height,
+      open: this.options.isStatusOpen(),
+      invocation: this.options.getStatusInvocation()
+    }) === 'close') {
+      this.options.onStatusDismiss()
+    }
+  }
+
+  statusAnchor() {
+    const controller = this.sources.find(runtime =>
+      runtime.inputSource?.handedness === 'left'
+      && !runtime.inputSource.hand
+      && runtime.inputSource.targetRayMode === 'tracked-pointer'
+    )
+    if (controller) {
+      return controller.inputSource?.gripSpace ? controller.grip : controller.targetRay
+    }
+    const hand = this.sources.find(runtime =>
+      runtime.inputSource?.handedness === 'left' && runtime.inputSource.hand
+    )
+    return hand
+      ? resolveTrackedHandJoint(hand.hand, 'wrist')
+      : null
   }
 
   private handleGrabStart(
@@ -380,7 +718,8 @@ export class ImmersiveInteractionSystem {
     if (!runtime.inputSource?.gripSpace) {
       runtime.targetRay.getWorldPosition(sourcePosition)
     }
-    runtime.grabOffset.copy(panel.group.position).sub(sourcePosition)
+    panel.group.getWorldPosition(runtime.grabOffset)
+    runtime.grabOffset.sub(sourcePosition)
     this.refreshPanelInteraction()
   }
 
@@ -405,10 +744,7 @@ export class ImmersiveInteractionSystem {
             .getWorldPosition(viewerPosition)
           this.options.onPanelFocused(
             grabbedPanelId,
-            resolveFocusedPanelPosition(
-              viewerPosition,
-              panel.group.position
-            )
+            resolveFocusedPanelLocalPosition(viewerPosition, panel.group)
           )
         } else {
           this.options.onPanelMoved(
@@ -425,9 +761,10 @@ export class ImmersiveInteractionSystem {
     if (!runtime.inputSource?.hand) {
       return
     }
-    const thumb = runtime.hand.getObjectByName('thumb-tip')
-    const index = runtime.hand.getObjectByName('index-finger-tip')
+    const thumb = resolveTrackedHandJoint(runtime.hand, 'thumb-tip')
+    const index = resolveTrackedHandJoint(runtime.hand, 'index-finger-tip')
     if (!thumb || !index) {
+      this.endSynthesizedPinch(runtime, false)
       return
     }
     thumb.getWorldPosition(thumbPosition)
@@ -437,12 +774,22 @@ export class ImmersiveInteractionSystem {
       runtime.pinching = true
       this.handleSelectStart(runtime, now, false)
     } else if (runtime.pinching && distance >= 0.038) {
-      runtime.pinching = false
-      runtime.selecting = false
-      this.model.selectEnd(runtime.id)
-      if (runtime.grabbedBy === 'pinch') {
-        this.releaseGrab(runtime, true)
-      }
+      this.endSynthesizedPinch(runtime, true)
+    }
+  }
+
+  private endSynthesizedPinch(
+    runtime: SourceRuntime,
+    focusOnTap: boolean
+  ) {
+    if (!runtime.pinching) {
+      return
+    }
+    runtime.pinching = false
+    runtime.selecting = false
+    this.model.selectEnd(runtime.id)
+    if (runtime.grabbedBy === 'pinch') {
+      this.releaseGrab(runtime, focusOnTap)
     }
   }
 
@@ -495,6 +842,8 @@ export class ImmersiveInteractionSystem {
         intersection ? this.hitFromObject(intersection.object) : null
       )
       this.updatePinch(runtime, now)
+      this.updateHandStatusContact(runtime)
+      this.updateMenuButton(runtime)
       this.updateGamepadScroll(runtime)
 
       const sourceState = this.model.snapshot().sources.get(runtime.id)
@@ -538,6 +887,11 @@ export class ImmersiveInteractionSystem {
               sourcePosition
             )
             if (position) {
+              worldPointToPanelLocal(
+                panel.group,
+                position,
+                position
+              )
               runtime.grabMoved ||= !isPanelGrabTap(
                 runtime.grabInitialPosition,
                 position
@@ -550,6 +904,11 @@ export class ImmersiveInteractionSystem {
               runtime.targetRay.getWorldPosition(sourcePosition)
             }
             const position = sourcePosition.add(runtime.grabOffset)
+            worldPointToPanelLocal(
+              panel.group,
+              position,
+              position
+            )
             runtime.grabMoved ||= !isPanelGrabTap(
               runtime.grabInitialPosition,
               position
@@ -559,6 +918,9 @@ export class ImmersiveInteractionSystem {
         }
       }
     }
+    this.updateInputCapabilities()
+    this.updateStatusGesture(now)
+    this.updateControllerArmDismissal(now)
     this.refreshPanelInteraction()
   }
 

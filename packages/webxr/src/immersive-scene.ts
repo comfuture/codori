@@ -1,6 +1,8 @@
 import {
   AmbientLight,
+  BufferGeometry,
   Color,
+  Float32BufferAttribute,
   GridHelper,
   Group,
   LineSegments,
@@ -8,6 +10,9 @@ import {
   MeshBasicMaterial,
   PerspectiveCamera,
   PlaneGeometry,
+  Points,
+  PointsMaterial,
+  TorusGeometry,
   Scene,
   SRGBColorSpace,
   Timer,
@@ -17,6 +22,7 @@ import {
 import { AgentLightView } from './agent-light-view'
 import {
   viewerFacingQuaternion,
+  viewerFacingLocalQuaternion,
   smoothViewerFacingQuaternion
 } from './billboard'
 import {
@@ -41,6 +47,19 @@ import {
 import { TranscriptBubbleView } from './transcript-bubble-view'
 import { WorldControls, type WorldControlAction } from './world-controls'
 import { WorldStatus } from './world-status'
+import {
+  StatusWindowView
+} from './status-window-view'
+import type {
+  StatusActionId,
+  StatusWindowInvocation,
+  StatusWindowSnapshot
+} from './status-window-model'
+import type { ImmersiveSessionMode } from './xr-capability'
+import {
+  ReferenceSpaceResetModel,
+  resolveWorkspaceAnchor
+} from './workspace-anchor'
 
 export type ImmersiveSceneOptions = {
   canvas: HTMLCanvasElement
@@ -52,6 +71,10 @@ export type ImmersiveSceneOptions = {
   onPanelFocused: (panelId: string, position: Vector3) => void
   onPanelDismiss: (panelId: string) => void
   onPanelAppeared: (panelCount: number) => void
+  onStatusAction: (action: StatusActionId) => void
+  onStatusOpened: () => void
+  onStatusClosed: () => void
+  onStatusFallbackChanged: (visible: boolean) => void
 }
 
 const viewerPosition = new Vector3()
@@ -59,9 +82,10 @@ const viewerDirection = new Vector3()
 const worldCenter = new Vector3(0, 1.65, 0)
 const worldForward = new Vector3(0, 0, -1)
 const floorCenter = new Vector3()
-
-const clamp = (value: number, minimum: number, maximum: number) =>
-  Math.min(maximum, Math.max(minimum, value))
+const statusAnchorPosition = new Vector3()
+const menuWorldPosition = new Vector3()
+const menuOffset = new Vector3(0.52, -0.32, -1.15)
+const fallbackStatusOffset = new Vector3(-0.18, 0, -1.12)
 
 export class ImmersiveScene {
   readonly scene = new Scene()
@@ -88,6 +112,10 @@ export class ImmersiveScene {
 
   private readonly status = new WorldStatus()
 
+  private readonly statusWindow = new StatusWindowView()
+
+  private readonly contrast = new Group()
+
   private readonly panels = new Map<string, SpatialPanelView>()
 
   private readonly interaction: ImmersiveInteractionSystem
@@ -106,11 +134,21 @@ export class ImmersiveScene {
 
   private disposed = false
 
+  private readonly referenceReset = new ReferenceSpaceResetModel()
+
+  private releaseReferenceReset: (() => void) | null = null
+
+  private sessionMode: ImmersiveSessionMode = 'immersive-vr'
+
+  private environmentBlendMode: XREnvironmentBlendMode = 'opaque'
+
+  private statusInvocation: StatusWindowInvocation | null = null
+
   constructor(private readonly options: ImmersiveSceneOptions) {
     this.renderer = new WebGLRenderer({
       canvas: options.canvas,
       antialias: true,
-      alpha: false,
+      alpha: true,
       powerPreference: 'high-performance'
     })
     this.renderer.outputColorSpace = SRGBColorSpace
@@ -128,8 +166,11 @@ export class ImmersiveScene {
       this.agentLight.group,
       this.transcriptView.group,
       this.controls.group,
-      this.status.group
+      this.status.group,
+      this.contrast
     )
+    this.scene.add(this.statusWindow.group, this.statusWindow.menuGroup)
+    this.createContrastTreatments()
     this.setWorldCenter(new Vector3(0, 1.65, 0))
 
     this.interaction = new ImmersiveInteractionSystem({
@@ -140,17 +181,78 @@ export class ImmersiveScene {
         this.agentLight.hitTarget,
         ...this.controls.hitTargets
       ],
+      getStatusTargets: () => this.statusWindow.actionHits,
+      getStatusMenuTarget: () => this.statusWindow.menuHit,
+      isStatusOpen: () => this.statusWindow.isOpen,
+      getStatusInvocation: () => this.statusInvocation,
       onScroll: options.onPanelScroll,
       onPanelInteracted: options.onPanelInteracted,
       onPanelMoved: options.onPanelMoved,
       onPanelFocused: options.onPanelFocused,
       onPanelDismiss: options.onPanelDismiss,
-      onAction: options.onAction
+      onAction: options.onAction,
+      onStatusToggle: invocation => this.toggleStatusWindow(invocation),
+      onStatusDismiss: () => this.closeStatusWindow(),
+      onStatusAction: (action) => {
+        this.closeStatusWindow()
+        options.onStatusAction(action)
+      },
+      onInputCapabilitiesChanged: ({ fallbackMenu }) => {
+        this.statusWindow.setMenuVisible(fallbackMenu)
+        options.onStatusFallbackChanged(fallbackMenu)
+      }
     })
     this.renderer.setAnimationLoop((timestamp) => {
       this.renderFrame(timestamp)
     })
     this.resize()
+  }
+
+  private createContrastTreatments() {
+    const ditherPositions: number[] = []
+    const pointCount = 420
+    const goldenAngle = Math.PI * (3 - Math.sqrt(5))
+    for (let index = 0; index < pointCount; index += 1) {
+      const y = 1 - ((index / (pointCount - 1)) * 2)
+      const radius = Math.sqrt(1 - y * y)
+      const theta = goldenAngle * index
+      ditherPositions.push(
+        Math.cos(theta) * radius * 0.34,
+        y * 0.34,
+        Math.sin(theta) * radius * 0.34
+      )
+    }
+    const ditherGeometry = new BufferGeometry()
+    ditherGeometry.setAttribute(
+      'position',
+      new Float32BufferAttribute(ditherPositions, 3)
+    )
+    const dither = new Points(
+      ditherGeometry,
+      new PointsMaterial({
+        color: '#071008',
+        size: 0.012,
+        sizeAttenuation: true,
+        transparent: true,
+        opacity: 0.38,
+        depthWrite: false
+      })
+    )
+    dither.name = 'alpha-passthrough-dither-shell'
+    dither.userData.contrast = 'dither'
+    const additive = new Mesh(
+      new TorusGeometry(0.28, 0.025, 10, 48),
+      new MeshBasicMaterial({
+        color: '#ff6bd6',
+        transparent: true,
+        opacity: 0.88,
+        depthWrite: false
+      })
+    )
+    additive.name = 'additive-passthrough-shape-outline'
+    additive.userData.contrast = 'additive-shape'
+    this.contrast.add(dither, additive)
+    this.contrast.visible = false
   }
 
   private createRoom() {
@@ -213,20 +315,27 @@ export class ImmersiveScene {
     } else {
       worldForward.normalize()
     }
-    this.agentLight.group.position.copy(center)
+    this.world.position.set(center.x, 0, center.z)
+    this.world.quaternion.setFromUnitVectors(
+      new Vector3(0, 0, -1),
+      worldForward
+    )
+    worldCenter.set(0, center.y, 0)
+    this.agentLight.group.position.copy(worldCenter)
     this.transcriptView.group.position.set(
-      center.x,
+      0,
       center.y + 0.72,
-      center.z
+      0
     )
-    this.controls.placeExitDoor(center, worldForward)
+    this.controls.placeExitDoor(worldCenter, new Vector3(0, 0, -1))
     this.status.group.position.set(
-      center.x,
+      0,
       center.y + 1.22,
-      center.z
+      0
     )
-    floorCenter.set(center.x, 0, center.z)
+    floorCenter.set(0, 0, 0)
     this.room.position.copy(floorCenter)
+    this.contrast.position.copy(this.agentLight.group.position)
   }
 
   private placeFromInitialViewer() {
@@ -242,14 +351,14 @@ export class ImmersiveScene {
     } else {
       viewerDirection.normalize()
     }
-    const center = viewerPosition.clone()
-      .addScaledVector(viewerDirection, INITIAL_LIGHT_DISTANCE_METERS)
-    center.y = clamp(
-      viewerPosition.y,
-      MIN_LIGHT_HEIGHT_METERS,
-      MAX_LIGHT_HEIGHT_METERS
-    )
-    this.setWorldCenter(center, viewerDirection)
+    const anchor = resolveWorkspaceAnchor({
+      viewerPosition,
+      viewerDirection,
+      distanceMeters: INITIAL_LIGHT_DISTANCE_METERS,
+      minimumHeightMeters: MIN_LIGHT_HEIGHT_METERS,
+      maximumHeightMeters: MAX_LIGHT_HEIGHT_METERS
+    })
+    this.setWorldCenter(anchor.position, anchor.forward)
     this.placedFromViewer = true
     this.syncPanelViews()
   }
@@ -286,6 +395,84 @@ export class ImmersiveScene {
     }
   }
 
+  setStatusWindowSnapshot(snapshot: StatusWindowSnapshot) {
+    this.statusWindow.setSnapshot(snapshot)
+  }
+
+  private toggleStatusWindow(invocation: StatusWindowInvocation) {
+    if (this.statusWindow.toggle(performance.now())) {
+      if (this.statusWindow.isOpen) {
+        this.statusInvocation = invocation
+        this.options.onStatusOpened()
+      } else {
+        this.statusInvocation = null
+        this.options.onStatusClosed()
+      }
+    }
+  }
+
+  toggleStatusFromFallback() {
+    this.toggleStatusWindow('fallback')
+  }
+
+  openStatusForPreview() {
+    if (!this.statusWindow.isOpen) {
+      this.toggleStatusWindow('fallback')
+    }
+  }
+
+  private closeStatusWindow() {
+    if (this.statusWindow.close(performance.now())) {
+      this.statusInvocation = null
+      this.options.onStatusClosed()
+    }
+  }
+
+  recenterWorkspace() {
+    const camera = this.renderer.xr.isPresenting
+      ? this.renderer.xr.getCamera()
+      : this.camera
+    camera.getWorldPosition(viewerPosition)
+    camera.getWorldDirection(viewerDirection)
+    viewerDirection.y = 0
+    if (viewerDirection.lengthSq() < 0.001) {
+      viewerDirection.set(0, 0, -1)
+    } else {
+      viewerDirection.normalize()
+    }
+    const anchor = resolveWorkspaceAnchor({
+      viewerPosition,
+      viewerDirection,
+      distanceMeters: INITIAL_LIGHT_DISTANCE_METERS,
+      minimumHeightMeters: MIN_LIGHT_HEIGHT_METERS,
+      maximumHeightMeters: MAX_LIGHT_HEIGHT_METERS
+    })
+    this.setWorldCenter(anchor.position, anchor.forward)
+    this.syncPanelViews()
+  }
+
+  setSessionVisualMode(
+    mode: ImmersiveSessionMode,
+    environmentBlendMode: XREnvironmentBlendMode
+  ) {
+    this.sessionMode = mode
+    this.environmentBlendMode = environmentBlendMode
+    const passthrough = mode === 'immersive-ar'
+      && environmentBlendMode !== 'opaque'
+    this.room.visible = !passthrough
+    this.controls.group.visible = !passthrough
+    this.scene.background = passthrough ? null : new Color('#01040a')
+    this.renderer.setClearColor(0x000000, passthrough ? 0 : 1)
+    this.contrast.visible = passthrough
+    for (const child of this.contrast.children) {
+      child.visible = environmentBlendMode === 'alpha-blend'
+        ? child.userData.contrast === 'dither'
+        : environmentBlendMode === 'additive'
+          ? child.userData.contrast === 'additive-shape'
+          : false
+    }
+  }
+
   private syncPanelViews() {
     const layoutNow = performance.now()
     let appearedPanelCount = 0
@@ -299,9 +486,9 @@ export class ImmersiveScene {
     }
 
     const placements = allocatePanelSlots(this.panelSnapshots, {
-      x: worldCenter.x,
+      x: 0,
       y: 0,
-      z: worldCenter.z
+      z: 0
     })
     const placementById = new Map(
       placements.map(placement => [placement.id, placement])
@@ -344,7 +531,12 @@ export class ImmersiveScene {
     this.renderer.setSize(width, height, false)
   }
 
-  async setSession(session: XRSession | null) {
+  async setSession(
+    session: XRSession | null,
+    mode: ImmersiveSessionMode = 'immersive-vr'
+  ) {
+    this.releaseReferenceReset?.()
+    this.releaseReferenceReset = null
     if (session) {
       this.placedFromViewer = false
       this.lightAnimator.enterDormant()
@@ -352,6 +544,21 @@ export class ImmersiveScene {
       this.lightAnimator.resetAwakening()
     }
     await this.renderer.xr.setSession(session)
+    if (session) {
+      this.setSessionVisualMode(mode, session.environmentBlendMode)
+      const referenceSpace = this.renderer.xr.getReferenceSpace()
+      if (referenceSpace) {
+        const handleReset = () => {
+          this.referenceReset.mark()
+        }
+        referenceSpace.addEventListener('reset', handleReset)
+        this.releaseReferenceReset = () => {
+          referenceSpace.removeEventListener('reset', handleReset)
+        }
+      }
+    } else {
+      this.setSessionVisualMode('immersive-vr', 'opaque')
+    }
   }
 
   private renderFrame(timestamp: number) {
@@ -371,12 +578,52 @@ export class ImmersiveScene {
       timeSeconds
     )
     this.placeFromInitialViewer()
+    if (this.referenceReset.take()) {
+      this.recenterWorkspace()
+    }
 
     const camera = this.renderer.xr.isPresenting
       ? this.renderer.xr.getCamera()
       : this.camera
     camera.getWorldPosition(viewerPosition)
     const now = performance.now()
+    const anchor = this.interaction.statusAnchor()
+    if (anchor && this.statusWindow.group.visible) {
+      anchor.getWorldPosition(statusAnchorPosition)
+      this.statusWindow.group.position.copy(statusAnchorPosition)
+      this.statusWindow.group.position.y += 0.34
+      const statusTarget = viewerFacingQuaternion(
+        this.statusWindow.group.position,
+        viewerPosition
+      )
+      smoothViewerFacingQuaternion(
+        this.statusWindow.group.quaternion,
+        statusTarget,
+        deltaSeconds
+      )
+    } else if (this.statusWindow.group.visible) {
+      this.statusWindow.group.position.copy(fallbackStatusOffset)
+        .applyQuaternion(camera.quaternion)
+        .add(viewerPosition)
+      const fallbackTarget = viewerFacingQuaternion(
+        this.statusWindow.group.position,
+        viewerPosition
+      )
+      smoothViewerFacingQuaternion(
+        this.statusWindow.group.quaternion,
+        fallbackTarget,
+        deltaSeconds
+      )
+    }
+    menuWorldPosition.copy(menuOffset).applyQuaternion(camera.quaternion)
+      .add(viewerPosition)
+    this.statusWindow.menuGroup.position.copy(menuWorldPosition)
+    const menuTarget = viewerFacingQuaternion(
+      this.statusWindow.menuGroup.position,
+      viewerPosition
+    )
+    this.statusWindow.menuGroup.quaternion.copy(menuTarget)
+    this.statusWindow.update(now, this.options.reducedEffects())
     this.transcriptView.update(
       this.transcriptModel.update(
         this.transcriptSegments,
@@ -385,43 +632,27 @@ export class ImmersiveScene {
       ),
       now
     )
-    const bubbleTarget = viewerFacingQuaternion(
-      this.transcriptView.group.position,
-      viewerPosition
-    )
     smoothViewerFacingQuaternion(
       this.transcriptView.group.quaternion,
-      bubbleTarget,
+      viewerFacingLocalQuaternion(this.transcriptView.group, viewerPosition),
       deltaSeconds
-    )
-    const controlsTarget = viewerFacingQuaternion(
-      this.controls.group.position,
-      viewerPosition
     )
     smoothViewerFacingQuaternion(
       this.controls.group.quaternion,
-      controlsTarget,
+      viewerFacingLocalQuaternion(this.controls.group, viewerPosition),
       deltaSeconds
-    )
-    const statusTarget = viewerFacingQuaternion(
-      this.status.group.position,
-      viewerPosition
     )
     smoothViewerFacingQuaternion(
       this.status.group.quaternion,
-      statusTarget,
+      viewerFacingLocalQuaternion(this.status.group, viewerPosition),
       deltaSeconds
     )
 
     for (const view of this.panels.values()) {
       view.updateAnimation(now)
-      const target = viewerFacingQuaternion(
-        view.group.position,
-        viewerPosition
-      )
       smoothViewerFacingQuaternion(
         view.group.quaternion,
-        target,
+        viewerFacingLocalQuaternion(view.group, viewerPosition),
         deltaSeconds
       )
     }
@@ -437,6 +668,8 @@ export class ImmersiveScene {
     this.renderer.setAnimationLoop(null)
     this.timer.dispose()
     this.interaction.dispose()
+    this.releaseReferenceReset?.()
+    this.releaseReferenceReset = null
     for (const view of this.panels.values()) {
       view.dispose()
     }
@@ -444,9 +677,14 @@ export class ImmersiveScene {
     this.transcriptView.dispose()
     this.controls.dispose()
     this.status.dispose()
+    this.statusWindow.dispose()
     this.agentLight.dispose()
     this.scene.traverse((object) => {
-      if (object instanceof Mesh || object instanceof LineSegments) {
+      if (
+        object instanceof Mesh
+        || object instanceof LineSegments
+        || object instanceof Points
+      ) {
         object.geometry.dispose()
         if (Array.isArray(object.material)) {
           object.material.forEach(material => material.dispose())

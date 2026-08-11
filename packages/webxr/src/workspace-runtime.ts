@@ -5,10 +5,22 @@ import {
   CodexRpcClient
 } from '@codori/client/shared/codex-rpc'
 import type {
+  GetAccountRateLimitsResponse,
   Thread,
   ThreadReadResponse,
   ThreadResumeResponse
 } from '@codori/client/shared/generated/codex-app-server/v2'
+import {
+  mergeAccountRateLimits,
+  normalizeAccountRateLimits,
+  type RateLimitBucket
+} from '@codori/client/shared/account-rate-limits'
+import {
+  normalizeThreadTokenUsage,
+  resolveContextWindowState,
+  type ContextWindowState,
+  type TokenUsageSnapshot
+} from '@codori/client/shared/chat-prompt-controls'
 import {
   listAllThreadBackgroundTerminals,
   reconcileBackgroundTerminals,
@@ -53,6 +65,8 @@ export type WorkspaceRuntimeSnapshot = {
   panels: SpatialPanelSnapshot[]
   error: string | null
   thread: Thread | null
+  rateLimits: RateLimitBucket[]
+  context: ContextWindowState
 }
 
 export type WorkspaceRuntimeOptions = {
@@ -190,6 +204,10 @@ export class WorkspaceRuntime {
 
   private thread: Thread | null = null
 
+  private rateLimits: RateLimitBucket[] = []
+
+  private tokenUsage: TokenUsageSnapshot | null = null
+
   private error: string | null = null
 
   private backgroundTerminals: BackgroundTerminalModel[] = []
@@ -237,7 +255,13 @@ export class WorkspaceRuntime {
       transcripts: [...this.transcriptState.segments],
       panels: this.panelModel.snapshots(),
       error: this.error,
-      thread: this.thread
+      thread: this.thread,
+      rateLimits: this.rateLimits.map(bucket => ({
+        ...bucket,
+        primary: bucket.primary ? { ...bucket.primary } : null,
+        secondary: bucket.secondary ? { ...bucket.secondary } : null
+      })),
+      context: resolveContextWindowState(this.tokenUsage, null)
     }
   }
 
@@ -285,6 +309,15 @@ export class WorkspaceRuntime {
     }
     this.thread = response.thread
     this.seedRunningItems(response.thread)
+    try {
+      const rateLimits = await this.client.request<GetAccountRateLimitsResponse>(
+        'account/rateLimits/read'
+      )
+      this.rateLimits = normalizeAccountRateLimits(rateLimits)
+    } catch {
+      // Quota status is optional; the window remains explicit about unavailable data.
+      this.rateLimits = []
+    }
     await this.refreshBackgroundTerminals()
     this.resumeTimers()
     this.emit()
@@ -414,6 +447,15 @@ export class WorkspaceRuntime {
         )
         this.activity = 'listening'
         this.error = null
+        break
+      case 'thread/tokenUsage/updated':
+        this.tokenUsage = normalizeThreadTokenUsage(notification.params)
+        break
+      case 'account/rateLimits/updated':
+        this.rateLimits = mergeAccountRateLimits(
+          this.rateLimits,
+          notification.params
+        )
         break
       case 'thread/realtime/transcript/delta': {
         const role = (notification.params as { role?: unknown }).role
