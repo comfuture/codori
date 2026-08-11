@@ -89,4 +89,30 @@ describe('status window placement', () => {
     expect(jumped).toEqual(first)
     expect(followed.x).toBeLessThan(first.x)
   })
+
+  it('reacquires a stable wrist pose after rejecting the initial jump', () => {
+    const tracker = new StatusWindowAnchorTracker()
+    const first = tracker.update({
+      wristPosition: new Vector3(-0.18, 1.44, -0.34),
+      selectionEngaged: false,
+      deltaSeconds: 1 / 60
+    })!.clone()
+    const reacquiredWrist = new Vector3(0.2, 1.2, -0.5)
+
+    for (let index = 0; index < 8; index += 1) {
+      tracker.update({
+        wristPosition: reacquiredWrist,
+        selectionEngaged: false,
+        deltaSeconds: 1 / 60
+      })
+    }
+    const reacquired = tracker.update({
+      wristPosition: reacquiredWrist,
+      selectionEngaged: false,
+      deltaSeconds: 1 / 60
+    })!.clone()
+
+    expect(reacquired.x).toBeGreaterThan(first.x)
+    expect(reacquired.y).toBeLessThan(first.y)
+  })
 })
