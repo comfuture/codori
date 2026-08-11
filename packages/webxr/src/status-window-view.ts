@@ -10,6 +10,7 @@ import {
 } from 'three'
 import type {
   StatusAction,
+  StatusWindowPhase,
   StatusWindowSnapshot
 } from './status-window-model'
 import {
@@ -109,7 +110,7 @@ export class StatusWindowView {
 
   private snapshot: StatusWindowSnapshot | null = null
 
-  private phase: 'closed' | 'opening' | 'open' | 'closing' = 'closed'
+  private phase: StatusWindowPhase = 'closed'
 
   private phaseStartedAt = 0
 
@@ -191,6 +192,10 @@ export class StatusWindowView {
 
   get isOpen() {
     return this.phase === 'opening' || this.phase === 'open'
+  }
+
+  get isFullyOpen() {
+    return this.phase === 'open'
   }
 
   setSnapshot(snapshot: StatusWindowSnapshot) {

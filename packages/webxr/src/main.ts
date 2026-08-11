@@ -67,6 +67,12 @@ const developmentBlendPreview = developmentKitchenSink
   ? searchParams.get('blend') as 'alpha-blend' | 'additive'
   : null
 const developmentStatusPreview = searchParams.get('status') !== '0'
+const developmentBackground = (() => {
+  const background = searchParams.get('background')
+  return background === 'bright' || background === 'dark'
+    ? background
+    : 'textured'
+})()
 const developmentPaneState = (() => {
   const state = searchParams.get('paneState')
   return state === 'idle' || state === 'hover' || state === 'grab'
@@ -592,6 +598,7 @@ const enterDebugScene = async () => {
     scene.setPanels(fixture.panels)
     scene.setPanelInteractionPreview(developmentPaneId, developmentPaneState)
     scene.setPanelHandControlsPreview(developmentHandControls)
+    scene.setHandOutlinePreview(true)
     scene.setStatus(
       'Kitchen sink · non-immersive texture and layout preview'
     )
@@ -637,9 +644,15 @@ const enterDebugScene = async () => {
       scene.openStatusForPreview()
     }
     if (developmentBlendPreview) {
-      canvas.style.background = developmentBlendPreview === 'alpha-blend'
-        ? 'linear-gradient(135deg, #e9e2cb, #7ea0b0)'
-        : 'linear-gradient(135deg, #d9c995, #446d82)'
+      const surrogateBackgrounds = {
+        bright: 'linear-gradient(135deg, #fffef4, #c7e7f3)',
+        dark: 'linear-gradient(135deg, #05070b, #142331)',
+        textured: [
+          'repeating-linear-gradient(35deg, rgba(255,255,255,0.18) 0 8px, rgba(14,32,40,0.08) 8px 17px)',
+          'linear-gradient(135deg, #eadfbc, #527b8c)'
+        ].join(',')
+      }
+      canvas.style.background = surrogateBackgrounds[developmentBackground]
       scene.setSessionVisualMode('immersive-ar', developmentBlendPreview)
     }
     return

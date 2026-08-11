@@ -1,8 +1,6 @@
 import {
   AmbientLight,
-  BufferGeometry,
   Color,
-  Float32BufferAttribute,
   GridHelper,
   Group,
   LineSegments,
@@ -10,9 +8,6 @@ import {
   MeshBasicMaterial,
   PerspectiveCamera,
   PlaneGeometry,
-  Points,
-  PointsMaterial,
-  TorusGeometry,
   Scene,
   SRGBColorSpace,
   Timer,
@@ -32,6 +27,11 @@ import {
   ROOM_SIZE_METERS
 } from './config'
 import { ImmersiveInteractionSystem } from './interaction-system'
+import {
+  createDevelopmentHandPose,
+  HandOutlineView
+} from './hand-outline-view'
+import { PassthroughContrastView } from './passthrough-contrast'
 import {
   AgentLightAnimator,
   type RealtimeVisualActivity
@@ -118,7 +118,9 @@ export class ImmersiveScene {
 
   private readonly statusWindow = new StatusWindowView()
 
-  private readonly contrast = new Group()
+  private readonly contrast = new PassthroughContrastView()
+
+  private readonly developmentHands: HandOutlineView[] = []
 
   private readonly panels = new Map<string, SpatialPanelView>()
 
@@ -178,10 +180,9 @@ export class ImmersiveScene {
       this.transcriptView.group,
       this.controls.group,
       this.status.group,
-      this.contrast
+      this.contrast.group
     )
     this.scene.add(this.statusWindow.group, this.statusWindow.menuGroup)
-    this.createContrastTreatments()
     this.setWorldCenter(new Vector3(0, 1.65, 0))
 
     this.interaction = new ImmersiveInteractionSystem({
@@ -195,6 +196,7 @@ export class ImmersiveScene {
       getStatusTargets: () => this.statusWindow.actionHits,
       getStatusMenuTarget: () => this.statusWindow.menuHit,
       isStatusOpen: () => this.statusWindow.isOpen,
+      isStatusFullyOpen: () => this.statusWindow.isFullyOpen,
       getStatusInvocation: () => this.statusInvocation,
       onScroll: options.onPanelScroll,
       onPanelInteracted: options.onPanelInteracted,
@@ -217,53 +219,6 @@ export class ImmersiveScene {
       this.renderFrame(timestamp)
     })
     this.resize()
-  }
-
-  private createContrastTreatments() {
-    const ditherPositions: number[] = []
-    const pointCount = 420
-    const goldenAngle = Math.PI * (3 - Math.sqrt(5))
-    for (let index = 0; index < pointCount; index += 1) {
-      const y = 1 - ((index / (pointCount - 1)) * 2)
-      const radius = Math.sqrt(1 - y * y)
-      const theta = goldenAngle * index
-      ditherPositions.push(
-        Math.cos(theta) * radius * 0.34,
-        y * 0.34,
-        Math.sin(theta) * radius * 0.34
-      )
-    }
-    const ditherGeometry = new BufferGeometry()
-    ditherGeometry.setAttribute(
-      'position',
-      new Float32BufferAttribute(ditherPositions, 3)
-    )
-    const dither = new Points(
-      ditherGeometry,
-      new PointsMaterial({
-        color: '#071008',
-        size: 0.012,
-        sizeAttenuation: true,
-        transparent: true,
-        opacity: 0.38,
-        depthWrite: false
-      })
-    )
-    dither.name = 'alpha-passthrough-dither-shell'
-    dither.userData.contrast = 'dither'
-    const additive = new Mesh(
-      new TorusGeometry(0.28, 0.025, 10, 48),
-      new MeshBasicMaterial({
-        color: '#ff6bd6',
-        transparent: true,
-        opacity: 0.88,
-        depthWrite: false
-      })
-    )
-    additive.name = 'additive-passthrough-shape-outline'
-    additive.userData.contrast = 'additive-shape'
-    this.contrast.add(dither, additive)
-    this.contrast.visible = false
   }
 
   private createRoom() {
@@ -346,7 +301,7 @@ export class ImmersiveScene {
     )
     floorCenter.set(0, 0, 0)
     this.room.position.copy(floorCenter)
-    this.contrast.position.copy(this.agentLight.group.position)
+    this.contrast.group.position.copy(this.agentLight.group.position)
   }
 
   private placeFromInitialViewer() {
@@ -474,14 +429,9 @@ export class ImmersiveScene {
     this.controls.group.visible = !passthrough
     this.scene.background = passthrough ? null : new Color('#01040a')
     this.renderer.setClearColor(0x000000, passthrough ? 0 : 1)
-    this.contrast.visible = passthrough
-    for (const child of this.contrast.children) {
-      child.visible = environmentBlendMode === 'alpha-blend'
-        ? child.userData.contrast === 'dither'
-        : environmentBlendMode === 'additive'
-          ? child.userData.contrast === 'additive-shape'
-          : false
-    }
+    this.contrast.setBlendMode(
+      passthrough ? environmentBlendMode : 'opaque'
+    )
   }
 
   private syncPanelViews() {
@@ -563,6 +513,29 @@ export class ImmersiveScene {
   setPanelHandControlsPreview(visible: boolean) {
     this.panelHandControlsPreview = visible
     this.applyPanelInteractionPreview()
+  }
+
+  setHandOutlinePreview(visible: boolean) {
+    if (!visible) {
+      for (const hand of this.developmentHands) {
+        hand.group.visible = false
+      }
+      return
+    }
+    if (this.developmentHands.length === 0) {
+      for (const [index, handedness] of (['left', 'right'] as const).entries()) {
+        const hand = new HandOutlineView(handedness)
+        hand.update(createDevelopmentHandPose(handedness))
+        hand.group.position.set(index === 0 ? -0.52 : 0.52, 1.28, 0.22)
+        hand.group.rotation.set(-0.35, index === 0 ? -0.18 : 0.18, 0)
+        this.world.add(hand.group)
+        this.developmentHands.push(hand)
+      }
+      return
+    }
+    for (const hand of this.developmentHands) {
+      hand.group.visible = true
+    }
   }
 
   resize() {
@@ -722,11 +695,15 @@ export class ImmersiveScene {
     this.status.dispose()
     this.statusWindow.dispose()
     this.agentLight.dispose()
+    this.contrast.dispose()
+    for (const hand of this.developmentHands) {
+      hand.dispose()
+    }
+    this.developmentHands.length = 0
     this.scene.traverse((object) => {
       if (
         object instanceof Mesh
         || object instanceof LineSegments
-        || object instanceof Points
       ) {
         object.geometry.dispose()
         if (Array.isArray(object.material)) {

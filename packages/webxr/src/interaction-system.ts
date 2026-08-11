@@ -23,6 +23,7 @@ import {
   PanelInteractionModel,
   type PanelHit
 } from './panel-interaction'
+import { HandOutlineView } from './hand-outline-view'
 import type { SpatialPanelView } from './panel-view'
 import {
   classifyPaneGrabIntent,
@@ -41,6 +42,7 @@ import {
   canActivateStatusAction,
   mappedMenuButtonIndex,
   shouldShowStatusFallbackMenu,
+  StatusActionInteractionModel,
   StatusControllerArmModel,
   StatusGestureModel,
   type StatusActionId,
@@ -54,11 +56,13 @@ type SourceRuntime = {
   targetRay: XRTargetRaySpace
   grip: XRGripSpace
   hand: XRHandSpace
+  handOutline: HandOutlineView
   ray: Line<BufferGeometry, LineBasicMaterial>
   gripMarker: Mesh<SphereGeometry, MeshBasicMaterial>
   inputSource: XRInputSource | null
   selecting: boolean
   pinching: boolean
+  statusPressActive: boolean
   grabbedBy: 'select' | 'squeeze' | 'pinch' | 'touch' | null
   grabOffset: Vector3
   grabSphere: Sphere
@@ -96,6 +100,7 @@ export type InteractionSystemOptions = {
   getStatusTargets: () => readonly Mesh[]
   getStatusMenuTarget: () => Mesh | null
   isStatusOpen: () => boolean
+  isStatusFullyOpen?: () => boolean
   getStatusInvocation: () => StatusWindowInvocation | null
   onScroll: (
     panelId: string,
@@ -271,6 +276,8 @@ export class ImmersiveInteractionSystem {
 
   private readonly statusGesture = new StatusGestureModel()
 
+  private readonly statusActions = new StatusActionInteractionModel()
+
   private readonly statusControllerArm = new StatusControllerArmModel()
 
   private readonly preferredInput = new PreferredPaneInputModel()
@@ -290,6 +297,7 @@ export class ImmersiveInteractionSystem {
     const targetRay = this.options.renderer.xr.getController(index)
     const grip = this.options.renderer.xr.getControllerGrip(index)
     const hand = this.options.renderer.xr.getHand(index)
+    const handOutline = new HandOutlineView()
 
     const ray = new Line(
       new BufferGeometry().setFromPoints([
@@ -316,6 +324,7 @@ export class ImmersiveInteractionSystem {
     )
     gripMarker.name = 'generic-controller-grip'
     grip.add(gripMarker)
+    hand.add(handOutline.group)
     this.options.root.add(targetRay, grip, hand)
 
     const runtime: SourceRuntime = {
@@ -323,11 +332,13 @@ export class ImmersiveInteractionSystem {
       targetRay,
       grip,
       hand,
+      handOutline,
       ray,
       gripMarker,
       inputSource: null,
       selecting: false,
       pinching: false,
+      statusPressActive: false,
       grabbedBy: null,
       grabOffset: new Vector3(),
       grabSphere: new Sphere(),
@@ -355,6 +366,11 @@ export class ImmersiveInteractionSystem {
         runtime.inputSource = (
           event as unknown as { data: XRInputSource }
         ).data
+        runtime.handOutline.setHandedness(runtime.inputSource.handedness)
+        runtime.statusPressActive = false
+        runtime.contactActionId = null
+        this.statusActions.updatePress(id, false)
+        this.statusActions.updateContact(id, null)
         this.preferredInput.connect({
           id,
           handedness: runtime.inputSource.handedness,
@@ -364,17 +380,30 @@ export class ImmersiveInteractionSystem {
       disconnected: () => {
         runtime.selecting = false
         runtime.pinching = false
+        runtime.statusPressActive = false
         this.finalizeGrab(runtime, { refresh: false })
         runtime.inputSource = null
+        runtime.contactActionId = null
+        runtime.handOutline.clear()
+        this.statusActions.loseSource(id)
         this.stopHandScroll(runtime)
         this.preferredInput.lose(id)
         this.model.sourceLost(id)
         this.refreshPanelInteraction()
       },
       selectstart: () => {
-        this.handleSelectStart(runtime, performance.now(), true)
+        runtime.statusPressActive = true
+        const freshStatusPress = this.statusActions.updatePress(id, true)
+        this.handleSelectStart(
+          runtime,
+          performance.now(),
+          true,
+          freshStatusPress
+        )
       },
       selectend: () => {
+        runtime.statusPressActive = false
+        this.statusActions.updatePress(id, false)
         runtime.selecting = false
         this.model.selectEnd(id)
         if (runtime.grabbedBy === 'select') {
@@ -466,7 +495,8 @@ export class ImmersiveInteractionSystem {
   private handleSelectStart(
     runtime: SourceRuntime,
     now: number,
-    native: boolean
+    native: boolean,
+    freshStatusPress = false
   ) {
     const intersection = this.raycast(runtime)
     if (intersection?.object.userData.statusMenu === true) {
@@ -479,11 +509,15 @@ export class ImmersiveInteractionSystem {
         runtime,
         statusAction as StatusActionId,
         native ? 'ray' : 'pinch',
-        intersection!.object
+        intersection!.object,
+        freshStatusPress
       )
       return
     }
-    if (native && this.activateControllerContact(runtime)) {
+    if (
+      native
+      && this.activateControllerContact(runtime, freshStatusPress)
+    ) {
       return
     }
     const action = intersection?.object.userData.action
@@ -538,8 +572,15 @@ export class ImmersiveInteractionSystem {
     runtime: SourceRuntime,
     action: StatusActionId,
     method: StatusActivation['method'],
-    target: Object3D
+    target: Object3D,
+    freshTransition: boolean
   ) {
+    if (
+      !freshTransition
+      || runtime.inputSource?.handedness !== 'right'
+    ) {
+      return false
+    }
     if (target.userData.statusActionAvailable !== true) {
       return false
     }
@@ -570,7 +611,10 @@ export class ImmersiveInteractionSystem {
     return nearest?.target ?? null
   }
 
-  private activateControllerContact(runtime: SourceRuntime) {
+  private activateControllerContact(
+    runtime: SourceRuntime,
+    freshStatusPress: boolean
+  ) {
     if (
       !this.options.isStatusOpen()
       || runtime.inputSource?.hand
@@ -582,13 +626,20 @@ export class ImmersiveInteractionSystem {
     const target = this.nearestStatusContact(sourcePosition, 0.055)
     const action = target?.userData.statusActionId
     return typeof action === 'string'
-      ? this.activateStatusAction(runtime, action as StatusActionId, 'contact', target!)
+      ? this.activateStatusAction(
+          runtime,
+          action as StatusActionId,
+          'contact',
+          target!,
+          freshStatusPress
+        )
       : false
   }
 
   private updateHandStatusContact(runtime: SourceRuntime) {
     if (!runtime.inputSource?.hand || !this.options.isStatusOpen()) {
       runtime.contactActionId = null
+      this.statusActions.updateContact(runtime.id, null)
       return
     }
     const index = resolveTrackedHandJoint(
@@ -597,6 +648,7 @@ export class ImmersiveInteractionSystem {
     )
     if (!index) {
       runtime.contactActionId = null
+      this.statusActions.updateContact(runtime.id, null)
       return
     }
     index.getWorldPosition(indexPosition)
@@ -604,8 +656,27 @@ export class ImmersiveInteractionSystem {
     const action = typeof target?.userData.statusActionId === 'string'
       ? target.userData.statusActionId as StatusActionId
       : null
-    if (action && runtime.contactActionId !== action) {
-      this.activateStatusAction(runtime, action, 'contact', target!)
+    const freshAction = this.statusActions.updateContact(runtime.id, action)
+    const thumb = resolveTrackedHandJoint(runtime.hand, 'thumb-tip')
+    let pinchingNow = runtime.pinching
+    if (thumb) {
+      thumb.getWorldPosition(thumbPosition)
+      pinchingNow ||= thumbPosition.distanceTo(indexPosition) <= 0.026
+    }
+    if (
+      freshAction
+      && runtime.inputSource.handedness === 'right'
+      && !runtime.statusPressActive
+      && !pinchingNow
+      && !runtime.selecting
+    ) {
+      this.activateStatusAction(
+        runtime,
+        freshAction,
+        'contact',
+        target!,
+        true
+      )
     }
     runtime.contactActionId = action
   }
@@ -824,6 +895,25 @@ export class ImmersiveInteractionSystem {
     }
   }
 
+  private updateHandOutlines() {
+    for (const runtime of this.sources) {
+      const source = runtime.inputSource
+      if (!source?.hand) {
+        runtime.handOutline.clear()
+        continue
+      }
+      const controllerActive = this.sources.some(candidate =>
+        candidate.inputSource?.handedness === source.handedness
+        && !candidate.inputSource.hand
+        && candidate.inputSource.targetRayMode === 'tracked-pointer'
+      )
+      runtime.handOutline.updateFromHand(
+        runtime.hand,
+        !controllerActive
+      )
+    }
+  }
+
   private updateStatusGesture(now: number) {
     const leftController = this.sources.some(runtime =>
       runtime.inputSource?.handedness === 'left'
@@ -892,6 +982,18 @@ export class ImmersiveInteractionSystem {
   }
 
   statusAnchor() {
+    if (this.options.getStatusInvocation() === 'hand') {
+      const hand = this.sources.find(runtime =>
+        runtime.inputSource?.handedness === 'left'
+        && Boolean(runtime.inputSource.hand)
+      )
+      const wrist = hand
+        ? resolveTrackedHandJoint(hand.hand, 'wrist')
+        : null
+      if (wrist) {
+        return wrist
+      }
+    }
     const controller = this.sources.find(runtime =>
       runtime.inputSource?.handedness === 'left'
       && !runtime.inputSource.hand
@@ -1030,7 +1132,7 @@ export class ImmersiveInteractionSystem {
     if (!runtime.pinching && distance <= 0.026) {
       runtime.pinching = true
       this.preferredInput.use(runtime.id, now)
-      this.handleSelectStart(runtime, now, false)
+      this.handleSelectStart(runtime, now, false, false)
     } else if (runtime.pinching && distance >= 0.038) {
       this.endSynthesizedPinch(runtime, true)
     }
@@ -1135,7 +1237,16 @@ export class ImmersiveInteractionSystem {
     if (this.disposed) {
       return
     }
+    this.statusActions.updateWindow({
+      now,
+      open: this.options.isStatusOpen(),
+      fullyOpen: this.options.isStatusFullyOpen?.() ?? false
+    })
     for (const runtime of this.sources) {
+      this.statusActions.updatePress(
+        runtime.id,
+        runtime.statusPressActive
+      )
       const intersection = this.raycast(runtime)
       this.model.hover(
         runtime.id,
@@ -1229,9 +1340,11 @@ export class ImmersiveInteractionSystem {
         }
       }
     }
+    this.updateHandOutlines()
     this.updateInputCapabilities()
     this.updateStatusGesture(now)
     this.updateControllerArmDismissal(now)
+    this.statusActions.finishFrame(now)
     this.refreshPanelInteraction()
   }
 
@@ -1271,6 +1384,7 @@ export class ImmersiveInteractionSystem {
       runtime.ray.material.dispose()
       runtime.gripMarker.geometry.dispose()
       runtime.gripMarker.material.dispose()
+      runtime.handOutline.dispose()
       runtime.targetRay.clear()
       runtime.grip.clear()
       runtime.hand.clear()

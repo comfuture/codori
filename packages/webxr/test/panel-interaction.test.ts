@@ -26,6 +26,7 @@ import {
   resolveTrackedHandJoint
 } from '../src/interaction-system'
 import { PanelInteractionModel } from '../src/panel-interaction'
+import { createDevelopmentHandPose } from '../src/hand-outline-view'
 import type { SpatialPanelView } from '../src/panel-view'
 
 const createPanelDouble = (id = 'panel-1') => {
@@ -66,7 +67,15 @@ const createPanelDouble = (id = 'panel-1') => {
 }
 
 const createInteractionHarness = (
-  panels: ReadonlyMap<string, SpatialPanelView> = new Map()
+  panels: ReadonlyMap<string, SpatialPanelView> = new Map(),
+  statusOptions: {
+    targets?: Mesh[]
+    state?: {
+      open: boolean
+      fullyOpen: boolean
+      invocation: 'controller' | 'hand' | 'fallback' | null
+    }
+  } = {}
 ) => {
   const targetRays = [new Group(), new Group()]
   const grips = [new Group(), new Group()]
@@ -89,30 +98,52 @@ const createInteractionHarness = (
   for (const panel of panels.values()) {
     root.add(panel.group)
   }
+  for (const target of statusOptions.targets ?? []) {
+    root.add(target)
+  }
+  const statusState = statusOptions.state ?? {
+    open: false,
+    fullyOpen: false,
+    invocation: null
+  }
   const callbacks = {
     onScroll: vi.fn(),
     onPanelInteracted: vi.fn(),
     onPanelMoved: vi.fn(),
     onPanelFocused: vi.fn(),
-    onPanelDismiss: vi.fn()
+    onPanelDismiss: vi.fn(),
+    onStatusToggle: vi.fn(),
+    onStatusDismiss: vi.fn(),
+    onStatusAction: vi.fn()
   }
   const system = new ImmersiveInteractionSystem({
     renderer,
     root,
     getPanels: () => panels,
     getControlTargets: () => [],
-    getStatusTargets: () => [],
+    getStatusTargets: () => statusOptions.targets ?? [],
     getStatusMenuTarget: () => null,
-    isStatusOpen: () => false,
-    getStatusInvocation: () => null,
+    isStatusOpen: () => statusState.open,
+    isStatusFullyOpen: () => statusState.fullyOpen,
+    getStatusInvocation: () => statusState.invocation,
     ...callbacks,
     onAction: () => {},
-    onStatusToggle: () => {},
-    onStatusDismiss: () => {},
-    onStatusAction: () => {},
     onInputCapabilitiesChanged: () => {}
   })
-  return { system, targetRays, grips, hands, callbacks }
+  return { system, targetRays, grips, hands, callbacks, statusState }
+}
+
+const createStatusActionTarget = (id = 'passthrough') => {
+  const target = new Mesh(
+    new BoxGeometry(0.42, 0.18, 0.05),
+    new MeshBasicMaterial({ transparent: true, opacity: 0 })
+  )
+  target.position.set(0, 0, -1)
+  target.userData.statusActionId = id
+  target.userData.statusActionAvailable = true
+  target.userData.statusInputPolicy = 'controller-or-touch'
+  target.updateMatrixWorld(true)
+  return target
 }
 
 const attachTrackedIndexTip = (
@@ -330,6 +361,60 @@ describe('panel interaction model', () => {
     expect(resolveTrackedHandJoint(hand, 'wrist')).toBe(null)
   })
 
+  it('shows tracked hand outlines and hides them for same-hand controllers or loss', () => {
+    const { system, hands } = createInteractionHarness()
+    const internals = system as unknown as {
+      sources: Array<{
+        listeners: {
+          connected: (event: unknown) => void
+          disconnected: () => void
+        }
+      }>
+    }
+    const handRuntime = internals.sources[0]!
+    const controllerRuntime = internals.sources[1]!
+    handRuntime.listeners.connected({
+      data: {
+        handedness: 'left',
+        hand: {},
+        targetRayMode: 'tracked-pointer',
+        profiles: ['generic-hand-select']
+      } as unknown as XRInputSource
+    })
+    hands[0]!.visible = true
+    for (const [name, pose] of createDevelopmentHandPose('left')) {
+      const joint = Object.assign(new Group(), {
+        jointRadius: pose.radius
+      }) as unknown as XRJointSpace
+      joint.position.copy(pose.position)
+      joint.visible = true
+      hands[0]!.joints[name] = joint
+      hands[0]!.add(joint)
+    }
+    hands[0]!.updateMatrixWorld(true)
+    system.update(0, 1 / 60)
+    const outline = hands[0]!.getObjectByName('tracked-hand-outline-left')!
+    expect(outline.visible).toBe(true)
+
+    controllerRuntime.listeners.connected({
+      data: {
+        handedness: 'left',
+        hand: null,
+        targetRayMode: 'tracked-pointer',
+        profiles: ['oculus-touch-v3']
+      } as unknown as XRInputSource
+    })
+    system.update(1, 1 / 60)
+    expect(outline.visible).toBe(false)
+
+    controllerRuntime.listeners.disconnected()
+    system.update(2, 1 / 60)
+    expect(outline.visible).toBe(true)
+    handRuntime.listeners.disconnected()
+    expect(outline.visible).toBe(false)
+    system.dispose()
+  })
+
   it('recognizes a menu controller only when its mapped button is exposed', () => {
     const source = {
       handedness: 'left',
@@ -413,6 +498,330 @@ describe('panel interaction model', () => {
       rightHand,
       leftMappedController
     ])).toBe(false)
+  })
+
+  it('requires a stable left hand-back dwell and keeps the wrist anchor live', () => {
+    const { system, hands, callbacks } = createInteractionHarness()
+    const internals = system as unknown as {
+      sources: Array<{
+        inputSource: XRInputSource | null
+        listeners: { connected: (event: unknown) => void }
+      }>
+      statusAnchor: () => Group | null
+    }
+    const runtime = internals.sources[0]!
+    runtime.listeners.connected({
+      data: {
+        handedness: 'left',
+        hand: {},
+        targetRayMode: 'tracked-pointer',
+        profiles: ['generic-hand-select']
+      } as unknown as XRInputSource
+    })
+    const wrist = Object.assign(new Group(), {
+      jointRadius: 0.014
+    }) as unknown as XRJointSpace
+    wrist.position.set(0, -0.15, -0.04)
+    wrist.visible = true
+    hands[0]!.visible = true
+    hands[0]!.joints.wrist = wrist
+    hands[0]!.add(wrist)
+    hands[0]!.updateMatrixWorld(true)
+
+    system.update(0, 1 / 60)
+    system.update(699, 1 / 60)
+    expect(callbacks.onStatusToggle).not.toHaveBeenCalled()
+    system.update(700, 1 / 60)
+    expect(callbacks.onStatusToggle).toHaveBeenCalledTimes(1)
+    expect(callbacks.onStatusToggle).toHaveBeenCalledWith('hand')
+
+    const anchoredBefore = internals.statusAnchor()!
+      .getWorldPosition(new Vector3())
+    wrist.position.x = 0.18
+    hands[0]!.updateMatrixWorld(true)
+    const anchoredAfter = internals.statusAnchor()!
+      .getWorldPosition(new Vector3())
+    expect(anchoredAfter.x - anchoredBefore.x).toBeCloseTo(0.18)
+    system.dispose()
+  })
+
+  it('keeps a pre-existing right index overlap inert until a fresh contact', () => {
+    const target = createStatusActionTarget()
+    const statusState = {
+      open: true,
+      fullyOpen: false,
+      invocation: 'hand' as const
+    }
+    const { system, hands, callbacks } = createInteractionHarness(
+      new Map(),
+      { targets: [target], state: statusState }
+    )
+    const internals = system as unknown as {
+      sources: Array<{
+        listeners: { connected: (event: unknown) => void }
+      }>
+    }
+    internals.sources[0]!.listeners.connected({
+      data: {
+        handedness: 'right',
+        hand: {},
+        targetRayMode: 'tracked-pointer',
+        profiles: ['generic-hand-select']
+      } as unknown as XRInputSource
+    })
+    const index = Object.assign(new Group(), {
+      jointRadius: 0.01
+    }) as unknown as XRJointSpace
+    index.position.copy(target.position)
+    index.visible = true
+    hands[0]!.visible = true
+    hands[0]!.joints['index-finger-tip'] = index
+    hands[0]!.add(index)
+    hands[0]!.updateMatrixWorld(true)
+
+    system.update(0, 1 / 60)
+    statusState.fullyOpen = true
+    system.update(160, 1 / 60)
+    system.update(340, 1 / 60)
+    system.update(341, 1 / 60)
+    expect(callbacks.onStatusAction).not.toHaveBeenCalled()
+
+    index.position.x = 1
+    hands[0]!.updateMatrixWorld(true)
+    system.update(342, 1 / 60)
+    index.position.x = 0
+    hands[0]!.updateMatrixWorld(true)
+    system.update(343, 1 / 60)
+    system.update(344, 1 / 60)
+    expect(callbacks.onStatusAction).toHaveBeenCalledTimes(1)
+    expect(callbacks.onStatusAction).toHaveBeenCalledWith('passthrough')
+    system.dispose()
+  })
+
+  it('ignores left-hand contact and pinch for status actions', () => {
+    const target = createStatusActionTarget()
+    const statusState = {
+      open: true,
+      fullyOpen: true,
+      invocation: 'hand' as const
+    }
+    const { system, hands, callbacks } = createInteractionHarness(
+      new Map(),
+      { targets: [target], state: statusState }
+    )
+    const internals = system as unknown as {
+      sources: Array<{
+        listeners: {
+          connected: (event: unknown) => void
+          selectstart: () => void
+          selectend: () => void
+        }
+      }>
+    }
+    internals.sources[0]!.listeners.connected({
+      data: {
+        handedness: 'left',
+        hand: {},
+        targetRayMode: 'tracked-pointer',
+        profiles: ['generic-hand-select']
+      } as unknown as XRInputSource
+    })
+    const index = Object.assign(new Group(), {
+      jointRadius: 0.01
+    }) as unknown as XRJointSpace
+    index.position.set(1, 0, -1)
+    index.visible = true
+    hands[0]!.visible = true
+    hands[0]!.joints['index-finger-tip'] = index
+    hands[0]!.add(index)
+    system.update(0, 1 / 60)
+    system.update(180, 1 / 60)
+    index.position.x = 0
+    hands[0]!.updateMatrixWorld(true)
+    system.update(181, 1 / 60)
+    internals.sources[0]!.listeners.selectstart()
+    internals.sources[0]!.listeners.selectend()
+    expect(callbacks.onStatusAction).not.toHaveBeenCalled()
+    system.dispose()
+  })
+
+  it('does not reinterpret a right-hand pinch as status direct touch', () => {
+    const target = createStatusActionTarget()
+    const statusState = {
+      open: true,
+      fullyOpen: true,
+      invocation: 'hand' as const
+    }
+    const { system, hands, callbacks } = createInteractionHarness(
+      new Map(),
+      { targets: [target], state: statusState }
+    )
+    const internals = system as unknown as {
+      sources: Array<{
+        listeners: { connected: (event: unknown) => void }
+      }>
+    }
+    internals.sources[0]!.listeners.connected({
+      data: {
+        handedness: 'right',
+        hand: {},
+        targetRayMode: 'tracked-pointer',
+        profiles: ['generic-hand-select']
+      } as unknown as XRInputSource
+    })
+    const index = Object.assign(new Group(), {
+      jointRadius: 0.01
+    }) as unknown as XRJointSpace
+    const thumb = Object.assign(new Group(), {
+      jointRadius: 0.01
+    }) as unknown as XRJointSpace
+    index.position.set(1, 0, -1)
+    thumb.position.set(1.08, 0, -1)
+    index.visible = true
+    thumb.visible = true
+    hands[0]!.visible = true
+    hands[0]!.joints['index-finger-tip'] = index
+    hands[0]!.joints['thumb-tip'] = thumb
+    hands[0]!.add(index, thumb)
+    hands[0]!.updateMatrixWorld(true)
+    system.update(0, 1 / 60)
+    system.update(180, 1 / 60)
+
+    index.position.set(0, 0, -1)
+    thumb.position.set(0.02, 0, -1)
+    hands[0]!.updateMatrixWorld(true)
+    system.update(181, 1 / 60)
+    expect(callbacks.onStatusAction).not.toHaveBeenCalled()
+
+    thumb.position.set(0.08, 0, -1)
+    hands[0]!.updateMatrixWorld(true)
+    system.update(182, 1 / 60)
+    expect(callbacks.onStatusAction).not.toHaveBeenCalled()
+
+    index.position.x = 1
+    hands[0]!.updateMatrixWorld(true)
+    system.update(183, 1 / 60)
+    index.position.x = 0
+    hands[0]!.updateMatrixWorld(true)
+    system.update(184, 1 / 60)
+    expect(callbacks.onStatusAction).toHaveBeenCalledTimes(1)
+    system.dispose()
+  })
+
+  it('requires release after a held right-controller press, then activates once', () => {
+    const target = createStatusActionTarget()
+    const statusState = {
+      open: true,
+      fullyOpen: false,
+      invocation: 'controller' as const
+    }
+    const { system, callbacks } = createInteractionHarness(
+      new Map(),
+      { targets: [target], state: statusState }
+    )
+    const internals = system as unknown as {
+      sources: Array<{
+        listeners: {
+          connected: (event: unknown) => void
+          selectstart: () => void
+          selectend: () => void
+        }
+      }>
+    }
+    const runtime = internals.sources[0]!
+    runtime.listeners.connected({
+      data: {
+        handedness: 'right',
+        hand: null,
+        targetRayMode: 'tracked-pointer',
+        profiles: ['oculus-touch-v3']
+      } as unknown as XRInputSource
+    })
+    system.update(0, 1 / 60)
+    runtime.listeners.selectstart()
+    expect(callbacks.onStatusAction).not.toHaveBeenCalled()
+
+    statusState.fullyOpen = true
+    system.update(160, 1 / 60)
+    system.update(340, 1 / 60)
+    runtime.listeners.selectstart()
+    expect(callbacks.onStatusAction).not.toHaveBeenCalled()
+
+    runtime.listeners.selectend()
+    runtime.listeners.selectstart()
+    runtime.listeners.selectstart()
+    expect(callbacks.onStatusAction).toHaveBeenCalledTimes(1)
+    expect(callbacks.onStatusAction).toHaveBeenCalledWith('passthrough')
+    system.dispose()
+  })
+
+  it('keeps controller menu toggling edge-triggered', () => {
+    const { system, callbacks } = createInteractionHarness()
+    const button = { pressed: false }
+    const internals = system as unknown as {
+      sources: Array<{
+        listeners: { connected: (event: unknown) => void }
+      }>
+    }
+    internals.sources[0]!.listeners.connected({
+      data: {
+        handedness: 'left',
+        hand: null,
+        targetRayMode: 'tracked-pointer',
+        profiles: ['htc-vive-focus'],
+        gamepad: {
+          buttons: [{}, {}, {}, {}, button]
+        }
+      } as unknown as XRInputSource
+    })
+    system.update(0, 1 / 60)
+    button.pressed = true
+    system.update(1, 1 / 60)
+    system.update(2, 1 / 60)
+    expect(callbacks.onStatusToggle).toHaveBeenCalledTimes(1)
+    expect(callbacks.onStatusToggle).toHaveBeenCalledWith('controller')
+    system.dispose()
+  })
+
+  it('dismisses a deliberately lowered left hand without firing an action', () => {
+    const statusState = {
+      open: true,
+      fullyOpen: true,
+      invocation: 'hand' as const
+    }
+    const { system, hands, callbacks } = createInteractionHarness(
+      new Map(),
+      { state: statusState }
+    )
+    const internals = system as unknown as {
+      sources: Array<{
+        listeners: { connected: (event: unknown) => void }
+      }>
+    }
+    internals.sources[0]!.listeners.connected({
+      data: {
+        handedness: 'left',
+        hand: {},
+        targetRayMode: 'tracked-pointer',
+        profiles: ['generic-hand-select']
+      } as unknown as XRInputSource
+    })
+    const wrist = Object.assign(new Group(), {
+      jointRadius: 0.014
+    }) as unknown as XRJointSpace
+    wrist.position.set(0, -0.6, -0.1)
+    wrist.visible = true
+    hands[0]!.visible = true
+    hands[0]!.joints.wrist = wrist
+    hands[0]!.add(wrist)
+    hands[0]!.updateMatrixWorld(true)
+    system.update(0, 1 / 60)
+    system.update(349, 1 / 60)
+    expect(callbacks.onStatusDismiss).not.toHaveBeenCalled()
+    system.update(350, 1 / 60)
+    expect(callbacks.onStatusDismiss).toHaveBeenCalledTimes(1)
+    expect(callbacks.onStatusAction).not.toHaveBeenCalled()
+    system.dispose()
   })
 
   it.each(['thumb-tip', 'index-finger-tip'] as const)(

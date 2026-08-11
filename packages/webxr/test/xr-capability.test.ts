@@ -140,7 +140,11 @@ describe('immersive WebXR capability', () => {
       vrSupported: true,
       mode: 'immersive-ar',
       environmentBlendMode: 'alpha-blend'
-    })).toMatchObject({ supported: true, active: true, contrast: 'dither' })
+    })).toMatchObject({
+      supported: true,
+      active: true,
+      contrast: 'dark-feather'
+    })
     expect(resolvePassthroughAvailability({
       arSupported: true,
       vrSupported: true,
