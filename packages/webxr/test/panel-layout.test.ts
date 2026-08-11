@@ -56,7 +56,9 @@ describe('panel slot allocation', () => {
       displaced: {
         id: 'panel-0',
         slot: 4
-      }
+      },
+      overflowed: null,
+      position: null
     })
 
     const placements = allocatePanelSlots([
@@ -93,5 +95,46 @@ describe('panel slot allocation', () => {
       .toMatchObject({ slot: 0, position: manual.position })
     expect(placements.find(placement => placement.id === 'automatic'))
       .toMatchObject({ slot: 0 })
+  })
+
+  it('avoids manually positioned panes when another screen anchor is clear', () => {
+    const manual = {
+      ...snapshot('manual'),
+      userMoved: true,
+      slot: 0,
+      position: { x: -1.1, y: 1.35, z: 0.2 }
+    }
+    expect(assignNewPanelToFrontSlot([manual])).toMatchObject({
+      slot: 1,
+      displaced: null,
+      overflowed: null,
+      position: null
+    })
+  })
+
+  it('places a necessarily overlapping pane in front of manual panes', () => {
+    const manual = {
+      ...snapshot('manual'),
+      userMoved: true,
+      slot: 0,
+      position: { x: 0, y: 1.775, z: 0.5 }
+    }
+    const assignment = assignNewPanelToFrontSlot([manual])!
+    expect(assignment.slot).toBe(0)
+    expect(assignment.position).toMatchObject({ x: -1.1, y: 1.35 })
+    expect(assignment.position!.z).toBeGreaterThan(manual.position.z)
+  })
+
+  it('keeps the newest pane in front when every automatic slot is full', () => {
+    const panels = Array.from({ length: 8 }, (_, index) => ({
+      ...snapshot(`panel-${index}`),
+      slot: index
+    }))
+    expect(assignNewPanelToFrontSlot(panels)).toEqual({
+      slot: 0,
+      displaced: { id: 'panel-0', slot: 4 },
+      overflowed: { id: 'panel-4' },
+      position: null
+    })
   })
 })

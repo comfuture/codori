@@ -4,6 +4,7 @@ import {
   SpatialPanelModel,
   type SpatialPanelInput
 } from '../src/panel-model'
+import { allocatePanelSlots } from '../src/panel-layout'
 
 const panel = (
   input: Partial<SpatialPanelInput> = {}
@@ -235,6 +236,32 @@ describe('spatial panel model', () => {
       'command:3': 3,
       'command:4': 0
     })
+  })
+
+  it('keeps the newest panel visible in front at full capacity', () => {
+    const model = new SpatialPanelModel()
+    for (let index = 0; index < 9; index += 1) {
+      model.upsert(panel({
+        id: `command:${index}`,
+        title: `Command ${index}`
+      }), index)
+    }
+
+    const snapshots = model.snapshots()
+    expect(snapshots.find(snapshot => snapshot.id === 'command:8')?.slot)
+      .toBe(0)
+    expect(snapshots.find(snapshot => snapshot.id === 'command:4')?.slot)
+      .toBe(4)
+    expect(snapshots.find(snapshot => snapshot.id === 'command:0')?.slot)
+      .toBe(null)
+    const placements = allocatePanelSlots(
+      snapshots,
+      { x: 0, y: 0, z: -2.4 }
+    )
+    expect(placements.find(placement => placement.id === 'command:8'))
+      .toMatchObject({ slot: 0, overflow: false })
+    expect(placements.find(placement => placement.id === 'command:0'))
+      .toMatchObject({ overflow: true })
   })
 
   it('bursts a manually dismissed panel and never resurrects it', () => {

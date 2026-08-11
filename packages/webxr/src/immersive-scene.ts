@@ -484,7 +484,7 @@ export class ImmersiveScene {
       view.group.visible = true
       view.update(snapshot)
       view.placeInSlot(
-        snapshot.userMoved && snapshot.position
+        snapshot.position
           ? snapshot.position
           : placement.position,
         layoutNow

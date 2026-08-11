@@ -7,7 +7,6 @@ import {
   MeshBasicMaterial,
   PerspectiveCamera,
   Ray,
-  Sphere,
   Vector3,
   type WebGLRenderer,
   type XRHandSpace,
@@ -20,7 +19,6 @@ import {
   resolveFocusedPanelLocalPosition,
   resolveFocusedPanelPosition,
   resolveRayPanelPosition,
-  resolveRayGrabPosition,
   resolveStatusFallbackMenuVisibility,
   worldPointToPanelLocal,
   resolveTrackedHandJoint
@@ -169,31 +167,6 @@ const attachTrackedIndexTip = (
 }
 
 describe('panel interaction model', () => {
-  it('keeps ray-grabbed pointer positions at a fixed viewer distance', () => {
-    const sphere = new Sphere(new Vector3(0, 0, 0), 2)
-    const offset = new Vector3()
-    const first = resolveRayGrabPosition(
-      new Ray(
-        new Vector3(0, 0, 0),
-        new Vector3(0.25, 0, -1).normalize()
-      ),
-      sphere,
-      offset
-    )!
-    const second = resolveRayGrabPosition(
-      new Ray(
-        new Vector3(0, 0, 0),
-        new Vector3(0.5, 0, -1).normalize()
-      ),
-      sphere,
-      offset
-    )!
-
-    expect(first.length()).toBeCloseTo(2)
-    expect(second.length()).toBeCloseTo(2)
-    expect(second.x).toBeGreaterThan(first.x)
-  })
-
   it('treats only sub-classification movement as a focus tap', () => {
     const initial = new Vector3(0, 1, -2)
     expect(isPanelGrabTap(
@@ -1019,6 +992,79 @@ describe('panel interaction model', () => {
     system.update(16, 1 / 60)
     expect(callbacks.onPanelInteracted).toHaveBeenCalledWith('panel-1')
     expect(callbacks.onScroll).not.toHaveBeenCalled()
+    system.dispose()
+  })
+
+  it('pulls a pane toward the viewer from physical hand-pinch motion', () => {
+    const { panel, dismissHit, group } = createPanelDouble()
+    dismissHit.visible = false
+    const { system, hands, callbacks } = createInteractionHarness(
+      new Map([['panel-1', panel]])
+    )
+    const internals = system as unknown as {
+      sources: Array<{
+        pinching: boolean
+        grabbedBy: 'pinch' | null
+        grabIntent: 'neutral' | 'free' | 'depth'
+        listeners: { connected: (event: unknown) => void }
+      }>
+    }
+    const runtime = internals.sources[0]!
+    runtime.listeners.connected({
+      data: {
+        handedness: 'right',
+        hand: {},
+        targetRayMode: 'tracked-pointer',
+        profiles: ['generic-hand-select']
+      } as unknown as XRInputSource
+    })
+    const thumb = Object.assign(new Group(), {
+      jointRadius: 0.009
+    }) as unknown as XRJointSpace
+    const index = Object.assign(new Group(), {
+      jointRadius: 0.009
+    }) as unknown as XRJointSpace
+    thumb.position.set(0.01, 0, -0.5)
+    index.position.set(-0.01, 0, -0.5)
+    thumb.visible = true
+    index.visible = true
+    hands[0]!.visible = true
+    hands[0]!.joints['thumb-tip'] = thumb
+    hands[0]!.joints['index-finger-tip'] = index
+    hands[0]!.add(thumb, index)
+    hands[0]!.updateMatrixWorld(true)
+
+    system.update(0, 1 / 60)
+    expect(runtime).toMatchObject({
+      pinching: true,
+      grabbedBy: 'pinch'
+    })
+
+    thumb.position.z = -0.4
+    index.position.z = -0.4
+    hands[0]!.updateMatrixWorld(true)
+    system.update(16, 1 / 60)
+    expect(runtime.grabIntent).toBe('depth')
+    expect(group.position.z).toBeGreaterThan(-1)
+
+    thumb.position.z = -0.3
+    index.position.z = -0.3
+    hands[0]!.updateMatrixWorld(true)
+    system.update(32, 1 / 60)
+    expect(group.position.z).toBeGreaterThanOrEqual(-0.65)
+
+    thumb.position.x = 0.08
+    hands[0]!.updateMatrixWorld(true)
+    system.update(48, 1 / 60)
+    expect(runtime).toMatchObject({
+      pinching: false,
+      grabbedBy: null
+    })
+    expect(callbacks.onPanelMoved).toHaveBeenCalledTimes(1)
+    expect(callbacks.onPanelMoved).toHaveBeenCalledWith(
+      'panel-1',
+      expect.objectContaining({ z: expect.closeTo(group.position.z) })
+    )
     system.dispose()
   })
 
