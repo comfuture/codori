@@ -942,6 +942,7 @@ export class ImmersiveInteractionSystem {
     const key = `${controller}:${hand}:${preferredHand}:${fallbackMenu}`
     for (const panel of this.options.getPanels().values()) {
       panel.setHandControlsVisible(preferredHand)
+      panel.setRayControlsVisible(controller)
     }
     if (key !== this.lastInputCapabilities) {
       this.lastInputCapabilities = key
