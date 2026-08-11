@@ -76,22 +76,22 @@ Initial actions are `Passthrough`, `Recenter workspace`, the live voice/resume-a
 
 Controller:
 
-- target ray: hover and select controls or panel content
-- select-drag on panel content: scroll without a visible scrollbar
-- thumbstick vertical axis over content: scroll
-- select-drag, pinch, or squeeze on either the full-width `0.11 m` title header or the separate six-dot drag button above the active panel's top-right edge: move it while preserving viewer distance for ray input or following physical controller movement for squeeze
-- tap the title header or drag button: pull a distant panel along its current sight line to a `1.8 m` reading distance without pushing an already-close panel away
-- selecting a panel keeps it active after release, with a thicker cyan outline and stronger glow; selecting another panel transfers active state and selecting empty space clears it
-- select the vector close-icon button beside the drag button: dismiss the active panel with a `125 ms` expanding particle burst
+- target ray: hover and select the close action or any non-actionable pane point
+- select-drag or squeeze anywhere on the pane moves it; dragging never scrolls content and no title/six-dot grab target is required
+- initial controller translation remains neutral until `4.5 cm`, then viewer-local lateral motion stays approximately 1:1 while predominantly forward/back motion enters sticky accelerated depth movement (`3.2×`) with `0.65–4.5 m` viewer-distance clamps
+- only the right `xr-standard` primary thumbstick (`axes[3]`) scrolls the persistent active pane; a `0.22` dead zone and elapsed-time scaling keep speed independent of refresh rate, and unknown/profile-specific trailing axes are ignored
+- selecting a pane keeps it active after release. Active, hover, and grab state changes only separate cyan outline/glow geometry and never rerenders or tints pane content pixels
+- select the vector close-icon button: dismiss the active pane without starting movement, using the existing `125 ms` expanding particle burst
 - release: keep the panel at its chosen position for this XR session
 
 Tracked hand:
 
-- platform primary select: activate or scroll
-- index/thumb pinch: synthesized select/grab fallback when native select is not emitted
-- opening the pinch: release
+- direct `index-finger-tip` contact moves a nearby pane from any non-actionable point
+- index/thumb pinch remotely grabs a distant pane; opening the pinch releases it
+- visible top/bottom triangles are direct fingertip scroll controls. Scrolling starts slowly, accelerates smoothly to a cap while contact remains, and stops immediately on leave or tracking/source loss
+- remote pinch never activates status-window actions, which retain the direct-touch-only hand policy
 
-Native and synthesized primary actions are de-duplicated. Competing grabs have one deterministic owner, and input-source loss releases hover/grab state.
+Native and synthesized primary actions are de-duplicated. Preferred hints follow the most recently used connected source independently per hand, so a valid hand can replace an unused/disconnected controller without a session restart. Competing grabs have one deterministic owner, and input-source or required-joint loss releases hover, grab, and held-scroll state.
 
 `Recenter workspace` rotates and translates one shared anchor into the current horizontal gaze at clamped eye height. The agent light, transcript, status surfaces, automatic panes, and manually moved pane-local transforms move together without reallocating pane ids. A `local-floor` reference-space `reset` schedules exactly one anchor refresh; Codori does not emulate or require a reserved platform recenter button.
 
@@ -118,7 +118,7 @@ Resource caps:
 - 2,048 pixels maximum on either text-canvas edge
 - pooled light flare objects and no per-frame light-object allocation
 
-Growing output follows the live tail until manual scrolling. Later deltas preserve the manual reading position until the user returns to the tail.
+Growing output follows the live tail until manual scrolling. Later deltas preserve the manual reading position until the user returns to the tail. A bottom triangle appears only while wrapped content remains below and disappears at the live tail; tracked-hand mode also exposes a top triangle while content remains above. Reduced-effects mode keeps these affordances restrained and static rather than blinking.
 
 ## Current validation boundary
 
