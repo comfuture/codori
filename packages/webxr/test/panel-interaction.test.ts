@@ -57,6 +57,7 @@ const createPanelDouble = (id = 'panel-1') => {
     maximumScrollStart: 8,
     setInteraction: vi.fn(),
     setHandControlsVisible: vi.fn(),
+    setRayControlsVisible: vi.fn(),
     moveTo: (position: Vector3) => {
       group.position.copy(position)
       group.updateMatrixWorld(true)
@@ -166,6 +167,30 @@ const attachTrackedIndexTip = (
   hand.updateMatrixWorld(true)
   return index
 }
+
+describe('input capability controls', () => {
+  it('enables ray scroll controls for a controller-only setup', () => {
+    const { panel } = createPanelDouble()
+    const { system } = createInteractionHarness(
+      new Map([['panel-1', panel]])
+    )
+    const internals = system as unknown as {
+      sources: Array<{ inputSource: XRInputSource | null }>
+      updateInputCapabilities: () => void
+    }
+    internals.sources[0]!.inputSource = {
+      handedness: 'right',
+      hand: null,
+      targetRayMode: 'tracked-pointer'
+    } as unknown as XRInputSource
+
+    internals.updateInputCapabilities()
+
+    expect(panel.setRayControlsVisible).toHaveBeenCalledWith(true)
+    expect(panel.setHandControlsVisible).toHaveBeenCalledWith(false)
+    system.dispose()
+  })
+})
 
 describe('panel interaction model', () => {
   it('uses the oriented panel box for fingertip sphere collision', () => {

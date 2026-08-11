@@ -129,6 +129,51 @@ describe('spatial panel visual states', () => {
     view.dispose()
   })
 
+  it('keeps overflow hit targets available to controller rays', () => {
+    vi.stubGlobal('document', {
+      createElement: () => ({
+        width: 0,
+        height: 0,
+        getContext: () => ({})
+      })
+    })
+    vi.spyOn(CanvasTextSurface.prototype, 'render').mockReturnValue({
+      totalLineCount: 8,
+      visibleLineCount: 2,
+      startLine: 2,
+      endLine: 4,
+      hasAbove: true,
+      hasBelow: true
+    })
+    const view = new SpatialPanelView({
+      id: 'panel-controller-scroll',
+      kind: 'command',
+      title: 'Controller scroll',
+      status: 'in-progress',
+      text: 'one\ntwo\nthree\nfour\nfive\nsix\nseven\neight',
+      retainedText: 'one\ntwo\nthree\nfour\nfive\nsix\nseven\neight',
+      truncated: false,
+      background: false,
+      phase: 'visible',
+      phaseStartedAt: 0,
+      scrollOffset: 2,
+      autoFollow: false,
+      userMoved: true,
+      position: null,
+      slot: 0,
+      fileTransitionStartedAt: 0
+    })
+
+    expect(view.scrollUpHit.visible).toBe(false)
+    expect(view.scrollDownHit.visible).toBe(false)
+    view.setRayControlsVisible(true)
+    expect(view.scrollUpHit.visible).toBe(true)
+    expect(view.scrollDownHit.visible).toBe(true)
+    expect(view.scrollUpHit.parent?.visible).toBe(true)
+    expect(view.scrollDownHit.parent?.visible).toBe(true)
+    view.dispose()
+  })
+
   it('rerenders only when the effective clamped viewport line changes', () => {
     vi.stubGlobal('document', {
       createElement: () => ({

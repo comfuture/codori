@@ -370,6 +370,8 @@ export class SpatialPanelView {
 
   private hasContentBelow = false
 
+  private rayControlsVisible = false
+
   get maximumScrollStart() {
     const metrics = this.surface.metrics
     return Math.max(0, metrics.totalLineCount - metrics.visibleLineCount)
@@ -695,10 +697,12 @@ export class SpatialPanelView {
   }
 
   private updateOverflowVisibility() {
-    this.overflowUp.visible = this.handControlsVisible && this.hasContentAbove
+    const scrollControlsVisible = this.handControlsVisible
+      || this.rayControlsVisible
+    this.overflowUp.visible = scrollControlsVisible && this.hasContentAbove
     this.overflowDown.visible = this.hasContentBelow
-    this.scrollDownHit.visible = this.handControlsVisible && this.hasContentBelow
-    this.scrollUpHit.visible = this.handControlsVisible && this.hasContentAbove
+    this.scrollDownHit.visible = scrollControlsVisible && this.hasContentBelow
+    this.scrollUpHit.visible = scrollControlsVisible && this.hasContentAbove
   }
 
   setHandControlsVisible(visible: boolean) {
@@ -706,6 +710,14 @@ export class SpatialPanelView {
       return
     }
     this.handControlsVisible = visible
+    this.updateOverflowVisibility()
+  }
+
+  setRayControlsVisible(visible: boolean) {
+    if (this.rayControlsVisible === visible) {
+      return
+    }
+    this.rayControlsVisible = visible
     this.updateOverflowVisibility()
   }
 
