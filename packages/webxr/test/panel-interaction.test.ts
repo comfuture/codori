@@ -394,6 +394,14 @@ describe('panel interaction model', () => {
     const outline = hands[0]!.getObjectByName('tracked-hand-outline-left')!
     expect(outline.visible).toBe(true)
 
+    system.setHandOutlinesEnabled(false)
+    expect(outline.visible).toBe(false)
+    system.update(0.5, 1 / 60)
+    expect(outline.visible).toBe(false)
+    system.setHandOutlinesEnabled(true)
+    system.update(0.75, 1 / 60)
+    expect(outline.visible).toBe(true)
+
     controllerRuntime.listeners.connected({
       data: {
         handedness: 'left',

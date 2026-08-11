@@ -311,6 +311,8 @@ export class ImmersiveInteractionSystem {
 
   private lastInputCapabilities = ''
 
+  private handOutlinesEnabled = true
+
   private disposed = false
 
   constructor(private readonly options: InteractionSystemOptions) {
@@ -965,8 +967,17 @@ export class ImmersiveInteractionSystem {
       )
       runtime.handOutline.updateFromHand(
         runtime.hand,
-        !controllerActive
+        this.handOutlinesEnabled && !controllerActive
       )
+    }
+  }
+
+  setHandOutlinesEnabled(enabled: boolean) {
+    this.handOutlinesEnabled = enabled
+    if (!enabled) {
+      for (const runtime of this.sources) {
+        runtime.handOutline.clear()
+      }
     }
   }
 
