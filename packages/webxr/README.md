@@ -101,6 +101,8 @@ Native and synthesized primary actions are de-duplicated. Preferred hints follow
 
 The central agent-light orb starts voice only while voice is inactive. Its hit target is removed throughout permission, offer creation, startup, connected, and stopping states, preventing an accidental touch from ending an active session; intentional stopping remains available from the status window.
 
+Status-window binary actions render as track-and-knob toggles, while recenter and exit remain one-shot buttons.
+
 The palm-up per-hand `Menu`/Meta suggestions seen on Quest are Meta Horizon OS
 trusted UI, not the Codori fallback menu. Standard WebXR exposes joint poses and
 platform-defined `select*` events but no API for repositioning, freezing,

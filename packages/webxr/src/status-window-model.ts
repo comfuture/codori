@@ -24,6 +24,8 @@ export type StatusAction = {
   id: StatusActionId
   label: string
   state: string | null
+  presentation: 'toggle' | 'button'
+  checked: boolean | null
   available: boolean
   disabledReason: string | null
   inputPolicy: StatusActionInputPolicy
@@ -140,6 +142,8 @@ export const createStatusActions = (
   id: 'passthrough',
   label: 'Passthrough',
   state: state.passthroughActive ? 'On' : 'Off',
+  presentation: 'toggle',
+  checked: state.passthroughActive,
   available: state.passthroughSupported,
   disabledReason: state.passthroughSupported
     ? null
@@ -150,17 +154,17 @@ export const createStatusActions = (
   id: 'recenter',
   label: 'Recenter workspace',
   state: null,
+  presentation: 'button',
+  checked: null,
   available: true,
   disabledReason: null,
   inputPolicy: 'controller-or-touch'
 }, {
   id: 'voice',
-  label: state.voiceState === 'resume-audio'
-    ? 'Resume audio'
-    : state.voiceState === 'active'
-      ? 'Stop voice'
-      : 'Start voice',
+  label: 'Voice',
   state: state.voiceState === 'active' ? 'On' : 'Off',
+  presentation: 'toggle',
+  checked: state.voiceState === 'active',
   available: state.voiceState !== 'unavailable',
   disabledReason: state.voiceState === 'unavailable'
     ? 'Realtime voice is unavailable.'
@@ -170,6 +174,8 @@ export const createStatusActions = (
   id: 'reduced-effects',
   label: 'Reduced effects',
   state: state.reducedEffects ? 'On' : 'Off',
+  presentation: 'toggle',
+  checked: state.reducedEffects,
   available: true,
   disabledReason: null,
   inputPolicy: 'controller-or-touch'
@@ -177,6 +183,8 @@ export const createStatusActions = (
   id: 'exit',
   label: 'Exit immersive',
   state: null,
+  presentation: 'button',
+  checked: null,
   available: true,
   disabledReason: null,
   inputPolicy: 'any'
