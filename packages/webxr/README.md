@@ -127,6 +127,8 @@ Web Audio synthesizes a one-second agent-awakening cue whose low mechanical chor
 
 Foreground command, file-change, MCP, dynamic-tool, and web-search panels appear near the central field of view on `item/started`, update continuously from progress/output deltas, stay visible while active, dwell for one minute after terminal completion, then shrink and dispose. Four screen-space anchors each have a front/back depth pair. New panes prefer an anchor whose projected area is clear of both automatic and manually positioned panes. If overlap is unavoidable, the new pane receives the nearer depth; when every automatic slot is full, the newest pane takes a front slot, its previous occupant moves back, and the displaced back pane remains queued as overflow rather than covering the latest information. Scrolling, moving, or focusing a completed panel restarts that one-minute dwell. A manually dismissed panel does not reappear when late deltas arrive.
 
+The opaque-room floor, grid, and walls render before panes without writing depth, so panels remain readable even when placed behind or below the visual room shell. Pane-to-pane depth ordering remains intact.
+
 Panel height follows the estimated wrapped output, including double-width CJK characters. Short results use a compact `0.44 m` panel and grow with their content; the previous `0.92 m` height is the maximum.
 
 Agent background-terminal panels come only from the authoritative paginated `thread/backgroundTerminals/list` response and remain until absent from a complete response or explicitly terminated. They are not the user-created `command/exec` workspace terminals.
