@@ -28,7 +28,11 @@ import type {
   SpatialPanelPhase,
   SpatialPanelSnapshot
 } from './panel-model'
-import { CanvasTextSurface } from './text-surface'
+import {
+  CanvasTextSurface,
+  resolveTextViewportMetrics,
+  type TextViewportMetrics
+} from './text-surface'
 
 const easeOutCubic = (value: number) => 1 - ((1 - value) ** 3)
 const easeInCubic = (value: number) => value ** 3
@@ -127,6 +131,15 @@ export const createPanelContentRenderSignature = (input: {
   input.body,
   input.scrollLine ?? ''
 ].join('\u0000')
+
+export const resolvePanelViewportStart = (
+  metrics: TextViewportMetrics,
+  scrollLine?: number
+) => resolveTextViewportMetrics(
+  metrics.totalLineCount,
+  metrics.visibleLineCount,
+  scrollLine
+).startLine
 
 const triangleGeometry = (pointingUp: boolean) => {
   const shape = new Shape()
@@ -352,6 +365,8 @@ export class SpatialPanelView {
 
   private lastRenderedContent = ''
 
+  private lastRenderedLayout = ''
+
   private animationNow = 0
 
   private layoutPositionInitialized = false
@@ -550,22 +565,37 @@ export class SpatialPanelView {
     const scrollLine = snapshot.fileChange || snapshot.autoFollow
       ? undefined
       : snapshot.scrollOffset
+    const layoutSignature = createPanelContentRenderSignature({
+      title: snapshot.title,
+      status: snapshot.status,
+      body
+    })
+    const layoutChanged = layoutSignature !== this.lastRenderedLayout
+    const effectiveScrollLine = layoutChanged
+      ? scrollLine
+      : resolvePanelViewportStart(this.surface.metrics, scrollLine)
     const signature = createPanelContentRenderSignature({
       title: snapshot.title,
       status: snapshot.status,
       body,
-      scrollLine
+      scrollLine: effectiveScrollLine
     })
     if (signature === this.lastRenderedContent) {
       return
     }
-    this.lastRenderedContent = signature
     const metrics = this.surface.render({
       title: snapshot.title,
       status: statusLabel(snapshot.status),
       body,
       ansi: true,
-      scrollLine
+      scrollLine: effectiveScrollLine
+    })
+    this.lastRenderedLayout = layoutSignature
+    this.lastRenderedContent = createPanelContentRenderSignature({
+      title: snapshot.title,
+      status: snapshot.status,
+      body,
+      scrollLine: metrics.startLine
     })
     this.hasContentAbove = metrics.hasAbove
     this.hasContentBelow = metrics.hasBelow

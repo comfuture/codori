@@ -10,9 +10,14 @@ import {
   resolvePanelControlLayout,
   resolvePanelInteractionLayout,
   resolvePanelSlotTransition,
+  resolvePanelViewportStart,
   resolvePanelVisualState
 } from '../src/panel-view'
-import { CanvasTextSurface } from '../src/text-surface'
+import {
+  CanvasTextSurface,
+  resolveTextViewportMetrics,
+  type TextViewportMetrics
+} from '../src/text-surface'
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -105,6 +110,87 @@ describe('spatial panel visual states', () => {
       .toBe(PANEL_WORLD_DEPTH_RENDER_ORDER)
     expect(view.group.getObjectByName('panel-glow:panel-1')?.renderOrder)
       .toBe(PANEL_WORLD_DEPTH_RENDER_ORDER)
+    view.dispose()
+  })
+
+  it('rerenders only when the effective clamped viewport line changes', () => {
+    vi.stubGlobal('document', {
+      createElement: () => ({
+        width: 0,
+        height: 0,
+        getContext: () => ({})
+      })
+    })
+    const render = vi.spyOn(CanvasTextSurface.prototype, 'render')
+      .mockImplementation(function (
+        this: CanvasTextSurface,
+        content
+      ) {
+        const metrics = resolveTextViewportMetrics(
+          content.body.split('\n').length,
+          2,
+          content.scrollLine
+        )
+        ;(this as unknown as { viewportMetrics: TextViewportMetrics })
+          .viewportMetrics = metrics
+        return metrics
+      })
+    const body = Array.from({ length: 8 }, (_, index) => `line ${index}`)
+      .join('\n')
+    const snapshot = {
+      id: 'panel-scroll',
+      kind: 'command' as const,
+      title: 'Scroll proof',
+      status: 'in-progress' as const,
+      text: body,
+      retainedText: body,
+      truncated: false,
+      background: false,
+      phase: 'visible' as const,
+      phaseStartedAt: 0,
+      scrollOffset: 1.1,
+      autoFollow: false,
+      userMoved: false,
+      position: null,
+      slot: 0,
+      fileTransitionStartedAt: 0
+    }
+    const view = new SpatialPanelView(snapshot)
+    render.mockClear()
+
+    view.update({ ...snapshot, scrollOffset: 1.4 })
+    expect(render).not.toHaveBeenCalled()
+    view.update({ ...snapshot, scrollOffset: 1.6 })
+    expect(render).toHaveBeenCalledTimes(1)
+    view.update({ ...snapshot, scrollOffset: 1.7 })
+    expect(render).toHaveBeenCalledTimes(1)
+
+    view.update({ ...snapshot, scrollOffset: -100 })
+    expect(render).toHaveBeenCalledTimes(2)
+    view.update({ ...snapshot, scrollOffset: -200 })
+    expect(render).toHaveBeenCalledTimes(2)
+    view.update({ ...snapshot, scrollOffset: 100 })
+    expect(render).toHaveBeenCalledTimes(3)
+    view.update({ ...snapshot, scrollOffset: 200 })
+    expect(render).toHaveBeenCalledTimes(3)
+
+    const longerBody = `${body}\nnew line`
+    view.update({
+      ...snapshot,
+      text: longerBody,
+      retainedText: longerBody,
+      scrollOffset: 200
+    })
+    expect(render).toHaveBeenCalledTimes(4)
+    expect(view.maximumScrollStart).toBe(7)
+    expect(resolvePanelViewportStart({
+      totalLineCount: 9,
+      visibleLineCount: 2,
+      startLine: 7,
+      endLine: 9,
+      hasAbove: true,
+      hasBelow: false
+    }, 999)).toBe(7)
     view.dispose()
   })
 

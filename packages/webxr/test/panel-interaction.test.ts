@@ -539,6 +539,72 @@ describe('panel interaction model', () => {
     system.dispose()
   })
 
+  it('clears hidden active ownership and never thumbstick-scrolls overflow panes', () => {
+    const hidden = createPanelDouble('hidden')
+    const visible = createPanelDouble('visible')
+    visible.group.position.set(1, 0, -1)
+    visible.group.updateMatrixWorld(true)
+    const { system, callbacks } = createInteractionHarness(new Map([
+      ['hidden', hidden.panel],
+      ['visible', visible.panel]
+    ]))
+    type Runtime = {
+      id: string
+      inputSource: XRInputSource | null
+      grabbedBy: 'select' | null
+      handScrollPanelId: string | null
+      handScrollDirection: number
+    }
+    const internals = system as unknown as {
+      sources: Runtime[]
+      model: PanelInteractionModel
+      updateGamepadScroll: (
+        runtime: Runtime,
+        now: number,
+        deltaSeconds: number
+      ) => void
+      refreshPanelInteraction: () => void
+    }
+    const runtime = internals.sources[0]!
+    runtime.inputSource = {
+      handedness: 'right',
+      hand: null,
+      targetRayMode: 'tracked-pointer',
+      gamepad: {
+        mapping: 'xr-standard',
+        axes: [0, 0, 0, 0.8]
+      }
+    } as unknown as XRInputSource
+    const hit = { panelId: 'hidden', zone: 'move' as const }
+    internals.model.selectStart(runtime.id, hit, 0)
+    internals.model.grabStart(runtime.id, hit)
+    runtime.grabbedBy = 'select'
+    runtime.handScrollPanelId = 'hidden'
+    runtime.handScrollDirection = 1
+    const visiblePosition = visible.group.position.clone()
+
+    internals.updateGamepadScroll(runtime, 0, 1 / 60)
+    expect(callbacks.onScroll).toHaveBeenCalledTimes(1)
+    hidden.group.visible = false
+    internals.updateGamepadScroll(runtime, 16, 1 / 60)
+    expect(callbacks.onScroll).toHaveBeenCalledTimes(1)
+
+    internals.refreshPanelInteraction()
+    expect(internals.model.snapshot()).toMatchObject({
+      activePanelId: null
+    })
+    expect(internals.model.snapshot().grabOwners).toHaveLength(0)
+    expect(runtime).toMatchObject({
+      grabbedBy: null,
+      handScrollPanelId: null,
+      handScrollDirection: 0
+    })
+    expect(visible.group.position).toEqual(visiblePosition)
+    internals.updateGamepadScroll(runtime, 32, 1 / 60)
+    expect(callbacks.onScroll).toHaveBeenCalledTimes(1)
+    system.dispose()
+  })
+
   it('does not persist a normal-only fingertip withdrawal as manual placement', () => {
     const { panel, group } = createPanelDouble()
     const { system, hands, callbacks } = createInteractionHarness(

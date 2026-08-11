@@ -1072,7 +1072,7 @@ export class ImmersiveInteractionSystem {
     const activePanel = activePanelId
       ? this.options.getPanels().get(activePanelId)
       : null
-    if (activePanelId && activePanel) {
+    if (activePanelId && activePanel?.group.visible) {
       this.preferredInput.use(runtime.id, now)
       this.options.onScroll(
         activePanelId,
@@ -1084,7 +1084,12 @@ export class ImmersiveInteractionSystem {
 
   private refreshPanelInteraction() {
     const panels = this.options.getPanels()
-    this.model.reconcilePanels(new Set(panels.keys()))
+    const interactivePanelIds = new Set(
+      [...panels.entries()]
+        .filter(([, panel]) => panel.group.visible)
+        .map(([panelId]) => panelId)
+    )
+    this.model.reconcilePanels(interactivePanelIds)
     const snapshot = this.model.snapshot()
     for (const runtime of this.sources) {
       if (
@@ -1095,7 +1100,7 @@ export class ImmersiveInteractionSystem {
       }
       if (
         runtime.handScrollPanelId
-        && !panels.has(runtime.handScrollPanelId)
+        && !interactivePanelIds.has(runtime.handScrollPanelId)
       ) {
         this.stopHandScroll(runtime)
       }
@@ -1133,7 +1138,7 @@ export class ImmersiveInteractionSystem {
       const sourceState = this.model.snapshot().sources.get(runtime.id)
       if (sourceState?.grabbedPanelId) {
         const panel = this.options.getPanels().get(sourceState.grabbedPanelId)
-        if (panel) {
+        if (panel?.group.visible) {
           if (runtime.grabbedBy === 'touch') {
             continue
           }
