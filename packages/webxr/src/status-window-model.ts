@@ -89,8 +89,11 @@ export const createStatusActionRowLayout = (
 
 export const shouldShowStatusFallbackMenu = (input: {
   mappedMenuController: boolean
-  trackedHand: boolean
-}) => !input.mappedMenuController && !input.trackedHand
+  trackedLeftHand: boolean
+  leftControllerActive: boolean
+}) => !input.mappedMenuController && !(
+  input.trackedLeftHand && !input.leftControllerActive
+)
 
 export const resolveStatusWindowScale = (
   phase: 'opening' | 'open' | 'closing' | 'closed',

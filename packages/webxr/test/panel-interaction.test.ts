@@ -18,6 +18,7 @@ import {
   resolveFocusedPanelPosition,
   resolveRayPanelPosition,
   resolveRayGrabPosition,
+  resolveStatusFallbackMenuVisibility,
   worldPointToPanelLocal,
   resolveTrackedHandJoint
 } from '../src/interaction-system'
@@ -219,6 +220,167 @@ describe('panel interaction model', () => {
       profiles: ['unknown-controller']
     })).toBe(null)
   })
+
+  it('shows the fallback only when the connected sources have no status invocation path', () => {
+    const handSource = (handedness: XRHandedness) => {
+      const hand = Object.assign(new Group(), {
+        joints: {},
+        inputState: { pinching: false }
+      }) as unknown as XRHandSpace
+      const wrist = Object.assign(new Group(), {
+        jointRadius: 0.01
+      }) as unknown as XRJointSpace
+      hand.joints.wrist = wrist
+      hand.visible = true
+      wrist.visible = true
+      return {
+        inputSource: {
+          handedness,
+          hand: {},
+          targetRayMode: 'tracked-pointer',
+          profiles: []
+        } as unknown as XRInputSource,
+        hand
+      }
+    }
+    const controllerSource = (
+      handedness: XRHandedness,
+      mapped: boolean
+    ) => ({
+      inputSource: {
+        handedness,
+        hand: null,
+        targetRayMode: 'tracked-pointer',
+        profiles: mapped ? ['htc-vive-focus'] : ['unknown-controller'],
+        gamepad: {
+          buttons: [{}, {}, {}, {}, { pressed: false }]
+        }
+      } as unknown as XRInputSource,
+      hand: Object.assign(new Group(), {
+        joints: {},
+        inputState: { pinching: false }
+      }) as unknown as XRHandSpace
+    })
+
+    const rightHand = handSource('right')
+    const leftHand = handSource('left')
+    const leftMappedController = controllerSource('left', true)
+    const leftUnmappedController = controllerSource('left', false)
+    const rightUnmappedController = controllerSource('right', false)
+
+    expect(resolveStatusFallbackMenuVisibility([rightHand])).toBe(true)
+    expect(resolveStatusFallbackMenuVisibility([leftHand])).toBe(false)
+    expect(resolveStatusFallbackMenuVisibility([
+      leftMappedController
+    ])).toBe(false)
+    expect(resolveStatusFallbackMenuVisibility([
+      leftHand,
+      leftUnmappedController
+    ])).toBe(true)
+    expect(resolveStatusFallbackMenuVisibility([
+      leftHand,
+      rightUnmappedController
+    ])).toBe(false)
+    expect(resolveStatusFallbackMenuVisibility([
+      rightHand,
+      leftMappedController
+    ])).toBe(false)
+  })
+
+  it.each(['thumb-tip', 'index-finger-tip'] as const)(
+    'ends an active synthesized pinch once when %s tracking is lost',
+    (lostJointName) => {
+      const targetRays = [new Group(), new Group()]
+      const grips = [new Group(), new Group()]
+      const hands = [0, 1].map(() => Object.assign(new Group(), {
+        joints: {},
+        inputState: { pinching: false }
+      }) as unknown as XRHandSpace)
+      const renderer = {
+        xr: {
+          getController: (index: number) => targetRays[index],
+          getControllerGrip: (index: number) => grips[index],
+          getHand: (index: number) => hands[index]
+        }
+      } as unknown as WebGLRenderer
+      const system = new ImmersiveInteractionSystem({
+        renderer,
+        root: new Group(),
+        getPanels: () => new Map(),
+        getControlTargets: () => [],
+        getStatusTargets: () => [],
+        getStatusMenuTarget: () => null,
+        isStatusOpen: () => false,
+        getStatusInvocation: () => null,
+        onScroll: () => {},
+        onPanelInteracted: () => {},
+        onPanelMoved: () => {},
+        onPanelFocused: () => {},
+        onPanelDismiss: () => {},
+        onAction: () => {},
+        onStatusToggle: () => {},
+        onStatusDismiss: () => {},
+        onStatusAction: () => {},
+        onInputCapabilitiesChanged: () => {}
+      })
+      type TestRuntime = {
+        id: string
+        hand: XRHandSpace
+        inputSource: XRInputSource | null
+        pinching: boolean
+        selecting: boolean
+        grabbedBy: 'select' | 'squeeze' | 'pinch' | null
+      }
+      const internals = system as unknown as {
+        sources: TestRuntime[]
+        model: PanelInteractionModel
+        updatePinch: (runtime: TestRuntime, now: number) => void
+      }
+      const runtime = internals.sources[0]!
+      runtime.inputSource = {
+        handedness: 'left',
+        hand: {},
+        targetRayMode: 'tracked-pointer',
+        profiles: []
+      } as unknown as XRInputSource
+      runtime.hand.visible = true
+      for (const name of ['thumb-tip', 'index-finger-tip'] as const) {
+        const joint = Object.assign(new Group(), {
+          jointRadius: 0.01
+        }) as unknown as XRJointSpace
+        joint.visible = name !== lostJointName
+        runtime.hand.joints[name] = joint
+      }
+      const hit = { panelId: 'panel-1', zone: 'grab' as const }
+      internals.model.selectStart(runtime.id, hit, 0, false)
+      internals.model.grabStart(runtime.id, hit)
+      runtime.pinching = true
+      runtime.selecting = true
+      runtime.grabbedBy = 'pinch'
+      const selectEnd = vi.spyOn(internals.model, 'selectEnd')
+      const releaseGrab = vi.spyOn(internals.model, 'releaseGrab')
+
+      internals.updatePinch(runtime, 100)
+
+      expect(runtime).toMatchObject({
+        pinching: false,
+        selecting: false,
+        grabbedBy: null
+      })
+      expect(internals.model.snapshot().sources.get(runtime.id)).toMatchObject({
+        selected: null,
+        grabbedPanelId: null
+      })
+      expect(internals.model.snapshot().grabOwners).toHaveLength(0)
+      expect(selectEnd).toHaveBeenCalledTimes(1)
+      expect(releaseGrab).toHaveBeenCalledTimes(1)
+
+      internals.updatePinch(runtime, 101)
+      expect(selectEnd).toHaveBeenCalledTimes(1)
+      expect(releaseGrab).toHaveBeenCalledTimes(1)
+      system.dispose()
+    }
+  )
 
   it('removes input listeners and disposes fallback geometry on teardown', () => {
     const targetRays = [new Group(), new Group()]

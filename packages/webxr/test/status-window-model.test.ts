@@ -153,18 +153,37 @@ describe('XR status window model', () => {
     expect(mappedMenuButtonIndex('left', ['unknown-extra-buttons'])).toBe(null)
   })
 
-  it('shows the fallback for unmapped controllers but not mapped menus or tracked hands', () => {
+  it('shows the fallback exactly when no mapped menu or eligible left-hand gesture exists', () => {
+    // A visible right hand cannot invoke the left-hand status gesture.
     expect(shouldShowStatusFallbackMenu({
       mappedMenuController: false,
-      trackedHand: false
+      trackedLeftHand: false,
+      leftControllerActive: false
     })).toBe(true)
+    // A visible left hand can invoke the gesture when no left controller wins.
+    expect(shouldShowStatusFallbackMenu({
+      mappedMenuController: false,
+      trackedLeftHand: true,
+      leftControllerActive: false
+    })).toBe(false)
+    // A mapped left controller provides the invocation path.
     expect(shouldShowStatusFallbackMenu({
       mappedMenuController: true,
-      trackedHand: false
+      trackedLeftHand: false,
+      leftControllerActive: true
     })).toBe(false)
+    // An unmapped left controller suppresses the left-hand gesture, so its ray
+    // must retain the fallback target.
     expect(shouldShowStatusFallbackMenu({
       mappedMenuController: false,
-      trackedHand: true
+      trackedLeftHand: true,
+      leftControllerActive: true
+    })).toBe(true)
+    // A right controller does not suppress an eligible left hand.
+    expect(shouldShowStatusFallbackMenu({
+      mappedMenuController: false,
+      trackedLeftHand: true,
+      leftControllerActive: false
     })).toBe(false)
   })
 

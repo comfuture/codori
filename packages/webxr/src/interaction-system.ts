@@ -142,6 +142,31 @@ export const mappedStatusMenuButtonIndex = (
     : null
 }
 
+export const resolveStatusFallbackMenuVisibility = (
+  sources: readonly Pick<SourceRuntime, 'inputSource' | 'hand'>[]
+) => {
+  const trackedLeftHand = sources.some(runtime =>
+    runtime.inputSource?.handedness === 'left'
+    && Boolean(runtime.inputSource.hand)
+    && resolveTrackedHandJoint(runtime.hand, 'wrist') !== null
+  )
+  const leftControllerActive = sources.some(runtime =>
+    runtime.inputSource?.handedness === 'left'
+    && !runtime.inputSource.hand
+    && runtime.inputSource.targetRayMode === 'tracked-pointer'
+  )
+  const mappedMenuController = sources.some(runtime =>
+    runtime.inputSource != null
+    && !runtime.inputSource.hand
+    && mappedStatusMenuButtonIndex(runtime.inputSource) !== null
+  )
+  return shouldShowStatusFallbackMenu({
+    mappedMenuController,
+    trackedLeftHand,
+    leftControllerActive
+  })
+}
+
 export const resolveFocusedPanelPosition = (
   viewer: Vector3,
   panel: Vector3,
@@ -559,15 +584,7 @@ export class ImmersiveInteractionSystem {
       Boolean(runtime.inputSource?.hand)
       && resolveTrackedHandJoint(runtime.hand, 'wrist') !== null
     )
-    const mappedMenuController = this.sources.some(runtime =>
-      runtime.inputSource != null
-      && !runtime.inputSource.hand
-      && mappedStatusMenuButtonIndex(runtime.inputSource) !== null
-    )
-    const fallbackMenu = shouldShowStatusFallbackMenu({
-      mappedMenuController,
-      trackedHand: hand
-    })
+    const fallbackMenu = resolveStatusFallbackMenuVisibility(this.sources)
     const key = `${controller}:${hand}:${fallbackMenu}`
     if (key !== this.lastInputCapabilities) {
       this.lastInputCapabilities = key
@@ -747,6 +764,7 @@ export class ImmersiveInteractionSystem {
     const thumb = resolveTrackedHandJoint(runtime.hand, 'thumb-tip')
     const index = resolveTrackedHandJoint(runtime.hand, 'index-finger-tip')
     if (!thumb || !index) {
+      this.endSynthesizedPinch(runtime, false)
       return
     }
     thumb.getWorldPosition(thumbPosition)
@@ -756,12 +774,22 @@ export class ImmersiveInteractionSystem {
       runtime.pinching = true
       this.handleSelectStart(runtime, now, false)
     } else if (runtime.pinching && distance >= 0.038) {
-      runtime.pinching = false
-      runtime.selecting = false
-      this.model.selectEnd(runtime.id)
-      if (runtime.grabbedBy === 'pinch') {
-        this.releaseGrab(runtime, true)
-      }
+      this.endSynthesizedPinch(runtime, true)
+    }
+  }
+
+  private endSynthesizedPinch(
+    runtime: SourceRuntime,
+    focusOnTap: boolean
+  ) {
+    if (!runtime.pinching) {
+      return
+    }
+    runtime.pinching = false
+    runtime.selecting = false
+    this.model.selectEnd(runtime.id)
+    if (runtime.grabbedBy === 'pinch') {
+      this.releaseGrab(runtime, focusOnTap)
     }
   }
 
