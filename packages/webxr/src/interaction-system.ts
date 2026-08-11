@@ -1089,6 +1089,18 @@ export class ImmersiveInteractionSystem {
         .filter(([, panel]) => panel.group.visible)
         .map(([panelId]) => panelId)
     )
+    const preReconcileSnapshot = this.model.snapshot()
+    for (const runtime of this.sources) {
+      const grabbedPanelId = preReconcileSnapshot.sources
+        .get(runtime.id)?.grabbedPanelId
+      if (
+        runtime.grabbedBy
+        && grabbedPanelId
+        && !interactivePanelIds.has(grabbedPanelId)
+      ) {
+        this.finalizeGrab(runtime, { refresh: false })
+      }
+    }
     this.model.reconcilePanels(interactivePanelIds)
     const snapshot = this.model.snapshot()
     for (const runtime of this.sources) {
