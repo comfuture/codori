@@ -93,7 +93,7 @@ Tracked hand:
 
 - WebXR exposes articulated joint poses and radii; it does not guarantee a compositor-rendered hand. Codori therefore draws a lightweight connected outline for each tracked hand, hides it when tracking is lost or a same-handed controller is active, and excludes every outline primitive from raycasts and collisions.
 - direct `index-finger-tip` contact moves a nearby pane from any non-actionable point
-- index/thumb pinch remotely grabs a distant pane from the physical fingertip midpoint. Pulling the pinched hand toward the viewer accelerates only the depth component by `3.2×` within the `0.65–4.5 m` clamps. Left/right and up/down displacement scales by the initial pane-distance-to-hand-distance ratio, capped at `4×`, so distant panes track the hand's angular movement without jumping when depth intent activates. Opening the pinch releases it
+- index/thumb pinch remotely grabs a distant pane from the physical fingertip midpoint. Pulling the pinched hand toward the viewer accelerates only the depth component by `3.2×` within the `0.65–4.5 m` clamps. Left/right and up/down displacement continuously scales by the current pane-distance-to-hand-distance ratio so angular movement remains consistent as depth changes; a `0.25 m` minimum hand distance bounds tracking spikes without introducing a far-pane cap. Opening the pinch releases it
 - visible top/bottom triangles are direct fingertip scroll controls. Scrolling starts slowly, accelerates smoothly to a cap while contact remains, and stops immediately on leave or tracking/source loss
 - remote pinch never activates status-window actions, which retain the direct-touch-only hand policy
 

@@ -140,9 +140,48 @@ describe('pane manipulation helpers', () => {
       activationPhysicalDepth,
       activationSourceDisplacement: activation
     })
-    expect(later.x).toBeCloseTo(0.93)
-    expect(later.y).toBeCloseTo(1.935)
+    const resolvedDepth = resolveAcceleratedPaneDepth({
+      initialDistance: 2,
+      physicalDepth: moved.dot(sightLine),
+      activationPhysicalDepth
+    })
+    const currentSourceDistance = initialSourcePosition.clone()
+      .add(moved)
+      .distanceTo(initialViewerPosition)
+    const lateralScale = resolvedDepth / currentSourceDistance
+    expect(later.x).toBeCloseTo(
+      activation.x + ((moved.x - activation.x) * lateralScale)
+    )
+    expect(later.y).toBeCloseTo(
+      initialPanelPosition.y + activation.y
+        + ((moved.y - activation.y) * lateralScale)
+    )
     expect(later.z).toBeGreaterThan(initialPanelPosition.z + moved.z)
+  })
+
+  it('increases hand-pinch lateral gain as a pane moves farther away', () => {
+    const initialViewerPosition = new Vector3()
+    const initialPanelPosition = new Vector3(0, 0, -1)
+    const initialSourcePosition = new Vector3(0, 0, -0.5)
+    const sightLine = new Vector3(0, 0, -1)
+    const activation = new Vector3(0, 0, -0.05)
+    const activationPhysicalDepth = activation.dot(sightLine)
+    const resolve = (sourceDisplacement: Vector3) => (
+      resolveHandPinchDepthPanePosition({
+        initialPanelPosition,
+        initialViewerPosition,
+        initialSourcePosition,
+        sightLine,
+        sourceDisplacement,
+        activationPhysicalDepth,
+        activationSourceDisplacement: activation
+      })
+    )
+
+    const near = resolve(new Vector3(0.1, 0, -0.05))
+    const far = resolve(new Vector3(0.1, 0, -0.45))
+    expect(near.x).toBeGreaterThan(0.1)
+    expect(far.x).toBeGreaterThan(near.x)
   })
 
   it('maps only the right xr-standard primary thumbstick Y axis', () => {
