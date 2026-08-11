@@ -112,30 +112,36 @@ describe('pane manipulation helpers', () => {
   it('keeps live hand-pinch lateral coordinates while accelerating depth', () => {
     const initialViewerPosition = new Vector3(0, 1.6, 0)
     const initialPanelPosition = new Vector3(0, 1.6, -2)
+    const initialSourcePosition = new Vector3(0, 1.6, -0.5)
     const sightLine = new Vector3(0, 0, -1)
     const activation = new Vector3(0.01, -0.005, 0.06)
     const activationPhysicalDepth = activation.dot(sightLine)
     const atActivation = resolveHandPinchDepthPanePosition({
       initialPanelPosition,
       initialViewerPosition,
+      initialSourcePosition,
       sightLine,
       sourceDisplacement: activation,
-      activationPhysicalDepth
+      activationPhysicalDepth,
+      activationSourceDisplacement: activation
     })
-    expect(atActivation).toEqual(
-      initialPanelPosition.clone().add(activation)
-    )
+    const expectedAtActivation = initialPanelPosition.clone().add(activation)
+    expect(atActivation.x).toBeCloseTo(expectedAtActivation.x)
+    expect(atActivation.y).toBeCloseTo(expectedAtActivation.y)
+    expect(atActivation.z).toBeCloseTo(expectedAtActivation.z)
 
     const moved = new Vector3(0.24, 0.08, 0.16)
     const later = resolveHandPinchDepthPanePosition({
       initialPanelPosition,
       initialViewerPosition,
+      initialSourcePosition,
       sightLine,
       sourceDisplacement: moved,
-      activationPhysicalDepth
+      activationPhysicalDepth,
+      activationSourceDisplacement: activation
     })
-    expect(later.x).toBeCloseTo(initialPanelPosition.x + moved.x)
-    expect(later.y).toBeCloseTo(initialPanelPosition.y + moved.y)
+    expect(later.x).toBeCloseTo(0.93)
+    expect(later.y).toBeCloseTo(1.935)
     expect(later.z).toBeGreaterThan(initialPanelPosition.z + moved.z)
   })
 

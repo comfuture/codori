@@ -5,6 +5,7 @@ export type PaneGrabIntent = 'neutral' | 'free' | 'depth'
 export const PANE_GRAB_CLASSIFICATION_THRESHOLD_METERS = 0.045
 export const PANE_GRAB_DEPTH_RATIO = 1.35
 export const PANE_DEPTH_ACCELERATION = 3.2
+export const PANE_HAND_PINCH_LATERAL_MAX_SCALE = 4
 export const PANE_MIN_VIEWER_DISTANCE_METERS = 0.65
 export const PANE_MAX_VIEWER_DISTANCE_METERS = 4.5
 export const PANE_SCROLL_DEAD_ZONE = 0.22
@@ -109,12 +110,28 @@ export const resolveDepthLockedPanePosition = (input: {
 export const resolveHandPinchDepthPanePosition = (input: {
   initialPanelPosition: Vector3
   initialViewerPosition: Vector3
+  initialSourcePosition: Vector3
   sightLine: Vector3
   sourceDisplacement: Vector3
   activationPhysicalDepth: number
+  activationSourceDisplacement: Vector3
   target?: Vector3
 }) => {
   const physicalDepth = input.sourceDisplacement.dot(input.sightLine)
+  const initialSourceDistance = input.initialViewerPosition.distanceTo(
+    input.initialSourcePosition
+  )
+  const lateralScale = MathUtils.clamp(
+    initialSourceDistance > Number.EPSILON
+      ? input.initialViewerPosition.distanceTo(input.initialPanelPosition)
+        / initialSourceDistance
+      : PANE_HAND_PINCH_LATERAL_MAX_SCALE,
+    1,
+    PANE_HAND_PINCH_LATERAL_MAX_SCALE
+  )
+  const activationLateralDepth = input.activationSourceDisplacement.dot(
+    input.sightLine
+  )
   return (input.target ?? new Vector3())
     .copy(input.initialViewerPosition)
     .addScaledVector(
@@ -127,8 +144,20 @@ export const resolveHandPinchDepthPanePosition = (input: {
         activationPhysicalDepth: input.activationPhysicalDepth
       })
     )
-    .add(input.sourceDisplacement)
-    .addScaledVector(input.sightLine, -physicalDepth)
+    .add(input.activationSourceDisplacement)
+    .addScaledVector(input.sightLine, -activationLateralDepth)
+    .addScaledVector(
+      input.sourceDisplacement,
+      lateralScale
+    )
+    .addScaledVector(
+      input.activationSourceDisplacement,
+      -lateralScale
+    )
+    .addScaledVector(
+      input.sightLine,
+      -(physicalDepth - activationLateralDepth) * lateralScale
+    )
 }
 
 export const applyThumbstickDeadZone = (
