@@ -28,7 +28,7 @@ import type { WorldControlAction } from './world-controls'
 import {
   canActivateStatusAction,
   mappedMenuButtonIndex,
-  shouldShowNoInputMenu,
+  shouldShowStatusFallbackMenu,
   StatusControllerArmModel,
   StatusGestureModel,
   type StatusActionId,
@@ -86,7 +86,7 @@ export type InteractionSystemOptions = {
   onInputCapabilitiesChanged: (input: {
     controller: boolean
     hand: boolean
-    noUsableInput: boolean
+    fallbackMenu: boolean
   }) => void
 }
 
@@ -123,6 +123,23 @@ export const resolveRayGrabPosition = (
 ) => {
   const intersection = ray.intersectSphere(sphere, target)
   return intersection?.add(offset) ?? null
+}
+
+export const resolveTrackedHandJoint = (
+  hand: XRHandSpace,
+  name: XRHandJoint
+) => {
+  const joint = hand.joints[name]
+  return hand.visible && joint?.visible ? joint : null
+}
+
+export const mappedStatusMenuButtonIndex = (
+  source: Pick<XRInputSource, 'handedness' | 'profiles' | 'gamepad'>
+) => {
+  const index = mappedMenuButtonIndex(source.handedness, source.profiles)
+  return index != null && source.gamepad?.buttons[index]
+    ? index
+    : null
 }
 
 export const resolveFocusedPanelPosition = (
@@ -499,7 +516,10 @@ export class ImmersiveInteractionSystem {
       runtime.contactActionId = null
       return
     }
-    const index = runtime.hand.getObjectByName('index-finger-tip')
+    const index = resolveTrackedHandJoint(
+      runtime.hand,
+      'index-finger-tip'
+    )
     if (!index) {
       runtime.contactActionId = null
       return
@@ -518,7 +538,7 @@ export class ImmersiveInteractionSystem {
   private updateMenuButton(runtime: SourceRuntime) {
     const source = runtime.inputSource
     const index = source
-      ? mappedMenuButtonIndex(source.handedness, source.profiles)
+      ? mappedStatusMenuButtonIndex(source)
       : null
     const pressed = index == null
       ? false
@@ -535,14 +555,26 @@ export class ImmersiveInteractionSystem {
       && !runtime.inputSource?.hand
       && runtime.inputSource?.targetRayMode === 'tracked-pointer'
     )
-    const hand = this.sources.some(runtime => Boolean(runtime.inputSource?.hand))
-    const key = `${controller}:${hand}`
+    const hand = this.sources.some(runtime =>
+      Boolean(runtime.inputSource?.hand)
+      && resolveTrackedHandJoint(runtime.hand, 'wrist') !== null
+    )
+    const mappedMenuController = this.sources.some(runtime =>
+      runtime.inputSource != null
+      && !runtime.inputSource.hand
+      && mappedStatusMenuButtonIndex(runtime.inputSource) !== null
+    )
+    const fallbackMenu = shouldShowStatusFallbackMenu({
+      mappedMenuController,
+      trackedHand: hand
+    })
+    const key = `${controller}:${hand}:${fallbackMenu}`
     if (key !== this.lastInputCapabilities) {
       this.lastInputCapabilities = key
       this.options.onInputCapabilitiesChanged({
         controller,
         hand,
-        noUsableInput: shouldShowNoInputMenu({ controller, hand })
+        fallbackMenu
       })
     }
   }
@@ -557,7 +589,9 @@ export class ImmersiveInteractionSystem {
       runtime.inputSource?.handedness === 'left'
       && Boolean(runtime.inputSource.hand)
     )
-    const wrist = leftHand?.hand.getObjectByName('wrist')
+    const wrist = leftHand
+      ? resolveTrackedHandJoint(leftHand.hand, 'wrist')
+      : null
     this.options.renderer.xr.getCamera().getWorldPosition(viewerPosition)
     let height = Number.NEGATIVE_INFINITY
     let facing = Number.NEGATIVE_INFINITY
@@ -624,7 +658,9 @@ export class ImmersiveInteractionSystem {
     const hand = this.sources.find(runtime =>
       runtime.inputSource?.handedness === 'left' && runtime.inputSource.hand
     )
-    return hand?.hand.getObjectByName('wrist') ?? null
+    return hand
+      ? resolveTrackedHandJoint(hand.hand, 'wrist')
+      : null
   }
 
   private handleGrabStart(
@@ -708,8 +744,8 @@ export class ImmersiveInteractionSystem {
     if (!runtime.inputSource?.hand) {
       return
     }
-    const thumb = runtime.hand.getObjectByName('thumb-tip')
-    const index = runtime.hand.getObjectByName('index-finger-tip')
+    const thumb = resolveTrackedHandJoint(runtime.hand, 'thumb-tip')
+    const index = resolveTrackedHandJoint(runtime.hand, 'index-finger-tip')
     if (!thumb || !index) {
       return
     }

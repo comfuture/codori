@@ -78,10 +78,10 @@ export const resolvePassthroughAvailability = (input: {
   }
   if (input.environmentBlendMode === 'opaque') {
     return {
-      supported: false,
+      supported: true,
       active: false,
       contrast: 'opaque',
-      disabledReason: 'The immersive AR session reports opaque environment blending.'
+      disabledReason: null
     }
   }
   return {

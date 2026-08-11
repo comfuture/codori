@@ -87,10 +87,10 @@ export const createStatusActionRowLayout = (
   height: height / count
 }))
 
-export const shouldShowNoInputMenu = (input: {
-  controller: boolean
-  hand: boolean
-}) => !input.controller && !input.hand
+export const shouldShowStatusFallbackMenu = (input: {
+  mappedMenuController: boolean
+  trackedHand: boolean
+}) => !input.mappedMenuController && !input.trackedHand
 
 export const resolveStatusWindowScale = (
   phase: 'opening' | 'open' | 'closing' | 'closed',

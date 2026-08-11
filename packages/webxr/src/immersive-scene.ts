@@ -74,7 +74,7 @@ export type ImmersiveSceneOptions = {
   onStatusAction: (action: StatusActionId) => void
   onStatusOpened: () => void
   onStatusClosed: () => void
-  onNoUsableInputChanged: (visible: boolean) => void
+  onStatusFallbackChanged: (visible: boolean) => void
 }
 
 const viewerPosition = new Vector3()
@@ -197,9 +197,9 @@ export class ImmersiveScene {
         this.closeStatusWindow()
         options.onStatusAction(action)
       },
-      onInputCapabilitiesChanged: ({ noUsableInput }) => {
-        this.statusWindow.setMenuVisible(noUsableInput)
-        options.onNoUsableInputChanged(noUsableInput)
+      onInputCapabilitiesChanged: ({ fallbackMenu }) => {
+        this.statusWindow.setMenuVisible(fallbackMenu)
+        options.onStatusFallbackChanged(fallbackMenu)
       }
     })
     this.renderer.setAnimationLoop((timestamp) => {

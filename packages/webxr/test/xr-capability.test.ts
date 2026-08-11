@@ -152,7 +152,12 @@ describe('immersive WebXR capability', () => {
       vrSupported: true,
       mode: 'immersive-ar',
       environmentBlendMode: 'opaque'
-    })).toMatchObject({ supported: false, active: false, contrast: 'opaque' })
+    })).toMatchObject({
+      supported: true,
+      active: false,
+      contrast: 'opaque',
+      disabledReason: null
+    })
   })
 
   it('refuses session creation outside a secure context', async () => {

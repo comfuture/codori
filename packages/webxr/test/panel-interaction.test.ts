@@ -6,16 +6,20 @@ import {
   Ray,
   Sphere,
   Vector3,
-  type WebGLRenderer
+  type WebGLRenderer,
+  type XRHandSpace,
+  type XRJointSpace
 } from 'three'
 import {
   ImmersiveInteractionSystem,
   isPanelGrabTap,
+  mappedStatusMenuButtonIndex,
   resolveFocusedPanelLocalPosition,
   resolveFocusedPanelPosition,
   resolveRayPanelPosition,
   resolveRayGrabPosition,
-  worldPointToPanelLocal
+  worldPointToPanelLocal,
+  resolveTrackedHandJoint
 } from '../src/interaction-system'
 import { PanelInteractionModel } from '../src/panel-interaction'
 
@@ -172,6 +176,48 @@ describe('panel interaction model', () => {
     expect(model.selectStart('hand', hit, 1_000, true)).toBe(true)
     expect(model.selectStart('hand', hit, 1_100, false)).toBe(false)
     expect(model.selectStart('hand', hit, 1_300, false)).toBe(true)
+  })
+
+  it('reads only currently tracked Three.js hand joints from the joints map', () => {
+    const hand = Object.assign(new Group(), {
+      joints: {},
+      inputState: { pinching: false }
+    }) as unknown as XRHandSpace
+    const wrist = Object.assign(new Group(), {
+      jointRadius: 0.01
+    }) as unknown as XRJointSpace
+    hand.joints.wrist = wrist
+    hand.visible = true
+    wrist.visible = true
+
+    expect(wrist.name).toBe('')
+    expect(hand.getObjectByName('wrist')).toBeUndefined()
+    expect(resolveTrackedHandJoint(hand, 'wrist')).toBe(wrist)
+
+    wrist.visible = false
+    expect(resolveTrackedHandJoint(hand, 'wrist')).toBe(null)
+    wrist.visible = true
+    hand.visible = false
+    expect(resolveTrackedHandJoint(hand, 'wrist')).toBe(null)
+  })
+
+  it('recognizes a menu controller only when its mapped button is exposed', () => {
+    const source = {
+      handedness: 'left',
+      profiles: ['htc-vive-focus'],
+      gamepad: {
+        buttons: [{}, {}, {}, {}, { pressed: false }]
+      }
+    } as unknown as Pick<XRInputSource, 'handedness' | 'profiles' | 'gamepad'>
+    expect(mappedStatusMenuButtonIndex(source)).toBe(4)
+    expect(mappedStatusMenuButtonIndex({
+      ...source,
+      gamepad: { buttons: [{}, {}, {}, {}] } as unknown as Gamepad
+    })).toBe(null)
+    expect(mappedStatusMenuButtonIndex({
+      ...source,
+      profiles: ['unknown-controller']
+    })).toBe(null)
   })
 
   it('removes input listeners and disposes fallback geometry on teardown', () => {

@@ -11,6 +11,7 @@ import {
   mappedMenuButtonIndex,
   resolveStatusContext,
   resolveStatusWindowScale,
+  shouldShowStatusFallbackMenu,
   StatusControllerArmModel,
   StatusGestureModel
 } from '../src/status-window-model'
@@ -150,6 +151,21 @@ describe('XR status window model', () => {
     expect(mappedMenuButtonIndex('right', ['htc-vive-focus'])).toBe(null)
     expect(mappedMenuButtonIndex('left', ['htc-vive'])).toBe(null)
     expect(mappedMenuButtonIndex('left', ['unknown-extra-buttons'])).toBe(null)
+  })
+
+  it('shows the fallback for unmapped controllers but not mapped menus or tracked hands', () => {
+    expect(shouldShowStatusFallbackMenu({
+      mappedMenuController: false,
+      trackedHand: false
+    })).toBe(true)
+    expect(shouldShowStatusFallbackMenu({
+      mappedMenuController: true,
+      trackedHand: false
+    })).toBe(false)
+    expect(shouldShowStatusFallbackMenu({
+      mappedMenuController: false,
+      trackedHand: true
+    })).toBe(false)
   })
 
   it('debounces the hand-back pose with hysteresis and cooldown', () => {

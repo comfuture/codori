@@ -260,7 +260,7 @@ const ensureScene = async () => {
           onStatusClosed: () => {
             soundEffects.playStatusClose()
           },
-          onNoUsableInputChanged: (visible) => {
+          onStatusFallbackChanged: (visible) => {
             fallbackMenu.hidden = !(
               visible
               && activeSession
