@@ -99,6 +99,8 @@ Tracked hand:
 
 Native and synthesized primary actions are de-duplicated. Preferred hints follow the most recently used connected source independently per hand, so a valid hand can replace an unused/disconnected controller without a session restart. Competing grabs have one deterministic owner, and input-source or required-joint loss releases hover, grab, and held-scroll state.
 
+The central agent-light orb starts voice only while voice is inactive. Its hit target is removed throughout permission, offer creation, startup, connected, and stopping states, preventing an accidental touch from ending an active session; intentional stopping remains available from the status window.
+
 The palm-up per-hand `Menu`/Meta suggestions seen on Quest are Meta Horizon OS
 trusted UI, not the Codori fallback menu. Standard WebXR exposes joint poses and
 platform-defined `select*` events but no API for repositioning, freezing,

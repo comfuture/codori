@@ -121,6 +121,14 @@ export const configureRoomSurfaceRendering = (
     wall.renderOrder = ROOM_WALL_RENDER_ORDER
   }
 }
+
+export const resolveWorldControlTargets = (
+  voiceToggleEnabled: boolean,
+  voiceTarget: Mesh,
+  controlTargets: readonly Mesh[]
+) => voiceToggleEnabled
+  ? [voiceTarget, ...controlTargets]
+  : [...controlTargets]
 const statusAnchorPosition = new Vector3()
 const menuWorldPosition = new Vector3()
 const menuOffset = new Vector3(0.52, -0.32, -1.15)
@@ -194,6 +202,8 @@ export class ImmersiveScene {
 
   private panelHandControlsPreview = false
 
+  private voiceToggleEnabled = true
+
   constructor(private readonly options: ImmersiveSceneOptions) {
     this.renderer = new WebGLRenderer({
       canvas: options.canvas,
@@ -226,10 +236,11 @@ export class ImmersiveScene {
       renderer: this.renderer,
       root: this.scene,
       getPanels: () => this.panels,
-      getControlTargets: () => [
+      getControlTargets: () => resolveWorldControlTargets(
+        this.voiceToggleEnabled,
         this.agentLight.hitTarget,
-        ...this.controls.hitTargets
-      ],
+        this.controls.hitTargets
+      ),
       getStatusTargets: () => this.statusWindow.actionHits,
       getStatusMenuTarget: () => this.statusWindow.menuHit,
       isStatusOpen: () => this.statusWindow.isOpen,
@@ -372,6 +383,11 @@ export class ImmersiveScene {
 
   setActivity(activity: RealtimeVisualActivity) {
     this.activity = activity
+  }
+
+  setVoiceToggleEnabled(enabled: boolean) {
+    this.voiceToggleEnabled = enabled
+    this.agentLight.hitTarget.visible = enabled
   }
 
   prepareAgentAwakening() {

@@ -7,12 +7,23 @@ import {
 } from 'three'
 import {
   configureRoomSurfaceRendering,
+  resolveWorldControlTargets,
   ROOM_FLOOR_RENDER_ORDER,
   ROOM_GRID_RENDER_ORDER,
   ROOM_WALL_RENDER_ORDER
 } from '../src/immersive-scene'
 
 describe('immersive room rendering', () => {
+  it('removes the voice orb from control targets while voice is active', () => {
+    const voice = new Mesh()
+    const exit = new Mesh()
+
+    expect(resolveWorldControlTargets(true, voice, [exit]))
+      .toEqual([voice, exit])
+    expect(resolveWorldControlTargets(false, voice, [exit]))
+      .toEqual([exit])
+  })
+
   it('renders floor surfaces before panes without writing occluding depth', () => {
     const floorMaterial = new MeshBasicMaterial()
     const floor = new Mesh(new PlaneGeometry(20, 20), floorMaterial)

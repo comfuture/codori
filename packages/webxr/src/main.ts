@@ -12,6 +12,7 @@ import {
 import type { ImmersiveScene } from './immersive-scene'
 import {
   resolveImmersiveVoiceActivity,
+  voiceSessionActive,
   VoiceRuntime
 } from './voice-runtime'
 import { coordinateRealtimeAutoStart } from './realtime-auto-start'
@@ -123,13 +124,6 @@ const disposeConnectedRuntimes = async () => {
   ].filter((task): task is Promise<void> => Boolean(task)))
 }
 
-const sessionActive = (snapshot: RealtimeConversationSnapshot) =>
-  snapshot.state === 'requesting-permission'
-  || snapshot.state === 'creating-offer'
-  || snapshot.state === 'starting'
-  || snapshot.state === 'connected'
-  || snapshot.state === 'stopping'
-
 const statusVoiceState = () => {
   if (!latestVoice) {
     return 'unavailable' as const
@@ -137,7 +131,7 @@ const statusVoiceState = () => {
   if (latestVoice.autoplayBlocked) {
     return 'resume-audio' as const
   }
-  return sessionActive(latestVoice) ? 'active' as const : 'inactive' as const
+  return voiceSessionActive(latestVoice) ? 'active' as const : 'inactive' as const
 }
 
 const updateStatusWindow = () => {
@@ -200,6 +194,7 @@ const showEntry = () => {
 
 const updateVoiceUi = (snapshot: RealtimeConversationSnapshot) => {
   latestVoice = snapshot
+  immersiveScene?.setVoiceToggleEnabled(!voiceSessionActive(snapshot))
   updateStatusWindow()
   immersiveScene?.setTranscript(snapshot.transcripts, snapshot.generation)
   immersiveScene?.setActivity(
@@ -242,7 +237,7 @@ const ensureScene = async () => {
           reducedEffects: () => reducedEffects.checked,
           onAction: (action) => {
             if (action === 'toggle-voice') {
-              void toggleVoice()
+              void activateAgentLightVoice()
             } else {
               void exitImmersive()
             }
@@ -283,6 +278,9 @@ const ensureScene = async () => {
           }
         })
         updateStatusWindow()
+        immersiveScene.setVoiceToggleEnabled(
+          !latestVoice || !voiceSessionActive(latestVoice)
+        )
         return immersiveScene
       })
   }
@@ -309,7 +307,7 @@ const startWorkspaceRuntime = async () => {
       latestWorkspace = snapshot
       lastWorkspaceError = snapshot.error
       immersiveScene?.setPanels(snapshot.panels)
-      if (!voiceRuntime || !sessionActive(voiceRuntime.getSnapshot())) {
+      if (!voiceRuntime || !voiceSessionActive(voiceRuntime.getSnapshot())) {
         immersiveScene?.setActivity(snapshot.activity)
         immersiveScene?.setTranscript(
           snapshot.transcripts,
@@ -350,7 +348,7 @@ const toggleVoice = async () => {
       await voiceRuntime.toggle()
       return
     }
-    if (sessionActive(snapshot)) {
+    if (voiceSessionActive(snapshot)) {
       await voiceRuntime.stop()
       immersiveScene?.prepareAgentAwakening()
       return
@@ -366,6 +364,16 @@ const toggleVoice = async () => {
       true
     )
   }
+}
+
+const activateAgentLightVoice = async () => {
+  if (
+    voiceRuntime
+    && voiceSessionActive(voiceRuntime.getSnapshot())
+  ) {
+    return
+  }
+  await toggleVoice()
 }
 
 const transitionSessionMode = async (mode: ImmersiveSessionMode) => {
