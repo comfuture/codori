@@ -120,6 +120,18 @@ export const resolvePanelInteractionLayout = (
   }
 }
 
+export const resolvePanelOverflowControlLayout = (
+  width: number,
+  height: number
+) => {
+  const content = resolvePanelInteractionLayout(width, height).content
+  const inset = 0.04
+  return {
+    upY: content.y + (content.height / 2) - inset,
+    downY: content.y - (content.height / 2) + inset
+  }
+}
+
 export const createPanelContentRenderSignature = (input: {
   title: string
   status: string
@@ -469,15 +481,15 @@ export class SpatialPanelView {
     this.overflowUp.position.z = 0.05
     this.overflowDown.position.z = 0.05
     this.scrollUpHit = new Mesh(
-      new BoxGeometry(0.13, 0.075, 0.07),
+      new BoxGeometry(0.22, 0.13, 0.1),
       invisibleMaterial.clone()
     )
     this.scrollDownHit = new Mesh(
-      new BoxGeometry(0.13, 0.075, 0.07),
+      new BoxGeometry(0.22, 0.13, 0.1),
       invisibleMaterial.clone()
     )
-    this.scrollUpHit.position.z = 0.045
-    this.scrollDownHit.position.z = 0.045
+    this.scrollUpHit.position.z = 0.015
+    this.scrollDownHit.position.z = 0.015
     this.scrollUpHit.userData = {
       panelId: snapshot.id,
       hitZone: 'scroll-up'
@@ -677,9 +689,9 @@ export class SpatialPanelView {
   }
 
   private positionOverflowControls() {
-    const inset = 0.055
-    this.overflowUp.position.set(0, (this.height / 2) - inset, 0.045)
-    this.overflowDown.position.set(0, (-this.height / 2) + inset, 0.045)
+    const layout = resolvePanelOverflowControlLayout(this.width, this.height)
+    this.overflowUp.position.set(0, layout.upY, 0.045)
+    this.overflowDown.position.set(0, layout.downY, 0.045)
   }
 
   private updateOverflowVisibility() {
