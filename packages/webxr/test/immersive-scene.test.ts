@@ -8,12 +8,20 @@ import {
 import {
   configureRoomSurfaceRendering,
   resolveWorldControlTargets,
+  shouldShowHandOutlines,
   ROOM_FLOOR_RENDER_ORDER,
   ROOM_GRID_RENDER_ORDER,
   ROOM_WALL_RENDER_ORDER
 } from '../src/immersive-scene'
 
 describe('immersive room rendering', () => {
+  it('hides synthetic hand outlines only in real passthrough modes', () => {
+    expect(shouldShowHandOutlines('immersive-vr', 'opaque')).toBe(true)
+    expect(shouldShowHandOutlines('immersive-ar', 'opaque')).toBe(true)
+    expect(shouldShowHandOutlines('immersive-ar', 'alpha-blend')).toBe(false)
+    expect(shouldShowHandOutlines('immersive-ar', 'additive')).toBe(false)
+  })
+
   it('removes the voice orb from control targets while voice is active', () => {
     const voice = new Mesh()
     const exit = new Mesh()

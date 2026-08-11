@@ -129,6 +129,11 @@ export const resolveWorldControlTargets = (
 ) => voiceToggleEnabled
   ? [voiceTarget, ...controlTargets]
   : [...controlTargets]
+
+export const shouldShowHandOutlines = (
+  mode: ImmersiveSessionMode,
+  environmentBlendMode: XREnvironmentBlendMode
+) => !(mode === 'immersive-ar' && environmentBlendMode !== 'opaque')
 const statusAnchorPosition = new Vector3()
 const menuWorldPosition = new Vector3()
 const menuOffset = new Vector3(0.52, -0.32, -1.15)
@@ -484,6 +489,9 @@ export class ImmersiveScene {
     this.environmentBlendMode = environmentBlendMode
     const passthrough = mode === 'immersive-ar'
       && environmentBlendMode !== 'opaque'
+    this.interaction.setHandOutlinesEnabled(
+      shouldShowHandOutlines(mode, environmentBlendMode)
+    )
     this.room.visible = !passthrough
     this.controls.group.visible = !passthrough
     this.scene.background = passthrough ? null : new Color('#01040a')
