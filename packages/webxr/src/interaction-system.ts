@@ -26,6 +26,7 @@ import {
 import type { SpatialPanelView } from './panel-view'
 import {
   classifyPaneGrabIntent,
+  isMeaningfulTouchDrag,
   PANE_GRAB_CLASSIFICATION_THRESHOLD_METERS,
   PreferredPaneInputModel,
   resolveDepthLockedPanePosition,
@@ -361,25 +362,13 @@ export class ImmersiveInteractionSystem {
         }, performance.now())
       },
       disconnected: () => {
-        const grabbedPanelId = this.model.snapshot().sources
-          .get(id)?.grabbedPanelId
-        runtime.inputSource = null
         runtime.selecting = false
         runtime.pinching = false
-        runtime.grabbedBy = null
-        runtime.handScrollPanelId = null
-        runtime.handScrollDirection = 0
+        this.finalizeGrab(runtime, { refresh: false })
+        runtime.inputSource = null
+        this.stopHandScroll(runtime)
         this.preferredInput.lose(id)
         this.model.sourceLost(id)
-        if (grabbedPanelId) {
-          const panel = this.options.getPanels().get(grabbedPanelId)
-          if (panel) {
-            this.options.onPanelMoved(
-              grabbedPanelId,
-              panel.group.position.clone()
-            )
-          }
-        }
         this.refreshPanelInteraction()
       },
       selectstart: () => {
@@ -389,7 +378,7 @@ export class ImmersiveInteractionSystem {
         runtime.selecting = false
         this.model.selectEnd(id)
         if (runtime.grabbedBy === 'select') {
-          this.releaseGrab(runtime, true)
+          this.finalizeGrab(runtime, { focusSelectTap: true })
         }
       },
       squeezestart: () => {
@@ -397,7 +386,7 @@ export class ImmersiveInteractionSystem {
       },
       squeezeend: () => {
         if (runtime.grabbedBy === 'squeeze') {
-          this.releaseGrab(runtime)
+          this.finalizeGrab(runtime)
         }
       }
     }
@@ -688,14 +677,14 @@ export class ImmersiveInteractionSystem {
     if (!index) {
       this.stopHandScroll(runtime)
       if (runtime.grabbedBy === 'touch') {
-        this.releaseGrab(runtime)
+        this.finalizeGrab(runtime)
       }
       return
     }
     if (this.options.isStatusOpen()) {
       this.stopHandScroll(runtime)
       if (runtime.grabbedBy === 'touch') {
-        this.releaseGrab(runtime)
+        this.finalizeGrab(runtime)
       }
       return
     }
@@ -708,7 +697,7 @@ export class ImmersiveInteractionSystem {
     )
     if (scrollContact) {
       if (runtime.grabbedBy === 'touch') {
-        this.releaseGrab(runtime)
+        this.finalizeGrab(runtime)
       }
       const direction = scrollContact.hit.zone === 'scroll-up' ? -1 : 1
       if (
@@ -739,7 +728,7 @@ export class ImmersiveInteractionSystem {
         ? this.options.getPanels().get(grabbedPanelId)
         : null
       if (!panel) {
-        this.releaseGrab(runtime)
+        this.finalizeGrab(runtime)
         return
       }
       panel.group.getWorldPosition(panelWorldPosition)
@@ -749,7 +738,7 @@ export class ImmersiveInteractionSystem {
             .dot(runtime.grabDirectNormal)
         ) > radius + 0.055
       ) {
-        this.releaseGrab(runtime)
+        this.finalizeGrab(runtime)
         return
       }
       sourceDisplacement.subVectors(
@@ -760,13 +749,10 @@ export class ImmersiveInteractionSystem {
         runtime.grabDirectNormal,
         -sourceDisplacement.dot(runtime.grabDirectNormal)
       )
+      runtime.grabMoved ||= isMeaningfulTouchDrag(sourceDisplacement)
       panelWorldPosition.copy(runtime.grabInitialWorldPosition)
         .add(sourceDisplacement)
       worldPointToPanelLocal(panel.group, panelWorldPosition, panelWorldPosition)
-      runtime.grabMoved ||= !isPanelGrabTap(
-        runtime.grabInitialPosition,
-        panelWorldPosition
-      )
       panel.moveTo(panelWorldPosition)
       return
     }
@@ -980,22 +966,29 @@ export class ImmersiveInteractionSystem {
     return anchor.getWorldPosition(target)
   }
 
-  private releaseGrab(runtime: SourceRuntime, focusOnTap = false) {
+  private finalizeGrab(
+    runtime: SourceRuntime,
+    options: {
+      focusSelectTap?: boolean
+      refresh?: boolean
+    } = {}
+  ) {
     const grabbedPanelId = this.model.snapshot().sources
       .get(runtime.id)?.grabbedPanelId
     const activation = runtime.grabbedBy
+    const moved = runtime.grabMoved
     this.model.releaseGrab(runtime.id)
     runtime.grabbedBy = null
     if (grabbedPanelId) {
       const panel = this.options.getPanels().get(grabbedPanelId)
       if (panel) {
         if (
-          focusOnTap
+          options.focusSelectTap
           && (
             activation === 'select'
             || activation === 'pinch'
           )
-          && !runtime.grabMoved
+          && !moved
         ) {
           this.options.renderer.xr.getCamera()
             .getWorldPosition(viewerPosition)
@@ -1003,15 +996,19 @@ export class ImmersiveInteractionSystem {
             grabbedPanelId,
             resolveFocusedPanelLocalPosition(viewerPosition, panel.group)
           )
-        } else {
+        } else if (moved) {
           this.options.onPanelMoved(
             grabbedPanelId,
             panel.group.position.clone()
           )
+        } else if (activation) {
+          panel.moveTo(runtime.grabInitialPosition)
         }
       }
     }
-    this.refreshPanelInteraction()
+    if (options.refresh !== false) {
+      this.refreshPanelInteraction()
+    }
   }
 
   private updatePinch(runtime: SourceRuntime, now: number) {
@@ -1050,7 +1047,7 @@ export class ImmersiveInteractionSystem {
     runtime.selecting = false
     this.model.selectEnd(runtime.id)
     if (runtime.grabbedBy === 'pinch') {
-      this.releaseGrab(runtime, focusOnTap)
+      this.finalizeGrab(runtime, { focusSelectTap: focusOnTap })
     }
   }
 

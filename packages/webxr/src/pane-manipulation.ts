@@ -9,6 +9,16 @@ export const PANE_MIN_VIEWER_DISTANCE_METERS = 0.65
 export const PANE_MAX_VIEWER_DISTANCE_METERS = 4.5
 export const PANE_SCROLL_DEAD_ZONE = 0.22
 export const PANE_SCROLL_LINES_PER_SECOND = 12
+export const PANE_TOUCH_MOVE_EPSILON_METERS = 0.006
+
+export const isMeaningfulTouchDrag = (
+  displacement: Pick<Vector3, 'x' | 'y' | 'z'>,
+  epsilon = PANE_TOUCH_MOVE_EPSILON_METERS
+) => Math.hypot(
+  displacement.x,
+  displacement.y,
+  displacement.z
+) >= epsilon
 
 export const classifyPaneGrabIntent = (
   viewerLocalDisplacement: Pick<Vector3, 'x' | 'y' | 'z'>,

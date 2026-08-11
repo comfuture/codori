@@ -115,6 +115,27 @@ const createInteractionHarness = (
   return { system, targetRays, grips, hands, callbacks }
 }
 
+const attachTrackedIndexTip = (
+  runtime: { inputSource: XRInputSource | null },
+  hand: XRHandSpace
+) => {
+  runtime.inputSource = {
+    handedness: 'right',
+    hand: {},
+    targetRayMode: 'tracked-pointer'
+  } as unknown as XRInputSource
+  const index = Object.assign(new Group(), {
+    jointRadius: 0.01
+  }) as unknown as XRJointSpace
+  index.position.set(0, 0, -0.96)
+  index.visible = true
+  hand.visible = true
+  hand.joints['index-finger-tip'] = index
+  hand.add(index)
+  hand.updateMatrixWorld(true)
+  return index
+}
+
 describe('panel interaction model', () => {
   it('keeps ray-grabbed pointer positions at a fixed viewer distance', () => {
     const sphere = new Sphere(new Vector3(0, 0, 0), 2)
@@ -518,6 +539,137 @@ describe('panel interaction model', () => {
     system.dispose()
   })
 
+  it('does not persist a normal-only fingertip withdrawal as manual placement', () => {
+    const { panel, group } = createPanelDouble()
+    const { system, hands, callbacks } = createInteractionHarness(
+      new Map([['panel-1', panel]])
+    )
+    type Runtime = {
+      inputSource: XRInputSource | null
+      hand: XRHandSpace
+      grabbedBy: 'touch' | null
+    }
+    const internals = system as unknown as {
+      sources: Runtime[]
+      model: PanelInteractionModel
+      updateHandPaneContact: (
+        runtime: Runtime,
+        now: number,
+        deltaSeconds: number
+      ) => void
+    }
+    const runtime = internals.sources[0]!
+    const index = attachTrackedIndexTip(runtime, hands[0]!)
+    const initialPosition = group.position.clone()
+
+    internals.updateHandPaneContact(runtime, 0, 1 / 60)
+    index.position.z = -0.7
+    hands[0]!.updateMatrixWorld(true)
+    internals.updateHandPaneContact(runtime, 16, 1 / 60)
+
+    expect(runtime.grabbedBy).toBe(null)
+    expect(internals.model.snapshot().grabOwners).toHaveLength(0)
+    expect(group.position).toEqual(initialPosition)
+    expect(callbacks.onPanelMoved).not.toHaveBeenCalled()
+    system.dispose()
+  })
+
+  it('persists a small meaningful in-plane fingertip drag', () => {
+    const { panel, group } = createPanelDouble()
+    const { system, hands, callbacks } = createInteractionHarness(
+      new Map([['panel-1', panel]])
+    )
+    type Runtime = {
+      inputSource: XRInputSource | null
+      hand: XRHandSpace
+      grabbedBy: 'touch' | null
+    }
+    const internals = system as unknown as {
+      sources: Runtime[]
+      updateHandPaneContact: (
+        runtime: Runtime,
+        now: number,
+        deltaSeconds: number
+      ) => void
+    }
+    const runtime = internals.sources[0]!
+    const index = attachTrackedIndexTip(runtime, hands[0]!)
+
+    internals.updateHandPaneContact(runtime, 0, 1 / 60)
+    index.position.x = 0.008
+    hands[0]!.updateMatrixWorld(true)
+    internals.updateHandPaneContact(runtime, 16, 1 / 60)
+    expect(group.position.x).toBeCloseTo(0.008)
+
+    index.position.z = -0.7
+    hands[0]!.updateMatrixWorld(true)
+    internals.updateHandPaneContact(runtime, 32, 1 / 60)
+
+    expect(callbacks.onPanelMoved).toHaveBeenCalledTimes(1)
+    expect(callbacks.onPanelMoved).toHaveBeenCalledWith(
+      'panel-1',
+      expect.objectContaining({ x: expect.closeTo(0.008) })
+    )
+    system.dispose()
+  })
+
+  it('persists source-loss movement once but ignores source loss before movement', () => {
+    const before = createPanelDouble('before')
+    const beforeHarness = createInteractionHarness(
+      new Map([['before', before.panel]])
+    )
+    type Runtime = {
+      inputSource: XRInputSource | null
+      hand: XRHandSpace
+      listeners: { disconnected: () => void }
+    }
+    type Internals = {
+      sources: Runtime[]
+      updateHandPaneContact: (
+        runtime: Runtime,
+        now: number,
+        deltaSeconds: number
+      ) => void
+    }
+    const beforeInternals = beforeHarness.system as unknown as Internals
+    const beforeRuntime = beforeInternals.sources[0]!
+    const beforeIndex = attachTrackedIndexTip(
+      beforeRuntime,
+      beforeHarness.hands[0]!
+    )
+    beforeInternals.updateHandPaneContact(beforeRuntime, 0, 1 / 60)
+    beforeIndex.position.x = 0.004
+    beforeHarness.hands[0]!.updateMatrixWorld(true)
+    beforeInternals.updateHandPaneContact(beforeRuntime, 16, 1 / 60)
+    beforeRuntime.listeners.disconnected()
+    expect(beforeHarness.callbacks.onPanelMoved).not.toHaveBeenCalled()
+    expect(before.group.position).toEqual(new Vector3(0, 0, -1))
+    beforeHarness.system.dispose()
+
+    const after = createPanelDouble('after')
+    const afterHarness = createInteractionHarness(
+      new Map([['after', after.panel]])
+    )
+    const afterInternals = afterHarness.system as unknown as Internals
+    const afterRuntime = afterInternals.sources[0]!
+    const afterIndex = attachTrackedIndexTip(
+      afterRuntime,
+      afterHarness.hands[0]!
+    )
+    afterInternals.updateHandPaneContact(afterRuntime, 0, 1 / 60)
+    afterIndex.position.x = 0.008
+    afterHarness.hands[0]!.updateMatrixWorld(true)
+    afterInternals.updateHandPaneContact(afterRuntime, 16, 1 / 60)
+    afterRuntime.listeners.disconnected()
+    afterRuntime.listeners.disconnected()
+    expect(afterHarness.callbacks.onPanelMoved).toHaveBeenCalledTimes(1)
+    expect(afterHarness.callbacks.onPanelMoved).toHaveBeenCalledWith(
+      'after',
+      expect.objectContaining({ x: expect.closeTo(0.008) })
+    )
+    afterHarness.system.dispose()
+  })
+
   it('direct-touch drags a nearby pane and releases all ownership on source loss', () => {
     const { panel, group } = createPanelDouble()
     const { system, hands, callbacks } = createInteractionHarness(
@@ -590,6 +742,7 @@ describe('panel interaction model', () => {
       'panel-1',
       expect.any(Vector3)
     )
+    expect(callbacks.onPanelMoved).toHaveBeenCalledTimes(1)
     system.dispose()
   })
 
