@@ -89,6 +89,9 @@ const handColor = (handedness: XRHandedness) => handedness === 'left'
   ? '#a8efff'
   : '#d8ffad'
 
+export const resolveHandJointRadius = (radius?: number) =>
+  Math.max(0.001, radius ?? 0.006)
+
 export class HandOutlineView {
   readonly group = new Group()
 
@@ -196,7 +199,7 @@ export class HandOutlineView {
         }
         this.trackedPose.set(name, {
           position: joint.position,
-          radius: Math.max(0.004, joint.jointRadius ?? 0.008)
+          radius: resolveHandJointRadius(joint.jointRadius)
         })
       }
     }
@@ -235,11 +238,14 @@ export class HandOutlineView {
       if (!joint) {
         continue
       }
-      const radius = Math.min(0.008, Math.max(0.003, joint.radius * 0.42))
-      scale.setScalar(radius * 1.65)
+      const radius = Math.max(0.003, joint.radius)
+      // The outer translucent surface matches the WebXR joint radius used by
+      // direct-touch collision so visible fingertip contact and activation
+      // share one physical boundary.
+      scale.setScalar(radius)
       matrix.compose(joint.position, rotation.identity(), scale)
       this.outerJoints.setMatrixAt(jointCount, matrix)
-      scale.setScalar(radius)
+      scale.setScalar(radius * 0.58)
       matrix.compose(joint.position, rotation, scale)
       this.innerJoints.setMatrixAt(jointCount, matrix)
       jointCount += 1

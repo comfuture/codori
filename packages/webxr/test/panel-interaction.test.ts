@@ -20,6 +20,7 @@ import {
   resolveFocusedPanelPosition,
   resolveRayPanelPosition,
   resolveStatusFallbackMenuVisibility,
+  statusTargetIntersectsSphere,
   worldPointToPanelLocal,
   resolveTrackedHandJoint
 } from '../src/interaction-system'
@@ -167,6 +168,29 @@ const attachTrackedIndexTip = (
 }
 
 describe('panel interaction model', () => {
+  it('uses the oriented panel box for fingertip sphere collision', () => {
+    const target = new Mesh(
+      new BoxGeometry(0.2, 0.1, 0.004),
+      new MeshBasicMaterial({ transparent: true, opacity: 0 })
+    )
+    target.position.set(0, 0, -1)
+    target.rotation.y = Math.PI / 4
+    target.updateMatrixWorld(true)
+    const beforeSurface = target.localToWorld(new Vector3(0, 0, 0.03))
+    const touchingSurface = target.localToWorld(new Vector3(0, 0, 0.008))
+
+    expect(statusTargetIntersectsSphere(
+      target,
+      beforeSurface,
+      0.009
+    )).toBe(false)
+    expect(statusTargetIntersectsSphere(
+      target,
+      touchingSurface,
+      0.009
+    )).toBe(true)
+  })
+
   it('treats only sub-classification movement as a focus tap', () => {
     const initial = new Vector3(0, 1, -2)
     expect(isPanelGrabTap(
@@ -627,7 +651,7 @@ describe('panel interaction model', () => {
       'passthrough'
     )
 
-    index.position.z = -0.99
+    index.position.z = -0.992
     hands[0]!.updateMatrixWorld(true)
     system.update(182, 1 / 60)
     expect(callbacks.onStatusAction).toHaveBeenCalledTimes(1)

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { Vector3 } from 'three'
 import {
+  resolveHandStatusWindowAnchorPosition,
   resolveStatusWindowAnchorPosition,
   StatusWindowAnchorTracker,
   STATUS_WINDOW_DISTANCE_METERS,
@@ -8,7 +9,7 @@ import {
 } from '../src/status-window-placement'
 
 describe('status window placement', () => {
-  it('keeps the wrist-directed window forty centimeters from the viewer', () => {
+  it('keeps controller placement forty centimeters from the viewer', () => {
     const viewer = new Vector3(0, 1.65, 0)
     const wrist = new Vector3(-0.22, 1.42, -0.34)
     const position = resolveStatusWindowAnchorPosition(wrist, viewer)
@@ -27,39 +28,38 @@ describe('status window placement', () => {
     ))
   })
 
-  it('continues following allowed lateral wrist movement', () => {
-    const viewer = new Vector3(0, 1.65, 0)
-    const first = resolveStatusWindowAnchorPosition(
-      new Vector3(-0.18, 1.44, -0.34),
-      viewer
-    ).clone()
-    const second = resolveStatusWindowAnchorPosition(
-      new Vector3(-0.32, 1.44, -0.34),
-      viewer
-    ).clone()
-    expect(second.x).toBeLessThan(first.x)
-    expect(first.distanceTo(viewer)).toBeCloseTo(0.4)
-    expect(second.distanceTo(viewer)).toBeCloseTo(0.4)
+  it('keeps hand placement attached to the physical wrist in all axes', () => {
+    const firstWrist = new Vector3(-0.18, 1.44, -0.34)
+    const secondWrist = new Vector3(-0.32, 1.5, -0.62)
+    const first = resolveHandStatusWindowAnchorPosition(firstWrist).clone()
+    const second = resolveHandStatusWindowAnchorPosition(secondWrist).clone()
+    expect(first).toEqual(new Vector3(
+      firstWrist.x,
+      firstWrist.y + STATUS_WINDOW_WRIST_RISE_METERS,
+      firstWrist.z
+    ))
+    expect(second).toEqual(new Vector3(
+      secondWrist.x,
+      secondWrist.y + STATUS_WINDOW_WRIST_RISE_METERS,
+      secondWrist.z
+    ))
+    expect(second.z - first.z).toBeCloseTo(secondWrist.z - firstWrist.z)
   })
 
   it('freezes the last stable pose during right-hand approach and tracking loss', () => {
     const tracker = new StatusWindowAnchorTracker()
-    const viewer = new Vector3(0, 1.65, 0)
     const first = tracker.update({
       wristPosition: new Vector3(-0.18, 1.44, -0.34),
-      viewerPosition: viewer,
       selectionEngaged: false,
       deltaSeconds: 1 / 60
     })!.clone()
     const engaged = tracker.update({
       wristPosition: new Vector3(-0.28, 1.4, -0.3),
-      viewerPosition: viewer,
       selectionEngaged: true,
       deltaSeconds: 1 / 60
     })!.clone()
     const occluded = tracker.update({
       wristPosition: null,
-      viewerPosition: viewer,
       selectionEngaged: true,
       deltaSeconds: 1 / 60
     })!.clone()
@@ -70,22 +70,18 @@ describe('status window placement', () => {
 
   it('rejects an implausible reacquisition jump but follows modest motion', () => {
     const tracker = new StatusWindowAnchorTracker()
-    const viewer = new Vector3(0, 1.65, 0)
     const first = tracker.update({
       wristPosition: new Vector3(-0.18, 1.44, -0.34),
-      viewerPosition: viewer,
       selectionEngaged: false,
       deltaSeconds: 1 / 60
     })!.clone()
     const jumped = tracker.update({
       wristPosition: new Vector3(0.45, 0.8, -0.05),
-      viewerPosition: viewer,
       selectionEngaged: false,
       deltaSeconds: 1 / 60
     })!.clone()
     const followed = tracker.update({
       wristPosition: new Vector3(-0.22, 1.43, -0.34),
-      viewerPosition: viewer,
       selectionEngaged: false,
       deltaSeconds: 1 / 30
     })!.clone()

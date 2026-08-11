@@ -1,9 +1,11 @@
 import {
   Box3,
+  BoxGeometry,
   BufferGeometry,
   Line,
   LineBasicMaterial,
   Matrix4,
+  MathUtils,
   Mesh,
   MeshBasicMaterial,
   Plane,
@@ -22,7 +24,10 @@ import {
   PanelInteractionModel,
   type PanelHit
 } from './panel-interaction'
-import { HandOutlineView } from './hand-outline-view'
+import {
+  HandOutlineView,
+  resolveHandJointRadius
+} from './hand-outline-view'
 import type { SpatialPanelView } from './panel-view'
 import {
   classifyPaneGrabIntent,
@@ -143,11 +148,14 @@ const viewerLocalDisplacement = new Vector3()
 const panelWorldPosition = new Vector3()
 const contactDelta = new Vector3()
 const viewerQuaternion = new Quaternion()
+const statusLocalPoint = new Vector3()
+const statusClosestLocalPoint = new Vector3()
+const statusClosestWorldPoint = new Vector3()
+const statusTargetPosition = new Vector3()
 const PANEL_GRAB_TAP_MAX_DISTANCE_METERS = (
   PANE_GRAB_CLASSIFICATION_THRESHOLD_METERS * 0.75
 )
 const PANEL_FOCUSED_DISTANCE_METERS = 1.8
-const STATUS_HAND_TOUCH_SLOP_METERS = 0.0015
 const STATUS_HAND_ENGAGEMENT_DISTANCE_METERS = 0.18
 
 export const isPanelGrabTap = (
@@ -155,6 +163,28 @@ export const isPanelGrabTap = (
   currentPosition: Vector3
 ) => initialPosition.distanceTo(currentPosition)
   <= PANEL_GRAB_TAP_MAX_DISTANCE_METERS
+
+export const statusTargetIntersectsSphere = (
+  target: Mesh<BoxGeometry>,
+  center: Vector3,
+  radius: number
+) => {
+  target.updateWorldMatrix(true, false)
+  target.worldToLocal(statusLocalPoint.copy(center))
+  const width = target.geometry.parameters.width as number
+  const height = target.geometry.parameters.height as number
+  const depth = target.geometry.parameters.depth as number
+  statusClosestLocalPoint.set(
+    MathUtils.clamp(statusLocalPoint.x, -width / 2, width / 2),
+    MathUtils.clamp(statusLocalPoint.y, -height / 2, height / 2),
+    MathUtils.clamp(statusLocalPoint.z, -depth / 2, depth / 2)
+  )
+  target.localToWorld(
+    statusClosestWorldPoint.copy(statusClosestLocalPoint)
+  )
+  return statusClosestWorldPoint.distanceToSquared(center)
+    <= Math.max(0, radius) ** 2
+}
 
 export const resolveTrackedHandJoint = (
   hand: XRHandSpace,
@@ -605,6 +635,22 @@ export class ImmersiveInteractionSystem {
     return nearest?.target ?? null
   }
 
+  private nearestHandStatusContact(point: Vector3, radius: number) {
+    let nearest: { target: Mesh<BoxGeometry>, distance: number } | null = null
+    for (const candidate of this.options.getStatusTargets()) {
+      const target = candidate as Mesh<BoxGeometry>
+      if (!statusTargetIntersectsSphere(target, point, radius)) {
+        continue
+      }
+      target.getWorldPosition(statusTargetPosition)
+      const distance = statusTargetPosition.distanceToSquared(point)
+      if (!nearest || distance < nearest.distance) {
+        nearest = { target, distance }
+      }
+    }
+    return nearest?.target ?? null
+  }
+
   private activateControllerContact(
     runtime: SourceRuntime,
     freshStatusPress: boolean
@@ -646,10 +692,10 @@ export class ImmersiveInteractionSystem {
       return
     }
     index.getWorldPosition(indexPosition)
-    const radius = Math.max(0.006, index.jointRadius ?? 0.009)
-    const target = this.nearestStatusContact(
+    const radius = resolveHandJointRadius(index.jointRadius)
+    const target = this.nearestHandStatusContact(
       indexPosition,
-      radius + STATUS_HAND_TOUCH_SLOP_METERS
+      radius
     )
     const action = typeof target?.userData.statusActionId === 'string'
       ? target.userData.statusActionId as StatusActionId
