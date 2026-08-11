@@ -5,7 +5,7 @@ export type PaneGrabIntent = 'neutral' | 'free' | 'depth'
 export const PANE_GRAB_CLASSIFICATION_THRESHOLD_METERS = 0.045
 export const PANE_GRAB_DEPTH_RATIO = 1.35
 export const PANE_DEPTH_ACCELERATION = 3.2
-export const PANE_HAND_PINCH_LATERAL_MAX_SCALE = 4
+export const PANE_HAND_PINCH_MIN_SOURCE_DISTANCE_METERS = 0.25
 export const PANE_MIN_VIEWER_DISTANCE_METERS = 0.65
 export const PANE_MAX_VIEWER_DISTANCE_METERS = 4.5
 export const PANE_SCROLL_DEAD_ZONE = 0.22
@@ -118,16 +118,27 @@ export const resolveHandPinchDepthPanePosition = (input: {
   target?: Vector3
 }) => {
   const physicalDepth = input.sourceDisplacement.dot(input.sightLine)
-  const initialSourceDistance = input.initialViewerPosition.distanceTo(
-    input.initialSourcePosition
+  const resolvedDepth = resolveAcceleratedPaneDepth({
+    initialDistance: input.initialViewerPosition.distanceTo(
+      input.initialPanelPosition
+    ),
+    physicalDepth,
+    activationPhysicalDepth: input.activationPhysicalDepth
+  })
+  const currentSourceDistance = Math.hypot(
+    input.initialSourcePosition.x + input.sourceDisplacement.x
+      - input.initialViewerPosition.x,
+    input.initialSourcePosition.y + input.sourceDisplacement.y
+      - input.initialViewerPosition.y,
+    input.initialSourcePosition.z + input.sourceDisplacement.z
+      - input.initialViewerPosition.z
   )
-  const lateralScale = MathUtils.clamp(
-    initialSourceDistance > Number.EPSILON
-      ? input.initialViewerPosition.distanceTo(input.initialPanelPosition)
-        / initialSourceDistance
-      : PANE_HAND_PINCH_LATERAL_MAX_SCALE,
+  const lateralScale = Math.max(
     1,
-    PANE_HAND_PINCH_LATERAL_MAX_SCALE
+    resolvedDepth / Math.max(
+      currentSourceDistance,
+      PANE_HAND_PINCH_MIN_SOURCE_DISTANCE_METERS
+    )
   )
   const activationLateralDepth = input.activationSourceDisplacement.dot(
     input.sightLine
@@ -136,13 +147,7 @@ export const resolveHandPinchDepthPanePosition = (input: {
     .copy(input.initialViewerPosition)
     .addScaledVector(
       input.sightLine,
-      resolveAcceleratedPaneDepth({
-        initialDistance: input.initialViewerPosition.distanceTo(
-          input.initialPanelPosition
-        ),
-        physicalDepth,
-        activationPhysicalDepth: input.activationPhysicalDepth
-      })
+      resolvedDepth
     )
     .add(input.activationSourceDisplacement)
     .addScaledVector(input.sightLine, -activationLateralDepth)

@@ -1078,7 +1078,7 @@ describe('panel interaction model', () => {
     hands[0]!.updateMatrixWorld(true)
     system.update(32, 1 / 60)
     expect(group.position.z).toBeGreaterThanOrEqual(-0.65)
-    expect(group.position.x).toBeCloseTo(0.36)
+    expect(group.position.x).toBeCloseTo(0.334, 2)
 
     thumb.position.x = 0.08
     hands[0]!.updateMatrixWorld(true)
