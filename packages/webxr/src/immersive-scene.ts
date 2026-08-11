@@ -623,7 +623,6 @@ export class ImmersiveScene {
         : null
       const trackedPosition = this.statusAnchorTracker.update({
         wristPosition: trackedWrist,
-        viewerPosition,
         selectionEngaged: this.interaction.isStatusHandEngaged(),
         deltaSeconds
       })

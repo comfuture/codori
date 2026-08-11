@@ -7,6 +7,13 @@ export const STATUS_WINDOW_FOLLOW_RATE = 12
 
 const anchorDirection = new Vector3()
 
+export const resolveHandStatusWindowAnchorPosition = (
+  wristPosition: Vector3,
+  target = new Vector3()
+) => target.copy(wristPosition).setY(
+  wristPosition.y + STATUS_WINDOW_WRIST_RISE_METERS
+)
+
 export const resolveStatusWindowAnchorPosition = (
   wristPosition: Vector3,
   viewerPosition: Vector3,
@@ -46,7 +53,6 @@ export class StatusWindowAnchorTracker {
 
   update(input: {
     wristPosition: Vector3 | null
-    viewerPosition: Vector3
     selectionEngaged: boolean
     deltaSeconds: number
   }) {
@@ -54,9 +60,8 @@ export class StatusWindowAnchorTracker {
       return this.hasPosition ? this.position : null
     }
 
-    const candidate = resolveStatusWindowAnchorPosition(
+    const candidate = resolveHandStatusWindowAnchorPosition(
       input.wristPosition,
-      input.viewerPosition,
       this.candidate
     )
     if (

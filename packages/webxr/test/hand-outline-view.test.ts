@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
+  Matrix4,
   MeshBasicMaterial,
+  Quaternion,
   Raycaster,
   Vector3
 } from 'three'
@@ -8,10 +10,16 @@ import {
   createDevelopmentHandPose,
   HAND_BONE_CONNECTIONS,
   HAND_JOINT_NAMES,
-  HandOutlineView
+  HandOutlineView,
+  resolveHandJointRadius
 } from '../src/hand-outline-view'
 
 describe('tracked hand outline', () => {
+  it('uses one physical joint radius for rendering and touch collision', () => {
+    expect(resolveHandJointRadius(0.009)).toBe(0.009)
+    expect(resolveHandJointRadius()).toBe(0.006)
+  })
+
   it('renders a connected, handed joint silhouette without hit testing', () => {
     const view = new HandOutlineView('left')
     view.update(createDevelopmentHandPose('left'))
@@ -35,6 +43,21 @@ describe('tracked hand outline', () => {
     expect(outer.opacity).toBeLessThan(inner.opacity)
     expect(inner.color.getHexString()).toBe('a8efff')
     expect(view.group.userData.representationalOnly).toBe(true)
+
+    const fingertipMatrix = new Matrix4()
+    const fingertipScale = new Vector3()
+    view.outerJoints.getMatrixAt(
+      HAND_JOINT_NAMES.indexOf('index-finger-tip'),
+      fingertipMatrix
+    )
+    fingertipMatrix.decompose(
+      new Vector3(),
+      new Quaternion(),
+      fingertipScale
+    )
+    expect(fingertipScale.x).toBeCloseTo(
+      createDevelopmentHandPose('left').get('index-finger-tip')!.radius
+    )
 
     view.group.updateMatrixWorld(true)
     const raycaster = new Raycaster(
