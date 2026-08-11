@@ -290,22 +290,27 @@ export class SpatialPanelModel {
       position: input.position
         ? { ...input.position }
         : panel.position,
-      slot: input.userMoved && input.position
-        ? null
-        : panel.slot
+      // Layout identity is stable even after a manual world transform. Manual
+      // panes no longer participate in automatic slot occupancy, but retain
+      // their original slot for deterministic identity and diagnostics.
+      slot: panel.slot
     })
     return true
   }
 
-  scroll(id: string, deltaLines: number, now?: number) {
+  scroll(
+    id: string,
+    deltaLines: number,
+    now?: number,
+    maximumStart?: number
+  ) {
     const panel = this.panels.get(id)
     if (!panel || !Number.isFinite(deltaLines) || deltaLines === 0) {
       return false
     }
-    const liveTail = Math.max(
-      0,
-      panel.retainedText.split('\n').length - 1
-    )
+    const liveTail = Number.isFinite(maximumStart)
+      ? Math.max(0, maximumStart!)
+      : Math.max(0, panel.retainedText.split('\n').length - 1)
     if (panel.autoFollow && deltaLines > 0) {
       return this.markInteraction(id, {}, now)
     }

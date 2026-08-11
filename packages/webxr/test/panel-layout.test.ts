@@ -76,4 +76,22 @@ describe('panel slot allocation', () => {
       .toBeLessThan(0.05)
     expect(created.position.z - existing.position.z).toBeCloseTo(0.55)
   })
+
+  it('keeps a manual pane identity without consuming an automatic slot', () => {
+    const manual = {
+      ...snapshot('manual'),
+      userMoved: true,
+      slot: 0,
+      position: { x: 0.35, y: 1.5, z: -1.1 }
+    }
+    const automatic = { ...snapshot('automatic'), slot: 0 }
+    const placements = allocatePanelSlots(
+      [manual, automatic],
+      { x: 0, y: 0, z: -2.4 }
+    )
+    expect(placements.find(placement => placement.id === 'manual'))
+      .toMatchObject({ slot: 0, position: manual.position })
+    expect(placements.find(placement => placement.id === 'automatic'))
+      .toMatchObject({ slot: 0 })
+  })
 })

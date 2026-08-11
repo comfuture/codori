@@ -562,8 +562,13 @@ export class WorkspaceRuntime {
     }
   }
 
-  scrollPanel(panelId: string, deltaLines: number) {
-    if (this.panelModel.scroll(panelId, deltaLines, this.now())) {
+  scrollPanel(panelId: string, deltaLines: number, maximumStart?: number) {
+    if (this.panelModel.scroll(
+      panelId,
+      deltaLines,
+      this.now(),
+      maximumStart
+    )) {
       this.emit()
     }
   }

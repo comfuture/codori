@@ -36,7 +36,7 @@ export type TextSurfaceOptions = {
   radiusPixels?: number
 }
 
-export type TextSurfaceIcon = 'close' | 'drag'
+export type TextSurfaceIcon = 'close'
 
 export type TextSurfaceContent = {
   title?: string
@@ -44,8 +44,38 @@ export type TextSurfaceContent = {
   body: string
   scrollLine?: number
   ansi?: boolean
-  active?: boolean
   icon?: TextSurfaceIcon
+}
+
+export type TextViewportMetrics = {
+  totalLineCount: number
+  visibleLineCount: number
+  startLine: number
+  endLine: number
+  hasAbove: boolean
+  hasBelow: boolean
+}
+
+export const resolveTextViewportMetrics = (
+  totalLineCount: number,
+  visibleLineCount: number,
+  scrollLine?: number
+): TextViewportMetrics => {
+  const total = Math.max(0, Math.floor(totalLineCount))
+  const visible = Math.max(1, Math.floor(visibleLineCount))
+  const maximumStart = Math.max(0, total - visible)
+  const startLine = scrollLine == null
+    ? maximumStart
+    : Math.min(maximumStart, Math.max(0, Math.round(scrollLine)))
+  const endLine = Math.min(total, startLine + visible)
+  return {
+    totalLineCount: total,
+    visibleLineCount: visible,
+    startLine,
+    endLine,
+    hasAbove: startLine > 0,
+    hasBelow: endLine < total
+  }
 }
 
 export type TextSurfaceSize = {
@@ -238,6 +268,12 @@ export class CanvasTextSurface {
 
   private disposed = false
 
+  private viewportMetrics = resolveTextViewportMetrics(0, 1)
+
+  get metrics() {
+    return this.viewportMetrics
+  }
+
   constructor(options: TextSurfaceOptions) {
     this.options = {
       widthPixels: 1_536,
@@ -316,7 +352,7 @@ export class CanvasTextSurface {
 
   render(content: TextSurfaceContent) {
     if (this.disposed) {
-      return
+      return this.viewportMetrics
     }
     const {
       width,
@@ -334,7 +370,6 @@ export class CanvasTextSurface {
       glow,
       radiusPixels
     } = this.options
-    const active = content.active === true
     const context = this.context
     context.clearRect(0, 0, width, height)
     roundedRect(
@@ -347,12 +382,11 @@ export class CanvasTextSurface {
     )
     context.fillStyle = background
     context.fill()
-    const strokeColor = active ? '#8cecff' : border
-    context.lineWidth = active ? 10 : 4
-    context.strokeStyle = strokeColor
-    if (glow || active) {
-      context.shadowBlur = active ? 44 : 22
-      context.shadowColor = strokeColor
+    context.lineWidth = 4
+    context.strokeStyle = border
+    if (glow) {
+      context.shadowBlur = 22
+      context.shadowColor = border
     }
     context.stroke()
     context.shadowBlur = 0
@@ -377,25 +411,10 @@ export class CanvasTextSurface {
         context.moveTo(centerX + extent, centerY - extent)
         context.lineTo(centerX - extent, centerY + extent)
         context.stroke()
-      } else {
-        const xOffset = Math.min(width, height) * 0.105
-        const yOffset = Math.min(width, height) * 0.14
-        const radius = Math.min(width, height) * 0.033
-        for (const x of [centerX - xOffset, centerX + xOffset]) {
-          for (const y of [
-            centerY - yOffset,
-            centerY,
-            centerY + yOffset
-          ]) {
-            context.beginPath()
-            context.arc(x, y, radius, 0, Math.PI * 2)
-            context.fill()
-          }
-        }
       }
       context.shadowBlur = 0
       this.texture.needsUpdate = true
-      return
+      return this.viewportMetrics
     }
 
     let bodyTop = paddingPixels
@@ -485,10 +504,12 @@ export class CanvasTextSurface {
       1,
       Math.floor((height - bodyTop - paddingPixels) / lineHeightPixels)
     )
-    const maximumStart = Math.max(0, styledLines.length - visibleLineCount)
-    const startLine = content.scrollLine == null
-      ? maximumStart
-      : Math.min(maximumStart, Math.max(0, Math.round(content.scrollLine)))
+    this.viewportMetrics = resolveTextViewportMetrics(
+      styledLines.length,
+      visibleLineCount,
+      content.scrollLine
+    )
+    const { startLine } = this.viewportMetrics
     const visibleLines = styledLines.slice(
       startLine,
       startLine + visibleLineCount
@@ -520,6 +541,7 @@ export class CanvasTextSurface {
     context.globalAlpha = 1
     context.shadowBlur = 0
     this.texture.needsUpdate = true
+    return this.viewportMetrics
   }
 
   dispose() {

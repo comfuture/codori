@@ -1,14 +1,23 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   PANEL_CONTROL_DEPTH_METERS,
   PANEL_CONTROL_RADIUS_METERS,
   PANEL_CONTROL_SIZE_METERS,
+  PANEL_WORLD_DEPTH_RENDER_ORDER,
+  SpatialPanelView,
+  createPanelContentRenderSignature,
   resolvePanelHeight,
   resolvePanelControlLayout,
   resolvePanelInteractionLayout,
   resolvePanelSlotTransition,
   resolvePanelVisualState
 } from '../src/panel-view'
+import { CanvasTextSurface } from '../src/text-surface'
+
+afterEach(() => {
+  vi.restoreAllMocks()
+  vi.unstubAllGlobals()
+})
 
 describe('spatial panel visual states', () => {
   it('shrinks short output while keeping the current size as the maximum', () => {
@@ -31,13 +40,77 @@ describe('spatial panel visual states', () => {
       height: 0.11
     })
     expect(contentTop).toBeLessThan(titleBottom)
+    expect(layout.move).toMatchObject({ width: 1.55, height: 0.92, y: 0 })
   })
 
-  it('places compact, thick controls side by side above the top-right edge', () => {
+  it('keeps interaction state out of the content render signature', () => {
+    const content = {
+      title: 'Run tests',
+      status: 'in progress',
+      body: 'same pixels',
+      scrollLine: 2
+    }
+    expect(createPanelContentRenderSignature(content))
+      .toBe(createPanelContentRenderSignature({ ...content }))
+    expect(createPanelContentRenderSignature(content)).not.toContain('active')
+  })
+
+  it('keeps content and independent chrome in world-depth sort order', () => {
+    expect(PANEL_WORLD_DEPTH_RENDER_ORDER).toBe(0)
+  })
+
+  it('does not rerender canvas pixels when active, hover, or grab changes', () => {
+    vi.stubGlobal('document', {
+      createElement: () => ({
+        width: 0,
+        height: 0,
+        getContext: () => ({})
+      })
+    })
+    const render = vi.spyOn(CanvasTextSurface.prototype, 'render')
+      .mockReturnValue({
+        totalLineCount: 3,
+        visibleLineCount: 2,
+        startLine: 1,
+        endLine: 3,
+        hasAbove: true,
+        hasBelow: false
+      })
+    const view = new SpatialPanelView({
+      id: 'panel-1',
+      kind: 'command',
+      title: 'Render proof',
+      status: 'in-progress',
+      text: 'one\ntwo\nthree',
+      retainedText: 'one\ntwo\nthree',
+      truncated: false,
+      background: false,
+      phase: 'visible',
+      phaseStartedAt: 0,
+      scrollOffset: Number.POSITIVE_INFINITY,
+      autoFollow: true,
+      userMoved: false,
+      position: null,
+      slot: 0,
+      fileTransitionStartedAt: 0
+    })
+    render.mockClear()
+
+    view.setInteraction(true, false, true)
+    view.setInteraction(true, true, true)
+    view.setInteraction(false, false, false)
+
+    expect(render).not.toHaveBeenCalled()
+    expect(view.group.getObjectByName('panel-outline:panel-1')?.renderOrder)
+      .toBe(PANEL_WORLD_DEPTH_RENDER_ORDER)
+    expect(view.group.getObjectByName('panel-glow:panel-1')?.renderOrder)
+      .toBe(PANEL_WORLD_DEPTH_RENDER_ORDER)
+    view.dispose()
+  })
+
+  it('keeps the compact dismiss control above the top-right edge', () => {
     const layout = resolvePanelControlLayout(1.55, 0.92)
-    expect(layout.dismiss.x).toBeGreaterThan(layout.drag.x)
     expect(layout.dismiss.y).toBeGreaterThan(0.92 / 2)
-    expect(layout.drag.y).toBe(layout.dismiss.y)
     expect(PANEL_CONTROL_RADIUS_METERS)
       .toBeLessThan(PANEL_CONTROL_SIZE_METERS / 4)
     expect(PANEL_CONTROL_DEPTH_METERS).toBeGreaterThan(0.02)
