@@ -3,6 +3,8 @@ import { Vector3 } from 'three'
 export const STATUS_WINDOW_DISTANCE_METERS = 0.4
 export const STATUS_WINDOW_WRIST_RISE_METERS = 0.18
 export const STATUS_WINDOW_MAX_ANCHOR_JUMP_METERS = 0.12
+export const STATUS_WINDOW_REACQUIRE_STABILITY_METERS = 0.04
+export const STATUS_WINDOW_REACQUIRE_SECONDS = 0.12
 export const STATUS_WINDOW_FOLLOW_RATE = 12
 
 const anchorDirection = new Vector3()
@@ -42,13 +44,21 @@ export class StatusWindowAnchorTracker {
 
   private readonly candidate = new Vector3()
 
+  private readonly reacquireCandidate = new Vector3()
+
   private hasPosition = false
 
   private hasAcceptedTarget = false
 
+  private hasReacquireCandidate = false
+
+  private reacquireSeconds = 0
+
   reset() {
     this.hasPosition = false
     this.hasAcceptedTarget = false
+    this.hasReacquireCandidate = false
+    this.reacquireSeconds = 0
   }
 
   update(input: {
@@ -57,6 +67,8 @@ export class StatusWindowAnchorTracker {
     deltaSeconds: number
   }) {
     if (input.selectionEngaged || !input.wristPosition) {
+      this.hasReacquireCandidate = false
+      this.reacquireSeconds = 0
       return this.hasPosition ? this.position : null
     }
 
@@ -69,8 +81,24 @@ export class StatusWindowAnchorTracker {
       && candidate.distanceTo(this.acceptedTarget)
         > STATUS_WINDOW_MAX_ANCHOR_JUMP_METERS
     ) {
-      return this.hasPosition ? this.position : null
+      if (
+        !this.hasReacquireCandidate
+        || candidate.distanceTo(this.reacquireCandidate)
+          > STATUS_WINDOW_REACQUIRE_STABILITY_METERS
+      ) {
+        this.reacquireCandidate.copy(candidate)
+        this.hasReacquireCandidate = true
+        this.reacquireSeconds = 0
+        return this.hasPosition ? this.position : null
+      }
+      this.reacquireCandidate.copy(candidate)
+      this.reacquireSeconds += Math.max(0, input.deltaSeconds)
+      if (this.reacquireSeconds < STATUS_WINDOW_REACQUIRE_SECONDS) {
+        return this.hasPosition ? this.position : null
+      }
     }
+    this.hasReacquireCandidate = false
+    this.reacquireSeconds = 0
     this.acceptedTarget.copy(candidate)
     this.hasAcceptedTarget = true
     if (!this.hasPosition) {
