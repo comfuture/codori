@@ -46,6 +46,12 @@ export const shouldRenderTranscriptTexture = (input: {
     )
   )
 
+export const TRANSCRIPT_BUBBLE_APPEARANCE = {
+  background: 'rgba(12, 70, 96, 0.62)',
+  border: 'rgba(104, 225, 255, 0.96)',
+  text: '#d9f8ff'
+} as const
+
 export class TranscriptBubbleView {
   readonly group = new Group()
 
@@ -54,9 +60,9 @@ export class TranscriptBubbleView {
     heightMeters: 0.62,
     widthPixels: 1_536,
     heightPixels: 560,
-    background: 'rgba(2, 16, 28, 0.2)',
-    border: 'rgba(65, 221, 255, 0.9)',
-    color: '#79e8ff',
+    background: TRANSCRIPT_BUBBLE_APPEARANCE.background,
+    border: TRANSCRIPT_BUBBLE_APPEARANCE.border,
+    color: TRANSCRIPT_BUBBLE_APPEARANCE.text,
     font: 'Inter, system-ui, "Noto Sans CJK KR", "Apple Color Emoji", sans-serif',
     lineHeightPixels: 52,
     paddingPixels: 60,

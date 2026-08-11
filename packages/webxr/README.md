@@ -103,6 +103,8 @@ The central agent-light orb starts voice only while voice is inactive. Its hit t
 
 Status-window binary actions render as track-and-knob toggles, while recenter and exit remain one-shot buttons.
 
+Assistant transcript bubbles use a more opaque sky-blue surface and brighter text/border treatment for passthrough readability.
+
 The palm-up per-hand `Menu`/Meta suggestions seen on Quest are Meta Horizon OS
 trusted UI, not the Codori fallback menu. Standard WebXR exposes joint poses and
 platform-defined `select*` events but no API for repositioning, freezing,

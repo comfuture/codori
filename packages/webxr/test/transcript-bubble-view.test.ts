@@ -1,10 +1,18 @@
 import { describe, expect, it } from 'vitest'
 import {
   resolveTranscriptBubbleScale,
-  shouldRenderTranscriptTexture
+  shouldRenderTranscriptTexture,
+  TRANSCRIPT_BUBBLE_APPEARANCE
 } from '../src/transcript-bubble-view'
 
 describe('assistant transcript bubble animation', () => {
+  it('uses a sky-blue translucent surface for passthrough contrast', () => {
+    expect(TRANSCRIPT_BUBBLE_APPEARANCE.background)
+      .toBe('rgba(12, 70, 96, 0.62)')
+    expect(TRANSCRIPT_BUBBLE_APPEARANCE.border)
+      .toBe('rgba(104, 225, 255, 0.96)')
+    expect(TRANSCRIPT_BUBBLE_APPEARANCE.text).toBe('#d9f8ff')
+  })
   it('scales in and out over a quarter second', () => {
     expect(resolveTranscriptBubbleScale('hidden', 0)).toBe(0)
     expect(resolveTranscriptBubbleScale('appearing', 0)).toBe(0)
