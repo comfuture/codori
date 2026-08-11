@@ -9,6 +9,7 @@ import {
   resolvePanelHeight,
   resolvePanelControlLayout,
   resolvePanelInteractionLayout,
+  resolvePanelOverflowControlLayout,
   resolvePanelSlotTransition,
   resolvePanelViewportStart,
   resolvePanelVisualState
@@ -46,6 +47,21 @@ describe('spatial panel visual states', () => {
     })
     expect(contentTop).toBeLessThan(titleBottom)
     expect(layout.move).toMatchObject({ width: 1.55, height: 0.92, y: 0 })
+  })
+
+  it('keeps scroll arrows inside the content area below the title bar', () => {
+    const interaction = resolvePanelInteractionLayout(1.55, 0.92)
+    const overflow = resolvePanelOverflowControlLayout(1.55, 0.92)
+    const titleBottom = interaction.titleBar.y
+      - (interaction.titleBar.height / 2)
+    const contentTop = interaction.content.y
+      + (interaction.content.height / 2)
+    const contentBottom = interaction.content.y
+      - (interaction.content.height / 2)
+
+    expect(overflow.upY).toBeLessThan(contentTop)
+    expect(overflow.upY).toBeLessThan(titleBottom)
+    expect(overflow.downY).toBeGreaterThan(contentBottom)
   })
 
   it('keeps interaction state out of the content render signature', () => {

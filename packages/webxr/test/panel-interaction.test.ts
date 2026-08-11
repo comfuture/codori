@@ -1019,6 +1019,33 @@ describe('panel interaction model', () => {
     system.dispose()
   })
 
+  it.each([
+    ['remote pinch cursor', false],
+    ['controller ray', true]
+  ] as const)('scrolls up once when the %s selects the arrow', (_label, native) => {
+    const { panel, dismissHit, scrollUpHit } = createPanelDouble()
+    dismissHit.visible = false
+    scrollUpHit.visible = true
+    scrollUpHit.position.z = 0.045
+    const { system, callbacks } = createInteractionHarness(
+      new Map([['panel-1', panel]])
+    )
+    const internals = system as unknown as {
+      sources: unknown[]
+      handleSelectStart: (
+        runtime: unknown,
+        now: number,
+        native: boolean
+      ) => void
+    }
+
+    internals.handleSelectStart(internals.sources[0], 0, native)
+    expect(callbacks.onPanelInteracted).toHaveBeenCalledWith('panel-1')
+    expect(callbacks.onScroll).toHaveBeenCalledWith('panel-1', -1, 8)
+    expect(callbacks.onPanelMoved).not.toHaveBeenCalled()
+    system.dispose()
+  })
+
   it('pulls a pane toward the viewer from physical hand-pinch motion', () => {
     const { panel, dismissHit, group } = createPanelDouble()
     dismissHit.visible = false
@@ -1481,6 +1508,55 @@ describe('panel interaction model', () => {
     internals.updateHandPaneContact(runtime, 1_300, 0.1)
     expect(runtime.handScrollPanelId).toBe(null)
     expect(callbacks.onScroll).toHaveBeenCalledTimes(2)
+    system.dispose()
+  })
+
+  it('accepts fingertip contact on the lowered scroll-up control', () => {
+    const { panel, scrollUpHit } = createPanelDouble()
+    scrollUpHit.visible = true
+    scrollUpHit.position.set(0, 0.25, 0.045)
+    const { system, hands, callbacks } = createInteractionHarness(
+      new Map([['panel-1', panel]])
+    )
+    const internals = system as unknown as {
+      sources: Array<{
+        inputSource: XRInputSource | null
+        hand: XRHandSpace
+        handScrollPanelId: string | null
+        handScrollDirection: number
+      }>
+      updateHandPaneContact: (
+        runtime: unknown,
+        now: number,
+        deltaSeconds: number
+      ) => void
+    }
+    const runtime = internals.sources[0]!
+    runtime.inputSource = {
+      handedness: 'right',
+      hand: {},
+      targetRayMode: 'tracked-pointer'
+    } as unknown as XRInputSource
+    const index = Object.assign(new Group(), {
+      jointRadius: 0.01
+    }) as unknown as XRJointSpace
+    index.position.set(0, 0.25, -0.91)
+    index.visible = true
+    hands[0]!.visible = true
+    hands[0]!.joints['index-finger-tip'] = index
+    hands[0]!.add(index)
+    hands[0]!.updateMatrixWorld(true)
+
+    internals.updateHandPaneContact(runtime, 0, 0.1)
+    expect(callbacks.onScroll).toHaveBeenCalledWith(
+      'panel-1',
+      expect.closeTo(-0.14),
+      8
+    )
+    expect(runtime).toMatchObject({
+      handScrollPanelId: 'panel-1',
+      handScrollDirection: -1
+    })
     system.dispose()
   })
 

@@ -575,6 +575,17 @@ export class ImmersiveInteractionSystem {
       this.options.onPanelInteracted(hit.panelId)
     }
     runtime.selecting = true
+    if (hit?.zone === 'scroll-up' || hit?.zone === 'scroll-down') {
+      const panel = this.options.getPanels().get(hit.panelId)
+      if (panel) {
+        this.options.onScroll(
+          hit.panelId,
+          hit.zone === 'scroll-up' ? -1 : 1,
+          panel.maximumScrollStart
+        )
+      }
+      return
+    }
     if (hit?.zone === 'move') {
       this.handleGrabStart(runtime, native ? 'select' : 'pinch')
     }
