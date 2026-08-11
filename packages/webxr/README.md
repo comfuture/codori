@@ -7,11 +7,11 @@ The package is a progressive enhancement. The existing dashboard remains the pri
 ## Requirements
 
 - A secure context. `https://` is required on a remote headset; the browser's `localhost` exception does not apply to a plain LAN IP.
-- A browser reporting `navigator.xr.isSessionSupported('immersive-vr')`.
+- A browser reporting `immersive-vr` or `immersive-ar` support. VR is preferred when both are available; AR-only devices enter their supported mode.
 - A materialized Codori project or projectless-chat thread.
 - The Codori server started with realtime voice enabled if voice controls are required.
 
-The entry screen checks support without user-agent sniffing. `requestSession('immersive-vr')` and microphone access occur only after explicit user actions.
+The entry screen probes the two modes independently without user-agent sniffing, so a failed AR probe does not disable working VR. `requestSession()` and microphone access occur only after explicit user actions.
 
 ## Development
 
@@ -32,6 +32,11 @@ file-change, tool, search, and background-terminal surfaces without connecting
 to a live workspace. This fixture is useful for browser-side text density,
 border, color, and layout comparisons; it does not reproduce headset
 framebuffer scaling or fixed foveation.
+The kitchen-sink fixture also opens the lime status window with primary and
+secondary quota windows, context state, and the initial action registry.
+Append `&blend=alpha-blend` or `&blend=additive` to preview the two
+development-only agent contrast treatments. These are visual fixtures, not
+claims that a camera or optical display is active.
 
 Vite proxies `/api` HTTP and WebSocket traffic to
 `http://127.0.0.1:4310` by default. Point it at another running Codori server
@@ -56,6 +61,19 @@ Users sensitive to motion or flicker should enable reduced effects before enteri
 
 ## Controls
 
+Status window:
+
+- The verified `menu` component on the left `htc-vive-focus` input profile toggles the window. Codori does not guess extra gamepad indices on other profiles, and WebXR-reserved app/system buttons may be absent.
+- With a tracked left hand and no active left controller, hold the raised back-of-hand pose for `450 ms`. Lowering it for `180 ms` dismisses the window; short pose/tracking gaps use hysteresis and a `300 ms` tracking-loss grace.
+- A controller-opened window remains open until reinvoked, an action is selected, or the left grip is held below the lowering threshold for `250 ms`.
+- Placement uses the left grip or WebXR `wrist` joint plus a viewer-facing vertical offset. WebXR exposes no elbow joint, so this is a wrist/grip-and-view approximation rather than full forearm tracking.
+- Right controller rays and direct controller contact can activate actions. Tracked hands require direct `index-finger-tip` contact; remote pinch/ray activation is rejected for status actions.
+- When no tracked controller or hand is usable, an in-canvas bottom-right `Menu` is shown. A DOM-overlay button mirrors it when the optional DOM Overlays feature is granted. Both disappear when tracked input returns; screen/gaze can open the menu but cannot bypass `controller-or-touch` action policy.
+
+The status view uses a translucent pale lime treatment distinct from cyan panes. It shows the authoritative primary and secondary Codex quota windows, localized reset times, current-thread context remaining only when known, connection/voice state, pane count, and thread/workspace identity. Sparse `account/rateLimits/updated` buckets merge by `limitId` into the last `account/rateLimits/read` snapshot; unknown quota or context is labeled unavailable rather than rendered as zero/full.
+
+Initial actions are `Passthrough`, `Recenter workspace`, the live voice/resume-audio action, `Reduced effects`, and `Exit immersive`. Each registry item carries a stable id, state, availability/disabled reason, callback, and input policy so additional actions can be added without changing the status surface architecture.
+
 Controller:
 
 - target ray: hover and select controls or panel content
@@ -75,11 +93,15 @@ Tracked hand:
 
 Native and synthesized primary actions are de-duplicated. Competing grabs have one deterministic owner, and input-source loss releases hover/grab state.
 
+`Recenter workspace` rotates and translates one shared anchor into the current horizontal gaze at clamped eye height. The agent light, transcript, status surfaces, automatic panes, and manually moved pane-local transforms move together without reallocating pane ids. A `local-floor` reference-space `reset` schedules exactly one anchor refresh; Codori does not emulate or require a reserved platform recenter button.
+
+`Passthrough` is a real session-mode transition, not a background toggle. When `immersive-ar` is supported, Codori ends the current session and requests the other mode while retaining the same workspace and voice runtimes/subscriptions. If the browser cannot complete that transition within the action, the entry surface explains that state and offers explicit re-entry without recreating the RPC runtime. In a non-opaque AR session, transparent renderer pixels expose the environment and room geometry plus the boundary Exit door are hidden. `alpha-blend` uses a restrained dark stipple shell outside the agent light; `additive` uses a bright magenta shape outline because dark pixels cannot occlude an optical display. An AR session reporting `opaque` is never described as passthrough. The normal projection path remains correct without WebXR Layers.
+
 Immersive entry starts the realtime voice session automatically after at least `500 ms` and as soon as the workspace runtime is ready. New XR sessions reuse the voice selection and browser-only voice-instruction override saved by Settings → Voice. The selected voice is sent only when the connected server advertises it; prompt precedence remains browser override, `experimental_realtime_ws_backend_prompt` from `config.toml`, then the Codori default. Selecting the central light stops the active session and re-arms the dormant visual state; selecting it again replays the full awakening before restarting voice. A door-sized rounded `Exit` surface sits on the `10 m × 10 m` room boundary, beyond the agent light along the initial view direction. The 2D fallback remains available before immersive entry.
 
 While realtime startup is pending, the agent light remains dormant at `86%` scale, `72%` intensity, and nearly zero lens flare. Startup triggers a `160 ms` flare ignition followed by an `850 ms` settle into the current activity state. Reduced-effects mode uses a smaller scale excursion and lower flare peak.
 
-Web Audio synthesizes a one-second agent-awakening cue whose low mechanical chord clusters and softer upper harmonics beat against each other while their pitch rises on an ease-out curve for `700 ms`, followed by a `300 ms` fade whose cubic curve preserves the initial resonance before dropping away. Panel appearance uses a separate `250 ms` cue that blends an immediate low body with delayed, beating high harmonics. Multiple panels created in one synchronization batch produce one softly amplified cue instead of overlapping sounds. Run `pnpm --filter @codori/webxr render:sfx-previews -- <output-directory>` to render listenable WAV previews from the same canonical sound plans.
+Web Audio synthesizes a one-second agent-awakening cue whose low mechanical chord clusters and softer upper harmonics beat against each other while their pitch rises on an ease-out curve for `700 ms`, followed by a `300 ms` fade whose cubic curve preserves the initial resonance before dropping away. Panel appearance uses a separate `250 ms` cue that blends an immediate low body with delayed, beating high harmonics. The status window uses related `380 ms` pitch-up and `300 ms` pitch-down cues. Multiple panels created in one synchronization batch produce one softly amplified cue instead of overlapping sounds. Run `pnpm --filter @codori/webxr render:sfx-previews -- <output-directory>` to render listenable WAV previews from the same canonical sound plans.
 
 ## Panel semantics and caps
 
@@ -102,4 +124,4 @@ Growing output follows the live tail until manual scrolling. Later deltas preser
 
 Automated tests cover session options/failure states, deterministic light bounds and reduced effects, transcript generation plus 30-second visibility and 250 ms scale transitions, streaming panel lifecycle plus 60-second dwell and 125 ms forced dismissal, panel retention/layout/scroll state, input ownership and source loss, shared notification adapters, `/xr/` server routing, and package builds.
 
-Real headset validation is still required before making device-specific support or performance claims. Record the headset OS, browser version, optional features granted, target refresh rate, median frame time, sustained worst frame-time band, text legibility, and a 15-minute mixed voice/tool memory observation for each supported device/browser combination.
+Real headset validation is still required before making device-specific support, transition, input-component, blend-mode, or performance claims. For each controller, hand-tracking, and screen/gaze device/browser combination, record headset/device, OS, browser version, supported session modes, actual `environmentBlendMode` and `interactionMode`, optional features granted, exposed input profiles/components, app-visible buttons, target refresh rate, median frame time, sustained worst frame-time band, status anchoring/direct-touch behavior, alpha/additive contrast readability, text legibility, and a 15-minute mixed voice/tool memory observation. Browser kitchen-sink QA proves only canvas layout, colors, typography, and animation; it cannot prove headset poses, camera passthrough, additive optics, reserved buttons, or seamless session switching.

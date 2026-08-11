@@ -11,9 +11,11 @@ import {
 import {
   ImmersiveInteractionSystem,
   isPanelGrabTap,
+  resolveFocusedPanelLocalPosition,
   resolveFocusedPanelPosition,
   resolveRayPanelPosition,
-  resolveRayGrabPosition
+  resolveRayGrabPosition,
+  worldPointToPanelLocal
 } from '../src/interaction-system'
 import { PanelInteractionModel } from '../src/panel-interaction'
 
@@ -66,6 +68,26 @@ describe('panel interaction model', () => {
 
     const close = new Vector3(0.4, 1.5, -1.2)
     expect(resolveFocusedPanelPosition(viewer, close)).toEqual(close)
+  })
+
+  it('keeps focus and drag targets correct under a recentered yaw anchor', () => {
+    const anchor = new Group()
+    anchor.position.set(3, 0, -2)
+    anchor.rotation.y = -Math.PI / 2
+    const panel = new Group()
+    panel.position.set(0.5, 1.4, -2.6)
+    anchor.add(panel)
+    anchor.updateMatrixWorld(true)
+
+    const viewer = new Vector3(0, 1.65, 0)
+    panel.position.copy(resolveFocusedPanelLocalPosition(viewer, panel))
+    anchor.updateMatrixWorld(true)
+    expect(panel.getWorldPosition(new Vector3()).distanceTo(viewer)).toBeCloseTo(1.8)
+
+    const dragWorld = new Vector3(1.2, 1.7, -1.1)
+    panel.position.copy(worldPointToPanelLocal(panel, dragWorld))
+    anchor.updateMatrixWorld(true)
+    expect(panel.getWorldPosition(new Vector3())).toEqual(dragWorld)
   })
 
   it('tracks content scrolling at the ray intersection instead of controller height', () => {
@@ -169,12 +191,20 @@ describe('panel interaction model', () => {
       root,
       getPanels: () => new Map(),
       getControlTargets: () => [],
+      getStatusTargets: () => [],
+      getStatusMenuTarget: () => null,
+      isStatusOpen: () => false,
+      getStatusInvocation: () => null,
       onScroll: () => {},
       onPanelInteracted: () => {},
       onPanelMoved: () => {},
       onPanelFocused: () => {},
       onPanelDismiss: () => {},
-      onAction: () => {}
+      onAction: () => {},
+      onStatusToggle: () => {},
+      onStatusDismiss: () => {},
+      onStatusAction: () => {},
+      onInputCapabilitiesChanged: () => {}
     })
     const listenerRemoval = targetRays.map(targetRay =>
       vi.spyOn(targetRay, 'removeEventListener')
