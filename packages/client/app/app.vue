@@ -1,7 +1,11 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted } from 'vue'
+import { useActiveTurnWakeLock } from './composables/useActiveTurnWakeLock'
+import { useHasActiveChatTurn } from './composables/useChatSession'
 
 let visualViewportRef: VisualViewport | null = null
+const hasActiveChatTurn = useHasActiveChatTurn()
+useActiveTurnWakeLock(hasActiveChatTurn)
 
 const setViewportHeightCssVar = () => {
   if (!import.meta.client) {
