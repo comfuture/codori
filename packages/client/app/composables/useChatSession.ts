@@ -1,4 +1,4 @@
-import { ref, type Ref } from 'vue'
+import { computed, ref, shallowRef, type Ref } from 'vue'
 import type { ChatMessage, SubagentAgentStatus, VisualSubagentPanel } from '~~/shared/codex-chat'
 import type { CollaborationModeMask } from '~~/shared/collaboration-mode'
 import type { ReasoningEffort } from '~~/shared/generated/codex-app-server/ReasoningEffort'
@@ -73,6 +73,14 @@ export type ChatSession = {
 }
 
 const sessions = new Map<string, ChatSession>()
+const registeredSessions = shallowRef<ChatSession[]>([])
+
+export const isChatTurnActive = (status: ChatStatus) =>
+  status === 'submitted' || status === 'streaming'
+
+export const useHasActiveChatTurn = () => computed(() =>
+  registeredSessions.value.some(session => isChatTurnActive(session.status.value))
+)
 
 const createSession = (): ChatSession => {
   const session: ChatSession = {
@@ -124,6 +132,7 @@ export const useChatSession = (projectId: string) => {
 
   const session = createSession()
   sessions.set(projectId, session)
+  registeredSessions.value = [...registeredSessions.value, session]
   return session
 }
 
