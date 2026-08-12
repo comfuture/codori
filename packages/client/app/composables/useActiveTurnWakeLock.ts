@@ -37,6 +37,10 @@ export const useActiveTurnWakeLock = (
       return
     }
 
+    if (wakeLockRequested || wakeLock.isActive.value) {
+      return
+    }
+
     wakeLockRequested = true
     try {
       await wakeLock.request('screen')
