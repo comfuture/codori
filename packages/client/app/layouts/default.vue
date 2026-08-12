@@ -138,11 +138,13 @@ const settingsRoute = computed(() => ({
             class="flex min-w-0 items-center gap-3 rounded-xl outline-none transition hover:opacity-80 focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-default"
             :class="collapsed ? '' : 'flex-1'"
           >
-            <span class="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary/12 text-primary">
-              <UIcon
-                name="i-lucide-terminal-square"
-                class="size-5"
-              />
+            <span class="flex size-9 shrink-0 items-center justify-center">
+              <img
+                src="/icons/codori-192.png"
+                alt=""
+                data-testid="sidebar-brand-icon"
+                class="size-9 rounded-xl"
+              >
             </span>
             <span
               v-if="!collapsed"

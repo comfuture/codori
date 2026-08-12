@@ -99,6 +99,9 @@ describe('sidebar home link', () => {
     expect(link.attributes('aria-label')).toBe('Go to the Codori home screen')
     expect(link.text()).toContain('Codori')
     expect(link.classes().join(' ')).toContain('focus-visible:ring-2')
+    expect(link.get('[data-testid="sidebar-brand-icon"]').attributes('src'))
+      .toBe('/icons/codori-192.png')
+    expect(link.get('[data-testid="sidebar-brand-icon"]').attributes('alt')).toBe('')
 
     // The service-update trigger must stay outside the link so its click is not
     // captured by navigation.
@@ -119,6 +122,8 @@ describe('sidebar home link', () => {
     expect(link.attributes('href')).toBe('/')
     expect(link.attributes('aria-label')).toBe('Go to the Codori home screen')
     expect(link.get('.sr-only').text()).toContain('Codori')
+    expect(link.get('[data-testid="sidebar-brand-icon"]').attributes('src'))
+      .toBe('/icons/codori-192.png')
 
     wrapper.unmount()
   })

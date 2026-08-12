@@ -760,6 +760,7 @@ describe('createHttpServer', () => {
     const bundleDir = mkdtempSync(join(os.tmpdir(), 'codori-ui-'))
     writeFileSync(join(bundleDir, 'index.html'), '<html><body>codori ui</body></html>')
     writeFileSync(join(bundleDir, 'asset.txt'), 'static asset')
+    writeFileSync(join(bundleDir, 'sw.js'), 'self.addEventListener("install", () => {})')
     mkdirSync(join(bundleDir, 'xr', 'assets'), { recursive: true })
     writeFileSync(join(bundleDir, 'xr', 'index.html'), '<html><body>immersive codori</body></html>')
     writeFileSync(join(bundleDir, 'xr', 'assets', 'scene.js'), 'immersive asset')
@@ -799,6 +800,56 @@ describe('createHttpServer', () => {
     })
     expect(assetResponse.statusCode).toBe(200)
     expect(assetResponse.body).toBe('static asset')
+
+    const serviceWorkerResponse = await app.inject({
+      method: 'GET',
+      url: '/sw.js'
+    })
+    expect(serviceWorkerResponse.statusCode).toBe(200)
+    expect(serviceWorkerResponse.headers['content-type']).toContain('javascript')
+    expect(serviceWorkerResponse.body).toContain('addEventListener')
+
+    const hostnameManifestResponse = await app.inject({
+      method: 'GET',
+      url: '/manifest.webmanifest',
+      headers: {
+        host: 'workstation.tailnet.ts.net:4310'
+      }
+    })
+    expect(hostnameManifestResponse.statusCode).toBe(200)
+    expect(hostnameManifestResponse.headers['content-type']).toContain('application/manifest+json')
+    expect(hostnameManifestResponse.json()).toMatchObject({
+      id: '/',
+      name: 'Codori @ workstation.tailnet.ts.net',
+      short_name: 'Codori @ workstation.tailnet.ts.net',
+      start_url: '/',
+      scope: '/',
+      display: 'standalone'
+    })
+
+    const ipManifestResponse = await app.inject({
+      method: 'GET',
+      url: '/manifest.webmanifest',
+      headers: {
+        host: '100.64.0.12:4310'
+      }
+    })
+    expect(ipManifestResponse.json()).toMatchObject({
+      name: 'Codori @ 100.64.0.12',
+      short_name: 'Codori @ 100.64.0.12'
+    })
+
+    const ipv6ManifestResponse = await app.inject({
+      method: 'GET',
+      url: '/manifest.webmanifest',
+      headers: {
+        host: '[2001:db8::1]:4310'
+      }
+    })
+    expect(ipv6ManifestResponse.json()).toMatchObject({
+      name: 'Codori @ 2001:db8::1',
+      short_name: 'Codori @ 2001:db8::1'
+    })
 
     const xrIndexResponse = await app.inject({
       method: 'GET',
