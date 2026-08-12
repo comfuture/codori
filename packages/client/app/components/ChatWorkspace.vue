@@ -160,12 +160,11 @@ import { readCodoriDeveloperInstructions } from '~~/shared/codori-web-instructio
 import {
   notificationRequestId,
   notificationTurnStatus,
-  notificationThreadName,
   notificationThreadId,
-  notificationThreadUpdatedAt,
   notificationTurnId,
   type CodexRpcNotification,
 } from '~~/shared/codex-rpc'
+import { applyActiveThreadTitleNotification } from '../utils/thread-title-notification'
 import {
   buildTurnOverrides,
   canSubmitToLoadPromptControls,
@@ -1404,7 +1403,7 @@ const optimisticAttachmentSnapshots = new Map<string, DraftAttachment[]>()
 let promptControlsPromise: Promise<void> | null = null
 let pendingThreadHydration: Promise<void> | null = null
 let releaseServerRequestHandler: (() => void) | null = null
-let releaseSkillNotificationSubscription: (() => void) | null = null
+let releaseRuntimeNotificationSubscription: (() => void) | null = null
 let releaseRealtimeVoiceConnectionStateSubscription: (() => void) | null = null
 let releaseWorkspaceGitBranchEnvironmentListeners: (() => void) | null = null
 let releaseThreadReactivationListeners: (() => void) | null = null
@@ -1468,6 +1467,12 @@ const createLiveStreamState = (
 const subscribeThreadNotifications = (threadId: string, liveStream: LiveStream) => {
   const client = getRuntimeClient()
   liveStream.unsubscribe = client.subscribe((notification) => {
+    // The generated name can arrive after turn completion. Its workspace-wide
+    // subscription survives the live turn and applies this event exactly once.
+    if (notification.method === 'thread/name/updated') {
+      return
+    }
+
     const targetThreadId = notificationThreadId(notification)
     if (!targetThreadId) {
       return
@@ -1699,14 +1704,15 @@ const updateThreadTitleFromUserInput = (threadId: string, text: string) => {
   }
 
   const fallbackTitle = `Thread ${threadId}`
-  const shouldSyncChatTitle = shouldSyncInitialChatSessionTitle(threadId)
   const currentTitle = threadTitle.value?.trim() ?? ''
-  if (!currentTitle || currentTitle === fallbackTitle || currentTitle === defaultChatTitle) {
-    threadTitle.value = nextTitle
+  if (currentTitle && currentTitle !== fallbackTitle && currentTitle !== defaultChatTitle) {
+    return
   }
 
+  threadTitle.value = nextTitle
   updateThreadSummaryTitle(threadId, nextTitle)
-  if (shouldSyncChatTitle) {
+  const currentChatTitle = selectedChat.value?.title?.trim() ?? ''
+  if (!currentChatTitle || currentChatTitle === defaultChatTitle) {
     syncChatSessionTitle(nextTitle)
   }
 }
@@ -1726,23 +1732,24 @@ const syncChatSessionTitle = (title: string) => {
   })
 }
 
-const syncChatSessionTitleFromThreadName = (thread: { name: string | null }) => {
-  const nextTitle = normalizeThreadTitleCandidate(thread.name)
-  if (nextTitle) {
-    syncChatSessionTitle(nextTitle)
-  }
-}
-
-const shouldSyncInitialChatSessionTitle = (threadId: string) => {
+const syncChatSessionTitleFromThread = (thread: { name: string | null, preview: string }) => {
   if (!isChatSessionWorkspace.value) {
-    return false
+    return
   }
 
-  const fallbackTitle = `Thread ${threadId}`
-  const currentThreadTitle = threadTitle.value?.trim() ?? ''
+  const generatedTitle = normalizeThreadTitleCandidate(thread.name)
+  if (generatedTitle) {
+    syncChatSessionTitle(generatedTitle)
+    return
+  }
+
   const currentChatTitle = selectedChat.value?.title?.trim() ?? ''
-  return (!currentThreadTitle || currentThreadTitle === fallbackTitle || currentThreadTitle === defaultChatTitle)
-    && (!currentChatTitle || currentChatTitle === defaultChatTitle)
+  if (!currentChatTitle || currentChatTitle === defaultChatTitle) {
+    const initialTitle = normalizeThreadTitleCandidate(thread.preview)
+    if (initialTitle) {
+      syncChatSessionTitle(initialTitle)
+    }
+  }
 }
 
 const formatAttachmentSize = (size: number) => {
@@ -3012,7 +3019,7 @@ const syncThreadSnapshot = (thread: Thread) => {
   activeThreadId.value = thread.id
   threadTitle.value = resolveThreadSummaryTitle(thread)
   syncThreadSummary(thread)
-  syncChatSessionTitleFromThreadName(thread)
+  syncChatSessionTitleFromThread(thread)
   messages.value = threadToMessages(thread)
   latestPlanTurnId.value = findLatestPlanTurnId(thread.turns)
   maybeQueuePlanImplementationPrompt({
@@ -3382,7 +3389,7 @@ const ensureThread = async () => {
   moveDraftCollaborationModeToThread(response.thread.id)
   threadTitle.value = resolveThreadSummaryTitle(response.thread)
   syncThreadSummary(response.thread)
-  syncChatSessionTitleFromThreadName(response.thread)
+  syncChatSessionTitleFromThread(response.thread)
   return {
     threadId: response.thread.id,
     created: true
@@ -3716,22 +3723,12 @@ const applyNotification = (notification: CodexRpcNotification) => {
       return
     }
     case 'thread/name/updated': {
-      const nextThreadId = notificationThreadId(notification)
-      const nextThreadName = notificationThreadName(notification)
-      if (!nextThreadId || !nextThreadName) {
-        return
-      }
-      const nextTitle = normalizeThreadTitleCandidate(nextThreadName)
-      if (!nextTitle) {
-        return
-      }
-
-      if (activeThreadId.value === nextThreadId) {
-        threadTitle.value = nextTitle
-        syncChatSessionTitle(nextTitle)
-      }
-
-      updateThreadSummaryTitle(nextThreadId, nextTitle, notificationThreadUpdatedAt(notification))
+      applyActiveThreadTitleNotification(notification, {
+        activeThreadId: activeThreadId.value,
+        setThreadTitle: title => { threadTitle.value = title },
+        syncSessionTitle: syncChatSessionTitle,
+        updateThreadSummaryTitle
+      })
       return
     }
     case 'thread/goal/updated': {
@@ -4429,15 +4426,22 @@ const ensureRuntimeSubscriptions = () => {
 
   const replacingRuntimeClient = runtimeSubscriptionKey !== null
   releaseServerRequestHandler?.()
-  releaseSkillNotificationSubscription?.()
+  releaseRuntimeNotificationSubscription?.()
   releaseRealtimeVoiceConnectionStateSubscription?.()
   releaseServerRequestHandler = client.setServerRequestHandler(handleServerRequest)
-  releaseSkillNotificationSubscription = client.subscribe((notification) => {
-    if (notification.method !== 'skills/changed') {
+  releaseRuntimeNotificationSubscription = client.subscribe((notification) => {
+    if (notification.method === 'thread/name/updated') {
+      applyActiveThreadTitleNotification(notification, {
+        activeThreadId: activeThreadId.value,
+        setThreadTitle: title => { threadTitle.value = title },
+        syncSessionTitle: syncChatSessionTitle,
+        updateThreadSummaryTitle
+      })
       return
     }
-
-    skillAutocompleteInvalidationVersion.value += 1
+    if (notification.method === 'skills/changed') {
+      skillAutocompleteInvalidationVersion.value += 1
+    }
   })
   let realtimeVoiceRpcWasDisconnected = false
   releaseRealtimeVoiceConnectionStateSubscription = client.subscribeConnectionState((connectionState) => {
@@ -4587,8 +4591,8 @@ onBeforeUnmount(() => {
   releaseRealtimeVoicePageListeners = null
   releaseServerRequestHandler?.()
   releaseServerRequestHandler = null
-  releaseSkillNotificationSubscription?.()
-  releaseSkillNotificationSubscription = null
+  releaseRuntimeNotificationSubscription?.()
+  releaseRuntimeNotificationSubscription = null
   releaseRealtimeVoiceConnectionStateSubscription?.()
   releaseRealtimeVoiceConnectionStateSubscription = null
   runtimeSubscriptionKey = null

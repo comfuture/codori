@@ -94,6 +94,9 @@ export const normalizeThreadTitleCandidate = (value: string | null | undefined) 
   }
 
   const stripped = raw
+    // Submitted app and plugin mentions are Markdown links. Thread titles are
+    // plain text, so preserve only the user-visible label.
+    .replace(/\[([^\]\r\n]+)\]\((?:\\.|[^\\()\r\n]|\([^()\r\n]*\))*\)/g, '$1')
     .replace(/<\/?[a-z_]+>/gi, ' ')
     .replace(/\s+/g, ' ')
     .trim()

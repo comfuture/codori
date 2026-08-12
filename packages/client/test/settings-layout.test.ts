@@ -85,5 +85,8 @@ describe('settings layout', () => {
       || button.attributes('aria-label') === 'Back to app'
     )).toHaveLength(2)
     expect(wrapper.get('[data-testid="settings-page"]').text()).toBe('Voice page')
+    expect(wrapper.get('main').classes()).toContain('overscroll-contain')
+    expect(wrapper.get('main').classes())
+      .toContain('pb-[calc(env(safe-area-inset-bottom)+2rem)]')
   })
 })

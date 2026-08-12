@@ -21,14 +21,12 @@ onMounted(() => {
 
   visualViewportRef = window.visualViewport
   visualViewportRef?.addEventListener('resize', setViewportHeightCssVar)
-  visualViewportRef?.addEventListener('scroll', setViewportHeightCssVar)
   window.addEventListener('resize', setViewportHeightCssVar)
   window.addEventListener('orientationchange', setViewportHeightCssVar)
 })
 
 onBeforeUnmount(() => {
   visualViewportRef?.removeEventListener('resize', setViewportHeightCssVar)
-  visualViewportRef?.removeEventListener('scroll', setViewportHeightCssVar)
   window.removeEventListener('resize', setViewportHeightCssVar)
   window.removeEventListener('orientationchange', setViewportHeightCssVar)
 })

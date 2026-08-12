@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   isThreadSummaryRunning,
+  normalizeThreadTitleCandidate,
   normalizeThreadSummaryStatus,
   useThreadSummaries
 } from '../app/composables/useThreadSummaries'
@@ -13,6 +14,15 @@ const createSummaries = () => {
 }
 
 describe('thread summaries', () => {
+  it('reduces submitted app and plugin links to plain-text title labels', () => {
+    expect(normalizeThreadTitleCandidate(
+      'Use [@Browser](plugin://browser@openai-bundled) with [$review](skill://review/path) please'
+    )).toBe('Use @Browser with $review please')
+    expect(normalizeThreadTitleCandidate(
+      'Inspect [ordinary label](https://example.com/a_(b)) now'
+    )).toBe('Inspect ordinary label now')
+  })
+
   it('normalizes generated thread statuses defensively', () => {
     expect(normalizeThreadSummaryStatus({ type: 'idle' })).toEqual({ type: 'idle' })
     expect(normalizeThreadSummaryStatus({

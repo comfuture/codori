@@ -25,7 +25,7 @@ const sectionItems = computed<NavigationMenuItem[]>(() =>
 </script>
 
 <template>
-  <div class="app-shell-height flex min-h-0 bg-default text-default">
+  <div class="app-shell-height relative flex min-h-0 overflow-hidden bg-default text-default">
     <aside class="hidden w-64 shrink-0 flex-col border-e border-default bg-elevated/20 px-4 py-5 md:flex">
       <UButton
         :to="returnTo"
@@ -83,7 +83,7 @@ const sectionItems = computed<NavigationMenuItem[]>(() =>
         </div>
       </header>
 
-      <main class="min-h-0 flex-1 overflow-y-auto px-5 pb-32 pt-8 sm:px-8 md:px-12 md:py-12">
+      <main class="relative min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-[calc(env(safe-area-inset-bottom)+2rem)] pt-8 sm:px-8 md:px-12 md:py-12">
         <div class="mx-auto w-full max-w-3xl">
           <slot />
         </div>
