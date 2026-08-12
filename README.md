@@ -1,16 +1,35 @@
 # Codori
 
+<p align="center">
+  <img src="docs/brand/app-icon.png" alt="Codori app icon" width="128">
+</p>
+
 > Keep your desktop dev environment. Reach it from anywhere, in 2D or in VR.
 
 Codori is a self-hosted control plane that runs on the machine where your
 repositories already live, and puts Codex in your browser, your phone, or your
 headset.
 
-[![Codori XR mode](https://img.youtube.com/vi/YAYqA6zzSFI/maxresdefault.jpg)](https://www.youtube.com/watch?v=YAYqA6zzSFI)
+![Codori connects your local coding environment to the devices you use remotely](docs/brand/brand-image.png)
 
-**[▶ Watch Codori XR mode](https://www.youtube.com/watch?v=YAYqA6zzSFI)** — put on a
-headset, stand inside your coding session, and talk to Codex while it works on
-the repository sitting on the machine at home.
+## What it looks like
+
+Every Git project Codori discovers under your root directory shows up in the
+sidebar, ready to open. Scanning skips generated directories such as
+`node_modules`, `dist`, and `build`, so a repository nested inside one of those
+stays hidden.
+
+![Codori dashboard listing discovered Git projects](docs/images/dashboard.png)
+
+Threads are real Codex sessions with the same turns, reasoning, diffs, and file
+edits you get on the desktop. Close the tab, come back tomorrow, resume where
+you left off.
+
+![A Codori thread showing a Codex turn with edits and reasoning](docs/images/thread.png)
+
+The same session works on a phone, because a laptop is not always within reach.
+
+<img src="docs/images/mobile.png" alt="Codori thread view on a phone-sized screen" width="320">
 
 ## Install and run
 
@@ -46,32 +65,6 @@ npx @codori/server start --root ~/Project
 Requires Node.js 22.22.2+. A matching Codex CLI ships with the package, so a
 separate `codex` install is not required.
 
-## What it looks like
-
-Every Git project Codori discovers under your root directory shows up in the
-sidebar, ready to open. Scanning skips generated directories such as
-`node_modules`, `dist`, and `build`, so a repository nested inside one of those
-stays hidden.
-
-![Codori dashboard listing discovered Git projects](docs/images/dashboard.png)
-
-Threads are real Codex sessions with the same turns, reasoning, diffs, and file
-edits you get on the desktop. Close the tab, come back tomorrow, resume where
-you left off.
-
-![A Codori thread showing a Codex turn with edits and reasoning](docs/images/thread.png)
-
-The same session on a phone, because a laptop is not always within reach.
-
-<img src="docs/images/mobile.png" alt="Codori thread view on a phone-sized screen" width="320">
-
-And the part that is hard to go back from: open any thread's immersive action and
-Codori hands it to the WebXR workspace at `/xr/`, where you can keep talking to
-Codex hands-free. That is what the video at the top shows. Headsets need a
-secure HTTPS origin, so set up
-[Remote Access](https://github.com/comfuture/codori/wiki/Remote-Access) before
-reaching `/xr/` from a device other than the Codori host.
-
 ## Who this is for
 
 Codori fits if:
@@ -87,6 +80,21 @@ Codori fits if:
 Codori is the wrong tool if you want a hosted service, public URLs, or team
 accounts. It has no built-in authentication and assumes the host machine is
 trusted, so keep it on a private network.
+
+## Immersive XR
+
+XR is optional, but it is one of Codori's most distinctive ways to work. Open
+any thread's immersive action and Codori hands the same coding session to the
+WebXR workspace at `/xr/`, where you can talk to Codex hands-free while it works
+on the repository sitting on your machine.
+
+[![Codori XR mode](https://img.youtube.com/vi/YAYqA6zzSFI/maxresdefault.jpg)](https://www.youtube.com/watch?v=YAYqA6zzSFI)
+
+**[▶ Watch Codori XR mode](https://www.youtube.com/watch?v=YAYqA6zzSFI)**
+
+Headsets need a secure HTTPS origin. Set up
+[Remote Access](https://github.com/comfuture/codori/wiki/Remote-Access) before
+reaching `/xr/` from a device other than the Codori host.
 
 ## Philosophy
 
@@ -104,20 +112,17 @@ diff from a phone, changes when work can happen.
 
 ## Documentation
 
-Everything past "it works" lives in the
-[Codori Wiki](https://github.com/comfuture/codori/wiki):
+Everything past "it works" lives in the [Codori Wiki](https://github.com/comfuture/codori/wiki).
+Good places to start are:
 
-| Topic | What you will find |
-| --- | --- |
-| [Remote Access](https://github.com/comfuture/codori/wiki/Remote-Access) | Tailscale Serve, HTTPS for XR and microphone, direct tailnet binding |
-| [Realtime Voice](https://github.com/comfuture/codori/wiki/Realtime-Voice) | Push-to-talk, voice companion, voice selection, transcripts |
-| [Immersive XR](https://github.com/comfuture/codori/wiki/Immersive-XR) | WebXR workspace, entry requirements, headset notes |
-| [Configuration](https://github.com/comfuture/codori/wiki/Configuration) | `~/.codori/config.json`, CLI flags, ports, idle shutdown |
-| [Background Service](https://github.com/comfuture/codori/wiki/Background-Service) | launchd, systemd, Task Scheduler, updates |
-| [Runtime Model](https://github.com/comfuture/codori/wiki/Runtime-Model) | Remote-control daemon, managed fallback, workspace lifecycle |
-| [Settings and UI](https://github.com/comfuture/codori/wiki/Settings-and-UI) | Settings workspace, notifications, file explorer, avatars |
-| [Security Notes](https://github.com/comfuture/codori/wiki/Security-Notes) | Trust boundary, and what Codori deliberately leaves out |
-| [Development](https://github.com/comfuture/codori/wiki/Development) | Monorepo layout, local builds, tests, release flow |
+- [Remote Access](https://github.com/comfuture/codori/wiki/Remote-Access) for
+  Tailscale Serve, HTTPS, and access from another device
+- [Configuration](https://github.com/comfuture/codori/wiki/Configuration) for
+  CLI flags, ports, and `~/.codori/config.json`
+- [Development](https://github.com/comfuture/codori/wiki/Development) for local
+  builds, tests, and the release flow
+
+Use the Wiki navigation for feature guides, runtime details, and security notes.
 
 `codori --help` covers every command and flag.
 
