@@ -144,6 +144,44 @@ describe('active turn wake lock', () => {
     scope.stop()
   })
 
+  it('coalesces a stop and restart behind an older pending request', async () => {
+    const hasActiveTurn = ref(false)
+    const firstRequest = deferred()
+    const fixture = createFixture({ request: () => firstRequest.promise })
+    const scope = effectScope()
+    scope.run(() => useActiveTurnWakeLock(hasActiveTurn, fixture.createWakeLock))
+
+    hasActiveTurn.value = true
+    await nextTick()
+    await vi.waitFor(() => {
+      expect(fixture.request).toHaveBeenCalledTimes(1)
+    })
+    hasActiveTurn.value = false
+    await nextTick()
+    hasActiveTurn.value = true
+    await nextTick()
+
+    expect(fixture.request).toHaveBeenCalledTimes(1)
+    expect(fixture.release).not.toHaveBeenCalled()
+
+    fixture.active.value = true
+    firstRequest.resolve()
+    await firstRequest.promise
+    await vi.waitFor(() => {
+      expect(fixture.active.value).toBe(true)
+    })
+    expect(fixture.request).toHaveBeenCalledTimes(1)
+    expect(fixture.release).not.toHaveBeenCalled()
+
+    hasActiveTurn.value = false
+    await nextTick()
+    await vi.waitFor(() => {
+      expect(fixture.release).toHaveBeenCalledTimes(1)
+    })
+
+    scope.stop()
+  })
+
   it('releases an active lock when the app-level scope is disposed', async () => {
     const hasActiveTurn = ref(true)
     const fixture = createFixture()
