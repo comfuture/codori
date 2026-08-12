@@ -6,6 +6,7 @@ peerDependencyRules:
 allowBuilds:
   '@parcel/watcher': true
   esbuild: true
+  sharp: true
   vue-demi: true
 overrides:
   '@tailwindcss/postcss': 4.3.3

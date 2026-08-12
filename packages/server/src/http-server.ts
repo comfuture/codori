@@ -180,6 +180,44 @@ const isAssetRequest = (pathname: string) =>
 
 const MAX_ATTACHMENTS_PER_MESSAGE = 8
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024
+const PWA_THEME_COLOR = '#111827'
+const PWA_BACKGROUND_COLOR = '#0b1020'
+
+const normalizePwaHostLabel = (hostname: string) => {
+  const normalized = hostname.trim().toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/u, '')
+  return normalized || 'localhost'
+}
+
+export const createPwaManifest = (hostname: string) => {
+  const hostLabel = normalizePwaHostLabel(hostname)
+  const appName = `Codori @ ${hostLabel}`
+
+  return {
+    id: '/',
+    name: appName,
+    short_name: appName,
+    description: 'Reach the Codex sessions running on this Codori host.',
+    start_url: '/',
+    scope: '/',
+    display: 'standalone',
+    background_color: PWA_BACKGROUND_COLOR,
+    theme_color: PWA_THEME_COLOR,
+    icons: [
+      {
+        src: '/icons/codori-192.png',
+        sizes: '192x192',
+        type: 'image/png',
+        purpose: 'any maskable'
+      },
+      {
+        src: '/icons/codori-512.png',
+        sizes: '512x512',
+        type: 'image/png',
+        purpose: 'any maskable'
+      }
+    ]
+  }
+}
 
 const toStatusCode = (error: CodoriError) => {
   switch (error.code) {
@@ -341,6 +379,12 @@ export const createHttpServer = async (
     }
   })
   await app.register(websocket)
+
+  app.get('/manifest.webmanifest', async (request, reply) => {
+    reply.header('cache-control', 'no-cache')
+    reply.type('application/manifest+json')
+    return createPwaManifest(request.hostname)
+  })
 
   if (clientBundleDir) {
     await app.register(fastifyStatic, {

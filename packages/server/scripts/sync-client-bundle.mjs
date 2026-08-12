@@ -13,20 +13,26 @@ const bundles = [
     name: 'client',
     sourceDir: clientSourceDir,
     indexPath: resolve(clientSourceDir, 'index.html'),
+    requiredPaths: [
+      resolve(clientSourceDir, 'index.html'),
+      resolve(clientSourceDir, 'sw.js')
+    ],
     buildCommand: 'pnpm --filter @codori/client build'
   },
   {
     name: 'WebXR',
     sourceDir: webxrSourceDir,
     indexPath: resolve(webxrSourceDir, 'index.html'),
+    requiredPaths: [resolve(webxrSourceDir, 'index.html')],
     buildCommand: 'pnpm --filter @codori/webxr build'
   }
 ]
 
 for (const bundle of bundles) {
-  if (!existsSync(bundle.indexPath)) {
+  const missingPath = bundle.requiredPaths.find(path => !existsSync(path))
+  if (missingPath) {
     process.stderr.write(
-      `Missing ${bundle.name} bundle at ${bundle.indexPath}. Run "${bundle.buildCommand}" before building @codori/server.\n`
+      `Missing ${bundle.name} bundle artifact at ${missingPath}. Run "${bundle.buildCommand}" before building @codori/server.\n`
     )
     process.exit(1)
   }
