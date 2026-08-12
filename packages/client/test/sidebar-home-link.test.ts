@@ -98,18 +98,18 @@ describe('sidebar home link', () => {
     expect(link.attributes('href')).toBe('/')
     expect(link.attributes('aria-label')).toBe('Go to the Codori home screen')
     expect(link.text()).toContain('Codori')
+    expect(link.text()).not.toContain('Codex project control')
     expect(link.classes().join(' ')).toContain('focus-visible:ring-2')
     expect(link.get('[data-testid="sidebar-brand-icon"]').attributes('src'))
       .toBe('/icons/codori-192.png')
     expect(link.get('[data-testid="sidebar-brand-icon"]').attributes('alt')).toBe('')
 
-    // The service-update trigger must stay outside the link so its click is not
-    // captured by navigation.
-    const updateTrigger = wrapper.findAll('button').find((button) => {
-      const text = button.text().trim()
-      return text.startsWith('Update') && text !== 'Update and restart'
-    })
-    expect(updateTrigger).toBeDefined()
+    const updateTrigger = wrapper.get('[data-testid="service-update-button"]')
+    expect(updateTrigger.text().trim()).toBe('Update')
+    expect(updateTrigger.attributes('color')).toBe('primary')
+    expect(updateTrigger.attributes('aria-label')).toBe('Update Codori')
+    expect(updateTrigger.find('[name="i-lucide-download"]').exists()).toBe(true)
+    expect(updateTrigger.get('span').classes()).toEqual(['hidden', 'sm:inline'])
     expect(link.find('button').exists()).toBe(false)
 
     wrapper.unmount()
@@ -122,8 +122,12 @@ describe('sidebar home link', () => {
     expect(link.attributes('href')).toBe('/')
     expect(link.attributes('aria-label')).toBe('Go to the Codori home screen')
     expect(link.get('.sr-only').text()).toContain('Codori')
+    expect(link.get('.sr-only').text()).not.toContain('Codex project control')
     expect(link.get('[data-testid="sidebar-brand-icon"]').attributes('src'))
       .toBe('/icons/codori-192.png')
+    const updateTrigger = wrapper.get('[data-testid="service-update-button"]')
+    expect(updateTrigger.text().trim()).toBe('')
+    expect(updateTrigger.find('[name="i-lucide-download"]').exists()).toBe(true)
 
     wrapper.unmount()
   })

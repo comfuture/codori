@@ -562,6 +562,8 @@ describe('project sidebar inline threads', () => {
     expect(wrapper.text()).toContain('other')
     expect(wrapper.text()).toContain('Thread 1')
     expect(wrapper.text()).toContain('Thread 2')
+    expect(wrapper.text()).not.toContain('/repo/codori')
+    expect(wrapper.text()).not.toContain('/repo/other')
 
     const threadLink = wrapper.get('[data-kind="thread"][data-to="/projects/codori/threads/thread-1"]')
     expect(threadLink.text()).toContain('Thread 1')
@@ -591,16 +593,20 @@ describe('project sidebar inline threads', () => {
     })
   })
 
-  it('starts a new thread from an explicit project-row plus button', async () => {
+  it('starts a new thread from an explicit project-row chat-plus button', async () => {
     mockRpcRequest.mockResolvedValue(makeThreadListResponse(1))
     const wrapper = mountSidebar({ collapsed: false })
     await waitForSidebar()
 
     const projectRow = wrapper.get('[data-kind="project"][data-value="project:other"]')
     const newThreadButton = projectRow.get('button[aria-label="New thread in other"]')
-    expect(newThreadButton.attributes('data-icon')).toBe('i-lucide-plus')
+    expect(newThreadButton.attributes('data-icon')).toBe('i-lucide-message-square-plus')
     expect(newThreadButton.attributes('data-variant')).toBe('ghost')
     expect(newThreadButton.attributes('data-color')).toBe('neutral')
+    expect(newThreadButton.element.parentElement?.parentElement?.className)
+      .toContain('opacity-0')
+    expect(newThreadButton.element.parentElement?.parentElement?.className)
+      .toContain('group-hover:opacity-100')
 
     await newThreadButton.trigger('click')
     await waitForSidebar()
@@ -608,22 +614,35 @@ describe('project sidebar inline threads', () => {
     expect(mockRouterPush).toHaveBeenCalledWith('/projects/other')
   })
 
-  it('browses a project row without starting a thread and without a chevron', async () => {
+  it('routes a project-row click to a new thread while keeping inline threads expanded', async () => {
     mockRpcRequest.mockResolvedValue(makeThreadListResponse(1))
     const wrapper = mountSidebar({ collapsed: false })
     await waitForSidebar()
 
     const projectRow = wrapper.get('[data-kind="project"][data-value="project:other"]')
-    expect(projectRow.attributes('data-to')).toBe('')
+    expect(projectRow.attributes('data-to')).toBe('/projects/other')
 
     await projectRow.trigger('click')
     await waitForSidebar()
 
     expect(mockRouterPush).not.toHaveBeenCalled()
     expect(wrapper.get('.navigation-menu-stub').attributes('data-model-value'))
-      .toBe('["project:other"]')
+      .toBe('["project:codori"]')
     expect(wrapper.findAll('[data-kind="project"] [data-icon="i-lucide-chevron-down"]'))
       .toHaveLength(0)
+  })
+
+  it('keeps the active project chat-plus button visible', async () => {
+    mockRpcRequest.mockResolvedValue(makeThreadListResponse(1))
+    const wrapper = mountSidebar({ collapsed: false })
+    await waitForSidebar()
+
+    const projectRow = wrapper.get('[data-kind="project"][data-value="project:codori"]')
+    const newThreadButton = projectRow.get('button[aria-label="New thread in codori"]')
+    expect(newThreadButton.element.parentElement?.parentElement?.className)
+      .toContain('opacity-100')
+    expect(newThreadButton.element.parentElement?.parentElement?.className)
+      .not.toContain('opacity-0')
   })
 
   it('omits the project-row plus button while the sidebar is collapsed', async () => {

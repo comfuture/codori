@@ -30,8 +30,8 @@ const showServiceUpdateButton = computed(() =>
   serviceUpdate.value.enabled && (serviceUpdate.value.updateAvailable || serviceUpdate.value.updating)
 )
 
-const serviceUpdateLabel = computed(() =>
-  serviceUpdate.value.updating ? 'Updating' : 'Update'
+const serviceUpdateBusy = computed(() =>
+  serviceUpdatePending.value || serviceUpdate.value.updating
 )
 
 const serviceUpdateTooltip = computed(() => {
@@ -110,7 +110,7 @@ const settingsRoute = computed(() => ({
 
 <template>
   <UDashboardGroup
-    class="app-shell-min-height min-h-screen min-h-dvh"
+    class="app-shell-height min-h-0 overflow-hidden"
     storage="local"
     storage-key="codori-dashboard"
     :persistent="true"
@@ -153,9 +153,6 @@ const settingsRoute = computed(() => ({
               <span class="block truncate text-sm font-semibold">
                 Codori
               </span>
-              <span class="block truncate text-xs text-muted">
-                Codex project control
-              </span>
             </span>
             <span
               v-else
@@ -164,29 +161,8 @@ const settingsRoute = computed(() => ({
               <span>
                 Codori
               </span>
-              <span>
-                Codex project control
-              </span>
             </span>
           </NuxtLink>
-
-          <div v-if="!collapsed">
-            <UTooltip
-              v-if="showServiceUpdateButton"
-              :text="serviceUpdateTooltip"
-            >
-              <UButton
-                color="neutral"
-                variant="outline"
-                size="xs"
-                :loading="serviceUpdatePending || serviceUpdate.updating"
-                :disabled="serviceUpdatePending || serviceUpdate.updating"
-                @click="handleServiceUpdate"
-              >
-                {{ serviceUpdateLabel }}
-              </UButton>
-            </UTooltip>
-          </div>
         </div>
       </template>
 
@@ -197,7 +173,7 @@ const settingsRoute = computed(() => ({
         />
       </template>
 
-      <template #footer>
+      <template #footer="{ collapsed }">
         <div class="flex w-full items-center gap-2">
           <UTooltip text="Settings">
             <UButton
@@ -205,11 +181,39 @@ const settingsRoute = computed(() => ({
               variant="ghost"
               size="sm"
               icon="i-lucide-settings"
-              :label="sidebarCollapsed ? undefined : 'Settings'"
+              :label="collapsed ? undefined : 'Settings'"
               aria-label="Open settings"
               :to="settingsRoute"
-              :class="sidebarCollapsed ? 'justify-center' : 'min-w-0 flex-1 justify-start'"
+              :class="collapsed ? 'justify-center' : 'min-w-0 flex-1 justify-start'"
             />
+          </UTooltip>
+          <UTooltip
+            v-if="showServiceUpdateButton"
+            :text="serviceUpdateTooltip"
+          >
+            <UButton
+              data-testid="service-update-button"
+              color="primary"
+              variant="solid"
+              size="xs"
+              :square="collapsed"
+              :disabled="serviceUpdateBusy"
+              aria-label="Update Codori"
+              class="shrink-0 rounded-full"
+              @click="handleServiceUpdate"
+            >
+              <UIcon
+                :name="serviceUpdateBusy ? 'i-lucide-loader-circle' : 'i-lucide-download'"
+                class="size-4 shrink-0"
+                :class="serviceUpdateBusy ? 'animate-spin motion-reduce:animate-none' : ''"
+              />
+              <span
+                v-if="!collapsed"
+                class="hidden sm:inline"
+              >
+                Update
+              </span>
+            </UButton>
           </UTooltip>
           <UDashboardSidebarCollapse
             class="relative z-20 ms-auto shrink-0"

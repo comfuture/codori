@@ -13,8 +13,8 @@ const {
 <template>
   <UDashboardPanel
     id="landing-panel"
-    class="min-h-screen min-w-0 flex-1"
-    :ui="{ body: 'relative flex flex-1 p-0' }"
+    class="min-h-0 min-w-0 flex-1"
+    :ui="{ body: 'relative flex min-h-0 flex-1 overflow-y-auto overscroll-contain p-0' }"
   >
     <template #header>
       <UDashboardNavbar
@@ -38,15 +38,9 @@ const {
         <div class="flex flex-1 items-center justify-center py-8">
           <div class="flex w-full max-w-3xl flex-col items-center gap-8 text-center">
             <div class="space-y-4">
-              <div class="text-xs font-medium text-primary">
-                Remote coding
-              </div>
               <h1 class="text-balance text-4xl font-semibold tracking-tight text-highlighted md:text-5xl">
                 Pick a project and start coding.
               </h1>
-              <p class="mx-auto max-w-2xl text-base leading-7 text-muted md:text-lg">
-                Codori selects one shared Codex app-server backend and keeps project chat threads ready to resume from the dashboard.
-              </p>
             </div>
 
             <div class="grid w-full gap-3 md:grid-cols-3">

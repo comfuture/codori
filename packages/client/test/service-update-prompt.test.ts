@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 /* eslint-disable vue/one-component-per-file */
 import { mount } from '@vue/test-utils'
-import { defineComponent } from 'vue'
+import { defineComponent, nextTick } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const reloadPageMock = vi.hoisted(() => vi.fn())
@@ -82,7 +82,7 @@ const PassthroughStub = defineComponent({
   template: '<div><slot /></div>'
 })
 
-// The update trigger lives in the sidebar's `#header` slot, so the stub has to
+// The update trigger lives in the sidebar's `#footer` slot, so the stub has to
 // render named slots rather than only the default one.
 const SidebarStub = defineComponent({
   template: `
@@ -114,13 +114,8 @@ const findButtonByText = (
   text: string
 ) => wrapper.findAll('button').find(button => button.text().trim() === text)
 
-// The sidebar trigger renders its label through slot content rather than the
-// `label` prop, so match it separately from the dialog's confirm button.
 const findUpdateTrigger = (wrapper: ReturnType<typeof mountLayout>) =>
-  wrapper.findAll('button').find((button) => {
-    const text = button.text().trim()
-    return text.startsWith('Update') && text !== 'Update and restart'
-  })
+  wrapper.find('[data-testid="service-update-button"]')
 
 describe('service update prompt', () => {
   beforeEach(() => {
@@ -152,9 +147,9 @@ describe('service update prompt', () => {
     const wrapper = mountLayout()
 
     const updateButton = findUpdateTrigger(wrapper)
-    expect(updateButton).toBeDefined()
+    expect(updateButton.exists()).toBe(true)
 
-    await updateButton?.trigger('click')
+    await updateButton.trigger('click')
     // Opening the dialog must not restart anything on its own.
     expect(projectsMock.triggerServiceUpdate).not.toHaveBeenCalled()
     expect(wrapper.get('[data-testid="modal"]').attributes('data-open')).toBe('true')
@@ -169,13 +164,35 @@ describe('service update prompt', () => {
     const wrapper = mountLayout()
 
     const updateButton = findUpdateTrigger(wrapper)
-    await updateButton?.trigger('click')
+    await updateButton.trigger('click')
 
     const dismissButton = findButtonByText(wrapper, 'Not now')
     await dismissButton?.trigger('click')
 
     expect(projectsMock.triggerServiceUpdate).not.toHaveBeenCalled()
     expect(wrapper.get('[data-testid="modal"]').attributes('data-open')).toBe('false')
+  })
+
+  it('replaces the download icon with a spinner while updating', async () => {
+    const wrapper = mountLayout()
+    const updateButton = findUpdateTrigger(wrapper)
+
+    expect(updateButton.find('[name="i-lucide-download"]').exists()).toBe(true)
+    expect(updateButton.find('[name="i-lucide-loader-circle"]').exists()).toBe(false)
+
+    projectsMock.serviceUpdate.value = {
+      enabled: true,
+      updateAvailable: true,
+      updating: true,
+      installedVersion: '0.10.0',
+      latestVersion: '0.11.0'
+    }
+    await nextTick()
+
+    expect(updateButton.find('[name="i-lucide-download"]').exists()).toBe(false)
+    const spinner = updateButton.get('[name="i-lucide-loader-circle"]')
+    expect(spinner.classes()).toContain('animate-spin')
+    expect(updateButton.attributes('disabled')).toBeDefined()
   })
 
   it('starts completion polling before updating and reloads after the target server responds', async () => {
@@ -217,7 +234,7 @@ describe('service update prompt', () => {
 
     const wrapper = mountLayout()
     const updateButton = findUpdateTrigger(wrapper)
-    await updateButton?.trigger('click')
+    await updateButton.trigger('click')
     await findButtonByText(wrapper, 'Update and restart')?.trigger('click')
 
     expect(timerWasActiveWhenUpdateStarted).toBe(true)
@@ -245,7 +262,7 @@ describe('service update prompt', () => {
     })
 
     const wrapper = mountLayout()
-    await findUpdateTrigger(wrapper)?.trigger('click')
+    await findUpdateTrigger(wrapper).trigger('click')
     await findButtonByText(wrapper, 'Update and restart')?.trigger('click')
     expect(vi.getTimerCount()).toBe(3)
 
