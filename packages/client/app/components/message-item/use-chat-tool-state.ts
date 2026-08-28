@@ -9,7 +9,7 @@ export const useChatToolState = (status: () => ToolStatus, defaultOpen = false) 
   const isRunning = computed(() => runningStatuses.has(String(status() ?? '')))
 
   watch(status, (nextStatus, previousStatus) => {
-    if (isRunning.value || nextStatus === 'failed') {
+    if (isRunning.value || nextStatus === 'failed' || nextStatus === 'interrupted') {
       open.value = true
       return
     }
