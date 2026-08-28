@@ -4,6 +4,7 @@ import { useThreadQueue } from '../app/composables/useThreadQueue'
 import {
   buildTextThreadQueueInput,
   moveThreadQueueSubmission,
+  startObservedThreadQueueSubmission,
   validateTextThreadQueueDraft
 } from '../shared/thread-queue'
 import type { QueuedSubmission } from '../shared/generated/codex-app-server/v2/QueuedSubmission'
@@ -167,5 +168,42 @@ describe('thread queue', () => {
 
     expect(queue.submissions.value.map(item => item.id)).toEqual(['two'])
     queue.dispose()
+  })
+
+  it('restores the paused queue state from an interrupted hydrated turn', async () => {
+    const request = async <T>(): Promise<T> => ({
+      data: [queued('one', 'still queued')],
+      nextCursor: null
+    }) as T
+    const threadId = ref<string | null>('thread-one')
+    const queue = useThreadQueue({ threadId, getClient: () => ({ request }) })
+
+    queue.restoreFromTurnStatus('interrupted')
+    await queue.refresh()
+    expect(queue.paused.value).toBe(true)
+
+    queue.restoreFromTurnStatus('completed')
+    expect(queue.paused.value).toBe(false)
+    queue.dispose()
+  })
+
+  it('subscribes before starting a queued turn and ignores a stale result', async () => {
+    const events: string[] = []
+    let current = true
+    const started = await startObservedThreadQueueSubmission({
+      ensureObserved: async () => {
+        events.push('subscribe')
+        return { threadId: 'thread-one' }
+      },
+      isCurrent: () => current,
+      start: async () => {
+        events.push('start')
+        current = false
+        return { id: 'turn-one' }
+      }
+    })
+
+    expect(events).toEqual(['subscribe', 'start'])
+    expect(started).toBeNull()
   })
 })
