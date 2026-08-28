@@ -353,6 +353,7 @@ const {
   threadGoals,
   threadPlans,
   threadCollaborationModeMasks,
+  threadLastTurnStatuses,
   collaborationModeMasks,
   collaborationModesLoaded,
   collaborationModesLoading,
@@ -383,7 +384,8 @@ const {
 } = session
 const threadQueue = useThreadQueue({
   threadId: activeThreadId,
-  getClient: () => getRuntimeClient()
+  getClient: () => getRuntimeClient(),
+  getLastTurnStatus: threadId => threadLastTurnStatuses.value[threadId]
 })
 const {
   submissions: threadQueueSubmissions,
@@ -3067,9 +3069,25 @@ async function ensureProjectRuntime() {
   await startProject(workspaceId.value)
 }
 
+const rememberThreadLastTurnStatus = (
+  threadId: string | null,
+  turnStatus: Thread['turns'][number]['status'] | null | undefined
+) => {
+  if (!threadId) {
+    return
+  }
+  if (turnStatus) {
+    threadLastTurnStatuses.value[threadId] = turnStatus
+  } else {
+    delete threadLastTurnStatuses.value[threadId]
+  }
+}
+
 const syncThreadSnapshot = (thread: Thread) => {
   activeThreadId.value = thread.id
-  threadQueue.restoreFromTurnStatus(thread.turns.at(-1)?.status)
+  const lastTurnStatus = thread.turns.at(-1)?.status
+  rememberThreadLastTurnStatus(thread.id, lastTurnStatus)
+  threadQueue.restoreFromTurnStatus(lastTurnStatus)
   threadTitle.value = resolveThreadSummaryTitle(thread)
   syncThreadSummary(thread)
   syncChatSessionTitleFromThread(thread)
@@ -3640,6 +3658,7 @@ const applyTurnStartedNotification = (
   })) {
     return
   }
+  rememberThreadLastTurnStatus(threadId, 'inProgress')
   threadQueue.markTurnStarted()
 
   if (threadId && shouldResetThreadPlanForTurn(threadId, nextTurnId)) {
@@ -3729,6 +3748,7 @@ const applyTerminalNotification = (
     liveStream.lockedTurnId = null
   }
   clearLiveStream(new Error(messageText))
+  rememberThreadLastTurnStatus(liveStream?.threadId ?? activeThreadId.value, 'failed')
   threadQueue.markTurnCompleted('failed')
   error.value = messageText
   status.value = 'error'
@@ -3739,6 +3759,10 @@ const applyTurnCompletedNotification = (
   liveStream: LiveStream | null
 ) => {
   const turnStatus = notificationTurnStatus(notification)
+  rememberThreadLastTurnStatus(
+    notificationThreadId(notification) ?? liveStream?.threadId ?? activeThreadId.value,
+    turnStatus
+  )
   if (turnStatus === 'failed') {
     messages.value = updateWebSearchMessageStatus(messages.value, 'failed')
   }
@@ -4283,7 +4307,8 @@ const startQueuedPrompt = async (submissionId?: string) => {
     const started = await startObservedThreadQueueSubmission({
       ensureObserved: ensureObservedThreadSubscription,
       isCurrent: liveStream => activeThreadId.value === queuedThreadId
-        && liveStream.threadId === queuedThreadId,
+        && liveStream.threadId === queuedThreadId
+        && session.liveStream === liveStream,
       start: () => threadQueue.start(submissionId)
     })
     if (!started) {

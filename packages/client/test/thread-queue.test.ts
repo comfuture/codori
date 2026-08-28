@@ -176,9 +176,12 @@ describe('thread queue', () => {
       nextCursor: null
     }) as T
     const threadId = ref<string | null>('thread-one')
-    const queue = useThreadQueue({ threadId, getClient: () => ({ request }) })
+    const queue = useThreadQueue({
+      threadId,
+      getClient: () => ({ request }),
+      getLastTurnStatus: () => 'interrupted'
+    })
 
-    queue.restoreFromTurnStatus('interrupted')
     await queue.refresh()
     expect(queue.paused.value).toBe(true)
 
@@ -187,18 +190,19 @@ describe('thread queue', () => {
     queue.dispose()
   })
 
-  it('subscribes before starting a queued turn and ignores a stale result', async () => {
+  it('subscribes before starting and rejects an ABA observer replacement', async () => {
     const events: string[] = []
-    let current = true
+    const capturedStream = { threadId: 'thread-one', observer: 'captured' }
+    let currentStream = capturedStream
     const started = await startObservedThreadQueueSubmission({
       ensureObserved: async () => {
         events.push('subscribe')
-        return { threadId: 'thread-one' }
+        return capturedStream
       },
-      isCurrent: () => current,
+      isCurrent: liveStream => liveStream === currentStream,
       start: async () => {
         events.push('start')
-        current = false
+        currentStream = { threadId: 'thread-one', observer: 'replacement' }
         return { id: 'turn-one' }
       }
     })
