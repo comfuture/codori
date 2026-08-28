@@ -367,6 +367,11 @@ export const useThreadQueue = (options: UseThreadQueueOptions) => {
     void refresh(true)
   }
 
+  const restoreFromTurnStatus = (turnStatus: string | null | undefined) => {
+    automaticDispatchPaused = turnStatus === 'interrupted'
+    paused.value = automaticDispatchPaused && submissions.value.length > 0
+  }
+
   const stopThreadWatch = watch(options.threadId, (threadId) => {
     contextGeneration += 1
     mutationSequence += 1
@@ -402,6 +407,7 @@ export const useThreadQueue = (options: UseThreadQueueOptions) => {
     handleConnectionState,
     markTurnStarted,
     markTurnCompleted,
+    restoreFromTurnStatus,
     dispose: stopThreadWatch
   }
 }

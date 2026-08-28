@@ -93,3 +93,21 @@ export const moveThreadQueueSubmission = (
   reordered.splice(nextIndex, 0, submission)
   return reordered
 }
+
+export const startObservedThreadQueueSubmission = async <LiveStream, Turn>(input: {
+  ensureObserved: () => Promise<LiveStream | null>
+  isCurrent: (liveStream: LiveStream) => boolean
+  start: () => Promise<Turn>
+}) => {
+  const liveStream = await input.ensureObserved()
+  if (!liveStream || !input.isCurrent(liveStream)) {
+    return null
+  }
+
+  const turn = await input.start()
+  if (!input.isCurrent(liveStream)) {
+    return null
+  }
+
+  return { liveStream, turn }
+}

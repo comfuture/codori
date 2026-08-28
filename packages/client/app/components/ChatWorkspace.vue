@@ -143,6 +143,7 @@ import {
 import { buildTurnStartInput, type PersistedProjectAttachment } from '~~/shared/chat-attachments'
 import {
   createThreadQueueClientMessageId,
+  startObservedThreadQueueSubmission,
   validateTextThreadQueueDraft
 } from '~~/shared/thread-queue'
 import {
@@ -3068,6 +3069,7 @@ async function ensureProjectRuntime() {
 
 const syncThreadSnapshot = (thread: Thread) => {
   activeThreadId.value = thread.id
+  threadQueue.restoreFromTurnStatus(thread.turns.at(-1)?.status)
   threadTitle.value = resolveThreadSummaryTitle(thread)
   syncThreadSummary(thread)
   syncChatSessionTitleFromThread(thread)
@@ -4278,16 +4280,18 @@ const reorderQueuedPrompts = async (submissionIds: string[]) => {
 const startQueuedPrompt = async (submissionId?: string) => {
   const queuedThreadId = activeThreadId.value
   try {
-    const turn = await threadQueue.start(submissionId)
-    if (activeThreadId.value !== queuedThreadId) {
+    const started = await startObservedThreadQueueSubmission({
+      ensureObserved: ensureObservedThreadSubscription,
+      isCurrent: liveStream => activeThreadId.value === queuedThreadId
+        && liveStream.threadId === queuedThreadId,
+      start: () => threadQueue.start(submissionId)
+    })
+    if (!started) {
       return
     }
-    const liveStream = await ensureObservedThreadSubscription()
-    if (liveStream && liveStream.threadId === queuedThreadId) {
-      setLiveStreamTurnId(liveStream, turn.id)
-      setLiveStreamInterruptRequested(liveStream, false)
-      status.value = 'streaming'
-    }
+    setLiveStreamTurnId(started.liveStream, started.turn.id)
+    setLiveStreamInterruptRequested(started.liveStream, false)
+    status.value = 'streaming'
   } catch {
     // The queue controller restores server state and exposes the actionable error.
   }
