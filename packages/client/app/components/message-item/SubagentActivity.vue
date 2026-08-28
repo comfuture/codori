@@ -15,6 +15,10 @@ const hiddenActions = new Set<SubagentActivityItem['tool']>([
 
 const isHidden = computed(() => hiddenActions.has(props.item.tool))
 const stateEntries = computed<SubagentAgentState[]>(() => props.agentStates ?? [])
+const targetThreadIds = computed(() => [...new Set([
+  ...props.item.receiverThreadIds,
+  ...stateEntries.value.map(entry => entry.threadId)
+].filter(Boolean))])
 
 const shortThreadId = (value: string) => value.slice(0, 8)
 
@@ -86,15 +90,15 @@ const title = computed(() => {
 })
 
 const suffix = computed(() => {
-  if (props.item.receiverThreadIds.length === 0) {
+  if (targetThreadIds.value.length === 0) {
     return ''
   }
 
-  if (props.item.receiverThreadIds.length === 1) {
-    return shortThreadId(props.item.receiverThreadIds[0] ?? '')
+  if (targetThreadIds.value.length === 1) {
+    return shortThreadId(targetThreadIds.value[0] ?? '')
   }
 
-  return `${props.item.receiverThreadIds.length} agents`
+  return `${targetThreadIds.value.length} agents`
 })
 
 const statusColor = (status: SubagentAgentState['status']) => {
@@ -170,7 +174,7 @@ const { open, isLoading, isStreaming } = useChatToolState(() => props.item.statu
           <span class="font-medium text-highlighted">from</span>
           <span class="font-mono text-toned">{{ shortThreadId(item.senderThreadId) }}</span>
           <span class="font-medium text-highlighted">to</span>
-          <span class="font-mono text-toned">{{ item.receiverThreadIds.map(shortThreadId).join(', ') || '-' }}</span>
+          <span class="font-mono text-toned">{{ targetThreadIds.map(shortThreadId).join(', ') || '-' }}</span>
         </div>
         <div
           v-if="item.model || item.reasoningEffort"
