@@ -146,7 +146,7 @@ const projectItems = computed(() => {
   }
 
   return sortSidebarProjects(projects.value, null).map(project => ({
-    label: project.projectId,
+    label: project.projectName ?? project.projectId,
     suffix: project.projectPath,
     icon: 'i-lucide-folder-git-2',
     onSelect: () => selectProject(project.projectId)

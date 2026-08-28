@@ -809,7 +809,7 @@ const showStarterProjectSelector = computed(() =>
 )
 const starterProjectItems = computed(() =>
   sortSidebarProjects(projects.value, null).map(project => ({
-    label: project.projectId,
+    label: project.projectName ?? project.projectId,
     value: project.projectId,
     description: project.projectPath
   }))

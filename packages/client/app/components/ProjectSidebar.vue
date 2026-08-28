@@ -57,6 +57,7 @@ const emit = defineEmits<{
 type ProjectNavigationItem = NavigationMenuItem & {
   itemKind: 'project'
   projectId: string
+  projectName: string
   projectPath: string
   error: string | null
 }
@@ -734,16 +735,17 @@ const projectItems = computed<ProjectSidebarNavigationItem[][]>(() => [
     const item: ProjectNavigationItem = {
       itemKind: 'project',
       value: projectNavigationValue(project.projectId),
-      label: project.projectId,
+      label: project.projectName ?? project.projectId,
       icon: 'i-lucide-folder-git-2',
       active,
       class: navigationItemClass(active),
       ui: navigationItemUi(active),
       tooltip: {
-        text: project.projectId
+        text: project.projectName ? `${project.projectName} (${project.projectId})` : project.projectId
       },
       to: toProjectRoute(project.projectId),
       projectId: project.projectId,
+      projectName: project.projectName ?? project.projectId,
       projectPath: project.projectPath,
       error: project.error
     }
@@ -1081,7 +1083,7 @@ const isThreadStatusItem = (item: NavigationMenuItem): item is ProjectThreadStat
               class="truncate"
               :class="navigationTitleClass(item)"
             >
-              {{ asProjectItem(item).projectId }}
+              {{ asProjectItem(item).projectName }}
             </div>
             <div
               v-if="asProjectItem(item).error"
@@ -1134,7 +1136,7 @@ const isThreadStatusItem = (item: NavigationMenuItem): item is ProjectThreadStat
                 variant="ghost"
                 size="xs"
                 square
-                :aria-label="`New thread in ${asProjectItem(item).projectId}`"
+                :aria-label="`New thread in ${asProjectItem(item).projectName}`"
                 @click.prevent.stop="startProjectThread(asProjectItem(item).projectId)"
               />
             </UTooltip>

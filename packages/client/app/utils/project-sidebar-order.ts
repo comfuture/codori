@@ -1,9 +1,9 @@
-export const sortSidebarProjects = <T extends { projectId: string }>(
+export const sortSidebarProjects = <T extends { projectId: string, projectName?: string }>(
   projects: T[],
   activeProjectId: string | null
 ) => {
   const alphabeticalProjects = [...projects].sort((left, right) =>
-    left.projectId.localeCompare(right.projectId)
+    (left.projectName ?? left.projectId).localeCompare(right.projectName ?? right.projectId)
   )
 
   if (!activeProjectId) {
