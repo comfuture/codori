@@ -99,6 +99,16 @@ export const removeChatMessage = (messages: ChatMessage[], messageId: string) =>
 export const removePendingUserMessageId = (messageIds: string[], messageId: string) =>
   messageIds.filter(candidateId => candidateId !== messageId)
 
+export const resolvePendingUserMessageId = (
+  messageIds: string[],
+  clientUserMessageId: string | null | undefined
+) => {
+  if (clientUserMessageId) {
+    return messageIds.includes(clientUserMessageId) ? clientUserMessageId : null
+  }
+  return messageIds[0] ?? null
+}
+
 const isEquivalentUserMessagePart = (
   currentPart: ChatMessage['parts'][number],
   confirmedPart: ChatMessage['parts'][number]
