@@ -48,6 +48,8 @@ export type ProjectRootResponse = {
 export type ProjectRecord = {
   id: string
   path: string
+  name?: string
+  roots?: string[]
 }
 
 export type RuntimeRecord = {
@@ -127,6 +129,8 @@ export type ProjectRuntimeStatus = 'running' | 'stopped' | 'error'
 export type ProjectStatusRecord = {
   projectId: string
   projectPath: string
+  projectName?: string
+  projectRoots?: string[]
   status: ProjectRuntimeStatus
   pid: number | null
   port: number | null

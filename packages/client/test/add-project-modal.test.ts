@@ -7,8 +7,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import AddProjectModal from '../app/components/AddProjectModal.vue'
 
 const mockRouterPush = vi.fn()
-const mockCloneProject = vi.fn()
-const mockRefreshProjects = vi.fn()
+const mockCreateProject = vi.fn()
 const mockClonePending = ref(false)
 
 vi.mock('../app/composables/useCodoriRouter', () => ({
@@ -20,8 +19,7 @@ vi.mock('../app/composables/useCodoriRouter', () => ({
 vi.mock('../app/composables/useProjects', () => ({
   useProjects: () => ({
     clonePending: mockClonePending,
-    cloneProject: mockCloneProject,
-    refreshProjects: mockRefreshProjects
+    createProject: mockCreateProject
   })
 }))
 
@@ -142,7 +140,12 @@ const mountModal = (props: Record<string, unknown> = {}) =>
         UFormField: FormFieldStub,
         UInput: InputStub,
         UButton: ButtonStub,
-        UAlert: AlertStub
+        UAlert: AlertStub,
+        RemoteDirectoryPicker: defineComponent({
+          props: { modelValue: { type: Array, default: () => [] } },
+          emits: ['update:modelValue'],
+          setup(_, { emit }) { return () => h('button', { class: 'picker-stub', onClick: () => emit('update:modelValue', ['/srv/codori']) }) }
+        })
       }
     }
   })
@@ -150,40 +153,37 @@ const mountModal = (props: Record<string, unknown> = {}) =>
 describe('add project modal', () => {
   beforeEach(() => {
     mockRouterPush.mockReset()
-    mockCloneProject.mockReset()
-    mockRefreshProjects.mockReset()
+    mockCreateProject.mockReset()
     mockClonePending.value = false
   })
 
-  it('submits the clone request, refreshes projects, and navigates to the new project', async () => {
-    mockCloneProject.mockResolvedValue({
-      projectId: 'team/codori'
+  it('creates an app-server project and navigates to it', async () => {
+    mockCreateProject.mockResolvedValue({
+      projectId: 'project-1'
     })
-    mockRefreshProjects.mockResolvedValue(undefined)
     mockRouterPush.mockResolvedValue(undefined)
 
     const wrapper = mountModal()
     const inputs = wrapper.findAll('input')
 
-    await inputs[0]!.setValue('  https://github.com/comfuture/codori  ')
-    await inputs[1]!.setValue(' team/codori ')
+    await inputs[0]!.setValue('  Codori  ')
+    await wrapper.get('.picker-stub').trigger('click')
     await wrapper.get('form').trigger('submit')
     await flushPromises()
 
-    expect(mockCloneProject).toHaveBeenCalledWith({
-      repositoryUrl: 'https://github.com/comfuture/codori',
-      destination: 'team/codori'
-    })
-    expect(mockRefreshProjects).toHaveBeenCalledTimes(1)
-    expect(mockRouterPush).toHaveBeenCalledWith('/projects/team/codori')
+    expect(mockCreateProject).toHaveBeenCalledWith(expect.objectContaining({
+      name: 'Codori',
+      roots: ['/srv/codori']
+    }))
+    expect(mockRouterPush).toHaveBeenCalledWith('/projects/project-1')
     expect(wrapper.emitted('update:open')).toEqual([[false]])
   })
 
-  it('renders inline clone errors from the server response', async () => {
-    mockCloneProject.mockRejectedValue({
+  it('renders inline app-server errors', async () => {
+    mockCreateProject.mockRejectedValue({
       data: {
         error: {
-          message: 'Destination "team/codori" already exists under the configured Codori root.'
+          message: 'The server directory is unavailable.'
         }
       }
     })
@@ -191,19 +191,23 @@ describe('add project modal', () => {
     const wrapper = mountModal()
     const inputs = wrapper.findAll('input')
 
-    await inputs[0]!.setValue('https://github.com/comfuture/codori')
+    await inputs[0]!.setValue('Codori')
+    await wrapper.get('.picker-stub').trigger('click')
     await wrapper.get('form').trigger('submit')
     await flushPromises()
 
-    expect(wrapper.text()).toContain('Destination "team/codori" already exists under the configured Codori root.')
-    expect(mockRefreshProjects).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('The server directory is unavailable.')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(mockCreateProject).toHaveBeenCalledTimes(2)
+    expect(mockCreateProject.mock.calls[1]![0]!.idempotencyKey)
+      .toBe(mockCreateProject.mock.calls[0]![0]!.idempotencyKey)
     expect(mockRouterPush).not.toHaveBeenCalled()
   })
 
-  it('uses a single-directory placeholder for the optional destination field', () => {
+  it('requires a server folder selection', async () => {
     const wrapper = mountModal()
-    const inputs = wrapper.findAll('input')
-
-    expect(inputs[1]?.attributes('placeholder')).toBe('reponame')
+    await wrapper.get('form').trigger('submit')
+    expect(wrapper.text()).toContain('Project name is required.')
   })
 })

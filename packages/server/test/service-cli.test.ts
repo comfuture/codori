@@ -3,7 +3,6 @@ import os from 'node:os'
 import { dirname, join } from 'node:path'
 import { PassThrough } from 'node:stream'
 import { describe, expect, it } from 'vitest'
-import { resolveLastServiceRoot, writeLastServiceRoot } from '../src/config.js'
 import { CodoriError } from '../src/errors.js'
 import {
   installService,
@@ -230,12 +229,10 @@ describe('service lifecycle orchestration', () => {
     expect(existsSync(join(homeDir, '.codori', 'services', installed.metadata.installId))).toBe(false)
   })
 
-  it('keeps a Settings-changed root across restart and start', async () => {
+  it('does not create a remembered-root record during lifecycle operations', async () => {
     const homeDir = mkdtempSync(join(os.tmpdir(), 'codori-home-'))
     const installRoot = mkdtempSync(join(os.tmpdir(), 'codori-root-a-'))
-    const changedRoot = mkdtempSync(join(os.tmpdir(), 'codori-root-b-'))
     mkdirSync(join(installRoot, '.git'), { recursive: true })
-    mkdirSync(join(changedRoot, '.git'), { recursive: true })
 
     const dependencies = {
       homeDir,
@@ -253,21 +250,10 @@ describe('service lifecycle orchestration', () => {
       yes: true
     }, dependencies)
 
-    expect(resolveLastServiceRoot(homeDir)).toBe(installRoot)
-
-    // Settings changed the served root to B while the service was running.
-    writeLastServiceRoot(changedRoot, homeDir)
-
-    // A lifecycle command still targets the install-time root A, but must not
-    // revert the remembered root back to A.
     await restartService({ root: installRoot, yes: true }, dependencies)
-    expect(resolveLastServiceRoot(homeDir)).toBe(changedRoot)
-
     await stopService({ root: installRoot, yes: true }, dependencies)
-    expect(resolveLastServiceRoot(homeDir)).toBe(changedRoot)
-
     await startService({ root: installRoot, yes: true }, dependencies)
-    expect(resolveLastServiceRoot(homeDir)).toBe(changedRoot)
+    expect(existsSync(join(homeDir, '.codori', 'last-root.json'))).toBe(false)
   })
 
   it('restarts an active linux service when start applies launch overrides', async () => {
@@ -589,26 +575,7 @@ describe('installed service root resolution', () => {
     createServiceMetadata(homeDir, 'aaaaaaaaaaaa', '/srv/alpha')
     createServiceMetadata(homeDir, 'bbbbbbbbbbbb', '/srv/beta')
 
-    expect(() => resolveInstalledServiceRoot(undefined, homeDir)).toThrow(/Pass --root with one of/)
-  })
-
-  it('breaks a tie with a remembered root that still has metadata', () => {
-    const homeDir = mkdtempSync(join(os.tmpdir(), 'codori-home-'))
-    createServiceMetadata(homeDir, 'aaaaaaaaaaaa', '/srv/alpha')
-    createServiceMetadata(homeDir, 'bbbbbbbbbbbb', '/srv/beta')
-    writeLastServiceRoot('/srv/beta', homeDir)
-
-    expect(resolveInstalledServiceRoot(undefined, homeDir)).toBe('/srv/beta')
-  })
-
-  it('ignores a remembered root with no matching install', () => {
-    const homeDir = mkdtempSync(join(os.tmpdir(), 'codori-home-'))
-    createServiceMetadata(homeDir, 'aaaaaaaaaaaa', '/srv/projects')
-    // A stale last-root.json used to produce SERVICE_NOT_INSTALLED for a
-    // directory that was never installed.
-    writeLastServiceRoot('/tmp/projects', homeDir)
-
-    expect(resolveInstalledServiceRoot(undefined, homeDir)).toBe('/srv/projects')
+    expect(() => resolveInstalledServiceRoot(undefined, homeDir)).toThrow(/legacy root-keyed services/)
   })
 
   it('explains that nothing is installed rather than scanning for a root', () => {

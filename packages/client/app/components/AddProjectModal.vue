@@ -18,13 +18,16 @@ const emit = defineEmits<{
 const router = useCodoriRouter()
 const {
   clonePending,
-  cloneProject,
-  refreshProjects
+  createProject
 } = useProjects()
 
-const repositoryUrl = ref('')
-const destination = ref('')
+const projectName = ref('')
+const roots = ref<string[]>([])
 const error = ref<string | null>(null)
+const newIdempotencyKey = () => typeof globalThis.crypto?.randomUUID === 'function'
+  ? `codori:${globalThis.crypto.randomUUID()}`
+  : `codori:${Date.now()}:${Math.random().toString(36).slice(2)}`
+const idempotencyKey = ref(newIdempotencyKey())
 
 const isOpen = computed({
   get: () => props.open,
@@ -34,9 +37,10 @@ const isOpen = computed({
 })
 
 const resetState = () => {
-  repositoryUrl.value = ''
-  destination.value = ''
+  projectName.value = ''
+  roots.value = []
   error.value = null
+  idempotencyKey.value = newIdempotencyKey()
 }
 
 watch(() => props.open, (open, previous) => {
@@ -68,23 +72,26 @@ const submit = async () => {
     return
   }
 
-  const trimmedRepositoryUrl = repositoryUrl.value.trim()
-  const trimmedDestination = destination.value.trim()
+  const trimmedProjectName = projectName.value.trim()
 
-  if (!trimmedRepositoryUrl) {
-    error.value = 'Git repository URL is required.'
+  if (!trimmedProjectName) {
+    error.value = 'Project name is required.'
+    return
+  }
+  if (!roots.value.length) {
+    error.value = 'Select at least one folder on the Codori server.'
     return
   }
 
   error.value = null
 
   try {
-    const project = await cloneProject({
-      repositoryUrl: trimmedRepositoryUrl,
-      destination: trimmedDestination || null
+    const project = await createProject({
+      name: trimmedProjectName,
+      roots: roots.value,
+      idempotencyKey: idempotencyKey.value
     })
 
-    await refreshProjects()
     isOpen.value = false
     await router.push(toProjectRoute(project.projectId))
   } catch (caughtError) {
@@ -106,7 +113,7 @@ const submit = async () => {
       >
         <div class="w-full space-y-3">
           <UFormField
-            label="Git repository URL"
+            label="Project name"
             required
             size="sm"
             class="w-full"
@@ -116,9 +123,9 @@ const submit = async () => {
             }"
           >
             <UInput
-              v-model="repositoryUrl"
+              v-model="projectName"
               autofocus
-              placeholder="git@github.com:owner/repo.git"
+              placeholder="My project"
               size="sm"
               color="neutral"
               variant="subtle"
@@ -132,8 +139,8 @@ const submit = async () => {
           </UFormField>
 
           <UFormField
-            label="Directory name"
-            description="Optional relative path under the configured Codori root."
+            label="Server folders"
+            description="One or more absolute folders on the server running Codori."
             size="sm"
             class="w-full"
             :ui="{
@@ -141,18 +148,9 @@ const submit = async () => {
               container: 'w-full'
             }"
           >
-            <UInput
-              v-model="destination"
-              placeholder="reponame"
-              size="sm"
-              color="neutral"
-              variant="subtle"
-              class="w-full"
+            <RemoteDirectoryPicker
+              v-model="roots"
               :disabled="clonePending"
-              :ui="{
-                root: 'w-full',
-                base: 'min-h-10 w-full rounded-lg px-3 text-sm'
-              }"
             />
           </UFormField>
         </div>
@@ -181,7 +179,7 @@ const submit = async () => {
             :loading="clonePending"
             :disabled="clonePending"
           >
-            Clone project
+            Add project
           </UButton>
         </div>
       </form>

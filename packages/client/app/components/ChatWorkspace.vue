@@ -3450,6 +3450,7 @@ const ensureThread = async () => {
     model: selectedModel.value,
     serviceTier: selectedServiceTier.value,
     cwd: selectedProject.value?.projectPath ?? null,
+    projectId: workspaceKind === 'project' ? workspaceId.value : null,
     approvalPolicy: 'never',
     developerInstructions,
     experimentalRawEvents: false

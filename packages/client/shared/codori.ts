@@ -5,6 +5,8 @@ export type ProjectRuntimeStatus = 'running' | 'stopped' | 'error'
 export type ProjectRecord = {
   projectId: string
   projectPath: string
+  projectName?: string
+  projectRoots?: string[]
   status: ProjectRuntimeStatus
   pid: number | null
   port: number | null
@@ -78,9 +80,24 @@ export type ChatResponse = {
   chat: ChatSessionRecord | StartChatSessionResult
 }
 
-export type CloneProjectRequest = {
-  repositoryUrl: string
-  destination?: string | null
+export type CreateProjectRequest = {
+  name: string
+  roots: string[]
+  idempotencyKey: string
+}
+
+export type CreateProjectResponse = ProjectsResponse & {
+  project: ProjectRecord
+}
+
+export type DirectoryBrowseResponse = {
+  directory: {
+    path: string
+    entries: Array<{
+      name: string
+      isDirectory: boolean
+    }>
+  }
 }
 
 export type ServiceUpdateResponse = {

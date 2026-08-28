@@ -76,10 +76,6 @@ export const SERVICE_COMMANDS: CliCommandDoc[] = [
 
 export const CLI_OPTIONS: CliOptionDoc[] = [
   {
-    flag: '--root <path>',
-    description: 'Parent directory scanned for Git projects. Defaults to the current directory.'
-  },
-  {
     flag: '--host <host>',
     description: 'Address the server binds. Defaults to 127.0.0.1.'
   },
@@ -120,11 +116,7 @@ export const CLI_OPTIONS: CliOptionDoc[] = [
 
 export const CLI_EXAMPLES: { command: string, description: string }[] = [
   {
-    command: `${CLI_BINARY} start --root ~/Project`,
-    description: 'Serve every Git project under ~/Project with automatic private HTTPS.'
-  },
-  {
-    command: `${CLI_BINARY} start --root ~/Project --no-tailscale-serve`,
+    command: `${CLI_BINARY} start --no-tailscale-serve`,
     description: 'Start locally without configuring Tailscale Serve.'
   },
   {

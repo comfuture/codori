@@ -22,18 +22,17 @@ const namedStub = (name: string) => defineComponent({
 })
 
 describe('general settings', () => {
-  it('owns workspace root and appearance in one section', () => {
+  it('owns appearance without a legacy workspace-root setting', () => {
     const wrapper = mount(GeneralSettingsPage, {
       global: {
         stubs: {
-          ProjectRootSettings: namedStub('ProjectRootSettings'),
           AppearanceSettings: namedStub('AppearanceSettings')
         }
       }
     })
 
     expect(wrapper.get('h2').text()).toBe('General')
-    expect(wrapper.find('[data-stub="ProjectRootSettings"]').exists()).toBe(true)
+    expect(wrapper.find('[data-stub="ProjectRootSettings"]').exists()).toBe(false)
     expect(wrapper.find('[data-stub="AppearanceSettings"]').exists()).toBe(true)
   })
 
