@@ -27,6 +27,7 @@ type ThreadQueueRpcClient = {
 type UseThreadQueueOptions = {
   threadId: Ref<string | null>
   getClient: () => ThreadQueueRpcClient
+  getLastTurnStatus?: (threadId: string) => string | null | undefined
 }
 
 export const useThreadQueue = (options: UseThreadQueueOptions) => {
@@ -383,7 +384,9 @@ export const useThreadQueue = (options: UseThreadQueueOptions) => {
     loading.value = false
     mutating.value = false
     error.value = null
-    automaticDispatchPaused = false
+    automaticDispatchPaused = threadId
+      ? options.getLastTurnStatus?.(threadId) === 'interrupted'
+      : false
     paused.value = false
     if (threadId) {
       void refresh()

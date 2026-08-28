@@ -4,6 +4,7 @@ import type { CollaborationModeMask } from '~~/shared/collaboration-mode'
 import type { ReasoningEffort } from '~~/shared/generated/codex-app-server/ReasoningEffort'
 import type { CodexRpcNotification } from '~~/shared/codex-rpc'
 import type { ThreadGoal } from '~~/shared/generated/codex-app-server/v2/ThreadGoal'
+import type { TurnStatus } from '~~/shared/generated/codex-app-server/v2/TurnStatus'
 import type { ThreadPlanState } from '~~/shared/turn-plan'
 import type { ModelOption, TokenUsageSnapshot } from '~~/shared/chat-prompt-controls'
 
@@ -40,6 +41,7 @@ export type ChatSession = {
   threadGoals: Ref<Record<string, ThreadGoal>>
   threadPlans: Ref<Record<string, ThreadPlanState>>
   threadCollaborationModeMasks: Ref<Record<string, CollaborationModeMask>>
+  threadLastTurnStatuses: Ref<Record<string, TurnStatus>>
   collaborationModeMasks: Ref<CollaborationModeMask[]>
   collaborationModesLoaded: Ref<boolean>
   collaborationModesLoading: Ref<boolean>
@@ -89,6 +91,7 @@ const createSession = (): ChatSession => {
     threadGoals: ref({}) as Ref<Record<string, ThreadGoal>>,
     threadPlans: ref({}) as Ref<Record<string, ThreadPlanState>>,
     threadCollaborationModeMasks: ref({}) as Ref<Record<string, CollaborationModeMask>>,
+    threadLastTurnStatuses: ref({}) as Ref<Record<string, TurnStatus>>,
     collaborationModeMasks: ref([]) as Ref<CollaborationModeMask[]>,
     collaborationModesLoaded: ref(false),
     collaborationModesLoading: ref(false),
