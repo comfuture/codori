@@ -47,6 +47,7 @@ const makeThread = (input: Pick<Thread, 'id' | 'preview' | 'cwd' | 'createdAt' |
   ephemeral: false,
   section: null,
   sectionEnteredAt: null,
+  projectId: null,
   historyMode: 'legacy',
   modelProvider: 'openai',
   createdAt: input.createdAt,
@@ -67,6 +68,23 @@ const makeThread = (input: Pick<Thread, 'id' | 'preview' | 'cwd' | 'createdAt' |
 })
 
 describe('chat transcript stability', () => {
+  it('preserves asynchronous agent-message delivery for rendering', () => {
+    expect(itemToMessages(asAgentMessageItem({
+      id: 'agent-async-1',
+      text: 'Background update',
+      delivery: 'async'
+    }))).toEqual<ChatMessage[]>([{
+      id: 'agent-async-1',
+      role: 'assistant',
+      delivery: 'async',
+      parts: [{
+        type: 'text',
+        text: 'Background update',
+        state: 'done'
+      }]
+    }])
+  })
+
   it('maps realtime handoffs to a dedicated system presentation', () => {
     expect(itemToMessages({
       type: 'userMessage',

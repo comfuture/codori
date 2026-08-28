@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import MessagePartRenderer from './MessagePartRenderer'
+import MessagePartAsyncDelivery from './message-part/AsyncDelivery.vue'
 import type { ChatMessage, ChatPart } from '~~/shared/codex-chat'
 import type { WorkspaceAttachmentScope } from '~~/shared/chat-attachments'
 
@@ -21,6 +22,8 @@ const partKey = (messageId: string | undefined, part: ChatPart, index: number) =
 
 <template>
   <div class="space-y-3">
+    <MessagePartAsyncDelivery :delivery="message?.delivery" />
+
     <MessagePartRenderer
       v-for="(part, index) in message?.parts ?? []"
       :key="partKey(message?.id, part, index)"

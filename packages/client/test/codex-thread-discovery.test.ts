@@ -159,7 +159,7 @@ describe('Codex thread discovery compatibility', () => {
     })
   })
 
-  it.each(['started', 'interacted', 'interrupted'])(
+  it.each(['started', 'interacted', 'interrupted', 'completed'])(
     'extracts a thread reference from subAgentActivity %s without inferring running state',
     (kind) => {
       const input = notification({
@@ -182,7 +182,7 @@ describe('Codex thread discovery compatibility', () => {
     }
   )
 
-  it.each(['spawnAgent', 'sendInput', 'resumeAgent'])(
+  it.each(['spawnAgent', 'sendInput', 'resumeAgent', 'sendMessage', 'followupTask', 'interruptAgent'])(
     'extracts deduplicated receiver ids from legacy %s activity',
     (tool) => {
       const input = notification({
@@ -230,16 +230,18 @@ describe('Codex thread discovery compatibility', () => {
   })
 
   it('ignores unrelated or malformed collaboration items', () => {
-    expect(extractThreadDiscoveryHints(notification({
-      method: 'item/completed',
-      params: {
-        item: {
-          type: 'collabAgentToolCall',
-          tool: 'wait',
-          receiverThreadIds: ['thread-child']
+    for (const tool of ['wait', 'listAgents']) {
+      expect(extractThreadDiscoveryHints(notification({
+        method: 'item/completed',
+        params: {
+          item: {
+            type: 'collabAgentToolCall',
+            tool,
+            receiverThreadIds: ['thread-child']
+          }
         }
-      }
-    })).referencedThreadIds).toEqual([])
+      })).referencedThreadIds).toEqual([])
+    }
 
     expect(extractThreadDiscoveryHints(notification({
       method: 'item/completed',

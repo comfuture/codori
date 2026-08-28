@@ -21,7 +21,8 @@ const completedMessage = (input: {
       id: 'item-1',
       text: input.text ?? 'The task is ready.',
       phase: input.phase === undefined ? 'final_answer' : input.phase,
-      memoryCitation: null
+      memoryCitation: null,
+      delivery: null
     }
   }
 }) as CodexRpcNotification

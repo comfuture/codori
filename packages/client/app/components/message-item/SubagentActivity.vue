@@ -18,23 +18,64 @@ const stateEntries = computed<SubagentAgentState[]>(() => props.agentStates ?? [
 
 const shortThreadId = (value: string) => value.slice(0, 8)
 
+const actionTitle = (labels: {
+  inProgress: string
+  completed: string
+  failed: string
+  interrupted: string
+}) => labels[props.item.status]
+
 const title = computed(() => {
   switch (props.item.tool) {
     case 'spawnAgent':
-      if (props.item.status === 'failed') {
-        return 'Spawn failed'
-      }
-      return props.item.status === 'inProgress' ? 'Spawning..' : 'Spawned'
+      return actionTitle({
+        inProgress: 'Spawning...',
+        completed: 'Spawned',
+        failed: 'Spawn failed',
+        interrupted: 'Spawn interrupted'
+      })
     case 'sendInput':
-      if (props.item.status === 'failed') {
-        return 'Send failed'
-      }
-      return props.item.status === 'inProgress' ? 'Sending..' : 'Sent'
+      return actionTitle({
+        inProgress: 'Sending...',
+        completed: 'Sent',
+        failed: 'Send failed',
+        interrupted: 'Send interrupted'
+      })
     case 'resumeAgent':
-      if (props.item.status === 'failed') {
-        return 'Resume failed'
-      }
-      return props.item.status === 'inProgress' ? 'Resuming..' : 'Resumed'
+      return actionTitle({
+        inProgress: 'Resuming...',
+        completed: 'Resumed',
+        failed: 'Resume failed',
+        interrupted: 'Resume interrupted'
+      })
+    case 'sendMessage':
+      return actionTitle({
+        inProgress: 'Sending message...',
+        completed: 'Message sent',
+        failed: 'Message failed',
+        interrupted: 'Message interrupted'
+      })
+    case 'followupTask':
+      return actionTitle({
+        inProgress: 'Starting follow-up...',
+        completed: 'Follow-up started',
+        failed: 'Follow-up failed',
+        interrupted: 'Follow-up interrupted'
+      })
+    case 'interruptAgent':
+      return actionTitle({
+        inProgress: 'Interrupting agent...',
+        completed: 'Agent interrupted',
+        failed: 'Interrupt failed',
+        interrupted: 'Interrupt cancelled'
+      })
+    case 'listAgents':
+      return actionTitle({
+        inProgress: 'Listing agents...',
+        completed: 'Agents listed',
+        failed: 'List failed',
+        interrupted: 'List interrupted'
+      })
     case 'wait':
       return 'Waiting'
     case 'closeAgent':
@@ -97,9 +138,15 @@ const statusLabel = (status: SubagentAgentState['status']) => {
   }
 }
 
-const icon = computed(() =>
-  props.item.status === 'failed' ? 'i-lucide-triangle-alert' : 'i-lucide-bot'
-)
+const icon = computed(() => {
+  if (props.item.status === 'failed') {
+    return 'i-lucide-triangle-alert'
+  }
+  if (props.item.status === 'interrupted') {
+    return 'i-lucide-circle-stop'
+  }
+  return 'i-lucide-bot'
+})
 
 const { open, isLoading, isStreaming } = useChatToolState(() => props.item.status, props.item.status !== 'completed')
 </script>
@@ -114,7 +161,7 @@ const { open, isLoading, isStreaming } = useChatToolState(() => props.item.statu
     :streaming="isStreaming"
     variant="card"
     :open="open"
-    :default-open="item.status === 'failed'"
+    :default-open="item.status === 'failed' || item.status === 'interrupted'"
     @update:open="open = $event"
   >
     <div class="space-y-3">

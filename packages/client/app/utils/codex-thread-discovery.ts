@@ -25,13 +25,17 @@ export type ThreadRunningState = {
 const referencedCollabTools = new Set([
   'spawnAgent',
   'sendInput',
-  'resumeAgent'
+  'resumeAgent',
+  'sendMessage',
+  'followupTask',
+  'interruptAgent'
 ])
 
 const subagentActivityKinds = new Set([
   'started',
   'interacted',
-  'interrupted'
+  'interrupted',
+  'completed'
 ])
 
 const WINDOWS_ABSOLUTE_PATH_RE = /^[A-Za-z]:[\\/]/u

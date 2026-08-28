@@ -50,7 +50,7 @@ export type McpToolCallItem = Extract<ThreadItem, { type: 'mcpToolCall' }>
 export type DynamicToolCallItem = Extract<ThreadItem, { type: 'dynamicToolCall' }>
 
 export type SubagentTool = Extract<ThreadItem, { type: 'collabAgentToolCall' }>['tool']
-export type SubagentToolStatus = 'inProgress' | 'completed' | 'failed'
+export type SubagentToolStatus = Extract<ThreadItem, { type: 'collabAgentToolCall' }>['status']
 export type SubagentAgentStatus =
   | 'pendingInit'
   | 'running'
@@ -173,6 +173,7 @@ export type ChatMessage = {
   id: string
   role: 'user' | 'assistant' | 'system'
   pending?: boolean
+  delivery?: Extract<ThreadItem, { type: 'agentMessage' }>['delivery']
   parts: ChatPart[]
 }
 
@@ -338,12 +339,14 @@ export const asAgentMessageItem = (input: {
   text: string
   phase?: MessagePhase | null
   memoryCitation?: MemoryCitation | null
+  delivery?: Extract<ThreadItem, { type: 'agentMessage' }>['delivery']
 }): Extract<ThreadItem, { type: 'agentMessage' }> => ({
   type: 'agentMessage',
   id: input.id,
   text: input.text,
   phase: input.phase ?? null,
-  memoryCitation: input.memoryCitation ?? null
+  memoryCitation: input.memoryCitation ?? null,
+  delivery: input.delivery ?? null
 })
 
 export const isSubagentActiveStatus = (status: SubagentAgentStatus) =>
@@ -672,6 +675,7 @@ export const itemToMessages = (
       return [{
         id: item.id,
         role: 'assistant',
+        ...(item.delivery ? { delivery: item.delivery } : {}),
         parts: [{
           type: 'text',
           text: item.text,
