@@ -140,6 +140,23 @@ const waitForCondition = async (condition: () => boolean, timeoutMs = 1_000) => 
 }
 
 describe('RuntimeManager', () => {
+  it('keeps a synchronized empty app-server project registry authoritative', () => {
+    const fixture = createFixture()
+    const manager = createRuntimeManager({
+      homeDir: fixture.homeDir,
+      documentsDir: fixture.documentsDir,
+      config: fixture.config
+    })
+    runningManagers.push(manager)
+
+    expect(manager.listProjects().map(project => project.id)).toEqual(['demo', 'other'])
+
+    manager.setAppServerProjects([])
+
+    expect(manager.listProjects()).toEqual([])
+    expect(() => manager.getProjectStatus('demo')).toThrow(/was not found/u)
+  })
+
   it('builds a bundled Codex CLI command through the current Node runtime', async () => {
     const executable = await resolveCodexExecutable({
       env: { PATH: '' }

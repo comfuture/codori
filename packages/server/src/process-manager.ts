@@ -156,6 +156,8 @@ export class RuntimeManager {
 
   private readonly appServerProjects = new Map<string, ProjectRecord>()
 
+  private appServerProjectsLoaded = false
+
   private sharedRuntimeStart: Promise<StartedBackend> | null = null
 
   private sharedRuntimeStop: Promise<boolean> | null = null
@@ -211,7 +213,7 @@ export class RuntimeManager {
   }
 
   listProjects() {
-    if (this.appServerProjects.size > 0) {
+    if (this.appServerProjectsLoaded) {
       return [...this.appServerProjects.values()]
     }
     return scanProjects(this.config.root)
@@ -222,6 +224,7 @@ export class RuntimeManager {
     for (const project of projects) {
       this.appServerProjects.set(project.id, project)
     }
+    this.appServerProjectsLoaded = true
   }
 
   private getChatsRoot() {

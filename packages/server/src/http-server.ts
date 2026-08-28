@@ -511,11 +511,31 @@ export const createHttpServer = async (
     error: null
   })
 
+  const appServerProjectStatuses = async () => {
+    const projects = await appServerProjects(manager)
+    const statusByProjectId = new Map(
+      (await resolveValue(manager.listProjectStatuses()))
+        .map(status => [status.projectId, status] as const)
+    )
+    return projects.map((project) => {
+      const status = statusByProjectId.get(project.id)
+      if (!status) {
+        return toProjectStatus(project)
+      }
+      return {
+        ...status,
+        projectPath: project.roots[0]?.path ?? '',
+        projectName: project.name,
+        projectRoots: project.roots.map(root => root.path)
+      }
+    })
+  }
+
   app.get('/api/projects', async (): Promise<ProjectsResponse> => {
     if (!manager.getAppServerBridgeTarget) {
       return { projects: await resolveValue(manager.listProjectStatuses()) }
     }
-    return { projects: (await appServerProjects(manager)).map(toProjectStatus) }
+    return { projects: await appServerProjectStatuses() }
   })
 
   app.post<{ Body: ProjectCreateRequest }>('/api/projects', async (request, reply): Promise<ProjectCreateResponse> => {
@@ -541,7 +561,7 @@ export const createHttpServer = async (
     reply.status(201)
     return {
       project: toProjectStatus(project),
-      projects: (await appServerProjects(manager)).map(toProjectStatus)
+      projects: await appServerProjectStatuses()
     }
   })
 
