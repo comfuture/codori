@@ -356,6 +356,81 @@ describe('createHttpServer', () => {
     ])
   })
 
+  it('serializes overlapping app-server project refreshes', async () => {
+    const backend = new WebSocketServer({ host: '127.0.0.1', port: 0 })
+    startedSocketServers.push(backend)
+    await new Promise<void>(resolvePromise => backend.once('listening', resolvePromise))
+    const address = backend.address()
+    if (!address || typeof address === 'string') {
+      throw new Error('Failed to get app-server test address.')
+    }
+
+    let listRequestCount = 0
+    let releaseSlowList!: () => void
+    let markSlowListStarted!: () => void
+    const slowListRelease = new Promise<void>((resolvePromise) => {
+      releaseSlowList = resolvePromise
+    })
+    const slowListStarted = new Promise<void>((resolvePromise) => {
+      markSlowListStarted = resolvePromise
+    })
+    backend.on('connection', (socket: WebSocket) => {
+      socket.on('message', (message: WebSocket.RawData) => {
+        const payload = JSON.parse(rawDataToString(message)) as { id?: string, method?: string }
+        if (payload.method === 'initialize') {
+          socket.send(JSON.stringify({ id: payload.id, result: {} }))
+          return
+        }
+        if (payload.method !== 'project/list') {
+          return
+        }
+
+        listRequestCount += 1
+        const sendProjects = () => socket.send(JSON.stringify({
+          id: payload.id,
+          result: {
+            data: [{ id: 'project-1', name: 'First', roots: [{ path: '/srv/first' }] }],
+            nextCursor: null
+          }
+        }))
+        if (listRequestCount === 2) {
+          markSlowListStarted()
+          void slowListRelease.then(sendProjects)
+          return
+        }
+        sendProjects()
+      })
+    })
+
+    const app = await createHttpServer(createManager({
+      getAppServerBridgeTarget: () => ({
+        target: {
+          kind: 'codori-managed',
+          transport: 'tcp-websocket',
+          port: address.port,
+          pid: 4321,
+          ownedByCodori: true,
+          appServerVersion: '0.150.1'
+        },
+        workspacePath: '/srv'
+      }),
+      setAppServerProjects: vi.fn()
+    }))
+    startedApps.push(app)
+
+    const firstRefresh = app.inject({ method: 'GET', url: '/api/projects' })
+    await slowListStarted
+    const secondRefresh = app.inject({ method: 'GET', url: '/api/projects' })
+    await new Promise(resolvePromise => setTimeout(resolvePromise, 50))
+    const requestsBeforeRelease = listRequestCount
+    releaseSlowList()
+
+    const responses = await Promise.all([firstRefresh, secondRefresh])
+    expect(responses.map(response => response.statusCode)).toEqual([200, 200])
+    expect(requestsBeforeRelease).toBe(2)
+    expect(listRequestCount).toBe(3)
+  })
+
   it('reports the configured experimental realtime voice capability', async () => {
     const app = await createHttpServer(createManager({
       config: {

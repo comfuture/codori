@@ -443,6 +443,15 @@ export const createHttpServer = async (
     ? resolveBundledClientDir()
     : options.clientBundleDir
   const serviceUpdateController = options.serviceUpdateController ?? null
+  let appServerProjectRefresh = Promise.resolve<AppServerProject[]>([])
+  const refreshAppServerProjects = () => {
+    const refresh = appServerProjectRefresh.then(
+      () => appServerProjects(manager),
+      () => appServerProjects(manager)
+    )
+    appServerProjectRefresh = refresh
+    return refresh
+  }
 
   await app.register(multipart, {
     limits: {
@@ -512,7 +521,7 @@ export const createHttpServer = async (
   })
 
   const appServerProjectStatuses = async () => {
-    const projects = await appServerProjects(manager)
+    const projects = await refreshAppServerProjects()
     const statusByProjectId = new Map(
       (await resolveValue(manager.listProjectStatuses()))
         .map(status => [status.projectId, status] as const)
@@ -1553,7 +1562,7 @@ export const createHttpServer = async (
   // Without this, a direct deep link could reach `start` or `rpc` before the
   // dashboard's first inventory request had populated the app-server cache.
   if (manager.getAppServerBridgeTarget) {
-    await appServerProjects(manager)
+    await refreshAppServerProjects()
   }
 
   return app
