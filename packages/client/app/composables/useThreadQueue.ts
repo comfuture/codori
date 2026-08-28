@@ -1,5 +1,10 @@
 import { ref, watch, type Ref } from 'vue'
-import type { CodexRpcConnectionState, CodexRpcNotification } from '~~/shared/codex-rpc'
+import {
+  notificationThreadId,
+  notificationTurnStatus,
+  type CodexRpcConnectionState,
+  type CodexRpcNotification
+} from '~~/shared/codex-rpc'
 import type { QueuedSubmission } from '~~/shared/generated/codex-app-server/v2/QueuedSubmission'
 import type { ThreadQueueAddParams } from '~~/shared/generated/codex-app-server/v2/ThreadQueueAddParams'
 import type { ThreadQueueAddResponse } from '~~/shared/generated/codex-app-server/v2/ThreadQueueAddResponse'
@@ -337,12 +342,24 @@ export const useThreadQueue = (options: UseThreadQueueOptions) => {
   }
 
   const handleNotification = (notification: CodexRpcNotification) => {
-    if (notification.method !== 'thread/queue/changed') {
+    if (notificationThreadId(notification) !== selectedThreadId) {
       return
     }
-    const params = notification.params as { threadId?: unknown }
-    if (params.threadId === selectedThreadId) {
+
+    if (notification.method === 'thread/queue/changed') {
       void refresh(true)
+      return
+    }
+    if (notification.method === 'turn/started') {
+      markTurnStarted()
+      return
+    }
+    if (notification.method === 'turn/completed') {
+      markTurnCompleted(notificationTurnStatus(notification))
+      return
+    }
+    if (notification.method === 'turn/failed') {
+      markTurnCompleted('failed')
     }
   }
 

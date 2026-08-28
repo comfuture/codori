@@ -21,22 +21,32 @@ describe('thread queue', () => {
     expect(validateTextThreadQueueDraft({
       text: 'follow up',
       attachmentCount: 1,
-      mentionCount: 0
+      mentionCount: 0,
+      skillMentionCount: 0
     })).toContain('text-only')
     expect(validateTextThreadQueueDraft({
       text: '@agent follow up',
       attachmentCount: 0,
-      mentionCount: 1
+      mentionCount: 1,
+      skillMentionCount: 0
     })).toContain('@ mentions')
+    expect(validateTextThreadQueueDraft({
+      text: '$review follow up',
+      attachmentCount: 0,
+      mentionCount: 0,
+      skillMentionCount: 1
+    })).toContain('$skill')
     expect(validateTextThreadQueueDraft({
       text: '/review',
       attachmentCount: 0,
-      mentionCount: 0
+      mentionCount: 0,
+      skillMentionCount: 0
     })).toContain('Slash commands')
     expect(validateTextThreadQueueDraft({
       text: 'follow up',
       attachmentCount: 0,
-      mentionCount: 0
+      mentionCount: 0,
+      skillMentionCount: 0
     })).toBeNull()
   })
 
@@ -125,6 +135,29 @@ describe('thread queue', () => {
     })
     await queue.refresh()
     expect(queue.submissions.value.map(item => item.id)).toEqual(['one', 'two'])
+    queue.dispose()
+  })
+
+  it('tracks active-thread lifecycle notifications after a controller remount', async () => {
+    const request = async <T>(): Promise<T> => ({
+      data: [queued('one', 'still queued')],
+      nextCursor: null
+    }) as T
+    const threadId = ref<string | null>('thread-one')
+    const queue = useThreadQueue({ threadId, getClient: () => ({ request }) })
+    await queue.refresh()
+
+    queue.handleNotification({
+      method: 'turn/completed',
+      params: { threadId: 'thread-one', status: 'interrupted' }
+    } as unknown as import('../shared/codex-rpc').CodexRpcNotification)
+    expect(queue.paused.value).toBe(true)
+
+    queue.handleNotification({
+      method: 'turn/started',
+      params: { threadId: 'thread-one' }
+    } as unknown as import('../shared/codex-rpc').CodexRpcNotification)
+    expect(queue.paused.value).toBe(false)
     queue.dispose()
   })
 
