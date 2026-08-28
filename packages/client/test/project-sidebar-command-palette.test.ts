@@ -238,6 +238,7 @@ const makeProject = (input: Partial<ProjectRecord> & Pick<ProjectRecord, 'projec
 
 const makeThread = (index: number) => ({
   id: `thread-${index}`,
+  projectId: 'codori',
   name: `Thread ${index}`,
   preview: null,
   updatedAt: 1_000 - index,
@@ -247,12 +248,14 @@ const makeThread = (index: number) => ({
 const makeThreadReadResponse = (input: {
   id: string
   cwd?: string
+  projectId?: string | null
   status?: unknown
   updatedAt?: number
   name?: string | null
 }) => ({
   thread: {
     id: input.id,
+    projectId: input.projectId ?? 'codori',
     cwd: input.cwd ?? '/repo/codori',
     name: input.name ?? input.id,
     preview: '',
@@ -589,8 +592,37 @@ describe('project sidebar inline threads', () => {
       sortKey: 'updated_at',
       sortDirection: 'desc',
       sourceKinds: INLINE_THREAD_SOURCE_KINDS,
-      cwd: '/repo/codori'
+      projectId: 'codori'
     })
+  })
+
+  it('refreshes the app-server project inventory when another client changes a project', async () => {
+    mockRpcRequest.mockResolvedValue(makeThreadListResponse(0))
+    mountSidebar({ collapsed: false })
+    await waitForSidebar()
+
+    emitRpcNotification({
+      method: 'project/changed',
+      params: { projectId: 'other', changeType: 'updated' }
+    } as CodexRpcNotification)
+    await waitForSidebar()
+
+    expect(mockRefreshProjects).toHaveBeenCalledTimes(1)
+  })
+
+  it('removes a visible thread when its app-server project assignment changes', async () => {
+    mockRpcRequest.mockResolvedValue(makeThreadListResponse(1))
+    const wrapper = mountSidebar({ collapsed: false })
+    await waitForSidebar()
+    expect(wrapper.find('[data-to="/projects/codori/threads/thread-1"]').exists()).toBe(true)
+
+    emitRpcNotification({
+      method: 'thread/project/updated',
+      params: { threadId: 'thread-1', projectId: 'other' }
+    } as CodexRpcNotification)
+    await waitForSidebar()
+
+    expect(wrapper.find('[data-to="/projects/codori/threads/thread-1"]').exists()).toBe(false)
   })
 
   it('starts a new thread from an explicit project-row chat-plus button', async () => {
@@ -688,7 +720,7 @@ describe('project sidebar inline threads', () => {
       sortKey: 'updated_at',
       sortDirection: 'desc',
       sourceKinds: INLINE_THREAD_SOURCE_KINDS,
-      cwd: '/repo/codori'
+      projectId: 'codori'
     })
     expect(wrapper.findAll('[data-kind="thread"]')).toHaveLength(7)
     expect(wrapper.text()).toContain('Thread 6')
@@ -861,7 +893,7 @@ describe('project sidebar inline threads', () => {
       sortKey: 'updated_at',
       sortDirection: 'desc',
       sourceKinds: INLINE_THREAD_SOURCE_KINDS,
-      cwd: '/repo/codori'
+      projectId: 'codori'
     })
     expect(wrapper.text()).toContain('Thread 1')
   })
@@ -928,6 +960,7 @@ describe('project sidebar inline threads', () => {
       params: {
         thread: {
           id: 'spawned-thread',
+          projectId: 'codori',
           cwd: '/repo/codori',
           name: 'Spawned worker',
           preview: '',
@@ -1158,6 +1191,7 @@ describe('project sidebar inline threads', () => {
       params: {
         thread: {
           id: 'race-thread',
+          projectId: 'codori',
           cwd: '/repo/codori',
           name: 'Live worker',
           preview: '',
@@ -1274,12 +1308,13 @@ describe('project sidebar inline threads', () => {
       .toBe(false)
   })
 
-  it('filters hydrated threads by cwd and releases the notification subscription on unmount', async () => {
+  it('filters hydrated threads by project id and releases the notification subscription on unmount', async () => {
     mockRpcRequest.mockImplementation((method: string) => {
       if (method === 'thread/read') {
         return Promise.resolve(makeThreadReadResponse({
           id: 'other-project-thread',
           cwd: '/repo/other',
+          projectId: 'other',
           status: { type: 'active', activeFlags: [] }
         }))
       }
@@ -1319,6 +1354,7 @@ describe('project sidebar inline threads', () => {
       params: {
         thread: {
           id: 'lifecycle-thread',
+          projectId: 'codori',
           cwd: '/repo/codori',
           name: 'Lifecycle worker',
           preview: '',

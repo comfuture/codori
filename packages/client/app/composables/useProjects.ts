@@ -3,7 +3,8 @@ import { $fetch } from 'ofetch'
 import { encodeProjectIdSegment } from '~~/shared/codori'
 import { resolveApiUrl, shouldUseServerProxy } from '~~/shared/network'
 import type {
-  CloneProjectRequest,
+  CreateProjectResponse,
+  CreateProjectRequest,
   ProjectRecord,
   ProjectResponse,
   ProjectsResponse,
@@ -28,6 +29,7 @@ export const useProjects = () => {
   }))
   const loaded = useState<boolean>('codori-projects-loaded', () => false)
   const loading = useState<boolean>('codori-projects-loading', () => false)
+  const refreshQueued = useState<boolean>('codori-projects-refresh-queued', () => false)
   const clonePending = useState<boolean>('codori-projects-clone-pending', () => false)
   const serviceUpdatePending = useState<boolean>('codori-service-update-pending', () => false)
   const pendingProjectId = useState<string | null>('codori-projects-pending-id', () => null)
@@ -42,6 +44,7 @@ export const useProjects = () => {
 
   const refreshProjects = async () => {
     if (loading.value) {
+      refreshQueued.value = true
       return
     }
 
@@ -63,6 +66,10 @@ export const useProjects = () => {
       error.value = caughtError instanceof Error ? caughtError.message : String(caughtError)
     } finally {
       loading.value = false
+      if (refreshQueued.value) {
+        refreshQueued.value = false
+        void refreshProjects()
+      }
     }
   }
 
@@ -100,19 +107,19 @@ export const useProjects = () => {
     }
   }
 
-  const cloneProject = async (input: CloneProjectRequest) => {
+  const createProject = async (input: CreateProjectRequest) => {
     if (clonePending.value) {
-      throw new Error('A project clone is already in progress.')
+      throw new Error('A project creation is already in progress.')
     }
-
     clonePending.value = true
     error.value = null
     try {
-      const response = await $fetch<ProjectResponse>(toApiUrl('/projects/clone'), {
+      const response = await $fetch<CreateProjectResponse>(toApiUrl('/projects'), {
         method: 'POST',
         body: input
       })
-      return applyProjectResponse(response)
+      projects.value = response.projects
+      return response.project
     } finally {
       clonePending.value = false
     }
@@ -170,7 +177,7 @@ export const useProjects = () => {
     refreshProjects,
     refreshServiceUpdate,
     triggerServiceUpdate,
-    cloneProject,
+    createProject,
     startProject,
     stopProject,
     getProject

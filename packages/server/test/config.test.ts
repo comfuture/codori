@@ -1,13 +1,9 @@
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
-  resolveCodoriConfigPath,
-  resolveConfig,
-  resolveLastServiceRoot,
-  writeLastServiceRoot,
-  writeProjectRoot
+  resolveConfig
 } from '../src/config.js'
 
 const createdDirectories: string[] = []
@@ -142,63 +138,5 @@ describe('resolveConfig', () => {
       root: '/tmp/from-cli',
       realtimeVoiceEnabled: 'yes' as unknown as boolean
     }, homeDir)).toThrow(/realtimeVoice\.enabled/)
-  })
-})
-
-describe('project root persistence', () => {
-  it('writes the root without discarding unrelated config keys', () => {
-    const homeDir = createHome()
-    const root = mkdtempSync(join(os.tmpdir(), 'codori-root-'))
-    createdDirectories.push(root)
-
-    mkdirSync(join(homeDir, '.codori'), { recursive: true })
-    writeFileSync(
-      resolveCodoriConfigPath(homeDir),
-      JSON.stringify({
-        root: '/tmp/previous',
-        server: { host: '0.0.0.0', port: 4400 },
-        realtimeVoice: { enabled: false }
-      }),
-      'utf8'
-    )
-
-    expect(writeProjectRoot(root, homeDir)).toBe(root)
-
-    const persisted = JSON.parse(readFileSync(resolveCodoriConfigPath(homeDir), 'utf8'))
-    expect(persisted.root).toBe(root)
-    expect(persisted.server).toEqual({ host: '0.0.0.0', port: 4400 })
-    expect(persisted.realtimeVoice).toEqual({ enabled: false })
-
-    // The persisted value must be what a later resolveConfig picks up.
-    expect(resolveConfig({}, homeDir).root).toBe(root)
-  })
-
-  it('rejects a root that is missing or not a directory', () => {
-    const homeDir = createHome()
-    const root = mkdtempSync(join(os.tmpdir(), 'codori-root-'))
-    createdDirectories.push(root)
-    const filePath = join(root, 'not-a-directory.txt')
-    writeFileSync(filePath, 'x', 'utf8')
-
-    expect(() => writeProjectRoot(join(root, 'missing'), homeDir))
-      .toThrow(/does not exist or is not a directory/)
-    expect(() => writeProjectRoot(filePath, homeDir))
-      .toThrow(/does not exist or is not a directory/)
-  })
-
-  it('remembers and reads back the last served root', () => {
-    const homeDir = createHome()
-
-    expect(resolveLastServiceRoot(homeDir)).toBeNull()
-    writeLastServiceRoot('/tmp/served-root', homeDir)
-    expect(resolveLastServiceRoot(homeDir)).toBe('/tmp/served-root')
-  })
-
-  it('ignores a malformed last-root record', () => {
-    const homeDir = createHome()
-    mkdirSync(join(homeDir, '.codori'), { recursive: true })
-    writeFileSync(join(homeDir, '.codori', 'last-root.json'), '{ not json', 'utf8')
-
-    expect(resolveLastServiceRoot(homeDir)).toBeNull()
   })
 })

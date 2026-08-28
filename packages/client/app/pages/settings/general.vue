@@ -13,12 +13,11 @@ definePageMeta({
         General
       </h2>
       <p class="mt-2 max-w-2xl text-sm leading-6 text-muted">
-        Choose which project directory Codori serves, review what a registered service reuses on
-        startup, and pick how the interface looks.
+        Manage appearance for this Codori server. Workspace folders are owned by Codex app-server
+        projects and are managed from the dashboard.
       </p>
     </header>
 
-    <ProjectRootSettings />
     <AppearanceSettings />
   </section>
 </template>

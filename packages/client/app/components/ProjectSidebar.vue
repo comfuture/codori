@@ -14,7 +14,6 @@ import {
   type ThreadSummary
 } from '../composables/useThreadSummaries'
 import {
-  areThreadWorkspacePathsEqual,
   extractThreadDiscoveryHints,
   normalizeThreadRunningState
 } from '../utils/codex-thread-discovery'
@@ -252,7 +251,6 @@ const isCurrentInlineThreadSubscription = (projectId: string, sequence: number) 
 const hydrateInlineThread = (
   client: CodexRpcClient,
   projectId: string,
-  projectPath: string,
   threadId: string,
   subscriptionSequence: number,
   statusRevision = inlineThreadSummariesForProject(projectId).getStatusRevision()
@@ -277,12 +275,7 @@ const hydrateInlineThread = (
         return
       }
       const summaries = inlineThreadSummariesForProject(projectId)
-      const hasKnownParent = typeof response.thread.parentThreadId === 'string'
-        && summaries.threads.value.some(thread => thread.id === response.thread.parentThreadId)
-      if (
-        typeof response.thread.cwd !== 'string'
-        || (!areThreadWorkspacePathsEqual(response.thread.cwd, projectPath) && !hasKnownParent)
-      ) {
+      if (response.thread.projectId !== projectId) {
         return
       }
 
@@ -309,7 +302,6 @@ const applyInlineThreadNotification = (
   notification: CodexRpcNotification,
   client: CodexRpcClient,
   projectId: string,
-  projectPath: string,
   subscriptionSequence: number
 ) => {
   if (!isCurrentInlineThreadSubscription(projectId, subscriptionSequence)) {
@@ -319,6 +311,22 @@ const applyInlineThreadNotification = (
   const summaries = inlineThreadSummariesForProject(projectId)
   const hints = extractThreadDiscoveryHints(notification)
   const lifecycleThreadId = notificationThreadId(notification)
+
+  if (notification.method === 'thread/project/updated') {
+    const params = notification.params as { threadId?: unknown, projectId?: unknown }
+    if (typeof params.threadId === 'string') {
+      if (params.projectId !== projectId) {
+        suppressedInlineThreadIds.add(params.threadId)
+        liveInlineThreadIds.delete(params.threadId)
+        inlineThreadActiveTurnIds.delete(params.threadId)
+        summaries.removeThreadSummary(params.threadId)
+      } else {
+        suppressedInlineThreadIds.delete(params.threadId)
+        void hydrateInlineThread(client, projectId, params.threadId, subscriptionSequence)
+      }
+    }
+    return
+  }
 
   if (
     lifecycleThreadId
@@ -332,22 +340,16 @@ const applyInlineThreadNotification = (
   }
   if (lifecycleThreadId && notification.method === 'thread/unarchived') {
     suppressedInlineThreadIds.delete(lifecycleThreadId)
-    void hydrateInlineThread(client, projectId, projectPath, lifecycleThreadId, subscriptionSequence)
+    void hydrateInlineThread(client, projectId, lifecycleThreadId, subscriptionSequence)
     return
   }
 
   if (hints.thread) {
     const thread = hints.thread
-    const hasKnownParent = typeof thread.parentThreadId === 'string'
-      && summaries.threads.value.some(summary => summary.id === thread.parentThreadId)
-    if (
-      typeof thread.cwd === 'string'
-      && !areThreadWorkspacePathsEqual(thread.cwd, projectPath)
-      && !hasKnownParent
-    ) {
+    if (thread.projectId !== undefined && thread.projectId !== projectId) {
       return
     }
-    if (typeof thread.cwd === 'string' && typeof thread.updatedAt === 'number') {
+    if (thread.projectId === projectId && typeof thread.updatedAt === 'number') {
       liveInlineThreadIds.add(thread.id)
       const statusRevision = summaries.getStatusRevision()
       if (thread.status !== undefined) {
@@ -366,7 +368,6 @@ const applyInlineThreadNotification = (
       void hydrateInlineThread(
         client,
         projectId,
-        projectPath,
         thread.id,
         subscriptionSequence
       )
@@ -382,7 +383,6 @@ const applyInlineThreadNotification = (
       void hydrateInlineThread(
         client,
         projectId,
-        projectPath,
         hints.statusUpdate.threadId,
         subscriptionSequence,
         statusRevision
@@ -392,7 +392,7 @@ const applyInlineThreadNotification = (
 
   for (const threadId of hints.referencedThreadIds) {
     if (!summaries.threads.value.some(thread => thread.id === threadId)) {
-      void hydrateInlineThread(client, projectId, projectPath, threadId, subscriptionSequence)
+      void hydrateInlineThread(client, projectId, threadId, subscriptionSequence)
     }
   }
 
@@ -407,7 +407,7 @@ const applyInlineThreadNotification = (
           notificationThreadUpdatedAt(notification)
         )
       } else {
-        void hydrateInlineThread(client, projectId, projectPath, threadId, subscriptionSequence)
+        void hydrateInlineThread(client, projectId, threadId, subscriptionSequence)
       }
     }
   }
@@ -456,7 +456,6 @@ const applyInlineThreadNotification = (
       void hydrateInlineThread(
         client,
         projectId,
-        projectPath,
         runningState.threadId,
         subscriptionSequence,
         statusRevision
@@ -467,8 +466,7 @@ const applyInlineThreadNotification = (
 
 const ensureInlineThreadSubscription = (
   client: CodexRpcClient,
-  projectId: string,
-  projectPath: string
+  projectId: string
 ) => {
   if (inlineThreadSubscriptionKey === projectId) {
     return
@@ -478,11 +476,13 @@ const ensureInlineThreadSubscription = (
   inlineThreadSubscriptionKey = projectId
   const subscriptionSequence = inlineThreadSubscriptionSequence
   releaseInlineThreadNotificationSubscription = client.subscribe((notification) => {
+    if (notification.method === 'project/changed') {
+      void refreshProjects()
+    }
     applyInlineThreadNotification(
       notification,
       client,
       projectId,
-      projectPath,
       subscriptionSequence
     )
   })
@@ -594,9 +594,8 @@ const fetchInlineThreads = async (cursor: string | null = null) => {
       return
     }
 
-    const refreshedProject = getProject(projectId) ?? project
     const client = getClient(projectId)
-    ensureInlineThreadSubscription(client, projectId, refreshedProject.projectPath)
+    ensureInlineThreadSubscription(client, projectId)
     const statusRevision = inlineThreadSummariesForProject(projectId).getStatusRevision()
     const response = await client.request<ThreadListResponse>('thread/list', {
       ...(cursor ? { cursor } : {}),
@@ -604,7 +603,7 @@ const fetchInlineThreads = async (cursor: string | null = null) => {
       sortKey: 'updated_at',
       sortDirection: 'desc',
       sourceKinds: INLINE_THREAD_SOURCE_KINDS,
-      cwd: refreshedProject.projectPath
+      projectId
     } satisfies ThreadListParams)
 
     if (sequence !== inlineThreadFetchSequence) {

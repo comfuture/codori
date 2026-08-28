@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import os from 'node:os'
 import { join, resolve } from 'node:path'
 import { CodoriError } from './errors.js'
@@ -25,9 +25,6 @@ export const resolveCodoriHome = (homeDir = os.homedir()) => join(homeDir, '.cod
 
 export const resolveCodoriConfigPath = (homeDir = os.homedir()) =>
   join(resolveCodoriHome(homeDir), 'config.json')
-
-export const resolveLastServiceRootPath = (homeDir = os.homedir()) =>
-  join(resolveCodoriHome(homeDir), 'last-root.json')
 
 export const ensureCodoriDirectories = (homeDir = os.homedir()) => {
   const codoriHome = resolveCodoriHome(homeDir)
@@ -63,65 +60,6 @@ const loadUserConfig = (homeDir = os.homedir()): PartialConfig => {
   return parsed as PartialConfig
 }
 
-export const ensureProjectRootDirectory = (value: string) => {
-  const resolved = resolve(value)
-  if (!existsSync(resolved) || !statSync(resolved).isDirectory()) {
-    throw new CodoriError(
-      'INVALID_ROOT',
-      `Project root "${resolved}" does not exist or is not a directory.`
-    )
-  }
-
-  return resolved
-}
-
-export const writeProjectRoot = (value: string, homeDir = os.homedir()) => {
-  const resolved = ensureProjectRootDirectory(value)
-  const configPath = resolveCodoriConfigPath(homeDir)
-  const existing = loadUserConfig(homeDir)
-
-  mkdirSync(resolveCodoriHome(homeDir), { recursive: true })
-  writeFileSync(
-    configPath,
-    `${JSON.stringify({ ...existing, root: resolved }, null, 2)}\n`,
-    'utf8'
-  )
-
-  return resolved
-}
-
-export const writeLastServiceRoot = (value: string, homeDir = os.homedir()) => {
-  const resolved = resolve(value)
-  mkdirSync(resolveCodoriHome(homeDir), { recursive: true })
-  writeFileSync(
-    resolveLastServiceRootPath(homeDir),
-    `${JSON.stringify({ root: resolved, updatedAt: new Date().toISOString() }, null, 2)}\n`,
-    'utf8'
-  )
-
-  return resolved
-}
-
-export const resolveLastServiceRoot = (homeDir = os.homedir()) => {
-  const path = resolveLastServiceRootPath(homeDir)
-  if (!existsSync(path)) {
-    return null
-  }
-
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(readFileSync(path, 'utf8'))
-  } catch {
-    return null
-  }
-
-  if (!isRecord(parsed) || typeof parsed.root !== 'string' || !parsed.root) {
-    return null
-  }
-
-  return resolve(parsed.root)
-}
-
 const ensureValidPort = (value: unknown, label: string): number => {
   if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0 || value > 65535) {
     throw new CodoriError('INVALID_CONFIG', `${label} must be an integer between 1 and 65535.`)
@@ -151,11 +89,9 @@ export const resolveConfig = (
   homeDir = os.homedir()
 ): CodoriConfig => {
   const fileConfig = loadUserConfig(homeDir)
-  const root = overrides.root ?? fileConfig.root
-
-  if (!root || typeof root !== 'string') {
-    throw new CodoriError('MISSING_ROOT', 'Project root is required. Pass --root or set ~/.codori/config.json.')
-  }
+  // App-server projects own workspace roots. This is only the process working
+  // directory required when a managed fallback app-server is spawned.
+  const root = overrides.root ?? process.cwd()
 
   const host = overrides.host
     ?? (typeof fileConfig.server?.host === 'string' ? fileConfig.server.host : undefined)

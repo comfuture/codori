@@ -7,7 +7,9 @@ import { parseArgs } from 'node:util'
 import { CodoriError, describeErrorWithDetails, formatCliError } from './errors.js'
 import { startHttpServer } from './http-server.js'
 import { createRuntimeManager } from './process-manager.js'
-import { DEFAULT_SERVER_HOST, resolveLastServiceRoot, writeLastServiceRoot } from './config.js'
+import { DEFAULT_SERVER_HOST } from './config.js'
+import { requestAppServer } from './app-server-rpc.js'
+import { scanProjects } from './project-scanner.js'
 import { createCliUi, type CliUi } from './cli-ui.js'
 import {
   CLI_BINARY,
@@ -21,8 +23,6 @@ import {
   statusService,
   stopService,
   uninstallService,
-  CODORI_SERVICE_HOME_ENV,
-  CODORI_SERVICE_INSTALL_ROOT_ENV,
   type ServiceCommandDependencies
 } from './service.js'
 import {
@@ -120,36 +120,45 @@ const coercePort = (value: string | undefined) => {
   return Number.isFinite(parsed) ? parsed : undefined
 }
 
+const importExplicitRootProjects = async (
+  root: string,
+  manager: ReturnType<typeof createRuntimeManager>,
+  ui: CliUi
+) => {
+  if (typeof manager.getAppServerBridgeTarget !== 'function') {
+    ui.warn('--root import is unavailable because this runtime has no app-server project bridge.')
+    return
+  }
+  const bridge = await manager.getAppServerBridgeTarget()
+  const projects = scanProjects(root)
+  let registered = 0
+  for (const project of projects) {
+    try {
+      await requestAppServer(bridge.target, 'project/create', {
+        name: project.path.split(/[\\/]/u).filter(Boolean).at(-1) ?? project.id,
+        roots: [{ path: project.path }],
+        idempotencyKey: `codori:legacy-root:${project.path}`
+      })
+      registered += 1
+    } catch (error) {
+      ui.warn(`Skipped ${project.path}: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+  ui.warn(`--root is deprecated; registered ${registered}/${projects.length} Git projects with Codex app-server.`)
+}
+
 export const resolveServeRoot = (
   value: string | undefined,
   options: {
     env?: NodeJS.ProcessEnv
     homeDir?: string
     cwd?: string
+    /** Retained only so older programmatic callers keep compiling; ignored. */
     lastRoot?: (homeDir?: string) => string | null
   } = {}
 ) => {
   if (value) {
     return value
-  }
-
-  const env = options.env ?? process.env
-  // A system-scoped service can run as a different account than the installer.
-  const homeDir = options.homeDir ?? env[CODORI_SERVICE_HOME_ENV]?.trim()
-  // Only a managed service adopts the remembered root; a manual `serve` in a
-  // directory should keep behaving like the current working directory. The
-  // remembered root wins over the install-time root so a Settings change
-  // survives a restart.
-  if (env.CODORI_SERVICE_MANAGED === '1') {
-    const lastRoot = (options.lastRoot ?? resolveLastServiceRoot)(homeDir)
-    if (lastRoot) {
-      return lastRoot
-    }
-
-    const installRoot = env[CODORI_SERVICE_INSTALL_ROOT_ENV]?.trim()
-    if (installRoot) {
-      return installRoot
-    }
   }
 
   return options.cwd ?? process.cwd()
@@ -557,11 +566,9 @@ const runServerCommand = async (
 
   const app = await (dependencies.startHttpServer ?? startHttpServer)(manager)
 
-  writeLastServiceRoot(
-    manager.config.root,
-    dependencies.homeDir
-    ?? (dependencies.env ?? process.env)[CODORI_SERVICE_HOME_ENV]?.trim()
-  )
+  if (values.root) {
+    await importExplicitRootProjects(values.root, manager, ui)
+  }
 
   let serveResult: TailscaleServeResult | null = null
   let automaticServeError: unknown = null

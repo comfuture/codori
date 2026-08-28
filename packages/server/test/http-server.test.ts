@@ -11,7 +11,6 @@ import { join, resolve } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import WebSocket, { WebSocketServer } from 'ws'
 import { resolveProjectAttachmentsDir } from '../src/attachment-store.js'
-import { CodoriError } from '../src/errors.js'
 import { createHttpServer, startHttpServer, type RuntimeManagerLike } from '../src/http-server.js'
 import { MAX_LOCAL_FILE_VIEW_BYTES } from '../src/local-file-viewer.js'
 import type { ServerAvatarResolver } from '../src/server-avatar.js'
@@ -117,7 +116,6 @@ const createManager = (overrides: Partial<RuntimeManagerLike> = {}): RuntimeMana
   listChatStatuses: () => [],
   getProjectStatus: () => createProjectRecord(),
   getChatStatus: () => createChatRecord(),
-  cloneProject: () => createProjectRecord(),
   createChatSession: () => ({
     ...createChatRecord(),
     reusedExisting: false
@@ -256,6 +254,91 @@ describe('createHttpServer', () => {
     })
   })
 
+  it('paginates app-server projects and returns the exact project created by app-server', async () => {
+    const backend = new WebSocketServer({ host: '127.0.0.1', port: 0 })
+    startedSocketServers.push(backend)
+    await new Promise<void>(resolvePromise => backend.once('listening', resolvePromise))
+    const address = backend.address()
+    if (!address || typeof address === 'string') {
+      throw new Error('Failed to get app-server test address.')
+    }
+
+    const listedCursors: Array<string | null> = []
+    backend.on('connection', (socket: WebSocket) => {
+      socket.on('message', (message: WebSocket.RawData) => {
+        const payload = JSON.parse(rawDataToString(message)) as {
+          id?: string
+          method?: string
+          params?: { cursor?: string | null, name?: string, roots?: Array<{ path?: string }> }
+        }
+        if (payload.method === 'initialize') {
+          socket.send(JSON.stringify({ id: payload.id, result: {} }))
+          return
+        }
+        if (payload.method === 'project/list') {
+          const cursor = payload.params?.cursor ?? null
+          listedCursors.push(cursor)
+          socket.send(JSON.stringify({
+            id: payload.id,
+            result: cursor
+              ? { data: [{ id: 'project-2', name: 'Second', roots: [{ path: '/srv/second' }] }], nextCursor: null }
+              : { data: [{ id: 'project-1', name: 'First', roots: [{ path: '/srv/first' }] }], nextCursor: 'page-2' }
+          }))
+          return
+        }
+        if (payload.method === 'project/create') {
+          expect(payload.params).toMatchObject({
+            name: 'Created',
+            roots: [{ path: '/srv/created' }]
+          })
+          socket.send(JSON.stringify({
+            id: payload.id,
+            result: { project: { id: 'project-created', name: 'Created', roots: [{ path: '/srv/created' }] } }
+          }))
+        }
+      })
+    })
+
+    const setAppServerProjects = vi.fn()
+    const app = await createHttpServer(createManager({
+      getAppServerBridgeTarget: () => ({
+        target: {
+          kind: 'codori-managed',
+          transport: 'tcp-websocket',
+          port: address.port,
+          pid: 4321,
+          ownedByCodori: true,
+          appServerVersion: '0.150.1'
+        },
+        workspacePath: '/srv'
+      }),
+      setAppServerProjects
+    }))
+    startedApps.push(app)
+
+    const listResponse = await app.inject({ method: 'GET', url: '/api/projects' })
+    expect(listResponse.statusCode).toBe(200)
+    expect(listResponse.json().projects.map((project: ProjectStatusRecord) => project.projectId))
+      .toEqual(['project-1', 'project-2'])
+
+    const createResponse = await app.inject({
+      method: 'POST',
+      url: '/api/projects',
+      payload: { name: 'Created', roots: ['/srv/created'], idempotencyKey: 'test-created-project' }
+    })
+    expect(createResponse.statusCode).toBe(201)
+    expect(createResponse.json().project).toMatchObject({
+      projectId: 'project-created',
+      projectName: 'Created',
+      projectRoots: ['/srv/created']
+    })
+    expect(listedCursors).toEqual([null, 'page-2', null, 'page-2', null, 'page-2'])
+    expect(setAppServerProjects).toHaveBeenLastCalledWith([
+      { id: 'project-1', path: '/srv/first', name: 'First', roots: ['/srv/first'] },
+      { id: 'project-2', path: '/srv/second', name: 'Second', roots: ['/srv/second'] }
+    ])
+  })
+
   it('reports the configured experimental realtime voice capability', async () => {
     const app = await createHttpServer(createManager({
       config: {
@@ -326,36 +409,6 @@ describe('createHttpServer', () => {
       }
     })
     expect(response.body).not.toContain('socketPath')
-  })
-
-  it('clones a project through the management API', async () => {
-    const app = await createHttpServer(createManager({
-      cloneProject: ({ repositoryUrl, destination }) => ({
-        ...createProjectRecord(),
-        projectId: destination ?? 'demo',
-        projectPath: `/tmp/${destination ?? 'demo'}`,
-        error: repositoryUrl ? null : 'missing'
-      })
-    }))
-    startedApps.push(app)
-
-    const response = await app.inject({
-      method: 'POST',
-      url: '/api/projects/clone',
-      payload: {
-        repositoryUrl: 'https://github.com/comfuture/codori',
-        destination: 'team/codori'
-      }
-    })
-
-    expect(response.statusCode).toBe(201)
-    expect(response.json()).toEqual({
-      project: {
-        ...createProjectRecord(),
-        projectId: 'team/codori',
-        projectPath: '/tmp/team/codori'
-      }
-    })
   })
 
   it('creates and lists recent chats through the management API', async () => {
@@ -482,36 +535,6 @@ describe('createHttpServer', () => {
     })
   })
 
-  it('maps clone validation errors to structured API responses', async () => {
-    const app = await createHttpServer(createManager({
-      cloneProject: () => {
-        throw new CodoriError(
-          'DESTINATION_EXISTS',
-          'Destination "team/codori" already exists under the configured Codori root.'
-        )
-      }
-    }))
-    startedApps.push(app)
-
-    const response = await app.inject({
-      method: 'POST',
-      url: '/api/projects/clone',
-      payload: {
-        repositoryUrl: 'https://github.com/comfuture/codori',
-        destination: 'team/codori'
-      }
-    })
-
-    expect(response.statusCode).toBe(409)
-    expect(response.json()).toEqual({
-      error: {
-        code: 'DESTINATION_EXISTS',
-        message: 'Destination "team/codori" already exists under the configured Codori root.',
-        details: null
-      }
-    })
-  })
-
   it('returns service update status and accepts update requests for managed services', async () => {
     const serviceUpdateController: ServiceUpdateController = {
       getStatus: async () => ({
@@ -565,71 +588,6 @@ describe('createHttpServer', () => {
         latestVersion: '0.0.4'
       }
     })
-  })
-
-  it('reads and changes the served project root', async () => {
-    const nextRoot = mkdtempSync(join(os.tmpdir(), 'codori-next-root-'))
-    tempDirs.push(nextRoot)
-
-    let currentRoot = '/tmp/original-root'
-    let lastRoot: string | null = null
-    const app = await createHttpServer(createManager({
-      config: {
-        root: currentRoot
-      } as RuntimeManagerLike['config'],
-      setProjectRoot: (root: string) => {
-        currentRoot = root
-        lastRoot = root
-        return root
-      },
-      getLastProjectRoot: () => lastRoot
-    }))
-    startedApps.push(app)
-
-    const readResponse = await app.inject({
-      method: 'GET',
-      url: '/api/config/root'
-    })
-    expect(readResponse.statusCode).toBe(200)
-    expect(readResponse.json()).toEqual({
-      projectRoot: {
-        root: '/tmp/original-root',
-        lastRoot: null
-      }
-    })
-
-    const patchResponse = await app.inject({
-      method: 'PATCH',
-      url: '/api/config/root',
-      payload: {
-        root: nextRoot
-      }
-    })
-    expect(patchResponse.statusCode).toBe(200)
-    expect(patchResponse.json()).toEqual({
-      projectRoot: {
-        root: nextRoot,
-        lastRoot: nextRoot
-      }
-    })
-  })
-
-  it('rejects a blank project root change', async () => {
-    const app = await createHttpServer(createManager({
-      setProjectRoot: (root: string) => root
-    }))
-    startedApps.push(app)
-
-    const response = await app.inject({
-      method: 'PATCH',
-      url: '/api/config/root',
-      payload: {
-        root: '   '
-      }
-    })
-
-    expect(response.statusCode).toBe(400)
-    expect(response.json().error.code).toBe('MISSING_ROOT')
   })
 
   it('lists local git branches for a project', async () => {

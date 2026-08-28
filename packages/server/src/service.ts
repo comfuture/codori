@@ -40,13 +40,7 @@ import {
   type ServiceCommand,
   type ServiceUnitDefinition
 } from './service-adapters.js'
-import {
-  DEFAULT_SERVER_HOST,
-  DEFAULT_SERVER_PORT,
-  resolveCodoriHome,
-  resolveLastServiceRoot,
-  writeLastServiceRoot
-} from './config.js'
+import { DEFAULT_SERVER_HOST, DEFAULT_SERVER_PORT, resolveCodoriHome } from './config.js'
 import { CodoriError } from './errors.js'
 import { containsGitProject } from './project-scanner.js'
 import type { TailscaleServePolicy } from './tailscale-serve.js'
@@ -540,17 +534,9 @@ export const resolveInstalledServiceRoot = (
   }
 
   if (installs.length > 1) {
-    const rememberedRoot = resolveLastServiceRoot(homeDir)
-    if (rememberedRoot && installs.some(install => install.root === rememberedRoot)) {
-      return rememberedRoot
-    }
-
     throw new CodoriError(
       'AMBIGUOUS_SERVICE_ROOT',
-      [
-        'Several Codori services are registered, so the target is ambiguous.',
-        `Pass --root with one of: ${installs.map(install => install.root).join(', ')}.`
-      ].join(' ')
+      'Several legacy root-keyed services are registered. Remove or migrate the older installations before managing the Codori service.'
     )
   }
 
@@ -871,43 +857,14 @@ const shouldIgnoreCommandFailure = (
 
 const resolveRootWithPrompt = async (
   root: string | undefined,
-  yes: boolean,
+  _yes: boolean,
   cwd: string,
-  prompt: ServicePrompt
+  _prompt: ServicePrompt
 ) => {
-  if (root) {
-    const resolvedRoot = resolve(root)
-    ensureExistingDirectory(resolvedRoot)
-    return resolvedRoot
-  }
-
-  const defaultRoot = detectRootPromptDefault(cwd)
-  if (yes) {
-    if (!defaultRoot.value) {
-      throw new CodoriError(
-        'MISSING_ROOT',
-        'Project root is required. Pass --root or run interactively from a likely project root.'
-      )
-    }
-
-    ensureExistingDirectory(defaultRoot.value)
-    return defaultRoot.value
-  }
-
-  if (defaultRoot.value) {
-    const useDefault = await prompt.confirm(`Use ${defaultRoot.value} as the project root`, true)
-    if (useDefault) {
-      ensureExistingDirectory(defaultRoot.value)
-      return defaultRoot.value
-    }
-  }
-
-  const answer = await prompt.input('Project root directory', defaultRoot.value ?? undefined)
-  if (!answer) {
-    throw new CodoriError('MISSING_ROOT', 'Project root is required.')
-  }
-
-  const resolvedRoot = resolve(answer)
+  void _prompt
+  // Services do not own project roots. This is only the process working
+  // directory while the app-server remains the project source of truth.
+  const resolvedRoot = resolve(root ?? cwd)
   ensureExistingDirectory(resolvedRoot)
   return resolvedRoot
 }
@@ -1327,12 +1284,6 @@ export const installService = async (
       metadata
     )
     writeServiceMetadata(metadata, homeDir)
-    // Install is the only lifecycle command that seeds the remembered root.
-    // `restart`, `start`, and `stop` must never write it, because `metadata.root`
-    // is the install-time directory and would revert a root changed from
-    // Settings. The running server records subsequent roots itself.
-    writeLastServiceRoot(metadata.root, homeDir)
-
     return {
       action: 'install',
       metadata

@@ -173,14 +173,14 @@ describe('cli service commands', () => {
       .toThrow(/Unknown service subcommand "reload"/)
   })
 
-  it('adopts the remembered root only for a managed service launch', () => {
+  it('never adopts a remembered root for a managed service launch', () => {
     const lastRoot = () => '/remembered/root'
 
     expect(resolveServeRoot(undefined, {
       env: { CODORI_SERVICE_MANAGED: '1' },
       cwd: '/cwd',
       lastRoot
-    })).toBe('/remembered/root')
+    })).toBe('/cwd')
 
     expect(resolveServeRoot(undefined, {
       env: {},
@@ -201,9 +201,7 @@ describe('cli service commands', () => {
     })).toBe('/cwd')
   })
 
-  it('prefers the remembered root over the install-time root', () => {
-    // A root changed from Settings must survive an OS restart instead of
-    // reverting to the directory chosen at install time.
+  it('uses the process cwd instead of legacy service-root state', () => {
     expect(resolveServeRoot(undefined, {
       env: {
         CODORI_SERVICE_MANAGED: '1',
@@ -211,9 +209,9 @@ describe('cli service commands', () => {
       },
       cwd: '/cwd',
       lastRoot: () => '/remembered/root'
-    })).toBe('/remembered/root')
+    })).toBe('/cwd')
 
-    // With nothing remembered yet, the install-time root is the fallback.
+    // Install-time roots are legacy metadata, not server project selection.
     expect(resolveServeRoot(undefined, {
       env: {
         CODORI_SERVICE_MANAGED: '1',
@@ -221,7 +219,7 @@ describe('cli service commands', () => {
       },
       cwd: '/cwd',
       lastRoot: () => null
-    })).toBe('/install/root')
+    })).toBe('/cwd')
   })
 
   it('persists and configures required tailscale serve for service installs', async () => {

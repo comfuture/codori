@@ -11,12 +11,8 @@ import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import {
   resolveConfig,
-  resolveLastServiceRoot,
-  writeLastServiceRoot,
-  writeProjectRoot
 } from './config.js'
 import { CodoriError } from './errors.js'
-import { cloneProjectIntoRoot } from './git.js'
 import { findAvailablePort } from './ports.js'
 import { scanProjects } from './project-scanner.js'
 import { RuntimeStore } from './runtime-store.js'
@@ -158,6 +154,8 @@ export class RuntimeManager {
 
   private readonly workspaceActivity = new Map<string, WorkspaceActivityRecord>()
 
+  private readonly appServerProjects = new Map<string, ProjectRecord>()
+
   private sharedRuntimeStart: Promise<StartedBackend> | null = null
 
   private sharedRuntimeStop: Promise<boolean> | null = null
@@ -213,27 +211,17 @@ export class RuntimeManager {
   }
 
   listProjects() {
+    if (this.appServerProjects.size > 0) {
+      return [...this.appServerProjects.values()]
+    }
     return scanProjects(this.config.root)
   }
 
-  /**
-   * Repoints project discovery at a new root and persists it so the next
-   * service start adopts the same directory. Running project runtimes are left
-   * alone; they keep serving until they idle out or are stopped explicitly.
-   */
-  setProjectRoot(root: string) {
-    const resolvedRoot = writeProjectRoot(root, this.homeDir)
-    this.config = {
-      ...this.config,
-      root: resolvedRoot
+  setAppServerProjects(projects: ProjectRecord[]) {
+    this.appServerProjects.clear()
+    for (const project of projects) {
+      this.appServerProjects.set(project.id, project)
     }
-    writeLastServiceRoot(resolvedRoot, this.homeDir)
-
-    return resolvedRoot
-  }
-
-  getLastProjectRoot() {
-    return resolveLastServiceRoot(this.homeDir)
   }
 
   private getChatsRoot() {
@@ -389,6 +377,8 @@ export class RuntimeManager {
     return {
       projectId: project.id,
       projectPath: project.path,
+      ...(project.name ? { projectName: project.name } : {}),
+      ...(project.roots ? { projectRoots: project.roots } : {}),
       status: error ? 'error' : running ? 'running' : 'stopped',
       pid: managed?.pid ?? null,
       port: managed?.port ?? null,
@@ -722,16 +712,6 @@ export class RuntimeManager {
     return this.readRunningChatRuntime(this.resolveChatSession(chatId))
   }
 
-  async cloneProject(input: { repositoryUrl: string, destination?: string | null }) {
-    const clonedProject = await cloneProjectIntoRoot({
-      rootDirectory: this.config.root,
-      repositoryUrl: input.repositoryUrl,
-      destination: input.destination
-    })
-
-    return this.getProjectStatus(clonedProject.projectId)
-  }
-
   async startProject(projectId: string): Promise<StartProjectResult> {
     const project = this.resolveProject(projectId)
     return await this.startResolvedProject(project)
@@ -743,6 +723,16 @@ export class RuntimeManager {
     return {
       target: started.target,
       workspacePath: project.path
+    }
+  }
+
+  /** A project-independent bridge for app-server project and filesystem APIs. */
+  async getAppServerBridgeTarget(): Promise<RuntimeBridgeTarget> {
+    const workspace = this.sharedRuntimeProject()
+    const started = await this.startSharedRuntime(workspace)
+    return {
+      target: started.target,
+      workspacePath: workspace.path
     }
   }
 

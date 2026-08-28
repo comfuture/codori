@@ -1,6 +1,6 @@
 # @codori/server
 
-Codori server for Git project discovery, Codex app-server backend selection,
+Codori server for Codex app-server project discovery, backend selection,
 fallback lifecycle management, and bundled dashboard and immersive WebXR
 serving.
 
@@ -10,7 +10,7 @@ which provides the `codori` command as a thin launcher over this one:
 
 ```bash
 npm install -g @codori/cli
-codori start --root ~/Project
+codori start
 ```
 
 Running this package directly stays fully supported and behaves identically.
@@ -20,17 +20,18 @@ automatically.
 
 ## Usage
 
-Run Codori from the directory that contains your Git projects:
+Run Codori; projects come from the connected Codex app-server:
 
 ```bash
-cd ~/Project
 npx @codori/server start
 ```
 
-Or point it at a different root explicitly:
+For one release transition, `--root` is accepted but hidden from help. It scans
+descendant Git repositories and registers each with app-server; it never becomes
+the server's saved default:
 
 ```bash
-npx @codori/server start --root ~/Project --host 127.0.0.1 --port 4310
+npx @codori/server start --root ~/Project
 ```
 
 The server serves the dashboard UI, immersive WebXR workspace, REST API, and
@@ -79,7 +80,7 @@ normal direct or registered-service start binds Codori to loopback and
 configures persistent private HTTPS automatically:
 
 ```bash
-codori start --root ~/Project
+codori start
 ```
 
 Use `--tailscale-serve` to require this path and fail when its prerequisites
@@ -230,14 +231,11 @@ codori service uninstall
 The earlier `install-service`, `setup-service`, `restart-service`, and
 `uninstall-service` commands remain accepted as aliases.
 
-Every verb except `install` resolves its target from the install metadata under
-`~/.codori/services/<installId>/service.json`, so it works from any directory
-and never scans the filesystem for a project root. With several services
-registered, Codori lists their roots and asks for an explicit `--root` rather
-than choosing one.
+Every verb operates on the Codori service and reads projects from its connected
+app-server. Legacy root-keyed installations are rejected with migration
+guidance rather than selecting a remembered directory.
 
-The installer resolves missing `--root` and `--port` values interactively and
-uses `127.0.0.1` as the safe default host. Its Tailscale Serve policy defaults
+The installer resolves missing `--port` values interactively and uses `127.0.0.1` as the safe default host. Its Tailscale Serve policy defaults
 to `auto`; `--tailscale-serve` stores a required policy and
 `--no-tailscale-serve` stores a disabled policy. `service install`, `service
 start`, and `service restart` print the verified tailnet URL whenever Serve is
@@ -270,12 +268,19 @@ service definition before launching. Launchers use the canonical
 `@codori/server start` verb. Metadata written by older releases has no ingress
 policy; the next start/restart/update treats it as `auto`, rewrites it to the
 current schema, switches the backend listener to loopback, and restarts while
-preserving the remembered project root.
+without restoring a remembered project root.
 
 On macOS the launchd label and launcher directory include a deterministic
-12-character SHA-256 prefix derived from the resolved install root. It is not
-random: `codori service status|start|stop|restart|uninstall [--root <path>]` is
-the supported management surface for that root.
+12-character SHA-256 prefix retained for compatibility with an existing
+installation. Service lifecycle commands are not scoped by a project root.
+
+### App-server projects
+
+Codori lists and creates the projects persisted by Codex app-server. The Add
+project dialog accepts a name plus one or more absolute directories on the
+server; its folder browser uses app-server filesystem APIs, so it works when a
+browser connects to Codori over SSH/Tailscale. Browser-native folder pickers
+select the browser machine and are intentionally not used for remote projects.
 
 ### Windows notes
 
@@ -286,26 +291,6 @@ to start. A user-scoped install creates a logon task at least-privilege level an
 needs no administrator rights. Because Windows has no direct equivalent of
 launchd `KeepAlive` or systemd `Restart=always`, the generated task definition
 carries restart-on-failure settings and no execution time limit.
-
-## Project Root
-
-A service serves one project root. Change it from Settings → General, or with
-the API directly:
-
-```bash
-curl -X PATCH http://127.0.0.1:4310/api/config/root \
-  -H 'content-type: application/json' \
-  -d '{"root":"/Users/you/Project"}'
-```
-
-The change applies to the running server immediately, so project discovery
-re-reads the new directory without a restart. Project runtimes already started
-under the previous root keep running until they idle out or are stopped.
-
-The value is persisted to `root` in `~/.codori/config.json`, and the most
-recently served directory is recorded in `~/.codori/last-root.json`. A registered
-service that starts without an explicit `--root` adopts that remembered
-directory.
 
 ## Updates
 

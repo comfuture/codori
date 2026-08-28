@@ -22,6 +22,7 @@ import {
 } from './attachment-store.js'
 import { CodoriError } from './errors.js'
 import { bridgeCodexRpcWebSocket } from './codori-rpc-bridge.js'
+import { requestAppServer } from './app-server-rpc.js'
 import { createGitBranch, listGitBranches, switchGitBranch } from './git.js'
 import { LocalFileViewError, readProjectLocalFile, type LocalFileReadResult } from './local-file-viewer.js'
 import { createRuntimeManager } from './process-manager.js'
@@ -40,7 +41,6 @@ import type {
   AppServerTarget,
   ChatSessionStatusRecord,
   DeleteChatSessionResult,
-  ProjectRootResponse,
   ProjectStatusRecord,
   RuntimeBackendStatusResponse,
   RuntimeBridgeTarget,
@@ -58,9 +58,7 @@ export type RuntimeManagerLike = {
   listChatStatuses?: () => MaybePromise<ChatSessionStatusRecord[]>
   getProjectStatus: (projectId: string) => MaybePromise<ProjectStatusRecord>
   getChatStatus?: (chatId: string) => MaybePromise<ChatSessionStatusRecord>
-  setProjectRoot?: (root: string) => string
-  getLastProjectRoot?: () => string | null
-  cloneProject?: (input: { repositoryUrl: string, destination?: string | null }) => MaybePromise<ProjectStatusRecord>
+  setAppServerProjects?: (projects: { id: string, path: string, name?: string, roots?: string[] }[]) => void
   createChatSession?: () => MaybePromise<StartChatSessionResult>
   deleteChatSession?: (chatId: string) => MaybePromise<DeleteChatSessionResult>
   updateChatSessionTitle?: (chatId: string, title: string) => MaybePromise<UpdateChatSessionTitleResult>
@@ -68,6 +66,7 @@ export type RuntimeManagerLike = {
   startProject: (projectId: string) => MaybePromise<StartProjectResult>
   startChatSession?: (chatId: string) => MaybePromise<StartChatSessionResult>
   getProjectBridgeTarget?: (projectId: string) => MaybePromise<RuntimeBridgeTarget>
+  getAppServerBridgeTarget?: () => MaybePromise<RuntimeBridgeTarget>
   getChatBridgeTarget?: (chatId: string) => MaybePromise<RuntimeBridgeTarget>
   getRuntimeBackendStatus?: () => RuntimeBackendStatusResponse['backend']
   invalidateRuntimeTarget?: (target: AppServerTarget) => void
@@ -109,6 +108,49 @@ type ProjectsResponse = {
   projects: ProjectStatusRecord[]
 }
 
+type ProjectCreateResponse = ProjectsResponse & {
+  project: ProjectStatusRecord
+}
+
+type AppServerProject = {
+  id: string
+  name: string
+  roots: Array<{ path: string }>
+}
+
+type AppServerProjectListResponse = {
+  data?: unknown
+  nextCursor?: unknown
+}
+
+const normalizeAppServerProject = (project: unknown): AppServerProject | null => {
+  if (
+    typeof project !== 'object' || project === null || Array.isArray(project)
+    || typeof (project as { id?: unknown }).id !== 'string'
+    || typeof (project as { name?: unknown }).name !== 'string'
+    || !Array.isArray((project as { roots?: unknown }).roots)
+  ) return null
+  const roots = (project as { roots: unknown[] }).roots.flatMap(root =>
+    typeof root === 'object' && root !== null && typeof (root as { path?: unknown }).path === 'string'
+      ? [{ path: (root as { path: string }).path }]
+      : []
+  )
+  return { id: (project as { id: string }).id, name: (project as { name: string }).name, roots }
+}
+
+type ProjectCreateRequest = {
+  name?: string
+  roots?: string[]
+  idempotencyKey?: string
+}
+
+type DirectoryBrowseResponse = {
+  directory: {
+    path: string
+    entries: Array<{ name: string, isDirectory: boolean }>
+  }
+}
+
 type ChatsResponse = {
   chats: ChatSessionStatusRecord[]
 }
@@ -125,10 +167,6 @@ type ChatThreadRequest = {
 
 type ServiceUpdateResponse = {
   serviceUpdate: ServiceUpdateStatus
-}
-
-type ProjectRootRequest = {
-  root?: string
 }
 
 type ProjectGitBranchesResponse = {
@@ -290,6 +328,41 @@ const isAbsoluteFilesystemPath = (value: string) =>
 
 const resolveValue = async <T>(value: MaybePromise<T>) => value
 
+const appServerProjects = async (manager: RuntimeManagerLike) => {
+  if (!manager.getAppServerBridgeTarget) {
+    // Compatibility for embedders predating the project registry. Production
+    // RuntimeManager always supplies the app-server bridge.
+    return (await resolveValue(manager.listProjectStatuses())).map(project => ({
+      id: project.projectId,
+      name: project.projectName ?? project.projectId,
+      roots: (project.projectRoots ?? [project.projectPath]).filter(Boolean).map(path => ({ path }))
+    }))
+  }
+  const bridge = await resolveValue(manager.getAppServerBridgeTarget())
+  const normalized: AppServerProject[] = []
+  let cursor: string | null = null
+  const seenCursors = new Set<string>()
+  do {
+    const page: AppServerProjectListResponse = await requestAppServer<AppServerProjectListResponse>(bridge.target, 'project/list', {
+      limit: 100,
+      ...(cursor ? { cursor } : {})
+    })
+    const projects: unknown[] = Array.isArray(page.data) ? page.data : []
+    normalized.push(...projects.flatMap(project => {
+      const normalizedProject = normalizeAppServerProject(project)
+      return normalizedProject ? [normalizedProject] : []
+    }))
+    cursor = typeof page.nextCursor === 'string' && page.nextCursor ? page.nextCursor : null
+  } while (cursor && !seenCursors.has(cursor) && (seenCursors.add(cursor), true))
+  manager.setAppServerProjects?.(normalized.map(project => ({
+    id: project.id,
+    path: project.roots[0]?.path ?? '',
+    name: project.name,
+    roots: project.roots.map(root => root.path)
+  })))
+  return normalized
+}
+
 const isStatusCodeCarrier = (error: unknown): error is { statusCode: number, message?: string, code?: string } =>
   typeof error === 'object'
   && error !== null
@@ -422,9 +495,77 @@ export const createHttpServer = async (
     })
   })
 
-  app.get('/api/projects', async (): Promise<ProjectsResponse> => ({
-    projects: await resolveValue(manager.listProjectStatuses())
-  }))
+  const toProjectStatus = (project: AppServerProject): ProjectStatusRecord => ({
+    projectId: project.id,
+    projectPath: project.roots[0]?.path ?? '',
+    projectName: project.name,
+    projectRoots: project.roots.map(root => root.path),
+    status: 'stopped',
+    pid: null,
+    port: null,
+    startedAt: null,
+    lastActivityAt: null,
+    activeSessionCount: 0,
+    idleTimeoutMs: null,
+    idleDeadlineAt: null,
+    error: null
+  })
+
+  app.get('/api/projects', async (): Promise<ProjectsResponse> => {
+    if (!manager.getAppServerBridgeTarget) {
+      return { projects: await resolveValue(manager.listProjectStatuses()) }
+    }
+    return { projects: (await appServerProjects(manager)).map(toProjectStatus) }
+  })
+
+  app.post<{ Body: ProjectCreateRequest }>('/api/projects', async (request, reply): Promise<ProjectCreateResponse> => {
+    if (!manager.getAppServerBridgeTarget) {
+      throw new CodoriError('INVALID_CONFIG', 'This runtime does not expose app-server project management.')
+    }
+    const name = request.body?.name?.trim() ?? ''
+    const roots = (request.body?.roots ?? []).map(root => root.trim()).filter(Boolean)
+    const idempotencyKey = request.body?.idempotencyKey?.trim() ?? ''
+    if (!name || !idempotencyKey || roots.length === 0 || !roots.every(isAbsoluteFilesystemPath)) {
+      throw new CodoriError('INVALID_ROOT', 'A project name, idempotency key, and at least one absolute server directory are required.')
+    }
+    const bridge = await resolveValue(manager.getAppServerBridgeTarget())
+    const created = await requestAppServer<{ project?: unknown }>(bridge.target, 'project/create', {
+      name,
+      roots: roots.map(path => ({ path })),
+      idempotencyKey
+    })
+    const project = normalizeAppServerProject(created.project)
+    if (!project) {
+      throw new CodoriError('INVALID_CONFIG', 'The connected app-server returned an invalid project/create response.')
+    }
+    reply.status(201)
+    return {
+      project: toProjectStatus(project),
+      projects: (await appServerProjects(manager)).map(toProjectStatus)
+    }
+  })
+
+  app.get<{ Querystring: { path?: string } }>('/api/projects/directories', async (request): Promise<DirectoryBrowseResponse> => {
+    if (!manager.getAppServerBridgeTarget) {
+      throw new CodoriError('INVALID_CONFIG', 'This runtime does not expose app-server filesystem browsing.')
+    }
+    const path = request.query.path?.trim() ?? ''
+    if (!path || !isAbsoluteFilesystemPath(path)) {
+      throw new CodoriError('INVALID_ROOT', 'An absolute server directory path is required.')
+    }
+    const bridge = await resolveValue(manager.getAppServerBridgeTarget())
+    const metadata = await requestAppServer<{ isDirectory?: unknown }>(bridge.target, 'fs/getMetadata', { path })
+    if (metadata.isDirectory !== true) {
+      throw new CodoriError('INVALID_ROOT', `"${path}" is not a directory on the Codori server.`)
+    }
+    const response = await requestAppServer<{ entries?: unknown }>(bridge.target, 'fs/readDirectory', { path })
+    const entries = Array.isArray(response.entries) ? response.entries.flatMap(entry =>
+      typeof entry === 'object' && entry !== null && typeof (entry as { fileName?: unknown }).fileName === 'string'
+        ? [{ name: (entry as { fileName: string }).fileName, isDirectory: (entry as { isDirectory?: unknown }).isDirectory === true }]
+        : []
+    ) : []
+    return { directory: { path, entries } }
+  })
 
   app.get('/api/capabilities', async (): Promise<ServerCapabilitiesResponse> => ({
     capabilities: {
@@ -446,38 +587,6 @@ export const createHttpServer = async (
       codexExecutable: null
     }
   }))
-
-  app.get('/api/config/root', async (): Promise<ProjectRootResponse> => ({
-    projectRoot: {
-      root: manager.config?.root ?? '',
-      lastRoot: manager.getLastProjectRoot?.() ?? null
-    }
-  }))
-
-  app.patch<{ Body: ProjectRootRequest }>(
-    '/api/config/root',
-    async (request: FastifyRequest<{ Body: ProjectRootRequest }>): Promise<ProjectRootResponse> => {
-      const requestedRoot = typeof request.body?.root === 'string' ? request.body.root.trim() : ''
-      if (!requestedRoot) {
-        throw new CodoriError('MISSING_ROOT', 'A project root is required.')
-      }
-
-      if (!manager.setProjectRoot) {
-        throw new CodoriError(
-          'PROJECT_ROOT_UPDATE_UNAVAILABLE',
-          'This runtime does not support changing the project root.'
-        )
-      }
-
-      const root = manager.setProjectRoot(requestedRoot)
-      return {
-        projectRoot: {
-          root,
-          lastRoot: manager.getLastProjectRoot?.() ?? null
-        }
-      }
-    }
-  )
 
   app.get('/api/chats', async (): Promise<ChatsResponse> => ({
     chats: manager.listChatStatuses
@@ -563,31 +672,6 @@ export const createHttpServer = async (
           getChatIdFromRequest(request.params.chatId),
           request.body?.threadId ?? null
         ))
-      }
-    }
-  )
-
-  app.post<{ Body: { repositoryUrl?: string, destination?: string | null } }>(
-    '/api/projects/clone',
-    async (request, reply): Promise<ProjectResponse> => {
-      if (!manager.cloneProject) {
-        throw new CodoriError(
-          'INVALID_CONFIG',
-          'Project cloning is not available because the runtime manager does not support it.'
-        )
-      }
-
-      const repositoryUrl = request.body?.repositoryUrl?.trim() ?? ''
-      const destination = typeof request.body?.destination === 'string'
-        ? request.body.destination
-        : null
-
-      reply.status(201)
-      return {
-        project: await resolveValue(manager.cloneProject({
-          repositoryUrl,
-          destination
-        }))
       }
     }
   )
@@ -1443,6 +1527,13 @@ export const createHttpServer = async (
 
       return reply.type('text/html').sendFile('index.html')
     })
+  }
+
+  // Populate the runtime's opaque-id lookup before serving any project route.
+  // Without this, a direct deep link could reach `start` or `rpc` before the
+  // dashboard's first inventory request had populated the app-server cache.
+  if (manager.getAppServerBridgeTarget) {
+    await appServerProjects(manager)
   }
 
   return app
