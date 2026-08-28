@@ -1,7 +1,7 @@
 {
   "name": "codori-workspace",
   "private": true,
-  "version": "0.14.2",
+  "version": "0.14.3",
   "packageManager": "pnpm@11.20.0",
   "engines": {
     "node": ">=22.22.2"

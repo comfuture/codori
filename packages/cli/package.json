@@ -1,6 +1,6 @@
 {
   "name": "@codori/cli",
-  "version": "0.14.2",
+  "version": "0.14.3",
   "private": false,
   "description": "Codori command-line interface for serving projects and managing the background service.",
   "type": "module",
