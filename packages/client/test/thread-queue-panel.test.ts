@@ -44,6 +44,17 @@ describe('ThreadQueuePanel', () => {
           id: 'image',
           clientUserMessageId: 'client-image',
           input: [{ type: 'localImage', path: '/tmp/image.png' }]
+        }, {
+          id: 'text-element',
+          clientUserMessageId: 'client-text-element',
+          input: [{
+            type: 'text',
+            text: '$review',
+            text_elements: [{
+              byteRange: { start: 0, end: 7 },
+              placeholder: 'review'
+            }]
+          }]
         }],
         paused: false,
         loading: false,
@@ -58,5 +69,6 @@ describe('ThreadQueuePanel', () => {
     expect(wrapper.emitted('update')?.[0]).toEqual(['text', 'updated'])
     expect(wrapper.get('[aria-label="Edit queued prompt 2"]').attributes('disabled')).toBeDefined()
     expect(wrapper.get('[aria-label="Edit queued prompt 2"]').attributes('title')).toContain('Structured queued inputs')
+    expect(wrapper.get('[aria-label="Edit queued prompt 3"]').attributes('disabled')).toBeDefined()
   })
 })

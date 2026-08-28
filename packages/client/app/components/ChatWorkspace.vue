@@ -4250,7 +4250,8 @@ const queueCurrentPrompt = async () => {
   const validationError = validateTextThreadQueueDraft({
     text: input.value,
     attachmentCount: attachments.value.length,
-    mentionCount: insertedMentionSelections.value.length
+    mentionCount: insertedMentionSelections.value.length,
+    skillMentionCount: insertedSkillMentions.value.length
   })
   if (validationError) {
     error.value = validationError
@@ -4592,6 +4593,16 @@ const ensureRuntimeSubscriptions = () => {
   releaseRealtimeVoiceConnectionStateSubscription?.()
   releaseServerRequestHandler = client.setServerRequestHandler(handleServerRequest)
   releaseRuntimeNotificationSubscription = client.subscribe((notification) => {
+    const lifecycleThreadId = notificationThreadId(notification)
+    if (lifecycleThreadId === activeThreadId.value) {
+      if (notification.method === 'turn/started') {
+        rememberThreadLastTurnStatus(lifecycleThreadId, 'inProgress')
+      } else if (notification.method === 'turn/completed') {
+        rememberThreadLastTurnStatus(lifecycleThreadId, notificationTurnStatus(notification))
+      } else if (notification.method === 'turn/failed') {
+        rememberThreadLastTurnStatus(lifecycleThreadId, 'failed')
+      }
+    }
     threadQueue.handleNotification(notification)
     if (notification.method === 'thread/name/updated') {
       applyActiveThreadTitleNotification(notification, {

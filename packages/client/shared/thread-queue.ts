@@ -21,21 +21,24 @@ export const threadQueueSubmissionText = (submission: Pick<QueuedSubmission, 'in
     .filter(Boolean)
     .join('\n')
 
+const isPlainTextThreadQueueInput = (entry: UserInput) =>
+  entry.type === 'text' && entry.text_elements.length === 0
+
 export const isTextOnlyThreadQueueSubmission = (submission: Pick<QueuedSubmission, 'input'>) =>
   submission.input.length > 0
-  && submission.input.every(entry => entry.type === 'text')
+  && submission.input.every(isPlainTextThreadQueueInput)
 
 export const summarizeThreadQueueSubmission = (submission: Pick<QueuedSubmission, 'input'>) => {
   const text = threadQueueSubmissionText(submission)
-  const structuredCount = submission.input.filter(entry => entry.type !== 'text').length
+  const structuredCount = submission.input.filter(entry => !isPlainTextThreadQueueInput(entry)).length
   if (text && structuredCount > 0) {
-    return `${text}\n${structuredCount} attachment or mention input${structuredCount === 1 ? '' : 's'}`
+    return `${text}\n${structuredCount} structured input${structuredCount === 1 ? '' : 's'}`
   }
   if (text) {
     return text
   }
   if (structuredCount > 0) {
-    return `${structuredCount} attachment or mention input${structuredCount === 1 ? '' : 's'}`
+    return `${structuredCount} structured input${structuredCount === 1 ? '' : 's'}`
   }
   return 'Empty queued submission'
 }
@@ -44,12 +47,16 @@ export const validateTextThreadQueueDraft = (input: {
   text: string
   attachmentCount: number
   mentionCount: number
+  skillMentionCount: number
 }) => {
   if (input.attachmentCount > 0) {
     return 'Queued prompts are text-only in this version. Remove image attachments before queuing.'
   }
   if (input.mentionCount > 0) {
     return 'Queued prompts do not support @ mentions yet. Remove the mention before queuing.'
+  }
+  if (input.skillMentionCount > 0) {
+    return 'Queued prompts do not support selected $skill references yet. Remove the skill reference before queuing.'
   }
   if (!input.text.trim()) {
     return 'Enter a text prompt before adding it to the queue.'
