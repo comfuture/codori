@@ -301,6 +301,14 @@ describe('createHttpServer', () => {
 
     const setAppServerProjects = vi.fn()
     const app = await createHttpServer(createManager({
+      listProjectStatuses: () => [{
+        ...createProjectRecord(),
+        projectId: 'project-1',
+        projectPath: '/stale/first',
+        projectName: 'Stale first',
+        projectRoots: ['/stale/first'],
+        activeSessionCount: 2
+      }],
       getAppServerBridgeTarget: () => ({
         target: {
           kind: 'codori-managed',
@@ -320,6 +328,15 @@ describe('createHttpServer', () => {
     expect(listResponse.statusCode).toBe(200)
     expect(listResponse.json().projects.map((project: ProjectStatusRecord) => project.projectId))
       .toEqual(['project-1', 'project-2'])
+    expect(listResponse.json().projects[0]).toMatchObject({
+      projectId: 'project-1',
+      projectPath: '/srv/first',
+      projectName: 'First',
+      projectRoots: ['/srv/first'],
+      status: 'running',
+      pid: 123,
+      activeSessionCount: 2
+    })
 
     const createResponse = await app.inject({
       method: 'POST',
