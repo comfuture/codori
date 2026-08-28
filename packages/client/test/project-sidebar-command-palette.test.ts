@@ -553,6 +553,10 @@ describe('project sidebar inline threads', () => {
   })
 
   it('renders selected project threads inline without project status dots', async () => {
+    mockProjects.value = mockProjects.value.map(project => project.projectId === 'codori'
+      ? { ...project, projectName: 'Codori Console' }
+      : project
+    )
     mockRpcRequest.mockResolvedValue(makeThreadListResponse(2))
 
     const wrapper = mountSidebar({
@@ -561,7 +565,7 @@ describe('project sidebar inline threads', () => {
     await waitForSidebar()
 
     expect(wrapper.find('.status-dot-stub').exists()).toBe(false)
-    expect(wrapper.text()).toContain('codori')
+    expect(wrapper.text()).toContain('Codori Console')
     expect(wrapper.text()).toContain('other')
     expect(wrapper.text()).toContain('Thread 1')
     expect(wrapper.text()).toContain('Thread 2')
