@@ -3,6 +3,7 @@ import {
   hasSteerableTurn,
   reconcileOptimisticUserMessage,
   removePendingUserMessageId,
+  resolvePendingUserMessageId,
   resolvePromptSubmitStatus,
   resolveTurnSubmissionMethod,
   shouldAdvanceLiveStreamTurn,
@@ -525,6 +526,13 @@ describe('client package', () => {
   it('routes submissions to turn start or same-turn steering', () => {
     expect(resolveTurnSubmissionMethod(false)).toBe('turn/start')
     expect(resolveTurnSubmissionMethod(true)).toBe('turn/steer')
+  })
+
+  it('matches optimistic user messages by stable client id before using the legacy FIFO fallback', () => {
+    const pending = ['local-one', 'local-two']
+    expect(resolvePendingUserMessageId(pending, 'local-two')).toBe('local-two')
+    expect(resolvePendingUserMessageId(pending, 'queued-elsewhere')).toBeNull()
+    expect(resolvePendingUserMessageId(pending, null)).toBe('local-one')
   })
 
   it('uses turn/start for the first send in a new thread', () => {

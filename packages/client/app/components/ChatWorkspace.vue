@@ -16,6 +16,7 @@ import PlanTaskListPanel from './PlanTaskListPanel.vue'
 import PlanImplementationPromptDrawer from './PlanImplementationPromptDrawer.vue'
 import ReviewStartDrawer from './ReviewStartDrawer.vue'
 import PendingUserRequestDrawer from './PendingUserRequestDrawer.vue'
+import ThreadQueuePanel from './ThreadQueuePanel.vue'
 import UsageStatusModal from './UsageStatusModal.vue'
 import VoiceComposerControls from './VoiceComposerControls.vue'
 import WorkspaceBranchControl from './WorkspaceBranchControl.vue'
@@ -24,6 +25,7 @@ import {
   reconcileOptimisticUserMessage,
   removeChatMessage,
   removePendingUserMessageId,
+  resolvePendingUserMessageId,
   resolvePromptSubmitStatus,
   resolveTurnSubmissionMethod,
   shouldAdvanceLiveStreamTurn,
@@ -68,6 +70,7 @@ import { useChatGoalWorkflow } from '../composables/useChatGoalWorkflow'
 import { useChatPlanWorkflow } from '../composables/useChatPlanWorkflow'
 import { useChatReviewWorkflow } from '../composables/useChatReviewWorkflow'
 import { useSubagentPanelsController } from '../composables/useSubagentPanelsController'
+import { useThreadQueue } from '../composables/useThreadQueue'
 import {
   promotePendingUserRequestSessions,
   usePendingUserRequest
@@ -138,6 +141,10 @@ import {
   reduceToolItemDataNotification
 } from '~~/shared/tool-items'
 import { buildTurnStartInput, type PersistedProjectAttachment } from '~~/shared/chat-attachments'
+import {
+  createThreadQueueClientMessageId,
+  validateTextThreadQueueDraft
+} from '~~/shared/thread-queue'
 import {
   type CollaborationMode
 } from '~~/shared/collaboration-mode'
@@ -373,6 +380,18 @@ const {
   planImplementationPromptTurnId,
   planImplementationPromptThreadId
 } = session
+const threadQueue = useThreadQueue({
+  threadId: activeThreadId,
+  getClient: () => getRuntimeClient()
+})
+const {
+  submissions: threadQueueSubmissions,
+  supported: threadQueueSupported,
+  loading: threadQueueLoading,
+  mutating: threadQueueMutating,
+  error: threadQueueError,
+  paused: threadQueuePaused
+} = threadQueue
 const realtimeVoice = useSharedRealtimeConversation(
   workspaceSessionKey,
   getRuntimeClient
@@ -713,6 +732,15 @@ const hasDraftContent = computed(() =>
   input.value.trim().length > 0
   || attachments.value.length > 0
 )
+const showThreadQueuePanel = computed(() =>
+  threadQueueSupported.value === true
+  && Boolean(activeThreadId.value)
+  && (
+    threadQueueSubmissions.value.length > 0
+    || threadQueuePaused.value
+    || Boolean(threadQueueError.value)
+  )
+)
 const isComposerDisabled = computed(() =>
   (!hasValidPromptControlSelection.value && !canLoadDraftPromptControls.value)
   || isUploading.value
@@ -735,6 +763,15 @@ const composerPlaceholder = computed(() =>
       : isChatSessionWorkspace.value
         ? 'Ask Codex anything. @ to use plugins or use files'
         : 'Describe the change you want Codex to make'
+)
+const showQueuePromptAction = computed(() =>
+  threadQueueSupported.value === true
+  && Boolean(activeThreadId.value)
+  && (
+    hasActiveTurnEngagement()
+    || threadQueuePaused.value
+    || threadQueueSubmissions.value.length > 0
+  )
 )
 const displayMessages = computed(() => groupTranscriptMessages(messages.value))
 const showAwaitingAssistantIndicator = computed(() =>
@@ -2746,12 +2783,25 @@ const untrackPendingUserMessage = (messageId: string) => {
   liveStream.pendingUserMessageIds = removePendingUserMessageId(liveStream.pendingUserMessageIds, messageId)
 }
 
-const reconcilePendingUserMessage = (confirmedMessage: ChatMessage) => {
+const reconcilePendingUserMessage = (
+  confirmedMessage: ChatMessage,
+  clientUserMessageId?: string | null
+) => {
   const liveStream = currentLiveStream()
-  const optimisticMessageId = liveStream?.pendingUserMessageIds.shift() ?? null
+  const optimisticMessageId = resolvePendingUserMessageId(
+    liveStream?.pendingUserMessageIds ?? [],
+    clientUserMessageId
+  )
   if (!optimisticMessageId) {
     messages.value = upsertStreamingMessage(messages.value, confirmedMessage)
     return
+  }
+
+  if (liveStream) {
+    liveStream.pendingUserMessageIds = removePendingUserMessageId(
+      liveStream.pendingUserMessageIds,
+      optimisticMessageId
+    )
   }
 
   const pendingAttachments = optimisticAttachmentSnapshots.get(optimisticMessageId)
@@ -2811,6 +2861,7 @@ const submitTurnStart = async (input: {
     ?? await uploadAttachments(liveStream.threadId, submittedAttachments)
   const turnStart = await client.request<TurnStartResponse>('turn/start', {
     threadId: liveStream.threadId,
+    clientUserMessageId: optimisticMessageId,
     input: buildTurnStartInput(text, uploadedAttachments, additionalInput),
     cwd: selectedProject.value?.projectPath ?? null,
     approvalPolicy: 'never',
@@ -3587,6 +3638,7 @@ const applyTurnStartedNotification = (
   })) {
     return
   }
+  threadQueue.markTurnStarted()
 
   if (threadId && shouldResetThreadPlanForTurn(threadId, nextTurnId)) {
     clearThreadPlanState(threadId)
@@ -3623,7 +3675,7 @@ const applyItemStartedNotification = (notification: CodexRpcNotification) => {
       reconcilePendingUserMessage({
         ...nextMessage,
         pending: false
-      })
+      }, params.item.clientId)
     }
     status.value = 'streaming'
     return
@@ -3655,7 +3707,7 @@ const applyItemCompletedNotification = (notification: CodexRpcNotification) => {
       pending: false
     }
     if (params.item.type === 'userMessage') {
-      reconcilePendingUserMessage(confirmedMessage)
+      reconcilePendingUserMessage(confirmedMessage, params.item.clientId)
       continue
     }
 
@@ -3675,6 +3727,7 @@ const applyTerminalNotification = (
     liveStream.lockedTurnId = null
   }
   clearLiveStream(new Error(messageText))
+  threadQueue.markTurnCompleted('failed')
   error.value = messageText
   status.value = 'error'
 }
@@ -3683,7 +3736,8 @@ const applyTurnCompletedNotification = (
   notification: CodexRpcNotification,
   liveStream: LiveStream | null
 ) => {
-  if (notificationTurnStatus(notification) === 'failed') {
+  const turnStatus = notificationTurnStatus(notification)
+  if (turnStatus === 'failed') {
     messages.value = updateWebSearchMessageStatus(messages.value, 'failed')
   }
   maybeQueuePlanImplementationPrompt({
@@ -3699,6 +3753,7 @@ const applyTurnCompletedNotification = (
   error.value = null
   status.value = 'ready'
   completeLiveStreamTurn(liveStream)
+  threadQueue.markTurnCompleted(turnStatus)
 }
 const applyNotification = (notification: CodexRpcNotification) => {
   const liveStream = currentLiveStream()
@@ -4086,6 +4141,7 @@ const sendMessage = async () => {
           await client.request<TurnSteerResponse>('turn/steer', {
             threadId: liveStream.threadId,
             expectedTurnId: turnId,
+            clientUserMessageId: optimisticMessageId,
             input: buildTurnStartInput(text, uploadedAttachments, submittedMentionInput.pluginInput)
           } satisfies TurnSteerParams)
           tokenUsage.value = null
@@ -4157,6 +4213,83 @@ const sendMessage = async () => {
     }
   } finally {
     sendMessageLocked.value = false
+  }
+}
+
+const queueCurrentPrompt = async () => {
+  if (sendMessageLocked.value || threadQueueMutating.value || hasPendingRequest.value) {
+    return
+  }
+
+  const validationError = validateTextThreadQueueDraft({
+    text: input.value,
+    attachmentCount: attachments.value.length,
+    mentionCount: insertedMentionSelections.value.length
+  })
+  if (validationError) {
+    error.value = validationError
+    return
+  }
+
+  const queuedThreadId = activeThreadId.value
+  const queuedText = input.value
+  const clientUserMessageId = createThreadQueueClientMessageId()
+  sendMessageLocked.value = true
+  error.value = null
+  try {
+    await threadQueue.add(queuedText, clientUserMessageId)
+    if (activeThreadId.value === queuedThreadId && input.value === queuedText) {
+      applyDraftTextState('')
+    }
+  } catch (caughtError) {
+    if (activeThreadId.value === queuedThreadId) {
+      error.value = threadQueueError.value
+        ?? (caughtError instanceof Error ? caughtError.message : String(caughtError))
+    }
+  } finally {
+    sendMessageLocked.value = false
+  }
+}
+
+const updateQueuedPrompt = async (submissionId: string, text: string) => {
+  try {
+    await threadQueue.update(submissionId, text)
+  } catch {
+    // The queue controller restores server state and exposes the actionable error.
+  }
+}
+
+const deleteQueuedPrompt = async (submissionId: string) => {
+  try {
+    await threadQueue.remove(submissionId)
+  } catch {
+    // The queue controller restores server state and exposes the actionable error.
+  }
+}
+
+const reorderQueuedPrompts = async (submissionIds: string[]) => {
+  try {
+    await threadQueue.reorder(submissionIds)
+  } catch {
+    // The queue controller restores server state and exposes the actionable error.
+  }
+}
+
+const startQueuedPrompt = async (submissionId?: string) => {
+  const queuedThreadId = activeThreadId.value
+  try {
+    const turn = await threadQueue.start(submissionId)
+    if (activeThreadId.value !== queuedThreadId) {
+      return
+    }
+    const liveStream = await ensureObservedThreadSubscription()
+    if (liveStream && liveStream.threadId === queuedThreadId) {
+      setLiveStreamTurnId(liveStream, turn.id)
+      setLiveStreamInterruptRequested(liveStream, false)
+      status.value = 'streaming'
+    }
+  } catch {
+    // The queue controller restores server state and exposes the actionable error.
   }
 }
 
@@ -4430,6 +4563,7 @@ const ensureRuntimeSubscriptions = () => {
   releaseRealtimeVoiceConnectionStateSubscription?.()
   releaseServerRequestHandler = client.setServerRequestHandler(handleServerRequest)
   releaseRuntimeNotificationSubscription = client.subscribe((notification) => {
+    threadQueue.handleNotification(notification)
     if (notification.method === 'thread/name/updated') {
       applyActiveThreadTitleNotification(notification, {
         activeThreadId: activeThreadId.value,
@@ -4445,6 +4579,7 @@ const ensureRuntimeSubscriptions = () => {
   })
   let realtimeVoiceRpcWasDisconnected = false
   releaseRealtimeVoiceConnectionStateSubscription = client.subscribeConnectionState((connectionState) => {
+    threadQueue.handleConnectionState(connectionState)
     if (connectionState === 'disconnected') {
       realtimeVoiceRpcWasDisconnected = true
       return
@@ -4583,6 +4718,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  threadQueue.dispose()
   if (realtimeVoiceSessionKind.value === 'preview'
     && ownsRealtimeVoiceSession.value) {
     void realtimeVoice.stop()
@@ -5267,6 +5403,19 @@ watch(
           Codex is waiting for the response in the drawer below. Normal chat sending is paused until you answer it.
         </div>
 
+        <ThreadQueuePanel
+          v-if="showThreadQueuePanel"
+          :submissions="threadQueueSubmissions"
+          :paused="threadQueuePaused"
+          :loading="threadQueueLoading"
+          :mutating="threadQueueMutating"
+          :error="threadQueueError"
+          @update="(submissionId, text) => void updateQueuedPrompt(submissionId, text)"
+          @remove="(submissionId) => void deleteQueuedPrompt(submissionId)"
+          @reorder="(submissionIds) => void reorderQueuedPrompts(submissionIds)"
+          @start="(submissionId) => void startQueuedPrompt(submissionId)"
+        />
+
         <div
           class="relative"
           @dragenter="onDragEnter"
@@ -5612,6 +5761,24 @@ watch(
                     @toggle-output="void toggleRealtimeVoiceOutput()"
                     @stop="void stopRealtimeVoice()"
                   />
+
+                  <UTooltip
+                    v-if="showQueuePromptAction"
+                    text="Queue this text to run after the current turn"
+                  >
+                    <UButton
+                      type="button"
+                      color="neutral"
+                      variant="ghost"
+                      size="sm"
+                      icon="i-lucide-list-end"
+                      label="Queue next"
+                      :disabled="sendMessageLocked || threadQueueMutating || !hasDraftContent"
+                      class="shrink-0 rounded-full border border-default/70 bg-default/70"
+                      aria-label="Queue prompt to run after the current turn"
+                      @click="void queueCurrentPrompt()"
+                    />
+                  </UTooltip>
 
                   <UPopover
                     :open="promptControlsPopoverOpen"
