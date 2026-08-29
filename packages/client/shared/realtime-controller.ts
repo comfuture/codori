@@ -180,11 +180,11 @@ const readRealtimeFeaturePage = async (
       {
         threadId,
         limit: REALTIME_FEATURE_PAGE_SIZE,
-        ...(cursor ? { cursor } : {})
+        ...(cursor !== null ? { cursor } : {})
       } satisfies ExperimentalFeatureListParams
     )
     if (response.data.some(feature => feature.name === REALTIME_FEATURE_NAME)
-      || !response.nextCursor) {
+      || response.nextCursor === null) {
       return response
     }
     if (seenCursors.has(response.nextCursor)) {
