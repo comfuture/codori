@@ -109,7 +109,7 @@ class FakeRpcClient {
     this.requests.push({ method, params })
     if (method === 'experimentalFeature/list') {
       const cursor = (params as { cursor?: string } | undefined)?.cursor
-      return (cursor ? this.featurePages.get(cursor) : this.featureResponse) as T
+      return (cursor !== undefined ? this.featurePages.get(cursor) : this.featureResponse) as T
     }
     if (method === 'thread/realtime/listVoices') {
       return this.voicesResponse as T
@@ -296,6 +296,31 @@ describe('realtime conversation controller', () => {
       method: 'experimentalFeature/list',
       params: { threadId: 'thread-1', limit: 100 }
     }])
+  })
+
+  it('treats an empty feature-list cursor as an opaque continuation token', async () => {
+    const fixture = createFixture()
+    fixture.rpc.featureResponse = {
+      data: [],
+      nextCursor: ''
+    }
+    fixture.rpc.featurePages.set('', enabledFeatureResponse)
+
+    await fixture.controller.refreshCapability('thread-1', true)
+
+    expect(fixture.controller.capability.value.status).toBe('available')
+    expect(fixture.rpc.requests.filter(request =>
+      request.method === 'experimentalFeature/list'
+    )).toEqual([
+      {
+        method: 'experimentalFeature/list',
+        params: { threadId: 'thread-1', limit: 100 }
+      },
+      {
+        method: 'experimentalFeature/list',
+        params: { threadId: 'thread-1', limit: 100, cursor: '' }
+      }
+    ])
   })
 
   it('discovers and caches the advertised V1 voice catalog for V3', async () => {
