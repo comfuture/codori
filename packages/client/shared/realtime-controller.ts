@@ -1,5 +1,6 @@
 import type { CodexRpcClient, CodexRpcNotification } from './codex-rpc'
 import type { ExperimentalFeatureListResponse } from './generated/codex-app-server/v2/ExperimentalFeatureListResponse'
+import type { ExperimentalFeatureListParams } from './generated/codex-app-server/v2/ExperimentalFeatureListParams'
 import type { RealtimeVoice } from './generated/codex-app-server/RealtimeVoice'
 import type { ThreadRealtimeClosedNotification } from './generated/codex-app-server/v2/ThreadRealtimeClosedNotification'
 import type { ThreadRealtimeErrorNotification } from './generated/codex-app-server/v2/ThreadRealtimeErrorNotification'
@@ -134,6 +135,9 @@ type PendingCloseBarrier = {
 const DEFAULT_CONNECTION_TIMEOUT_MS = 20_000
 const DEFAULT_PREVIEW_TIMEOUT_MS = 12_000
 const REPLACEMENT_CLOSE_TIMEOUT_MS = 1_500
+const REALTIME_FEATURE_NAME = 'realtime_conversation'
+const REALTIME_FEATURE_PAGE_SIZE = 100
+const REALTIME_FEATURE_MAX_PAGES = 100
 
 export type RealtimeConnectOptions = {
   voice?: RealtimeVoice
@@ -162,6 +166,38 @@ const defaultEnvironment = (): RealtimeBrowserEnvironment => ({
   setTimeout: (handler, timeoutMs) => globalThis.setTimeout(handler, timeoutMs),
   clearTimeout: timer => globalThis.clearTimeout(timer)
 })
+
+const readRealtimeFeaturePage = async (
+  client: RealtimeRpcClient,
+  threadId: string
+) => {
+  const seenCursors = new Set<string>()
+  let cursor: string | null = null
+
+  for (let page = 0; page < REALTIME_FEATURE_MAX_PAGES; page += 1) {
+    const response: ExperimentalFeatureListResponse = await client.request<ExperimentalFeatureListResponse>(
+      'experimentalFeature/list',
+      {
+        threadId,
+        limit: REALTIME_FEATURE_PAGE_SIZE,
+        ...(cursor ? { cursor } : {})
+      } satisfies ExperimentalFeatureListParams
+    )
+    if (response.data.some(feature => feature.name === REALTIME_FEATURE_NAME)
+      || !response.nextCursor) {
+      return response
+    }
+    if (seenCursors.has(response.nextCursor)) {
+      throw new Error('The Codex app-server repeated a feature-list cursor.')
+    }
+    seenCursors.add(response.nextCursor)
+    cursor = response.nextCursor
+  }
+
+  throw new Error(
+    `The Codex app-server feature list exceeded ${REALTIME_FEATURE_MAX_PAGES} pages.`
+  )
+}
 
 const errorMessage = (error: unknown) =>
   error instanceof Error ? error.message : String(error)
@@ -895,10 +931,7 @@ export const createRealtimeConversationController = (
     }
 
     try {
-      const response = await options.client.request<ExperimentalFeatureListResponse>(
-        'experimentalFeature/list',
-        { threadId, limit: 100 }
-      )
+      const response = await readRealtimeFeaturePage(options.client, threadId)
       const resolved = resolveRealtimeCapability({
         configured,
         secureContext: true,

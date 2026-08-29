@@ -4,9 +4,10 @@ import {
   useRealtimeConversation,
   type RealtimeBrowserEnvironment
 } from '../app/composables/useRealtimeConversation'
+import type { ExperimentalFeatureListResponse } from '../shared/generated/codex-app-server/v2/ExperimentalFeatureListResponse'
 import type { CodexRpcConnectionState, CodexRpcNotification } from '../shared/codex-rpc'
 
-const enabledFeatureResponse = {
+const enabledFeatureResponse: ExperimentalFeatureListResponse = {
   data: [{
     name: 'realtime_conversation',
     stage: 'underDevelopment' as const,
@@ -90,7 +91,8 @@ class FakeRpcClient {
   readonly notificationListeners = new Set<(notification: CodexRpcNotification) => void>()
   readonly connectionListeners = new Set<(state: CodexRpcConnectionState) => void>()
   connected = true
-  featureResponse = enabledFeatureResponse
+  featureResponse: ExperimentalFeatureListResponse = enabledFeatureResponse
+  readonly featurePages = new Map<string, ExperimentalFeatureListResponse>()
   voicesResponse = {
     voices: {
       v1: ['juniper', 'cove'],
@@ -106,7 +108,8 @@ class FakeRpcClient {
   async request<T>(method: string, params?: unknown): Promise<T> {
     this.requests.push({ method, params })
     if (method === 'experimentalFeature/list') {
-      return this.featureResponse as T
+      const cursor = (params as { cursor?: string } | undefined)?.cursor
+      return (cursor ? this.featurePages.get(cursor) : this.featureResponse) as T
     }
     if (method === 'thread/realtime/listVoices') {
       return this.voicesResponse as T
@@ -256,6 +259,45 @@ describe('realtime capability normalization', () => {
 })
 
 describe('realtime conversation controller', () => {
+  it('follows feature-list pagination until realtime conversations are found', async () => {
+    const fixture = createFixture()
+    fixture.rpc.featureResponse = {
+      data: [],
+      nextCursor: '100'
+    }
+    fixture.rpc.featurePages.set('100', enabledFeatureResponse)
+
+    await fixture.controller.refreshCapability('thread-1', true)
+
+    expect(fixture.controller.capability.value.status).toBe('available')
+    expect(fixture.rpc.requests.filter(request =>
+      request.method === 'experimentalFeature/list'
+    )).toEqual([
+      {
+        method: 'experimentalFeature/list',
+        params: { threadId: 'thread-1', limit: 100 }
+      },
+      {
+        method: 'experimentalFeature/list',
+        params: { threadId: 'thread-1', limit: 100, cursor: '100' }
+      }
+    ])
+  })
+
+  it('stops feature-list pagination when the first page contains realtime conversations', async () => {
+    const fixture = createFixture()
+
+    await fixture.controller.refreshCapability('thread-1', true)
+
+    expect(fixture.controller.capability.value.status).toBe('available')
+    expect(fixture.rpc.requests.filter(request =>
+      request.method === 'experimentalFeature/list'
+    )).toEqual([{
+      method: 'experimentalFeature/list',
+      params: { threadId: 'thread-1', limit: 100 }
+    }])
+  })
+
   it('discovers and caches the advertised V1 voice catalog for V3', async () => {
     const fixture = createFixture()
 
