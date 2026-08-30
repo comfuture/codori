@@ -4,7 +4,7 @@ import { computed, onMounted } from 'vue'
 import WorkspaceFilesPanel from '../../../components/WorkspaceFilesPanel.vue'
 import { useProjects } from '../../../composables/useProjects'
 import WorkspaceTerminalToggle from '../../../components/WorkspaceTerminalToggle.vue'
-import { normalizeProjectIdParam } from '~~/shared/codori'
+import { normalizeProjectIdParam, resolveProjectDisplayName } from '~~/shared/codori'
 
 const route = useRoute()
 const {
@@ -15,7 +15,7 @@ const {
 
 const projectId = computed(() => normalizeProjectIdParam(route.params.projectId as string | string[] | undefined))
 const selectedProject = computed(() => getProject(projectId.value))
-const projectName = computed(() => selectedProject.value?.projectId ?? projectId.value ?? 'Project')
+const projectName = computed(() => resolveProjectDisplayName(selectedProject.value, projectId.value ?? 'Project'))
 
 onMounted(() => {
   if (!loaded.value) {

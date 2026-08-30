@@ -195,6 +195,7 @@ import {
   toChatRoute,
   toProjectRoute,
   toProjectThreadRoute,
+  resolveProjectDisplayName,
   type ServerCapabilitiesResponse
 } from '~~/shared/codori'
 import { resolveApiUrl, shouldUseServerProxy } from '~~/shared/network'
@@ -637,6 +638,7 @@ const selectedProject = computed(() => {
     return chat
       ? {
           projectId: chat.chatId,
+          projectName: chat.title ?? chat.chatId,
           projectPath: chat.chatPath,
           status: chat.status
         }
@@ -757,7 +759,7 @@ const promptSubmitStatus = computed(() =>
     hasDraftContent: hasDraftContent.value
   })
 )
-const projectTitle = computed(() => selectedProject.value?.projectId ?? workspaceId.value)
+const projectTitle = computed(() => resolveProjectDisplayName(selectedProject.value, workspaceId.value))
 const composerPlaceholder = computed(() =>
   hasPendingRequest.value
     ? 'Respond to the pending request below to let Codex continue'
@@ -809,7 +811,7 @@ const showStarterProjectSelector = computed(() =>
 )
 const starterProjectItems = computed(() =>
   sortSidebarProjects(projects.value, null).map(project => ({
-    label: project.projectName ?? project.projectId,
+    label: resolveProjectDisplayName(project),
     value: project.projectId,
     description: project.projectPath
   }))

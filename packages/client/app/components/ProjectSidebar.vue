@@ -30,7 +30,13 @@ import {
   notificationThreadName,
   notificationThreadUpdatedAt
 } from '~~/shared/codex-rpc'
-import { toChatRoute, toChatsRoute, toProjectRoute, toProjectThreadRoute } from '~~/shared/codori'
+import {
+  resolveProjectDisplayName,
+  toChatRoute,
+  toChatsRoute,
+  toProjectRoute,
+  toProjectThreadRoute
+} from '~~/shared/codori'
 
 const INLINE_THREAD_PAGE_SIZE = 5
 const INLINE_THREAD_SOURCE_KINDS: ThreadSourceKind[] = [
@@ -731,11 +737,12 @@ const chatItems = computed<ChatSidebarNavigationItem[][]>(() => {
 const projectItems = computed<ProjectSidebarNavigationItem[][]>(() => [
   sortSidebarProjects(projects.value, activeProjectId.value).map((project) => {
     const active = activeProjectId.value === project.projectId
+    const projectName = resolveProjectDisplayName(project)
     const children: ProjectSidebarNavigationItem[] = []
     const item: ProjectNavigationItem = {
       itemKind: 'project',
       value: projectNavigationValue(project.projectId),
-      label: project.projectName ?? project.projectId,
+      label: projectName,
       icon: 'i-lucide-folder-git-2',
       active,
       class: navigationItemClass(active),
@@ -745,7 +752,7 @@ const projectItems = computed<ProjectSidebarNavigationItem[][]>(() => [
       },
       to: toProjectRoute(project.projectId),
       projectId: project.projectId,
-      projectName: project.projectName ?? project.projectId,
+      projectName,
       projectPath: project.projectPath,
       error: project.error
     }

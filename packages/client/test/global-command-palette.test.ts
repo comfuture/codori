@@ -18,6 +18,7 @@ const mockStartProject = vi.fn()
 const mockGetClient = vi.fn()
 const mockProjects = ref<Array<{
   projectId: string
+  projectName?: string
   projectPath: string
   status: 'running' | 'stopped' | 'error'
   error: string | null
@@ -239,6 +240,7 @@ describe('global command palette', () => {
     mockProjects.value = [
       {
         projectId: 'team/api',
+        projectName: 'Team API',
         projectPath: '/Users/comfuture/Project/team-api',
         status: 'stopped',
         error: null
@@ -285,7 +287,7 @@ describe('global command palette', () => {
     expect(wrapper.text()).toContain('Recent Chats')
     expect(wrapper.text()).toContain('Design notes')
     expect(wrapper.text()).toContain('Recent Projects')
-    expect(wrapper.text()).toContain('team/api')
+    expect(wrapper.text()).toContain('Team API')
     expect(mockRefreshChats).toHaveBeenCalledTimes(1)
     expect(mockRefreshProjects).toHaveBeenCalledTimes(1)
   })
@@ -373,7 +375,7 @@ describe('global command palette', () => {
 
     dispatchShortcut({ metaKey: true })
     await nextTick()
-    await wrapper.findAll('.command-item').find(button => button.text().includes('team/api'))!.trigger('click')
+    await wrapper.findAll('.command-item').find(button => button.text().includes('Team API'))!.trigger('click')
     await flushPromises()
 
     expect(mockRouterPush).toHaveBeenCalledWith('/projects/team/api')
@@ -402,6 +404,7 @@ describe('global command palette', () => {
     mockProjects.value = [
       {
         projectId: 'team/api',
+        projectName: 'Team API',
         projectPath: '/Users/comfuture/Project/team-api',
         status: 'running',
         error: null
@@ -442,7 +445,8 @@ describe('global command palette', () => {
     })
     expect(wrapper.text()).toContain('Matching Threads')
     expect(wrapper.text()).toContain('Review API plan')
-    expect(wrapper.text()).toContain('team/api')
+    expect(wrapper.text()).toContain('Team API')
+    expect(wrapper.text()).not.toContain('team/api')
 
     await wrapper.findAll('.command-item').find(button => button.text().includes('Review API plan'))!.trigger('click')
     await flushPromises()

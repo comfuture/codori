@@ -1,9 +1,11 @@
+import { resolveProjectDisplayName } from '~~/shared/codori'
+
 export const sortSidebarProjects = <T extends { projectId: string, projectName?: string }>(
   projects: T[],
   activeProjectId: string | null
 ) => {
   const alphabeticalProjects = [...projects].sort((left, right) =>
-    (left.projectName ?? left.projectId).localeCompare(right.projectName ?? right.projectId)
+    resolveProjectDisplayName(left).localeCompare(resolveProjectDisplayName(right))
   )
 
   if (!activeProjectId) {

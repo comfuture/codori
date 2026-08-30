@@ -12,7 +12,13 @@ import {
   isMacLikePlatform
 } from '../utils/global-command-palette-shortcut'
 import { sortSidebarProjects } from '../utils/project-sidebar-order'
-import { toChatRoute, toChatsRoute, toProjectRoute, toProjectThreadRoute } from '~~/shared/codori'
+import {
+  resolveProjectDisplayName,
+  toChatRoute,
+  toChatsRoute,
+  toProjectRoute,
+  toProjectThreadRoute
+} from '~~/shared/codori'
 import type { ThreadListParams } from '~~/shared/generated/codex-app-server/v2/ThreadListParams'
 import type { ThreadListResponse } from '~~/shared/generated/codex-app-server/v2/ThreadListResponse'
 
@@ -21,6 +27,7 @@ type ThreadSearchResult = {
   title: string
   updatedAt: number
   projectId: string
+  projectName: string
   projectPath: string
 }
 
@@ -146,7 +153,7 @@ const projectItems = computed(() => {
   }
 
   return sortSidebarProjects(projects.value, null).map(project => ({
-    label: project.projectName ?? project.projectId,
+    label: resolveProjectDisplayName(project),
     suffix: project.projectPath,
     icon: 'i-lucide-folder-git-2',
     onSelect: () => selectProject(project.projectId)
@@ -156,7 +163,7 @@ const projectItems = computed(() => {
 const threadItems = computed(() =>
   threadSearchResults.value.map(thread => ({
     label: thread.title,
-    suffix: `${thread.projectId} • ${formatTimestamp(thread.updatedAt)}`,
+    suffix: `${thread.projectName} • ${formatTimestamp(thread.updatedAt)}`,
     icon: 'i-lucide-message-square-text',
     onSelect: () => selectThread(thread)
   }))
@@ -261,7 +268,7 @@ const runLimited = async <T, R>(
 }
 
 const searchProjectThreads = async (
-  project: { projectId: string, projectPath: string },
+  project: { projectId: string, projectName?: string, projectPath: string },
   query: string
 ) => {
   try {
@@ -278,6 +285,7 @@ const searchProjectThreads = async (
       title: resolveThreadSummaryTitle(thread),
       updatedAt: thread.updatedAt,
       projectId: project.projectId,
+      projectName: resolveProjectDisplayName(project),
       projectPath: project.projectPath
     }))
   } catch {
