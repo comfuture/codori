@@ -600,6 +600,44 @@ describe('project sidebar inline threads', () => {
     })
   })
 
+  it('falls back to unassigned threads from the selected project roots', async () => {
+    mockProjects.value = mockProjects.value.map(project => project.projectId === 'codori'
+      ? { ...project, projectRoots: ['/repo/codori', '/repo/codori-docs'] }
+      : project
+    )
+    mockRpcRequest
+      .mockResolvedValueOnce(makeThreadListResponse(0))
+      .mockResolvedValueOnce({
+        ...makeThreadListResponse(2),
+        data: [1, 2].map(index => ({
+          ...makeThread(index),
+          projectId: null,
+          cwd: '/repo/codori'
+        }))
+      } as unknown as ThreadListResponse)
+
+    const wrapper = mountSidebar({ collapsed: false })
+    await waitForSidebar()
+
+    expect(mockRpcRequest).toHaveBeenNthCalledWith(1, 'thread/list', {
+      limit: 5,
+      sortKey: 'updated_at',
+      sortDirection: 'desc',
+      sourceKinds: INLINE_THREAD_SOURCE_KINDS,
+      projectId: 'codori'
+    })
+    expect(mockRpcRequest).toHaveBeenNthCalledWith(2, 'thread/list', {
+      limit: 5,
+      sortKey: 'updated_at',
+      sortDirection: 'desc',
+      sourceKinds: INLINE_THREAD_SOURCE_KINDS,
+      projectId: null,
+      cwd: ['/repo/codori', '/repo/codori-docs']
+    })
+    expect(wrapper.text()).toContain('Thread 1')
+    expect(wrapper.text()).toContain('Thread 2')
+  })
+
   it('refreshes the app-server project inventory when another client changes a project', async () => {
     mockRpcRequest.mockResolvedValue(makeThreadListResponse(0))
     mountSidebar({ collapsed: false })
@@ -698,6 +736,7 @@ describe('project sidebar inline threads', () => {
     mockRpcRequest
       .mockResolvedValueOnce(makeThreadListResponse(5, 'next-page'))
       .mockResolvedValueOnce(makeThreadListResponse(3, null, 5))
+      .mockResolvedValueOnce(makeThreadListResponse(0))
 
     const wrapper = mountSidebar({
       collapsed: false
@@ -729,6 +768,18 @@ describe('project sidebar inline threads', () => {
     expect(wrapper.findAll('[data-kind="thread"]')).toHaveLength(7)
     expect(wrapper.text()).toContain('Thread 6')
     expect(wrapper.text()).toContain('Thread 7')
+
+    await wrapper.get('[data-kind="more"]').trigger('click')
+    await waitForSidebar()
+
+    expect(mockRpcRequest).toHaveBeenNthCalledWith(3, 'thread/list', {
+      limit: 5,
+      sortKey: 'updated_at',
+      sortDirection: 'desc',
+      sourceKinds: INLINE_THREAD_SOURCE_KINDS,
+      projectId: null,
+      cwd: '/repo/codori'
+    })
     expect(wrapper.find('[data-kind="more"]').exists()).toBe(false)
   })
 

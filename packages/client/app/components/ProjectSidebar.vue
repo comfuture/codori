@@ -39,6 +39,7 @@ import {
 } from '~~/shared/codori'
 
 const INLINE_THREAD_PAGE_SIZE = 5
+const INLINE_LEGACY_THREAD_CURSOR = '__codori_legacy_project_threads__'
 const INLINE_THREAD_SOURCE_KINDS: ThreadSourceKind[] = [
   'cli',
   'vscode',
@@ -122,6 +123,7 @@ const inlineThreadsProjectId = ref<string | null>(null)
 const inlineThreadsLoading = ref(false)
 const inlineThreadsError = ref<string | null>(null)
 const inlineThreadsNextCursor = ref<string | null>(null)
+const inlineThreadsPageSource = ref<'project' | 'legacy'>('project')
 let inlineThreadFetchSequence = 0
 let inlineThreadSubscriptionSequence = 0
 let inlineThreadSubscriptionKey: string | null = null
@@ -532,6 +534,7 @@ const resetInlineThreads = () => {
   inlineThreadsLoading.value = false
   inlineThreadsError.value = null
   inlineThreadsNextCursor.value = null
+  inlineThreadsPageSource.value = 'project'
 }
 
 onBeforeUnmount(() => {
@@ -604,18 +607,50 @@ const fetchInlineThreads = async (cursor: string | null = null) => {
     const client = getClient(projectId)
     ensureInlineThreadSubscription(client, projectId)
     const statusRevision = inlineThreadSummariesForProject(projectId).getStatusRevision()
-    const response = await client.request<ThreadListResponse>('thread/list', {
-      ...(cursor ? { cursor } : {}),
-      limit: INLINE_THREAD_PAGE_SIZE,
-      sortKey: 'updated_at',
-      sortDirection: 'desc',
-      sourceKinds: INLINE_THREAD_SOURCE_KINDS,
-      projectId
-    } satisfies ThreadListParams)
+    const projectRoots = (project.projectRoots?.length
+      ? project.projectRoots
+      : [project.projectPath]).filter(Boolean)
+    const requestedSource = cursor === INLINE_LEGACY_THREAD_CURSOR
+      ? 'legacy'
+      : inlineThreadsPageSource.value
+    const requestedCursor = cursor === INLINE_LEGACY_THREAD_CURSOR ? null : cursor
+    const listThreads = (source: 'project' | 'legacy', pageCursor: string | null) =>
+      client.request<ThreadListResponse>('thread/list', {
+        ...(pageCursor ? { cursor: pageCursor } : {}),
+        limit: INLINE_THREAD_PAGE_SIZE,
+        sortKey: 'updated_at',
+        sortDirection: 'desc',
+        sourceKinds: INLINE_THREAD_SOURCE_KINDS,
+        ...(source === 'project'
+          ? { projectId }
+          : {
+              projectId: null,
+              cwd: projectRoots.length === 1 ? projectRoots[0] : projectRoots
+            })
+      } satisfies ThreadListParams)
+    let response = await listThreads(requestedSource, requestedCursor)
+    let responseSource = requestedSource
+
+    if (
+      !cursor
+      && responseSource === 'project'
+      && response.data.length === 0
+      && response.nextCursor === null
+      && projectRoots.length > 0
+    ) {
+      response = await listThreads('legacy', null)
+      responseSource = 'legacy'
+    }
 
     if (sequence !== inlineThreadFetchSequence) {
       return
     }
+
+    inlineThreadsPageSource.value = responseSource
+    inlineThreadsNextCursor.value = response.nextCursor
+      ?? (responseSource === 'project' && projectRoots.length > 0
+        ? INLINE_LEGACY_THREAD_CURSOR
+        : null)
 
     const nextThreads = response.data.map(thread => ({
       id: thread.id,
@@ -639,7 +674,6 @@ const fetchInlineThreads = async (cursor: string | null = null) => {
         )
       ], { statusRevision })
     }
-    inlineThreadsNextCursor.value = response.nextCursor
   } catch (caughtError) {
     if (sequence !== inlineThreadFetchSequence) {
       return
