@@ -102,9 +102,9 @@ const childPath = (name: string) => {
 
 <template>
   <div class="space-y-3">
-    <div class="flex items-center justify-between gap-3">
+    <div class="flex flex-wrap items-center gap-2">
       <p class="text-sm text-muted">
-        Select folders on the Codori server. Your browser's local folders are never used.
+        Choose one or more folders.
       </p>
       <UButton
         type="button"
@@ -115,7 +115,7 @@ const childPath = (name: string) => {
         :disabled="disabled"
         @click="openPicker"
       >
-        Browse server folders
+        Browse folders
       </UButton>
     </div>
 
@@ -144,7 +144,7 @@ const childPath = (name: string) => {
 
     <UModal
       v-model:open="open"
-      title="Browse server folders"
+      title="Browse folders"
     >
       <template #body>
         <UForm
@@ -152,7 +152,7 @@ const childPath = (name: string) => {
           @submit.prevent="browse()"
         >
           <UFormField
-            label="Absolute server path"
+            label="Absolute path"
             required
           >
             <div class="flex gap-2">

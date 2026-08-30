@@ -139,8 +139,8 @@ const submit = async () => {
           </UFormField>
 
           <UFormField
-            label="Server folders"
-            description="One or more absolute folders on the server running Codori."
+            label="Folders"
+            description="One or more absolute folder paths."
             size="sm"
             class="w-full"
             :ui="{
