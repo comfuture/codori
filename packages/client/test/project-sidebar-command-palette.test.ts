@@ -582,6 +582,8 @@ describe('project sidebar inline threads', () => {
     expect(activeProject.attributes('data-depth')).toBe('0')
     expect(activeProject.attributes('data-value')).toBe('project:codori')
     expect(activeProject.attributes('data-active')).toBe('true')
+    expect(activeProject.get('.navigation-menu-icon').attributes('data-icon'))
+      .toBe('i-lucide-folder')
     expect(activeProject.classes()).toContain('before:bg-primary/5')
     expect(activeProject.classes()).not.toContain('ring-1')
     expect(activeProject.classes()).not.toContain('shadow-sm')

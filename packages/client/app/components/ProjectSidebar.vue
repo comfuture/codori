@@ -777,7 +777,7 @@ const projectItems = computed<ProjectSidebarNavigationItem[][]>(() => [
       itemKind: 'project',
       value: projectNavigationValue(project.projectId),
       label: projectName,
-      icon: 'i-lucide-folder-git-2',
+      icon: 'i-lucide-folder',
       active,
       class: navigationItemClass(active),
       ui: navigationItemUi(active),
