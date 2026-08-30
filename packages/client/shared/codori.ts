@@ -93,6 +93,7 @@ export type CreateProjectResponse = ProjectsResponse & {
 export type DirectoryBrowseResponse = {
   directory: {
     path: string
+    separator: '/' | '\\'
     entries: Array<{
       name: string
       isDirectory: boolean

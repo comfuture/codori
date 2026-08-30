@@ -147,6 +147,7 @@ type ProjectCreateRequest = {
 type DirectoryBrowseResponse = {
   directory: {
     path: string
+    separator: '/' | '\\'
     entries: Array<{ name: string, isDirectory: boolean }>
   }
 }
@@ -189,6 +190,7 @@ type WorkspaceDirectoryResponse = {
 export type HttpServerOptions = {
   clientBundleDir?: string | null
   attachmentsRootDir?: string | null
+  homeDir?: string
   serviceUpdateController?: ServiceUpdateController | null
   avatarResolver?: ServerAvatarResolver
 }
@@ -321,10 +323,16 @@ const resolveMentionAssetRoots = (projectPath: string) => [
 const WINDOWS_ABSOLUTE_PATH_PATTERN = /^[a-z]:[\\/]/i
 const WINDOWS_UNC_PATH_PATTERN = /^\\\\[^\\]+\\[^\\]+/
 
+const isWindowsFilesystemPath = (value: string) =>
+  WINDOWS_ABSOLUTE_PATH_PATTERN.test(value)
+  || WINDOWS_UNC_PATH_PATTERN.test(value)
+
 const isAbsoluteFilesystemPath = (value: string) =>
   isAbsolute(value)
-  || WINDOWS_ABSOLUTE_PATH_PATTERN.test(value)
-  || WINDOWS_UNC_PATH_PATTERN.test(value)
+  || isWindowsFilesystemPath(value)
+
+const filesystemPathSeparator = (value: string): '/' | '\\' =>
+  isWindowsFilesystemPath(value) && value.includes('\\') ? '\\' : '/'
 
 const resolveValue = async <T>(value: MaybePromise<T>) => value
 
@@ -442,6 +450,7 @@ export const createHttpServer = async (
   const clientBundleDir = options.clientBundleDir === undefined
     ? resolveBundledClientDir()
     : options.clientBundleDir
+  const defaultDirectoryPath = options.homeDir?.trim() || homedir()
   const serviceUpdateController = options.serviceUpdateController ?? null
   let appServerProjectRefresh = Promise.resolve<AppServerProject[]>([])
   const refreshAppServerProjects = () => {
@@ -578,9 +587,15 @@ export const createHttpServer = async (
     if (!manager.getAppServerBridgeTarget) {
       throw new CodoriError('INVALID_CONFIG', 'This runtime does not expose app-server filesystem browsing.')
     }
-    const path = request.query.path?.trim() ?? ''
-    if (!path || !isAbsoluteFilesystemPath(path)) {
-      throw new CodoriError('INVALID_ROOT', 'An absolute server directory path is required.')
+    const requestedPath = request.query.path?.trim() ?? ''
+    const path = requestedPath || defaultDirectoryPath
+    if (!isAbsoluteFilesystemPath(path)) {
+      throw new CodoriError(
+        requestedPath ? 'INVALID_ROOT' : 'INVALID_CONFIG',
+        requestedPath
+          ? 'An absolute server directory path is required.'
+          : 'Codori could not resolve an absolute home directory for the server user.'
+      )
     }
     const bridge = await resolveValue(manager.getAppServerBridgeTarget())
     const metadata = await requestAppServer<{ isDirectory?: unknown }>(bridge.target, 'fs/getMetadata', { path })
@@ -593,7 +608,13 @@ export const createHttpServer = async (
         ? [{ name: (entry as { fileName: string }).fileName, isDirectory: (entry as { isDirectory?: unknown }).isDirectory === true }]
         : []
     ) : []
-    return { directory: { path, entries } }
+    return {
+      directory: {
+        path,
+        separator: filesystemPathSeparator(path),
+        entries
+      }
+    }
   })
 
   app.get('/api/capabilities', async (): Promise<ServerCapabilitiesResponse> => ({
