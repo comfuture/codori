@@ -128,7 +128,10 @@ const AlertStub = defineComponent({
   }
 })
 
-const mountModal = (props: Record<string, unknown> = {}) =>
+const mountModal = (
+  props: Record<string, unknown> = {},
+  pickerRoots = ['/srv/codori']
+) =>
   mount(AddProjectModal, {
     props: {
       open: true,
@@ -144,7 +147,7 @@ const mountModal = (props: Record<string, unknown> = {}) =>
         RemoteDirectoryPicker: defineComponent({
           props: { modelValue: { type: Array, default: () => [] } },
           emits: ['update:modelValue'],
-          setup(_, { emit }) { return () => h('button', { class: 'picker-stub', onClick: () => emit('update:modelValue', ['/srv/codori']) }) }
+          setup(_, { emit }) { return () => h('button', { class: 'picker-stub', onClick: () => emit('update:modelValue', pickerRoots) }) }
         })
       }
     }
@@ -209,5 +212,27 @@ describe('add project modal', () => {
     const wrapper = mountModal()
     await wrapper.get('form').trigger('submit')
     expect(wrapper.text()).toContain('Project name is required.')
+  })
+
+  it('disables Add project until a name is set and infers one from the selected folder', async () => {
+    const wrapper = mountModal()
+    const addProject = wrapper.findAll('button').find(button => button.text() === 'Add project')
+
+    expect(addProject?.attributes('disabled')).toBeDefined()
+    await wrapper.get('.picker-stub').trigger('click')
+
+    expect((wrapper.get('input').element as HTMLInputElement).value).toBe('codori')
+    expect(addProject?.attributes('disabled')).toBeUndefined()
+  })
+
+  it.each([
+    ['C:\\Users\\alice\\Project', 'Project'],
+    ['\\\\server\\share\\repository', 'repository']
+  ])('infers a cross-platform project name from %s', async (root, expectedName) => {
+    const wrapper = mountModal({}, [root])
+
+    await wrapper.get('.picker-stub').trigger('click')
+
+    expect((wrapper.get('input').element as HTMLInputElement).value).toBe(expectedName)
   })
 })
