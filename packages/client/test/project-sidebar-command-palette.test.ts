@@ -410,18 +410,14 @@ describe('project sidebar command palette trigger', () => {
     platformSpy.mockRestore()
   })
 
-  it('renders search first and keeps add project in the projects section', async () => {
+  it('keeps expanded search out of the navigation rows', () => {
     const wrapper = mountSidebar({
       collapsed: false
     })
 
-    expect(wrapper.text()).toContain('Search')
-    expect(wrapper.text()).toContain('meta')
-    expect(wrapper.text()).toContain('K')
-
     const actionLabels = wrapper.findAll('button').map(button => button.attributes('aria-label') ?? button.text())
-    expect(actionLabels.indexOf('Search Codori')).toBeLessThan(actionLabels.indexOf('New Chat'))
     expect(actionLabels.indexOf('New Chat')).toBeLessThan(actionLabels.indexOf('Add project'))
+    expect(actionLabels).not.toContain('Search Codori')
     expect(actionLabels).not.toContain('Refresh projects')
 
     const addProject = wrapper.get('button[aria-label="Add project"]')
@@ -429,19 +425,6 @@ describe('project sidebar command palette trigger', () => {
     expect(addProject.attributes('data-color')).toBe('primary')
     expect(addProject.attributes('data-variant')).toBe('soft')
 
-    await wrapper.get('button[aria-label="Search Codori"]').trigger('click')
-
-    expect(wrapper.emitted('openCommandPalette')).toHaveLength(1)
-  })
-
-  it('renders the non-macOS shortcut modifier in the expanded search trigger', async () => {
-    platformSpy.mockReturnValue('Linux x86_64')
-    const wrapper = mountSidebar({
-      collapsed: false
-    })
-
-    expect(wrapper.text()).toContain('ctrl')
-    expect(wrapper.text()).toContain('K')
   })
 
   it('renders a compact search trigger when collapsed', async () => {

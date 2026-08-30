@@ -905,9 +905,11 @@ const isThreadStatusItem = (item: NavigationMenuItem): item is ProjectThreadStat
 <template>
   <div class="flex min-h-0 flex-1 flex-col gap-3">
     <div class="space-y-2">
-      <UTooltip text="Search Codori">
+      <UTooltip
+        v-if="props.collapsed"
+        text="Search Codori"
+      >
         <UButton
-          v-if="props.collapsed"
           icon="i-lucide-search"
           color="neutral"
           variant="outline"
@@ -924,32 +926,6 @@ const isThreadStatusItem = (item: NavigationMenuItem): item is ProjectThreadStat
             value="K"
             size="sm"
           />
-        </UButton>
-        <UButton
-          v-else
-          icon="i-lucide-search"
-          color="neutral"
-          variant="outline"
-          size="xs"
-          class="w-full justify-start"
-          aria-label="Search Codori"
-          @click="emit('openCommandPalette')"
-        >
-          <span class="min-w-0 flex-1 truncate text-left">
-            Search
-          </span>
-          <template #trailing>
-            <span class="flex items-center gap-1">
-              <UKbd
-                :value="isMac ? 'meta' : 'ctrl'"
-                size="sm"
-              />
-              <UKbd
-                value="K"
-                size="sm"
-              />
-            </span>
-          </template>
         </UButton>
       </UTooltip>
 
