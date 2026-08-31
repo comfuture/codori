@@ -623,6 +623,46 @@ describe('project sidebar inline threads', () => {
     expect(wrapper.text()).toContain('Thread 2')
   })
 
+  it('restarts with assigned threads after a legacy fallback and project change', async () => {
+    mockRpcRequest
+      .mockResolvedValueOnce(makeThreadListResponse(0))
+      .mockResolvedValueOnce({
+        ...makeThreadListResponse(1),
+        data: [{
+          ...makeThread(1),
+          id: 'legacy-thread',
+          name: 'Legacy thread',
+          projectId: null
+        }]
+      } as unknown as ThreadListResponse)
+      .mockResolvedValueOnce({
+        ...makeThreadListResponse(1),
+        data: [{
+          ...makeThread(2),
+          id: 'assigned-other-thread',
+          name: 'Assigned other thread',
+          projectId: 'other'
+        }]
+      } as unknown as ThreadListResponse)
+
+    const wrapper = mountSidebar({ collapsed: false })
+    await waitForSidebar()
+    expect(wrapper.text()).toContain('Legacy thread')
+
+    mockRoute.params = { projectId: 'other' }
+    await waitForSidebar()
+
+    expect(mockRpcRequest).toHaveBeenNthCalledWith(3, 'thread/list', {
+      limit: 5,
+      sortKey: 'updated_at',
+      sortDirection: 'desc',
+      sourceKinds: INLINE_THREAD_SOURCE_KINDS,
+      projectId: 'other'
+    })
+    expect(wrapper.text()).toContain('Assigned other thread')
+    expect(wrapper.text()).not.toContain('Legacy thread')
+  })
+
   it('refreshes the app-server project inventory when another client changes a project', async () => {
     mockRpcRequest.mockResolvedValue(makeThreadListResponse(0))
     mountSidebar({ collapsed: false })

@@ -575,6 +575,7 @@ const fetchInlineThreads = async (cursor: string | null = null) => {
   if (!cursor) {
     inlineThreadsProjectId.value = projectId
     inlineThreadsNextCursor.value = null
+    inlineThreadsPageSource.value = 'project'
   }
   inlineThreadsLoading.value = true
   inlineThreadsError.value = null
