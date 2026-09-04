@@ -282,7 +282,9 @@ Base behavior:
 
 Returns:
 
-- all discovered projects
+- projects from the server-local app-server registry, preserving opaque ids
+- an inventory descriptor with `ready`/`empty` status, source, scope, serving
+  host identity, registration capability, and Codex App catalog capability
 - status summary for each project
 - current port for a running managed fallback; `null` for a daemon-backed workspace
 
@@ -376,7 +378,11 @@ Layout:
 
 Required states:
 
-- no projects discovered
+- project inventory loading and bounded transient retry
+- project inventory unavailable with a manual retry action
+- empty server-local app-server registry
+- Codex App catalog synchronization unsupported, with a server registration
+  action and the upstream limitation identified
 - project selected but no thread selected
 - runtime starting
 - runtime running
