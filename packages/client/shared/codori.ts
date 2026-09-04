@@ -18,6 +18,11 @@ export type ProjectRecord = {
   error: string | null
 }
 
+export const resolveProjectDisplayName = (
+  project: Pick<ProjectRecord, 'projectId' | 'projectName'> | null | undefined,
+  fallback = 'Project'
+) => project?.projectName?.trim() || project?.projectId?.trim() || fallback
+
 export type ChatSessionRecord = {
   chatId: string
   chatPath: string
@@ -93,6 +98,7 @@ export type CreateProjectResponse = ProjectsResponse & {
 export type DirectoryBrowseResponse = {
   directory: {
     path: string
+    separator: '/' | '\\'
     entries: Array<{
       name: string
       isDirectory: boolean

@@ -356,6 +356,92 @@ describe('createHttpServer', () => {
     ])
   })
 
+  it('browses the server user home by default and reports its path separator', async () => {
+    const backend = new WebSocketServer({ host: '127.0.0.1', port: 0 })
+    startedSocketServers.push(backend)
+    await new Promise<void>(resolvePromise => backend.once('listening', resolvePromise))
+    const address = backend.address()
+    if (!address || typeof address === 'string') {
+      throw new Error('Failed to get app-server test address.')
+    }
+
+    const filesystemRequests: Array<{ method: string, path: string }> = []
+    backend.on('connection', (socket: WebSocket) => {
+      socket.on('message', (message: WebSocket.RawData) => {
+        const payload = JSON.parse(rawDataToString(message)) as {
+          id?: string
+          method?: string
+          params?: { path?: string }
+        }
+        if (payload.method === 'initialize') {
+          socket.send(JSON.stringify({ id: payload.id, result: {} }))
+          return
+        }
+        if (payload.method === 'project/list') {
+          socket.send(JSON.stringify({ id: payload.id, result: { data: [], nextCursor: null } }))
+          return
+        }
+        if ((payload.method === 'fs/getMetadata' || payload.method === 'fs/readDirectory') && payload.params?.path) {
+          filesystemRequests.push({ method: payload.method, path: payload.params.path })
+          socket.send(JSON.stringify({
+            id: payload.id,
+            result: payload.method === 'fs/getMetadata'
+              ? { isDirectory: true }
+              : {
+                  entries: [
+                    { fileName: 'Projects', isDirectory: true },
+                    { fileName: 'profile.txt', isDirectory: false }
+                  ]
+                }
+          }))
+        }
+      })
+    })
+
+    const target = {
+      kind: 'codori-managed' as const,
+      transport: 'tcp-websocket' as const,
+      port: address.port,
+      pid: 4321,
+      ownedByCodori: true as const,
+      appServerVersion: '0.150.1'
+    }
+    const app = await createHttpServer(createManager({
+      getAppServerBridgeTarget: () => ({ target, workspacePath: 'C:\\Users\\alice' }),
+      setAppServerProjects: vi.fn()
+    }), {
+      clientBundleDir: null,
+      homeDir: 'C:\\Users\\alice'
+    })
+    startedApps.push(app)
+
+    const homeResponse = await app.inject({ method: 'GET', url: '/api/projects/directories' })
+    expect(homeResponse.statusCode).toBe(200)
+    expect(homeResponse.json()).toEqual({
+      directory: {
+        path: 'C:\\Users\\alice',
+        separator: '\\',
+        entries: [
+          { name: 'Projects', isDirectory: true },
+          { name: 'profile.txt', isDirectory: false }
+        ]
+      }
+    })
+    expect(filesystemRequests).toEqual([
+      { method: 'fs/getMetadata', path: 'C:\\Users\\alice' },
+      { method: 'fs/readDirectory', path: 'C:\\Users\\alice' }
+    ])
+
+    filesystemRequests.length = 0
+    const rootResponse = await app.inject({ method: 'GET', url: '/api/projects/directories?path=%2F' })
+    expect(rootResponse.statusCode).toBe(200)
+    expect(rootResponse.json().directory).toMatchObject({ path: '/', separator: '/' })
+    expect(filesystemRequests).toEqual([
+      { method: 'fs/getMetadata', path: '/' },
+      { method: 'fs/readDirectory', path: '/' }
+    ])
+  })
+
   it('serializes overlapping app-server project refreshes', async () => {
     const backend = new WebSocketServer({ host: '127.0.0.1', port: 0 })
     startedSocketServers.push(backend)

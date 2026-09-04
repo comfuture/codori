@@ -2,6 +2,7 @@
 import { useRoute } from '#imports'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useProjects } from '../composables/useProjects'
+import { isMacLikePlatform } from '../utils/global-command-palette-shortcut'
 import {
   createServiceUpdateCompletionMonitor,
   reloadPage
@@ -11,6 +12,8 @@ import { DEFAULT_SETTINGS_ROUTE } from '~~/shared/settings'
 const route = useRoute()
 const sidebarCollapsed = ref(false)
 const commandPaletteOpen = ref(false)
+const platform = ref(typeof navigator === 'undefined' ? '' : navigator.platform)
+const isMac = computed(() => isMacLikePlatform(platform.value))
 const {
   serviceUpdate,
   serviceUpdatePending,
@@ -73,6 +76,7 @@ const confirmServiceUpdate = async () => {
 }
 
 onMounted(() => {
+  platform.value = navigator.platform
   void refreshServiceUpdate()
   serviceUpdateTimer = setInterval(() => {
     void refreshServiceUpdate()
@@ -130,7 +134,7 @@ const settingsRoute = computed(() => ({
       class="overflow-visible"
     >
       <template #header="{ collapsed }">
-        <div class="flex items-center gap-3 px-1">
+        <div class="flex w-full items-center gap-3 px-1">
           <NuxtLink
             to="/"
             data-testid="sidebar-home-link"
@@ -163,6 +167,34 @@ const settingsRoute = computed(() => ({
               </span>
             </span>
           </NuxtLink>
+          <UTooltip
+            v-if="!collapsed"
+            text="Search Codori"
+          >
+            <UButton
+              icon="i-lucide-search"
+              color="neutral"
+              variant="outline"
+              size="xs"
+              class="ms-auto shrink-0 gap-1 px-2"
+              aria-label="Search Codori"
+              @click="commandPaletteOpen = true"
+            >
+              <span class="text-muted">
+                Search
+              </span>
+              <span class="flex items-center gap-1">
+                <UKbd
+                  :value="isMac ? 'meta' : 'ctrl'"
+                  size="sm"
+                />
+                <UKbd
+                  value="K"
+                  size="sm"
+                />
+              </span>
+            </UButton>
+          </UTooltip>
         </div>
       </template>
 

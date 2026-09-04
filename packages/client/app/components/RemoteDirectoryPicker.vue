@@ -20,47 +20,71 @@ const toApiUrl = (path: string) => shouldUseServerProxy(configuredBase)
   ? `/api/codori${path}`
   : resolveApiUrl(path, configuredBase)
 const open = ref(false)
-const path = ref('/')
+const path = ref('')
+const separator = ref<'/' | '\\'>('/')
 const entries = ref<DirectoryBrowseResponse['directory']['entries']>([])
 const loading = ref(false)
 const error = ref<string | null>(null)
+let browseRequestId = 0
+
+const pathRoot = (value: string, pathSeparator: '/' | '\\') => {
+  if (pathSeparator === '\\') {
+    const uncRoot = value.match(/^(\\\\[^\\]+\\[^\\]+)(?:\\|$)/u)?.[1]
+    if (uncRoot) return uncRoot
+    return value.match(/^([a-z]:\\)/iu)?.[1] ?? ''
+  }
+  return value.match(/^([a-z]:\/)/iu)?.[1] ?? (value.startsWith('/') ? '/' : '')
+}
 
 const crumbs = computed(() => {
-  const values = path.value.split('/').filter(Boolean)
+  const root = pathRoot(path.value, separator.value)
+  if (!root) return []
+  const values = path.value.slice(root.length).split(separator.value).filter(Boolean)
+  let currentPath = root
   return [
-    { label: '/', path: '/' },
-    ...values.map((label, index) => ({
-      label,
-      path: `/${values.slice(0, index + 1).join('/')}`
-    }))
+    { label: root, path: root },
+    ...values.map((label) => {
+      currentPath = `${currentPath.endsWith(separator.value) ? currentPath : `${currentPath}${separator.value}`}${label}`
+      return { label, path: currentPath }
+    })
   ]
 })
 
-const browse = async (nextPath = path.value) => {
-  const normalized = nextPath.trim()
-  if (!normalized) {
-    error.value = 'Enter an absolute directory path on the Codori server.'
+const browse = async (nextPath: string | null = path.value) => {
+  const normalized = nextPath?.trim() ?? ''
+  if (nextPath !== null && !normalized) {
+    error.value = 'Enter an absolute directory path.'
     return
   }
+  if (nextPath !== null) path.value = normalized
+  const requestId = ++browseRequestId
   loading.value = true
   error.value = null
   try {
-    const response = await $fetch<DirectoryBrowseResponse>(toApiUrl('/projects/directories'), {
-      query: { path: normalized }
-    })
+    const response = await $fetch<DirectoryBrowseResponse>(
+      toApiUrl('/projects/directories'),
+      nextPath === null ? undefined : { query: { path: normalized } }
+    )
+    if (requestId !== browseRequestId) return
     path.value = response.directory.path
+    separator.value = response.directory.separator
     entries.value = response.directory.entries.filter(entry => entry.isDirectory)
   } catch (caughtError) {
+    if (requestId !== browseRequestId) return
     entries.value = []
     error.value = caughtError instanceof Error ? caughtError.message : String(caughtError)
   } finally {
-    loading.value = false
+    if (requestId === browseRequestId) loading.value = false
   }
 }
 
 const openPicker = () => {
   open.value = true
+  path.value = ''
+  separator.value = '/'
+  entries.value = []
   error.value = null
+  void browse(null)
 }
 
 const selectCurrent = () => {
@@ -70,14 +94,17 @@ const selectCurrent = () => {
 
 const remove = (root: string) => emit('update:modelValue', props.modelValue.filter(value => value !== root))
 
-const childPath = (name: string) => path.value === '/' ? `/${name}` : `${path.value.replace(/\/$/u, '')}/${name}`
+const childPath = (name: string) => {
+  const base = path.value.endsWith(separator.value) ? path.value : `${path.value}${separator.value}`
+  return `${base}${name}`
+}
 </script>
 
 <template>
   <div class="space-y-3">
-    <div class="flex items-center justify-between gap-3">
+    <div class="flex flex-wrap items-center gap-2">
       <p class="text-sm text-muted">
-        Select folders on the Codori server. Your browser's local folders are never used.
+        Choose one or more folders.
       </p>
       <UButton
         type="button"
@@ -88,7 +115,7 @@ const childPath = (name: string) => path.value === '/' ? `/${name}` : `${path.va
         :disabled="disabled"
         @click="openPicker"
       >
-        Browse server folders
+        Browse folders
       </UButton>
     </div>
 
@@ -117,7 +144,7 @@ const childPath = (name: string) => path.value === '/' ? `/${name}` : `${path.va
 
     <UModal
       v-model:open="open"
-      title="Browse server folders"
+      title="Browse folders"
     >
       <template #body>
         <UForm
@@ -125,7 +152,7 @@ const childPath = (name: string) => path.value === '/' ? `/${name}` : `${path.va
           @submit.prevent="browse()"
         >
           <UFormField
-            label="Absolute server path"
+            label="Absolute path"
             required
           >
             <div class="flex gap-2">

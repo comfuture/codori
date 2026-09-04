@@ -30,9 +30,16 @@ import {
   notificationThreadName,
   notificationThreadUpdatedAt
 } from '~~/shared/codex-rpc'
-import { toChatRoute, toChatsRoute, toProjectRoute, toProjectThreadRoute } from '~~/shared/codori'
+import {
+  resolveProjectDisplayName,
+  toChatRoute,
+  toChatsRoute,
+  toProjectRoute,
+  toProjectThreadRoute
+} from '~~/shared/codori'
 
 const INLINE_THREAD_PAGE_SIZE = 5
+const INLINE_LEGACY_THREAD_CURSOR = '__codori_legacy_project_threads__'
 const INLINE_THREAD_SOURCE_KINDS: ThreadSourceKind[] = [
   'cli',
   'vscode',
@@ -116,6 +123,7 @@ const inlineThreadsProjectId = ref<string | null>(null)
 const inlineThreadsLoading = ref(false)
 const inlineThreadsError = ref<string | null>(null)
 const inlineThreadsNextCursor = ref<string | null>(null)
+const inlineThreadsPageSource = ref<'project' | 'legacy'>('project')
 let inlineThreadFetchSequence = 0
 let inlineThreadSubscriptionSequence = 0
 let inlineThreadSubscriptionKey: string | null = null
@@ -526,6 +534,7 @@ const resetInlineThreads = () => {
   inlineThreadsLoading.value = false
   inlineThreadsError.value = null
   inlineThreadsNextCursor.value = null
+  inlineThreadsPageSource.value = 'project'
 }
 
 onBeforeUnmount(() => {
@@ -566,6 +575,7 @@ const fetchInlineThreads = async (cursor: string | null = null) => {
   if (!cursor) {
     inlineThreadsProjectId.value = projectId
     inlineThreadsNextCursor.value = null
+    inlineThreadsPageSource.value = 'project'
   }
   inlineThreadsLoading.value = true
   inlineThreadsError.value = null
@@ -598,18 +608,50 @@ const fetchInlineThreads = async (cursor: string | null = null) => {
     const client = getClient(projectId)
     ensureInlineThreadSubscription(client, projectId)
     const statusRevision = inlineThreadSummariesForProject(projectId).getStatusRevision()
-    const response = await client.request<ThreadListResponse>('thread/list', {
-      ...(cursor ? { cursor } : {}),
-      limit: INLINE_THREAD_PAGE_SIZE,
-      sortKey: 'updated_at',
-      sortDirection: 'desc',
-      sourceKinds: INLINE_THREAD_SOURCE_KINDS,
-      projectId
-    } satisfies ThreadListParams)
+    const projectRoots = (project.projectRoots?.length
+      ? project.projectRoots
+      : [project.projectPath]).filter(Boolean)
+    const requestedSource = cursor === INLINE_LEGACY_THREAD_CURSOR
+      ? 'legacy'
+      : inlineThreadsPageSource.value
+    const requestedCursor = cursor === INLINE_LEGACY_THREAD_CURSOR ? null : cursor
+    const listThreads = (source: 'project' | 'legacy', pageCursor: string | null) =>
+      client.request<ThreadListResponse>('thread/list', {
+        ...(pageCursor ? { cursor: pageCursor } : {}),
+        limit: INLINE_THREAD_PAGE_SIZE,
+        sortKey: 'updated_at',
+        sortDirection: 'desc',
+        sourceKinds: INLINE_THREAD_SOURCE_KINDS,
+        ...(source === 'project'
+          ? { projectId }
+          : {
+              projectId: null,
+              cwd: projectRoots.length === 1 ? projectRoots[0] : projectRoots
+            })
+      } satisfies ThreadListParams)
+    let response = await listThreads(requestedSource, requestedCursor)
+    let responseSource = requestedSource
+
+    if (
+      !cursor
+      && responseSource === 'project'
+      && response.data.length === 0
+      && response.nextCursor === null
+      && projectRoots.length > 0
+    ) {
+      response = await listThreads('legacy', null)
+      responseSource = 'legacy'
+    }
 
     if (sequence !== inlineThreadFetchSequence) {
       return
     }
+
+    inlineThreadsPageSource.value = responseSource
+    inlineThreadsNextCursor.value = response.nextCursor
+      ?? (responseSource === 'project' && projectRoots.length > 0
+        ? INLINE_LEGACY_THREAD_CURSOR
+        : null)
 
     const nextThreads = response.data.map(thread => ({
       id: thread.id,
@@ -633,7 +675,6 @@ const fetchInlineThreads = async (cursor: string | null = null) => {
         )
       ], { statusRevision })
     }
-    inlineThreadsNextCursor.value = response.nextCursor
   } catch (caughtError) {
     if (sequence !== inlineThreadFetchSequence) {
       return
@@ -731,12 +772,13 @@ const chatItems = computed<ChatSidebarNavigationItem[][]>(() => {
 const projectItems = computed<ProjectSidebarNavigationItem[][]>(() => [
   sortSidebarProjects(projects.value, activeProjectId.value).map((project) => {
     const active = activeProjectId.value === project.projectId
+    const projectName = resolveProjectDisplayName(project)
     const children: ProjectSidebarNavigationItem[] = []
     const item: ProjectNavigationItem = {
       itemKind: 'project',
       value: projectNavigationValue(project.projectId),
-      label: project.projectName ?? project.projectId,
-      icon: 'i-lucide-folder-git-2',
+      label: projectName,
+      icon: 'i-lucide-folder',
       active,
       class: navigationItemClass(active),
       ui: navigationItemUi(active),
@@ -745,7 +787,7 @@ const projectItems = computed<ProjectSidebarNavigationItem[][]>(() => [
       },
       to: toProjectRoute(project.projectId),
       projectId: project.projectId,
-      projectName: project.projectName ?? project.projectId,
+      projectName,
       projectPath: project.projectPath,
       error: project.error
     }
@@ -864,9 +906,11 @@ const isThreadStatusItem = (item: NavigationMenuItem): item is ProjectThreadStat
 <template>
   <div class="flex min-h-0 flex-1 flex-col gap-3">
     <div class="space-y-2">
-      <UTooltip text="Search Codori">
+      <UTooltip
+        v-if="props.collapsed"
+        text="Search Codori"
+      >
         <UButton
-          v-if="props.collapsed"
           icon="i-lucide-search"
           color="neutral"
           variant="outline"
@@ -883,32 +927,6 @@ const isThreadStatusItem = (item: NavigationMenuItem): item is ProjectThreadStat
             value="K"
             size="sm"
           />
-        </UButton>
-        <UButton
-          v-else
-          icon="i-lucide-search"
-          color="neutral"
-          variant="outline"
-          size="xs"
-          class="w-full justify-start"
-          aria-label="Search Codori"
-          @click="emit('openCommandPalette')"
-        >
-          <span class="min-w-0 flex-1 truncate text-left">
-            Search
-          </span>
-          <template #trailing>
-            <span class="flex items-center gap-1">
-              <UKbd
-                :value="isMac ? 'meta' : 'ctrl'"
-                size="sm"
-              />
-              <UKbd
-                value="K"
-                size="sm"
-              />
-            </span>
-          </template>
         </UButton>
       </UTooltip>
 

@@ -7,7 +7,7 @@ import { useProjects } from '../../../../composables/useProjects'
 import { useThreadSummaries } from '../../../../composables/useThreadSummaries'
 import WorkspaceTerminalToggle from '../../../../components/WorkspaceTerminalToggle.vue'
 import { useVisualSubagentPanels } from '../../../../composables/useVisualSubagentPanels'
-import { normalizeProjectIdParam, toProjectRoute } from '~~/shared/codori'
+import { normalizeProjectIdParam, resolveProjectDisplayName, toProjectRoute } from '~~/shared/codori'
 import {
   pruneExpandedSubagentThreadId,
   resolveExpandedSubagentPanel,
@@ -46,7 +46,7 @@ const subagentPanels = computed(() =>
   session.value?.subagentPanels.value ?? []
 )
 const { availablePanels, activePanels } = useVisualSubagentPanels(() => subagentPanels.value)
-const projectName = computed(() => selectedProject.value?.projectId ?? projectId.value ?? 'Project')
+const projectName = computed(() => resolveProjectDisplayName(selectedProject.value, projectId.value ?? 'Project'))
 const threadTitle = computed(() => {
   if (!projectId.value) {
     return threadId.value ?? 'Thread'

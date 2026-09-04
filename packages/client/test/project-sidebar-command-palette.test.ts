@@ -410,18 +410,14 @@ describe('project sidebar command palette trigger', () => {
     platformSpy.mockRestore()
   })
 
-  it('renders search first and keeps add project in the projects section', async () => {
+  it('keeps expanded search out of the navigation rows', () => {
     const wrapper = mountSidebar({
       collapsed: false
     })
 
-    expect(wrapper.text()).toContain('Search')
-    expect(wrapper.text()).toContain('meta')
-    expect(wrapper.text()).toContain('K')
-
     const actionLabels = wrapper.findAll('button').map(button => button.attributes('aria-label') ?? button.text())
-    expect(actionLabels.indexOf('Search Codori')).toBeLessThan(actionLabels.indexOf('New Chat'))
     expect(actionLabels.indexOf('New Chat')).toBeLessThan(actionLabels.indexOf('Add project'))
+    expect(actionLabels).not.toContain('Search Codori')
     expect(actionLabels).not.toContain('Refresh projects')
 
     const addProject = wrapper.get('button[aria-label="Add project"]')
@@ -429,19 +425,6 @@ describe('project sidebar command palette trigger', () => {
     expect(addProject.attributes('data-color')).toBe('primary')
     expect(addProject.attributes('data-variant')).toBe('soft')
 
-    await wrapper.get('button[aria-label="Search Codori"]').trigger('click')
-
-    expect(wrapper.emitted('openCommandPalette')).toHaveLength(1)
-  })
-
-  it('renders the non-macOS shortcut modifier in the expanded search trigger', async () => {
-    platformSpy.mockReturnValue('Linux x86_64')
-    const wrapper = mountSidebar({
-      collapsed: false
-    })
-
-    expect(wrapper.text()).toContain('ctrl')
-    expect(wrapper.text()).toContain('K')
   })
 
   it('renders a compact search trigger when collapsed', async () => {
@@ -582,6 +565,8 @@ describe('project sidebar inline threads', () => {
     expect(activeProject.attributes('data-depth')).toBe('0')
     expect(activeProject.attributes('data-value')).toBe('project:codori')
     expect(activeProject.attributes('data-active')).toBe('true')
+    expect(activeProject.get('.navigation-menu-icon').attributes('data-icon'))
+      .toBe('i-lucide-folder')
     expect(activeProject.classes()).toContain('before:bg-primary/5')
     expect(activeProject.classes()).not.toContain('ring-1')
     expect(activeProject.classes()).not.toContain('shadow-sm')
@@ -598,6 +583,84 @@ describe('project sidebar inline threads', () => {
       sourceKinds: INLINE_THREAD_SOURCE_KINDS,
       projectId: 'codori'
     })
+  })
+
+  it('falls back to unassigned threads from the selected project roots', async () => {
+    mockProjects.value = mockProjects.value.map(project => project.projectId === 'codori'
+      ? { ...project, projectRoots: ['/repo/codori', '/repo/codori-docs'] }
+      : project
+    )
+    mockRpcRequest
+      .mockResolvedValueOnce(makeThreadListResponse(0))
+      .mockResolvedValueOnce({
+        ...makeThreadListResponse(2),
+        data: [1, 2].map(index => ({
+          ...makeThread(index),
+          projectId: null,
+          cwd: '/repo/codori'
+        }))
+      } as unknown as ThreadListResponse)
+
+    const wrapper = mountSidebar({ collapsed: false })
+    await waitForSidebar()
+
+    expect(mockRpcRequest).toHaveBeenNthCalledWith(1, 'thread/list', {
+      limit: 5,
+      sortKey: 'updated_at',
+      sortDirection: 'desc',
+      sourceKinds: INLINE_THREAD_SOURCE_KINDS,
+      projectId: 'codori'
+    })
+    expect(mockRpcRequest).toHaveBeenNthCalledWith(2, 'thread/list', {
+      limit: 5,
+      sortKey: 'updated_at',
+      sortDirection: 'desc',
+      sourceKinds: INLINE_THREAD_SOURCE_KINDS,
+      projectId: null,
+      cwd: ['/repo/codori', '/repo/codori-docs']
+    })
+    expect(wrapper.text()).toContain('Thread 1')
+    expect(wrapper.text()).toContain('Thread 2')
+  })
+
+  it('restarts with assigned threads after a legacy fallback and project change', async () => {
+    mockRpcRequest
+      .mockResolvedValueOnce(makeThreadListResponse(0))
+      .mockResolvedValueOnce({
+        ...makeThreadListResponse(1),
+        data: [{
+          ...makeThread(1),
+          id: 'legacy-thread',
+          name: 'Legacy thread',
+          projectId: null
+        }]
+      } as unknown as ThreadListResponse)
+      .mockResolvedValueOnce({
+        ...makeThreadListResponse(1),
+        data: [{
+          ...makeThread(2),
+          id: 'assigned-other-thread',
+          name: 'Assigned other thread',
+          projectId: 'other'
+        }]
+      } as unknown as ThreadListResponse)
+
+    const wrapper = mountSidebar({ collapsed: false })
+    await waitForSidebar()
+    expect(wrapper.text()).toContain('Legacy thread')
+
+    mockRoute.params = { projectId: 'other' }
+    await waitForSidebar()
+
+    expect(mockRpcRequest).toHaveBeenNthCalledWith(3, 'thread/list', {
+      limit: 5,
+      sortKey: 'updated_at',
+      sortDirection: 'desc',
+      sourceKinds: INLINE_THREAD_SOURCE_KINDS,
+      projectId: 'other'
+    })
+    expect(wrapper.text()).toContain('Assigned other thread')
+    expect(wrapper.text()).not.toContain('Legacy thread')
   })
 
   it('refreshes the app-server project inventory when another client changes a project', async () => {
@@ -698,6 +761,7 @@ describe('project sidebar inline threads', () => {
     mockRpcRequest
       .mockResolvedValueOnce(makeThreadListResponse(5, 'next-page'))
       .mockResolvedValueOnce(makeThreadListResponse(3, null, 5))
+      .mockResolvedValueOnce(makeThreadListResponse(0))
 
     const wrapper = mountSidebar({
       collapsed: false
@@ -729,6 +793,18 @@ describe('project sidebar inline threads', () => {
     expect(wrapper.findAll('[data-kind="thread"]')).toHaveLength(7)
     expect(wrapper.text()).toContain('Thread 6')
     expect(wrapper.text()).toContain('Thread 7')
+
+    await wrapper.get('[data-kind="more"]').trigger('click')
+    await waitForSidebar()
+
+    expect(mockRpcRequest).toHaveBeenNthCalledWith(3, 'thread/list', {
+      limit: 5,
+      sortKey: 'updated_at',
+      sortDirection: 'desc',
+      sourceKinds: INLINE_THREAD_SOURCE_KINDS,
+      projectId: null,
+      cwd: '/repo/codori'
+    })
     expect(wrapper.find('[data-kind="more"]').exists()).toBe(false)
   })
 

@@ -24,6 +24,7 @@ const {
 const projectName = ref('')
 const roots = ref<string[]>([])
 const error = ref<string | null>(null)
+const hasProjectName = computed(() => projectName.value.trim().length > 0)
 const newIdempotencyKey = () => typeof globalThis.crypto?.randomUUID === 'function'
   ? `codori:${globalThis.crypto.randomUUID()}`
   : `codori:${Date.now()}:${Math.random().toString(36).slice(2)}`
@@ -55,6 +56,19 @@ const close = () => {
   }
 
   isOpen.value = false
+}
+
+const inferProjectName = (path: string) => {
+  const name = path.trim().replace(/[\\/]+$/u, '').split(/[\\/]/u).filter(Boolean).at(-1) ?? ''
+  return /^[a-z]:$/iu.test(name) ? '' : name
+}
+
+const updateRoots = (nextRoots: string[]) => {
+  const addedRoot = nextRoots.find(root => !roots.value.includes(root))
+  roots.value = nextRoots
+  if (!hasProjectName.value && addedRoot) {
+    projectName.value = inferProjectName(addedRoot)
+  }
 }
 
 const toErrorMessage = (caughtError: unknown) => {
@@ -139,8 +153,8 @@ const submit = async () => {
           </UFormField>
 
           <UFormField
-            label="Server folders"
-            description="One or more absolute folders on the server running Codori."
+            label="Folders"
+            description="One or more absolute folder paths."
             size="sm"
             class="w-full"
             :ui="{
@@ -149,8 +163,9 @@ const submit = async () => {
             }"
           >
             <RemoteDirectoryPicker
-              v-model="roots"
+              :model-value="roots"
               :disabled="clonePending"
+              @update:model-value="updateRoots"
             />
           </UFormField>
         </div>
@@ -177,7 +192,7 @@ const submit = async () => {
             type="submit"
             color="primary"
             :loading="clonePending"
-            :disabled="clonePending"
+            :disabled="clonePending || !hasProjectName"
           >
             Add project
           </UButton>

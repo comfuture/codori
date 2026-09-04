@@ -81,33 +81,31 @@ describe('remote directory picker', () => {
     mockFetch.mockReset()
   })
 
-  it('browses and returns absolute paths from the Codori server without a browser directory handle', async () => {
+  it('preloads and returns the server user home without a browser directory handle', async () => {
     mockFetch.mockResolvedValue({
       directory: {
-        path: '/srv/codori',
+        path: '/home/alice',
+        separator: '/',
         entries: [
-          { name: 'packages', isDirectory: true },
-          { name: 'README.md', isDirectory: false }
+          { name: 'Projects', isDirectory: true },
+          { name: '.profile', isDirectory: false }
         ]
       }
     })
     const wrapper = mountPicker()
 
     await wrapper.get('button').trigger('click')
-    await wrapper.get('input').setValue('/srv/codori')
-    await wrapper.get('form').trigger('submit')
     await flushPromises()
 
-    expect(mockFetch).toHaveBeenCalledWith(expect.stringMatching(/\/api\/projects\/directories$/u), {
-      query: { path: '/srv/codori' }
-    })
-    expect(wrapper.text()).toContain('packages')
-    expect(wrapper.text()).not.toContain('README.md')
+    expect(mockFetch).toHaveBeenCalledWith(expect.stringMatching(/\/api\/projects\/directories$/u), undefined)
+    expect((wrapper.get('input').element as HTMLInputElement).value).toBe('/home/alice')
+    expect(wrapper.text()).toContain('Projects')
+    expect(wrapper.text()).not.toContain('.profile')
 
     const addFolder = wrapper.findAll('button').find(button => button.text() === 'Add this folder')
     expect(addFolder).toBeDefined()
     await addFolder!.trigger('click')
-    expect(wrapper.emitted('update:modelValue')).toEqual([[['/srv/codori']]])
+    expect(wrapper.emitted('update:modelValue')).toEqual([[['/home/alice']]])
     expect('showDirectoryPicker' in window).toBe(false)
   })
 
@@ -116,10 +114,103 @@ describe('remote directory picker', () => {
     const wrapper = mountPicker()
 
     await wrapper.get('button').trigger('click')
-    await wrapper.get('form').trigger('submit')
     await flushPromises()
 
     expect(wrapper.find('.modal-stub').exists()).toBe(true)
     expect(wrapper.get('[role="alert"]').text()).toContain('Permission denied: /root')
+  })
+
+  it('returns to the server home and reloads its children whenever it reopens', async () => {
+    mockFetch
+      .mockResolvedValueOnce({
+        directory: { path: '/home/alice', separator: '/', entries: [{ name: 'Projects', isDirectory: true }] }
+      })
+      .mockResolvedValueOnce({
+        directory: { path: '/srv/codori', separator: '/', entries: [{ name: 'packages', isDirectory: true }] }
+      })
+      .mockResolvedValueOnce({
+        directory: { path: '/home/alice', separator: '/', entries: [{ name: 'Projects', isDirectory: true }] }
+      })
+    const wrapper = mountPicker()
+
+    await wrapper.get('button').trigger('click')
+    await flushPromises()
+    await wrapper.get('input').setValue('/srv/codori')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(wrapper.text()).toContain('packages')
+
+    await wrapper.findAll('button').find(button => button.text() === 'Close')!.trigger('click')
+    await wrapper.get('button').trigger('click')
+    await flushPromises()
+
+    expect(mockFetch).toHaveBeenLastCalledWith(expect.stringMatching(/\/api\/projects\/directories$/u), undefined)
+    expect((wrapper.get('input').element as HTMLInputElement).value).toBe('/home/alice')
+    expect(wrapper.text()).toContain('Projects')
+    expect(wrapper.text()).not.toContain('packages')
+  })
+
+  it('preserves Windows drive paths in breadcrumbs and child navigation', async () => {
+    mockFetch
+      .mockResolvedValueOnce({
+        directory: {
+          path: 'C:\\Users\\alice',
+          separator: '\\',
+          entries: [{ name: 'Projects', isDirectory: true }]
+        }
+      })
+      .mockResolvedValueOnce({
+        directory: {
+          path: 'C:\\Users\\alice\\Projects',
+          separator: '\\',
+          entries: [{ name: 'source', isDirectory: true }]
+        }
+      })
+    const wrapper = mountPicker()
+
+    await wrapper.get('button').trigger('click')
+    await flushPromises()
+
+    expect((wrapper.get('input').element as HTMLInputElement).value).toBe('C:\\Users\\alice')
+    expect(wrapper.find('.breadcrumb-stub').text()).toContain('C:\\')
+    await wrapper.findAll('button').find(button => button.text() === 'Projects')!.trigger('click')
+    expect((wrapper.get('input').element as HTMLInputElement).value).toBe('C:\\Users\\alice\\Projects')
+    await flushPromises()
+
+    expect(mockFetch).toHaveBeenLastCalledWith(expect.stringMatching(/\/api\/projects\/directories$/u), {
+      query: { path: 'C:\\Users\\alice\\Projects' }
+    })
+    expect(wrapper.text()).toContain('source')
+  })
+
+  it('keeps an explicit Windows UNC share root intact', async () => {
+    mockFetch
+      .mockResolvedValueOnce({
+        directory: { path: 'C:\\Users\\alice', separator: '\\', entries: [] }
+      })
+      .mockResolvedValueOnce({
+        directory: {
+          path: '\\\\server\\share',
+          separator: '\\',
+          entries: [{ name: 'repository', isDirectory: true }]
+        }
+      })
+      .mockResolvedValueOnce({
+        directory: { path: '\\\\server\\share\\repository', separator: '\\', entries: [] }
+      })
+    const wrapper = mountPicker()
+
+    await wrapper.get('button').trigger('click')
+    await flushPromises()
+    await wrapper.get('input').setValue('\\\\server\\share')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.find('.breadcrumb-stub').text()).toContain('\\\\server\\share')
+    await wrapper.findAll('button').find(button => button.text() === 'repository')!.trigger('click')
+    await flushPromises()
+    expect(mockFetch).toHaveBeenLastCalledWith(expect.stringMatching(/\/api\/projects\/directories$/u), {
+      query: { path: '\\\\server\\share\\repository' }
+    })
   })
 })
