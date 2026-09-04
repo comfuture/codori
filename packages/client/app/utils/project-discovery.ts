@@ -96,3 +96,21 @@ export const createProjectDiscoveryRunner = <T>(options: ProjectDiscoveryRunnerO
     cancel
   }
 }
+
+export type ProjectDiscoveryRunner<T> = ReturnType<typeof createProjectDiscoveryRunner<T>>
+
+export const createProjectDiscoveryRunnerRegistry = <T>() => {
+  const runners = new WeakMap<object, ProjectDiscoveryRunner<T>>()
+
+  return {
+    get: (owner: object, create: () => ProjectDiscoveryRunner<T>) => {
+      const existing = runners.get(owner)
+      if (existing) {
+        return existing
+      }
+      const runner = create()
+      runners.set(owner, runner)
+      return runner
+    }
+  }
+}

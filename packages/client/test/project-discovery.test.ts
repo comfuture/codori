@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createProjectDiscoveryRunner } from '../app/utils/project-discovery'
+import {
+  createProjectDiscoveryRunner,
+  createProjectDiscoveryRunnerRegistry
+} from '../app/utils/project-discovery'
 
 afterEach(() => {
   vi.useRealTimers()
@@ -63,6 +66,33 @@ describe('project discovery retry runner', () => {
     await expect(first).resolves.toBeUndefined()
     expect(discover).toHaveBeenCalledTimes(1)
     expect(states).toEqual(['loading', 'error'])
+  })
+
+  it('joins one active runner across consumers that share project state', async () => {
+    const owner = {}
+    const registry = createProjectDiscoveryRunnerRegistry<string>()
+    let resolveDiscovery!: (value: string) => void
+    const discover = vi.fn(() => new Promise<string>((resolve) => {
+      resolveDiscovery = resolve
+    }))
+    const createRunner = () => createProjectDiscoveryRunner({
+      discover,
+      isRetryable: () => true,
+      onState: () => {}
+    })
+
+    const sidebarRunner = registry.get(owner, createRunner)
+    const pageRunner = registry.get(owner, createRunner)
+    const sidebarRefresh = sidebarRunner.start()
+    const pageRefresh = pageRunner.start()
+
+    expect(pageRunner).toBe(sidebarRunner)
+    expect(pageRefresh).toBe(sidebarRefresh)
+    expect(discover).toHaveBeenCalledTimes(1)
+
+    resolveDiscovery('ready')
+    await expect(sidebarRefresh).resolves.toBe('ready')
+    expect(discover).toHaveBeenCalledTimes(1)
   })
 
   it('cancels a pending retry and suppresses later state updates', async () => {
