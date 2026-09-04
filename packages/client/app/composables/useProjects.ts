@@ -1,10 +1,13 @@
+import { computed } from 'vue'
 import { useRuntimeConfig, useState } from '#imports'
-import { $fetch } from 'ofetch'
+import { $fetch, type FetchError } from 'ofetch'
 import { encodeProjectIdSegment } from '~~/shared/codori'
 import { resolveApiUrl, shouldUseServerProxy } from '~~/shared/network'
+import { createProjectDiscoveryRunner } from '../utils/project-discovery'
 import type {
   CreateProjectResponse,
   CreateProjectRequest,
+  ProjectInventory,
   ProjectRecord,
   ProjectResponse,
   ProjectsResponse,
@@ -12,6 +15,32 @@ import type {
   ServiceUpdateStatus,
   StartProjectResult
 } from '~~/shared/codori'
+
+export type ProjectDiscoveryStatus = 'idle' | 'loading' | 'retrying' | 'ready' | 'error'
+
+const toProjectDiscoveryErrorMessage = (caughtError: unknown) => {
+  const fetchError = caughtError as FetchError<{
+    error?: {
+      message?: string
+    }
+  }>
+  return fetchError.data?.error?.message
+    ?? (caughtError instanceof Error ? caughtError.message : String(caughtError))
+}
+
+export const isRetryableProjectDiscoveryError = (caughtError: unknown) => {
+  const fetchError = caughtError as FetchError<{
+    error?: {
+      details?: { retryable?: boolean }
+    }
+  }>
+  if (fetchError.data?.error?.details?.retryable === true) {
+    return true
+  }
+  const status = fetchError.response?.status ?? fetchError.statusCode
+  return status === undefined || status === 408 || status === 425 || status === 429
+    || (status >= 500 && status !== 501)
+}
 
 const mergeProject = (projects: ProjectRecord[], nextProject: ProjectRecord) => {
   const filtered = projects.filter(project => project.projectId !== nextProject.projectId)
@@ -28,8 +57,11 @@ export const useProjects = () => {
     latestVersion: null
   }))
   const loaded = useState<boolean>('codori-projects-loaded', () => false)
-  const loading = useState<boolean>('codori-projects-loading', () => false)
-  const refreshQueued = useState<boolean>('codori-projects-refresh-queued', () => false)
+  const inventory = useState<ProjectInventory | null>('codori-project-inventory', () => null)
+  const discoveryStatus = useState<ProjectDiscoveryStatus>('codori-projects-discovery-status', () => 'idle')
+  const discoveryAttempt = useState<number>('codori-projects-discovery-attempt', () => 0)
+  const discoveryMaxAttempts = useState<number>('codori-projects-discovery-max-attempts', () => 1)
+  const loading = computed(() => discoveryStatus.value === 'loading' || discoveryStatus.value === 'retrying')
   const clonePending = useState<boolean>('codori-projects-clone-pending', () => false)
   const serviceUpdatePending = useState<boolean>('codori-service-update-pending', () => false)
   const pendingProjectId = useState<string | null>('codori-projects-pending-id', () => null)
@@ -42,35 +74,43 @@ export const useProjects = () => {
       ? `/api/codori${path}`
       : resolveApiUrl(path, configuredBase)
 
-  const refreshProjects = async () => {
-    if (loading.value) {
-      refreshQueued.value = true
-      return
-    }
-
-    loading.value = true
-    error.value = null
-    try {
-      void $fetch<ServiceUpdateResponse>(toApiUrl('/service/update'))
-        .then((response) => {
-          serviceUpdate.value = response.serviceUpdate
-        })
-        .catch(() => {
-          // Keep project discovery responsive even if the update check stalls or fails.
-        })
-
-      const response = await $fetch<ProjectsResponse>(toApiUrl('/projects'))
-      projects.value = response.projects
-      loaded.value = true
-    } catch (caughtError) {
-      error.value = caughtError instanceof Error ? caughtError.message : String(caughtError)
-    } finally {
-      loading.value = false
-      if (refreshQueued.value) {
-        refreshQueued.value = false
-        void refreshProjects()
+  const projectDiscovery = createProjectDiscoveryRunner<ProjectsResponse>({
+    discover: signal => $fetch<ProjectsResponse>(toApiUrl('/projects'), { signal }),
+    isRetryable: isRetryableProjectDiscoveryError,
+    onState: (state) => {
+      discoveryStatus.value = state.status
+      discoveryAttempt.value = state.attempt
+      discoveryMaxAttempts.value = state.maxAttempts
+      if (state.status === 'loading') {
+        if (state.attempt === 1) {
+          error.value = null
+        }
+        return
       }
+      if (state.status === 'retrying' || state.status === 'error') {
+        error.value = toProjectDiscoveryErrorMessage(state.error)
+        return
+      }
+      projects.value = state.result.projects
+      inventory.value = state.result.inventory
+      loaded.value = true
+      error.value = null
     }
+  })
+
+  const refreshProjects = async () => {
+    void $fetch<ServiceUpdateResponse>(toApiUrl('/service/update'))
+      .then((response) => {
+        serviceUpdate.value = response.serviceUpdate
+      })
+      .catch(() => {
+        // Keep project discovery responsive even if the update check stalls or fails.
+      })
+    await projectDiscovery.start()
+  }
+
+  const cancelProjectDiscovery = () => {
+    projectDiscovery.cancel()
   }
 
   const applyProjectResponse = (response: ProjectResponse) => {
@@ -119,6 +159,9 @@ export const useProjects = () => {
         body: input
       })
       projects.value = response.projects
+      inventory.value = response.inventory
+      loaded.value = true
+      discoveryStatus.value = 'ready'
       return response.project
     } finally {
       clonePending.value = false
@@ -167,14 +210,19 @@ export const useProjects = () => {
 
   return {
     projects,
+    inventory,
     serviceUpdate,
     loaded,
     loading,
+    discoveryStatus,
+    discoveryAttempt,
+    discoveryMaxAttempts,
     clonePending,
     serviceUpdatePending,
     error,
     pendingProjectId,
     refreshProjects,
+    cancelProjectDiscovery,
     refreshServiceUpdate,
     triggerServiceUpdate,
     createProject,

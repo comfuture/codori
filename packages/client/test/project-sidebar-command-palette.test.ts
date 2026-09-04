@@ -9,7 +9,7 @@ import {
   resolveProjectThreadSummaryKey,
   useThreadSummaries
 } from '../app/composables/useThreadSummaries'
-import type { ChatSessionRecord, ProjectRecord } from '../shared/codori'
+import type { ChatSessionRecord, ProjectInventory, ProjectRecord } from '../shared/codori'
 import type { ThreadListResponse } from '../shared/generated/codex-app-server/v2/ThreadListResponse'
 import type { CodexRpcNotification } from '../shared/codex-rpc'
 
@@ -42,6 +42,12 @@ const mockProjects = ref<ProjectRecord[]>([])
 const mockChats = ref<ChatSessionRecord[]>([])
 const mockProjectsLoaded = ref(true)
 const mockProjectsLoading = ref(false)
+const mockProjectInventory = ref<ProjectInventory | null>(null)
+const mockProjectDiscoveryStatus = ref<'idle' | 'loading' | 'retrying' | 'ready' | 'error'>('ready')
+const mockProjectDiscoveryAttempt = ref(1)
+const mockProjectDiscoveryMaxAttempts = ref(5)
+const mockProjectDiscoveryError = ref<string | null>(null)
+const mockCancelProjectDiscovery = vi.fn()
 
 vi.mock('../app/composables/useCodoriRoute', () => ({
   useCodoriRoute: () => mockRoute
@@ -56,9 +62,15 @@ vi.mock('../app/composables/useCodoriRouter', () => ({
 vi.mock('../app/composables/useProjects', () => ({
   useProjects: () => ({
     projects: mockProjects,
+    inventory: mockProjectInventory,
     loaded: mockProjectsLoaded,
     loading: mockProjectsLoading,
+    discoveryStatus: mockProjectDiscoveryStatus,
+    discoveryAttempt: mockProjectDiscoveryAttempt,
+    discoveryMaxAttempts: mockProjectDiscoveryMaxAttempts,
+    error: mockProjectDiscoveryError,
     refreshProjects: mockRefreshProjects,
+    cancelProjectDiscovery: mockCancelProjectDiscovery,
     startProject: mockStartProject,
     getProject: (projectId: string | null) =>
       mockProjects.value.find(project => project.projectId === projectId) ?? null
@@ -401,6 +413,22 @@ describe('project sidebar command palette trigger', () => {
     mockChats.value = []
     mockProjectsLoaded.value = true
     mockProjectsLoading.value = false
+    mockProjectInventory.value = {
+      status: 'empty',
+      source: 'app-server-project-registry',
+      scope: 'server-local',
+      host: { hostname: 'ssh-test' },
+      codexAppCatalog: {
+        status: 'unsupported',
+        upstreamIssue: 'https://github.com/openai/codex/issues/23527'
+      },
+      registration: { supported: true, method: 'project/create' }
+    }
+    mockProjectDiscoveryStatus.value = 'ready'
+    mockProjectDiscoveryAttempt.value = 1
+    mockProjectDiscoveryMaxAttempts.value = 5
+    mockProjectDiscoveryError.value = null
+    mockCancelProjectDiscovery.mockReset()
     resetRpcClientMocks()
     mockRpcRequest.mockResolvedValue(makeThreadListResponse(0))
     platformSpy = vi.spyOn(window.navigator, 'platform', 'get').mockReturnValue('MacIntel')
@@ -425,6 +453,42 @@ describe('project sidebar command palette trigger', () => {
     expect(addProject.attributes('data-color')).toBe('primary')
     expect(addProject.attributes('data-variant')).toBe('soft')
 
+  })
+
+  it('renders loading, retrying, and exhausted discovery states accurately', async () => {
+    mockProjectsLoaded.value = false
+    mockProjectDiscoveryStatus.value = 'loading'
+    mockProjectsLoading.value = true
+    const wrapper = mountSidebar({ collapsed: false })
+
+    expect(wrapper.text()).toContain('Loading server projects…')
+
+    mockProjectDiscoveryStatus.value = 'retrying'
+    mockProjectDiscoveryAttempt.value = 1
+    mockProjectDiscoveryError.value = 'The app-server project registry is temporarily unavailable.'
+    await nextTick()
+    expect(wrapper.text()).toContain('Retrying (2 of 5)')
+    expect(wrapper.text()).toContain('temporarily unavailable')
+
+    mockProjectsLoading.value = false
+    mockProjectDiscoveryStatus.value = 'error'
+    await nextTick()
+    expect(wrapper.text()).toContain('Project registry unavailable')
+
+    await wrapper.get('button[aria-label="Retry project discovery"]').trigger('click')
+    expect(mockRefreshProjects).toHaveBeenCalled()
+  })
+
+  it('distinguishes an empty server registry from unsupported Codex App catalog sync', () => {
+    const wrapper = mountSidebar({ collapsed: false })
+
+    expect(wrapper.text()).toContain('No projects are registered on this server.')
+    expect(wrapper.text()).toContain('empty app-server project registry on ssh-test')
+    expect(wrapper.text()).toContain('Codex App catalog sync is unavailable')
+    expect(wrapper.text()).not.toContain('configured root')
+    expect(wrapper.get('a').attributes('href')).toBe('https://github.com/openai/codex/issues/23527')
+    expect(wrapper.get('button[aria-label="Add a server project"]').attributes('data-icon'))
+      .toBe('i-lucide-folder-plus')
   })
 
   it('renders a compact search trigger when collapsed', async () => {

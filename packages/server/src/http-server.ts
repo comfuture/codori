@@ -1,6 +1,6 @@
 import { readFile, stat } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
-import { homedir } from 'node:os'
+import { homedir, hostname } from 'node:os'
 import { basename, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import multipart from '@fastify/multipart'
@@ -106,6 +106,7 @@ type ChatResponse = {
 
 type ProjectsResponse = {
   projects: ProjectStatusRecord[]
+  inventory: ProjectInventory
 }
 
 type ProjectCreateResponse = ProjectsResponse & {
@@ -121,6 +122,23 @@ type AppServerProject = {
 type AppServerProjectListResponse = {
   data?: unknown
   nextCursor?: unknown
+}
+
+type ProjectInventory = {
+  status: 'ready' | 'empty'
+  source: 'app-server-project-registry' | 'runtime-manager'
+  scope: 'server-local'
+  host: {
+    hostname: string
+  }
+  codexAppCatalog: {
+    status: 'unsupported'
+    upstreamIssue: 'https://github.com/openai/codex/issues/23527'
+  }
+  registration: {
+    supported: boolean
+    method: 'project/create' | null
+  }
 }
 
 const normalizeAppServerProject = (project: unknown): AppServerProject | null => {
@@ -193,6 +211,7 @@ export type HttpServerOptions = {
   homeDir?: string
   serviceUpdateController?: ServiceUpdateController | null
   avatarResolver?: ServerAvatarResolver
+  serverHostname?: string
 }
 
 const isCodoriError = (error: unknown): error is CodoriError =>
@@ -284,6 +303,8 @@ const toStatusCode = (error: CodoriError) => {
       return 409
     case 'PROJECT_ROOT_UPDATE_UNAVAILABLE':
       return 501
+    case 'PROJECT_INVENTORY_UNAVAILABLE':
+      return 503
     case 'PROJECT_CLONE_FAILED':
       return 502
     default:
@@ -452,6 +473,7 @@ export const createHttpServer = async (
     : options.clientBundleDir
   const defaultDirectoryPath = options.homeDir?.trim() || homedir()
   const serviceUpdateController = options.serviceUpdateController ?? null
+  const serverHostname = options.serverHostname?.trim() || hostname()
   let appServerProjectRefresh = Promise.resolve<AppServerProject[]>([])
   const refreshAppServerProjects = () => {
     const refresh = appServerProjectRefresh.then(
@@ -530,7 +552,21 @@ export const createHttpServer = async (
   })
 
   const appServerProjectStatuses = async () => {
-    const projects = await refreshAppServerProjects()
+    let projects: AppServerProject[]
+    try {
+      projects = await refreshAppServerProjects()
+    } catch (error) {
+      throw new CodoriError(
+        'PROJECT_INVENTORY_UNAVAILABLE',
+        'The app-server project registry is temporarily unavailable.',
+        {
+          retryable: true,
+          source: 'app-server-project-registry',
+          hostname: serverHostname,
+          reason: error instanceof Error ? error.message : String(error)
+        }
+      )
+    }
     const statusByProjectId = new Map(
       (await resolveValue(manager.listProjectStatuses()))
         .map(status => [status.projectId, status] as const)
@@ -549,11 +585,33 @@ export const createHttpServer = async (
     })
   }
 
+  const projectInventory = (
+    projects: ProjectStatusRecord[],
+    source: ProjectInventory['source']
+  ): ProjectInventory => ({
+    status: projects.length > 0 ? 'ready' : 'empty',
+    source,
+    scope: 'server-local',
+    host: {
+      hostname: serverHostname
+    },
+    codexAppCatalog: {
+      status: 'unsupported',
+      upstreamIssue: 'https://github.com/openai/codex/issues/23527'
+    },
+    registration: {
+      supported: source === 'app-server-project-registry',
+      method: source === 'app-server-project-registry' ? 'project/create' : null
+    }
+  })
+
   app.get('/api/projects', async (): Promise<ProjectsResponse> => {
     if (!manager.getAppServerBridgeTarget) {
-      return { projects: await resolveValue(manager.listProjectStatuses()) }
+      const projects = await resolveValue(manager.listProjectStatuses())
+      return { projects, inventory: projectInventory(projects, 'runtime-manager') }
     }
-    return { projects: await appServerProjectStatuses() }
+    const projects = await appServerProjectStatuses()
+    return { projects, inventory: projectInventory(projects, 'app-server-project-registry') }
   })
 
   app.post<{ Body: ProjectCreateRequest }>('/api/projects', async (request, reply): Promise<ProjectCreateResponse> => {
@@ -577,9 +635,11 @@ export const createHttpServer = async (
       throw new CodoriError('INVALID_CONFIG', 'The connected app-server returned an invalid project/create response.')
     }
     reply.status(201)
+    const projects = await appServerProjectStatuses()
     return {
       project: toProjectStatus(project),
-      projects: await appServerProjectStatuses()
+      projects,
+      inventory: projectInventory(projects, 'app-server-project-registry')
     }
   })
 
@@ -1583,7 +1643,12 @@ export const createHttpServer = async (
   // Without this, a direct deep link could reach `start` or `rpc` before the
   // dashboard's first inventory request had populated the app-server cache.
   if (manager.getAppServerBridgeTarget) {
-    await refreshAppServerProjects()
+    try {
+      await refreshAppServerProjects()
+    } catch {
+      // The HTTP service must still start while the app-server bridge is
+      // warming. GET /api/projects reports a retryable 503 until it recovers.
+    }
   }
 
   return app
