@@ -1,7 +1,6 @@
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import {
-  chmodSync,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -44,6 +43,17 @@ import { DEFAULT_SERVER_HOST, DEFAULT_SERVER_PORT, resolveCodoriHome } from './c
 import { CodoriError } from './errors.js'
 import { containsGitProject } from './project-scanner.js'
 import type { TailscaleServePolicy } from './tailscale-serve.js'
+import {
+  activateServiceBundleSelection,
+  ensureServiceBundleBootstrap,
+  getBundledServerVersion,
+  prepareServiceBundle,
+  readServiceBundleSelection,
+  writeJsonAtomic,
+  writeTextAtomic,
+  type PrepareServiceBundle,
+  type ServiceBundleSelection
+} from './service-bundle.js'
 
 export type ServiceScope = 'user' | 'system'
 
@@ -61,6 +71,19 @@ export type ServiceInstallMetadata = {
   launcherPath: string
   installedAt: string
   tailscaleServePolicy: TailscaleServePolicy
+  activeBundle?: ServiceBundleSelection
+  previousBundle?: ServiceBundleSelection
+  updateState?: ServiceUpdateState
+}
+
+export type ServiceUpdatePhase = 'idle' | 'downloading' | 'restarting' | 'healthy' | 'failed' | 'rolled-back'
+
+export type ServiceUpdateState = {
+  phase: ServiceUpdatePhase
+  targetVersion: string | null
+  activeVersion: string | null
+  failureReason: string | null
+  updatedAt: string
 }
 
 export type RootPromptDefault = {
@@ -90,7 +113,7 @@ export type LauncherScriptInput = {
   port: number
   scope: ServiceScope
   nodePath: string
-  npxPath: string
+  bootstrapPath: string
   platform?: ServicePlatform
   homeDir?: string
   tailscaleServePolicy?: TailscaleServePolicy
@@ -127,6 +150,9 @@ export type ServiceCommandDependencies = {
   env?: NodeJS.ProcessEnv
   nodePath?: string
   npxPath?: string
+  npmPath?: string
+  prepareBundle?: PrepareServiceBundle
+  bundlePreparationTimeoutMs?: number
   stdin?: NodeJS.ReadableStream
   stdout?: NodeJS.WritableStream
   runCommand?: CommandRunner
@@ -211,12 +237,11 @@ export const buildWindowsLauncherScript = ({
   port,
   scope,
   nodePath,
-  npxPath,
+  bootstrapPath,
   homeDir,
   tailscaleServePolicy = 'auto'
 }: Omit<LauncherScriptInput, 'platform'>) => {
-  const pathEntries = Array.from(new Set([dirname(nodePath), dirname(npxPath)]))
-  const prependedPath = pathEntries.map(batchEscapeValue).join(';')
+  const prependedPath = batchEscapeValue(dirname(nodePath))
 
   return [
     '@echo off',
@@ -231,9 +256,8 @@ export const buildWindowsLauncherScript = ({
     ...(homeDir ? [`set "${CODORI_SERVICE_HOME_ENV}=${batchEscapeValue(homeDir)}"`] : []),
     [
       'call',
-      batchQuote(batchEscapeValue(npxPath)),
-      '--yes',
-      '@codori/server',
+      batchQuote(batchEscapeValue(nodePath)),
+      batchQuote(batchEscapeValue(bootstrapPath)),
       'start',
       '--host',
       batchQuote(batchEscapeValue(host)),
@@ -332,8 +356,7 @@ const buildCanonicalInvocation = (
   // Keep literal command words unquoted so the printed command can be pasted
   // directly; only quote values that may contain spaces. The printed form uses
   // the installed `codori` binary because that is the documented entrypoint;
-  // the launcher scripts written to disk keep using `npx @codori/server` so
-  // already-installed services stay valid.
+  // registered service launchers use their service-owned bundle bootstrap.
   const parts: string[] = [binary, ...toCanonicalCommandWords(command)]
   if (options.root) {
     parts.push('--root', maybeQuote(options.root))
@@ -399,6 +422,49 @@ const ensureExistingDirectory = (path: string) => {
   }
 }
 
+const normalizeBundleSelection = (value: unknown): ServiceBundleSelection | undefined => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return undefined
+  }
+  const record = value as Record<string, unknown>
+  if (
+    typeof record.version !== 'string'
+    || typeof record.entrypoint !== 'string'
+    || typeof record.nodePath !== 'string'
+    || typeof record.activatedAt !== 'string'
+  ) {
+    return undefined
+  }
+  return record as ServiceBundleSelection
+}
+
+const SERVICE_UPDATE_PHASES = new Set<ServiceUpdatePhase>([
+  'idle',
+  'downloading',
+  'restarting',
+  'healthy',
+  'failed',
+  'rolled-back'
+])
+
+const normalizeUpdateState = (value: unknown): ServiceUpdateState | undefined => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return undefined
+  }
+  const record = value as Record<string, unknown>
+  if (
+    typeof record.phase !== 'string'
+    || !SERVICE_UPDATE_PHASES.has(record.phase as ServiceUpdatePhase)
+    || (record.targetVersion !== null && typeof record.targetVersion !== 'string')
+    || (record.activeVersion !== null && typeof record.activeVersion !== 'string')
+    || (record.failureReason !== null && typeof record.failureReason !== 'string')
+    || typeof record.updatedAt !== 'string'
+  ) {
+    return undefined
+  }
+  return record as ServiceUpdateState
+}
+
 const normalizeServiceMetadata = (value: unknown): ServiceInstallMetadata | null => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return null
@@ -434,7 +500,10 @@ const normalizeServiceMetadata = (value: unknown): ServiceInstallMetadata | null
     ...record,
     // Services installed before the automatic policy are migrated the next
     // time start/restart rewrites their launcher and metadata.
-    tailscaleServePolicy: tailscaleServePolicy ?? 'auto'
+    tailscaleServePolicy: tailscaleServePolicy ?? 'auto',
+    activeBundle: normalizeBundleSelection(record.activeBundle),
+    previousBundle: normalizeBundleSelection(record.previousBundle),
+    updateState: normalizeUpdateState(record.updateState)
   } as ServiceInstallMetadata
 }
 
@@ -460,6 +529,24 @@ const loadServiceMetadata = (root: string, homeDir = os.homedir()) => {
     throw new CodoriError('INVALID_SERVICE_METADATA', `Service metadata at ${metadataPath} is malformed.`)
   }
 
+  return metadata
+}
+
+export const loadServiceMetadataByInstallId = (installId: string, homeDir = os.homedir()) => {
+  const metadataPath = getServiceMetadataPath(installId, homeDir)
+  if (!existsSync(metadataPath)) {
+    throw new CodoriError('SERVICE_NOT_INSTALLED', `No service metadata was found for ${installId}.`)
+  }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(readFileSync(metadataPath, 'utf8'))
+  } catch (error) {
+    throw new CodoriError('INVALID_SERVICE_METADATA', `Failed to parse ${metadataPath}.`, error)
+  }
+  const metadata = normalizeServiceMetadata(parsed)
+  if (!metadata || metadata.installId !== installId) {
+    throw new CodoriError('INVALID_SERVICE_METADATA', `Service metadata at ${metadataPath} is malformed.`)
+  }
   return metadata
 }
 
@@ -916,17 +1003,22 @@ const resolvePromptedHost = async (
 }
 
 const writeLauncherAndServiceFiles = (
-  metadata: Pick<ServiceInstallMetadata, 'installId' | 'root' | 'host' | 'port' | 'scope' | 'platform' | 'tailscaleServePolicy'>,
+  metadata: Pick<ServiceInstallMetadata, 'installId' | 'root' | 'host' | 'port' | 'scope' | 'platform' | 'tailscaleServePolicy' | 'activeBundle' | 'previousBundle'>,
   definition: ServiceUnitDefinition,
   homeDir: string,
-  nodePath: string,
-  npxPath: string
+  nodePath: string
 ) => {
   const metadataDirectory = getServiceMetadataDirectory(metadata.installId, homeDir)
   const launcherPath = getServiceLauncherPath(metadata.installId, homeDir, metadata.platform)
 
   ensureDirectory(metadataDirectory)
   ensureDirectory(dirname(definition.serviceFilePath))
+
+  if (!metadata.activeBundle) {
+    throw new CodoriError('INVALID_SERVICE_METADATA', 'A managed service launcher requires an active exact bundle.')
+  }
+  activateServiceBundleSelection(metadataDirectory, metadata.activeBundle, metadata.previousBundle)
+  const bootstrapPath = ensureServiceBundleBootstrap(metadataDirectory)
 
   const launcherScript = buildLauncherScript({
     installId: metadata.installId,
@@ -935,7 +1027,7 @@ const writeLauncherAndServiceFiles = (
     port: metadata.port,
     scope: metadata.scope,
     nodePath,
-    npxPath,
+    bootstrapPath,
     platform: metadata.platform,
     tailscaleServePolicy: metadata.tailscaleServePolicy,
     // Only a system scope needs this; a user-scoped service already resolves the
@@ -944,10 +1036,9 @@ const writeLauncherAndServiceFiles = (
   })
 
   if (metadata.platform === 'win32') {
-    writeFileSync(launcherPath, `${launcherScript}\r\n`, 'utf8')
+    writeTextAtomic(launcherPath, `${launcherScript}\r\n`)
   } else {
-    writeFileSync(launcherPath, `${launcherScript}\n`, 'utf8')
-    chmodSync(launcherPath, 0o755)
+    writeTextAtomic(launcherPath, `${launcherScript}\n`, 0o755)
   }
 
   writeFileSync(
@@ -957,10 +1048,63 @@ const writeLauncherAndServiceFiles = (
   )
 }
 
+export const writeServiceRuntimeFiles = (
+  metadata: ServiceInstallMetadata,
+  homeDir: string,
+  nodePath = process.execPath
+) => {
+  const definition = resolveServiceDefinition(metadata, homeDir)
+  writeLauncherAndServiceFiles(metadata, definition, homeDir, nodePath)
+}
+
 const writeServiceMetadata = (metadata: ServiceInstallMetadata, homeDir: string) => {
   const metadataPath = getServiceMetadataPath(metadata.installId, homeDir)
   ensureDirectory(dirname(metadataPath))
-  writeFileSync(metadataPath, `${JSON.stringify(metadata, null, 2)}\n`, 'utf8')
+  writeJsonAtomic(metadataPath, metadata)
+}
+
+export const writeServiceMetadataAtomic = writeServiceMetadata
+
+const resolveNpmPath = (
+  dependencies: ServiceCommandDependencies,
+  nodePath: string
+) => dependencies.npmPath ?? join(
+  dirname(nodePath),
+  resolveServicePlatform(dependencies.platform) === 'win32' ? 'npm.cmd' : 'npm'
+)
+
+const ensureActiveServiceBundle = async (
+  metadata: ServiceInstallMetadata,
+  homeDir: string,
+  nodePath: string,
+  dependencies: ServiceCommandDependencies
+): Promise<ServiceInstallMetadata> => {
+  const metadataDirectory = getServiceMetadataDirectory(metadata.installId, homeDir)
+  const selected = readServiceBundleSelection(metadataDirectory)
+  if (metadata.activeBundle && selected?.version === metadata.activeBundle.version) {
+    return metadata
+  }
+
+  const prepareBundle = dependencies.prepareBundle ?? prepareServiceBundle
+  const activeBundle = await prepareBundle({
+    metadataDirectory,
+    version: getBundledServerVersion(),
+    nodePath,
+    npmPath: resolveNpmPath(dependencies, nodePath),
+    timeoutMs: dependencies.bundlePreparationTimeoutMs,
+    now: dependencies.now
+  })
+  return {
+    ...metadata,
+    activeBundle,
+    updateState: {
+      phase: 'healthy',
+      targetVersion: activeBundle.version,
+      activeVersion: activeBundle.version,
+      failureReason: null,
+      updatedAt: (dependencies.now ?? (() => new Date()))().toISOString()
+    }
+  }
 }
 
 const applyServiceLaunchPolicy = (
@@ -1154,7 +1298,7 @@ export const buildLauncherScript = ({
   port,
   scope,
   nodePath,
-  npxPath,
+  bootstrapPath,
   platform = 'linux',
   homeDir,
   tailscaleServePolicy = 'auto'
@@ -1167,14 +1311,13 @@ export const buildLauncherScript = ({
       port,
       scope,
       nodePath,
-      npxPath,
+      bootstrapPath,
       homeDir,
       tailscaleServePolicy
     })
   }
 
-  const pathEntries = Array.from(new Set([dirname(nodePath), dirname(npxPath)]))
-  const exportPath = `${pathEntries.map(shellEscape).join(':')}:$PATH`
+  const exportPath = `${shellEscape(dirname(nodePath))}:$PATH`
 
   return [
     '#!/bin/sh',
@@ -1186,7 +1329,7 @@ export const buildLauncherScript = ({
     `export ${CODORI_SERVICE_INSTALL_ROOT_ENV}=${shellEscape(resolve(root))}`,
     ...(homeDir ? [`export ${CODORI_SERVICE_HOME_ENV}=${shellEscape(homeDir)}`] : []),
     [
-      `exec ${shellEscape(npxPath)} --yes @codori/server start`,
+      `exec ${shellEscape(nodePath)} ${shellEscape(bootstrapPath)} start`,
       `--host ${shellEscape(host)}`,
       `--port ${port}`,
       tailscaleServePolicy === 'required'
@@ -1205,7 +1348,6 @@ export const installService = async (
   const cwd = dependencies.cwd ?? process.cwd()
   const homeDir = resolveServiceHomeDir(dependencies)
   const nodePath = dependencies.nodePath ?? process.execPath
-  const npxPath = dependencies.npxPath ?? join(dirname(nodePath), 'npx')
   const platform = resolveServicePlatform(dependencies.platform)
   const now = dependencies.now ?? (() => new Date())
   const prompt = dependencies.prompt ?? createDefaultPrompt(
@@ -1265,7 +1407,7 @@ export const installService = async (
       }
     }
 
-    const metadata = createOperationMetadata(installId, 'install', {
+    let metadata = createOperationMetadata(installId, 'install', {
       root,
       host,
       port,
@@ -1276,7 +1418,8 @@ export const installService = async (
       tailscaleServePolicy
     }, now)
 
-    writeLauncherAndServiceFiles(metadata, definition, homeDir, nodePath, npxPath)
+    metadata = await ensureActiveServiceBundle(metadata, homeDir, nodePath, dependencies)
+    writeLauncherAndServiceFiles(metadata, definition, homeDir, nodePath)
     await runCommandSequence(
       resolveServiceCommands('install', metadata, definition),
       runCommand,
@@ -1302,7 +1445,6 @@ export const restartService = async (
   const runCommand = dependencies.runCommand ?? defaultCommandRunner
   const homeDir = resolveServiceHomeDir(dependencies)
   const nodePath = dependencies.nodePath ?? process.execPath
-  const npxPath = dependencies.npxPath ?? join(dirname(nodePath), 'npx')
   const yes = options.yes ?? false
 
   // A restart acts on an existing install, so the root comes from recorded
@@ -1331,8 +1473,9 @@ export const restartService = async (
   await ensurePlatformServiceManager(metadata.platform, metadata.scope, runCommand)
 
   metadata = applyServiceLaunchPolicy(metadata, options)
+  metadata = await ensureActiveServiceBundle(metadata, homeDir, nodePath, dependencies)
   const definition = resolveServiceDefinition(metadata, homeDir)
-  writeLauncherAndServiceFiles(metadata, definition, homeDir, nodePath, npxPath)
+  writeLauncherAndServiceFiles(metadata, definition, homeDir, nodePath)
   await runCommandSequence(
     resolveServiceCommands('restart', metadata, definition),
     runCommand,
@@ -1411,7 +1554,6 @@ const runLifecycleAction = async (
   const runCommand = dependencies.runCommand ?? defaultCommandRunner
   const homeDir = resolveServiceHomeDir(dependencies)
   const nodePath = dependencies.nodePath ?? process.execPath
-  const npxPath = dependencies.npxPath ?? join(dirname(nodePath), 'npx')
   const yes = options.yes ?? false
 
   // These verbs only act on an already-registered install, so the root is
@@ -1439,10 +1581,11 @@ const runLifecycleAction = async (
 
   if (action === 'start') {
     metadata = applyServiceLaunchPolicy(metadata, options)
+    metadata = await ensureActiveServiceBundle(metadata, homeDir, nodePath, dependencies)
   }
   const definition = resolveServiceDefinition(metadata, homeDir)
   if (action === 'start') {
-    writeLauncherAndServiceFiles(metadata, definition, homeDir, nodePath, npxPath)
+    writeLauncherAndServiceFiles(metadata, definition, homeDir, nodePath)
   }
   const launchChanged = action === 'start' && (
     metadata.host !== previousLaunch.host

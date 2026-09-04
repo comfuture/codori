@@ -25,7 +25,10 @@ export const useProjects = () => {
     updateAvailable: false,
     updating: false,
     installedVersion: null,
-    latestVersion: null
+    latestVersion: null,
+    durableVersion: null,
+    phase: null,
+    failureReason: null
   }))
   const loaded = useState<boolean>('codori-projects-loaded', () => false)
   const loading = useState<boolean>('codori-projects-loading', () => false)

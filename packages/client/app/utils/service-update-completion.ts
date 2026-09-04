@@ -139,6 +139,13 @@ export const createServiceUpdateCompletionMonitor = (
       const status = await options.refreshStatus()
       if (
         generation === watchGeneration
+        && (status.phase === 'failed' || status.phase === 'rolled-back')
+      ) {
+        stop()
+        return
+      }
+      if (
+        generation === watchGeneration
         && status.enabled
         && !status.updating
         && status.installedVersion !== null
