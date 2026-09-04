@@ -282,6 +282,21 @@ server; its folder browser uses app-server filesystem APIs, so it works when a
 browser connects to Codori over SSH/Tailscale. Browser-native folder pickers
 select the browser machine and are intentionally not used for remote projects.
 
+`GET /api/projects` describes this inventory explicitly as the server-local
+`app-server-project-registry`, including the serving host identity, whether the
+registry is ready or empty, and the supported `project/create` registration
+path. Project ids remain the opaque ids returned by app-server and are never
+reconstructed from names or paths.
+
+This registry is not the Codex App's host-aware saved-project catalog. The
+current public app-server protocol has no RPC that enumerates the desktop
+catalog, including SSH projects managed by a separate macOS Codex App. Codori
+therefore reports catalog synchronization as unsupported and directs users to
+register directories deliberately on the Codori host. It does not read desktop
+global state, merge projects by label/path, or fabricate remote projects. The
+upstream propagation limitation is tracked in
+[openai/codex#23527](https://github.com/openai/codex/issues/23527).
+
 ### Windows notes
 
 Windows registration uses Task Scheduler rather than the Service Control

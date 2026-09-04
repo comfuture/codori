@@ -14,10 +14,9 @@ headset.
 
 ## What it looks like
 
-Every Git project Codori discovers under your root directory shows up in the
-sidebar, ready to open. Scanning skips generated directories such as
-`node_modules`, `dist`, and `build`, so a repository nested inside one of those
-stays hidden.
+Projects registered with the Codex app-server on the Codori host show up in the
+sidebar, ready to open. Use **Add project** to register one or more absolute
+directories from that server; Codori does not scan the filesystem automatically.
 
 ![Codori dashboard listing discovered Git projects](docs/images/dashboard.png)
 
@@ -35,7 +34,7 @@ The same session works on a phone, because a laptop is not always within reach.
 
 ```bash
 npm install -g @codori/cli
-codori start --root ~/Project
+codori start
 ```
 
 That is the whole setup. Codori prints where it is listening:
@@ -43,7 +42,6 @@ That is the whole setup. Codori prints where it is listening:
 ```text
 ✔ Codori listening on http://127.0.0.1:4310
 ✔ Tailscale Serve configured: https://my-host.your-tailnet.ts.net/
-  root       /Users/you/Project
   dashboard  http://127.0.0.1:4310/
   immersive  http://127.0.0.1:4310/xr/
 ```
@@ -59,7 +57,7 @@ covers the prerequisites, including the one-time
 Prefer not to install anything?
 
 ```bash
-npx @codori/server start --root ~/Project
+npx @codori/server start
 ```
 
 Requires Node.js 22.22.2+. A matching Codex CLI ships with the package, so a
@@ -71,7 +69,7 @@ Codori fits if:
 
 - your repositories live on one machine (workstation, home server, mini PC) and
   you want to reach them from a laptop, tablet, phone, or headset
-- you keep many Git repositories under one parent directory
+- you want to register the server-side repositories that should appear remotely
 - you already trust your local tooling and would rather not rebuild your
   workflow around someone else's cloud
 - you have Tailscale, or another private network you control, and want to keep
