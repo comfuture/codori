@@ -38,6 +38,9 @@ const serviceUpdateBusy = computed(() =>
 )
 
 const serviceUpdateTooltip = computed(() => {
+  if (serviceUpdate.value.failureReason) {
+    return `Update ${serviceUpdate.value.phase === 'rolled-back' ? 'rolled back' : 'failed'}: ${serviceUpdate.value.failureReason}`
+  }
   if (!serviceUpdate.value.latestVersion || !serviceUpdate.value.installedVersion) {
     return serviceUpdate.value.updating ? 'Applying the latest server package update.' : 'Install the latest @codori/server package.'
   }

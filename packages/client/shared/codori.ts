@@ -55,6 +55,9 @@ export type ServiceUpdateStatus = {
   updating: boolean
   installedVersion: string | null
   latestVersion: string | null
+  durableVersion?: string | null
+  phase?: 'idle' | 'downloading' | 'restarting' | 'healthy' | 'failed' | 'rolled-back' | null
+  failureReason?: string | null
 }
 
 export type ProjectsResponse = {

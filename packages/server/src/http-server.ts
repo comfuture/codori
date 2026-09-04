@@ -794,7 +794,10 @@ export const createHttpServer = async (
           updateAvailable: false,
           updating: false,
           installedVersion: null,
-          latestVersion: null
+          latestVersion: null,
+          durableVersion: null,
+          phase: null,
+          failureReason: null
         }
   }))
 
