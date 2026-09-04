@@ -898,14 +898,20 @@ describe('createHttpServer', () => {
         updateAvailable: true,
         updating: false,
         installedVersion: '0.0.3',
-        latestVersion: '0.0.4'
+        latestVersion: '0.0.4',
+        durableVersion: '0.0.3',
+        phase: 'healthy',
+        failureReason: null
       }),
       requestUpdate: async () => ({
         enabled: true,
         updateAvailable: true,
         updating: true,
         installedVersion: '0.0.3',
-        latestVersion: '0.0.4'
+        latestVersion: '0.0.4',
+        durableVersion: '0.0.3',
+        phase: 'downloading',
+        failureReason: null
       }),
       startPolling: () => {},
       stopPolling: () => {}
@@ -926,7 +932,10 @@ describe('createHttpServer', () => {
         updateAvailable: true,
         updating: false,
         installedVersion: '0.0.3',
-        latestVersion: '0.0.4'
+        latestVersion: '0.0.4',
+        durableVersion: '0.0.3',
+        phase: 'healthy',
+        failureReason: null
       }
     })
 
@@ -941,7 +950,10 @@ describe('createHttpServer', () => {
         updateAvailable: true,
         updating: true,
         installedVersion: '0.0.3',
-        latestVersion: '0.0.4'
+        latestVersion: '0.0.4',
+        durableVersion: '0.0.3',
+        phase: 'downloading',
+        failureReason: null
       }
     })
   })

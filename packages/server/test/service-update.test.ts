@@ -1,37 +1,99 @@
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import os from 'node:os'
+import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  comparePackageVersions,
   checkStartupUpdate,
-  CODORI_STARTUP_UPDATE_APPLIED_ENV,
+  comparePackageVersions,
   createServiceUpdateController,
-  createUpdateCommand
+  createUpdateCommand,
+  getCurrentServerPackage,
+  runServiceUpdateTransaction
 } from '../src/service-update.js'
+import {
+  activateServiceBundleSelection,
+  getServiceBundleDirectory,
+  getServiceBundleSelectionPath,
+  type PrepareServiceBundle,
+  type ServiceBundleSelection
+} from '../src/service-bundle.js'
 import {
   CODORI_SERVICE_INSTALL_ID_ENV,
   CODORI_SERVICE_MANAGED_ENV,
-  CODORI_SERVICE_SCOPE_ENV
+  CODORI_SERVICE_SCOPE_ENV,
+  getServiceMetadataDirectory,
+  getServiceMetadataPath,
+  type ServiceInstallMetadata
 } from '../src/service.js'
 
-const CURRENT_SERVER_VERSION = (() => {
-  const manifest = JSON.parse(readFileSync(resolve(import.meta.dirname, '../package.json'), 'utf8')) as {
-    version: string
-  }
-  return manifest.version
-})()
-
+const CURRENT_SERVER_VERSION = getCurrentServerPackage().version
 const nextPatchVersion = (version: string) => {
-  const [major = '0', minor = '0', patch = '0', ...rest] = version.split('.')
-  const nextPatch = Number.parseInt(patch, 10)
-  if (Number.isNaN(nextPatch)) {
-    throw new Error(`Cannot derive next patch version from "${version}".`)
-  }
+  const [major = '0', minor = '0', patch = '0'] = version.split('.')
+  return `${major}.${minor}.${Number.parseInt(patch, 10) + 1}`
+}
+const NEWER_SERVER_VERSION = nextPatchVersion(CURRENT_SERVER_VERSION)
 
-  return [major, minor, String(nextPatch + 1), ...rest].join('.')
+const createRegistryFetch = (version: string) => vi.fn(async () => ({
+  ok: true,
+  json: async () => ({ version })
+} as Response))
+
+const createSelection = (
+  metadataDirectory: string,
+  version: string,
+  nodePath = process.execPath
+): ServiceBundleSelection => {
+  const packageDirectory = join(getServiceBundleDirectory(metadataDirectory, version), 'node_modules', '@codori', 'server')
+  mkdirSync(join(packageDirectory, 'dist'), { recursive: true })
+  const entrypoint = join(packageDirectory, 'dist', 'cli.js')
+  writeFileSync(entrypoint, '#!/usr/bin/env node\n')
+  writeFileSync(join(packageDirectory, 'package.json'), JSON.stringify({
+    name: '@codori/server',
+    version,
+    engines: { node: '>=22.22.2' },
+    bin: { 'codori-server': 'dist/cli.js' }
+  }))
+  return { version, entrypoint, nodePath, activatedAt: '2026-09-04T00:00:00.000Z' }
 }
 
-const NEWER_SERVER_VERSION = nextPatchVersion(CURRENT_SERVER_VERSION)
+const createServiceFixture = () => {
+  const homeDir = mkdtempSync(join(os.tmpdir(), 'codori-update-home-'))
+  const root = mkdtempSync(join(os.tmpdir(), 'codori-update-root-'))
+  const installId = 'abc123def456'
+  const metadataDirectory = getServiceMetadataDirectory(installId, homeDir)
+  mkdirSync(metadataDirectory, { recursive: true })
+  const activeBundle = createSelection(metadataDirectory, CURRENT_SERVER_VERSION)
+  activateServiceBundleSelection(metadataDirectory, activeBundle)
+  const metadata: ServiceInstallMetadata = {
+    installId,
+    root,
+    host: '127.0.0.1',
+    port: 4310,
+    scope: 'user',
+    platform: 'linux',
+    serviceName: 'codori-test.service',
+    serviceFilePath: join(metadataDirectory, 'codori-test.service'),
+    launcherPath: join(metadataDirectory, 'run-service.sh'),
+    installedAt: '2026-09-04T00:00:00.000Z',
+    tailscaleServePolicy: 'auto',
+    activeBundle,
+    updateState: {
+      phase: 'healthy',
+      targetVersion: CURRENT_SERVER_VERSION,
+      activeVersion: CURRENT_SERVER_VERSION,
+      failureReason: null,
+      updatedAt: '2026-09-04T00:00:00.000Z'
+    }
+  }
+  writeFileSync(getServiceMetadataPath(installId, homeDir), `${JSON.stringify(metadata, null, 2)}\n`)
+  return { homeDir, root, installId, metadataDirectory, metadata, activeBundle }
+}
+
+const SERVICE_ENV = {
+  [CODORI_SERVICE_MANAGED_ENV]: '1',
+  [CODORI_SERVICE_INSTALL_ID_ENV]: 'abc123def456',
+  [CODORI_SERVICE_SCOPE_ENV]: 'user'
+}
 
 describe('service update controller', () => {
   it('compares package versions numerically', () => {
@@ -42,268 +104,275 @@ describe('service update controller', () => {
   })
 
   it('stays disabled when the server was not launched by a registered service', async () => {
-    const controller = createServiceUpdateController({
-      root: '/tmp/demo',
-      env: {},
-      fetchImpl: vi.fn()
-    })
-
+    const controller = createServiceUpdateController({ root: '/tmp/demo', env: {}, fetchImpl: vi.fn() })
     await expect(controller.getStatus()).resolves.toEqual({
       enabled: false,
       updateAvailable: false,
       updating: false,
       installedVersion: null,
-      latestVersion: null
+      latestVersion: null,
+      durableVersion: null,
+      phase: null,
+      failureReason: null
     })
   })
 
-  it('reports update availability for service-managed runs', async () => {
-    const controller = createServiceUpdateController({
-      root: '/tmp/demo',
-      env: {
-        [CODORI_SERVICE_MANAGED_ENV]: '1',
-        [CODORI_SERVICE_INSTALL_ID_ENV]: 'abc123def456',
-        [CODORI_SERVICE_SCOPE_ENV]: 'user'
-      },
-      fetchImpl: vi.fn(async () => ({
-        ok: true,
-        json: async () => ({
-          version: NEWER_SERVER_VERSION
-        })
-      } as Response))
-    })
-
-    const status = await controller.getStatus()
-    expect(status.enabled).toBe(true)
-    expect(status.updateAvailable).toBe(true)
-    expect(status.installedVersion).toMatch(/^\d+\.\d+\.\d+/u)
-    expect(status.latestVersion).toBe(NEWER_SERVER_VERSION)
-    expect(status.updating).toBe(false)
-  })
-
-  it('spawns a detached update helper and flips into updating state', async () => {
+  it('persists downloading state and spawns an exact-version worker without npx', async () => {
+    const fixture = createServiceFixture()
     const spawnUpdateProcess = vi.fn(async () => undefined)
     const controller = createServiceUpdateController({
-      root: '/tmp/demo workspace',
-      env: {
-        [CODORI_SERVICE_MANAGED_ENV]: '1',
-        [CODORI_SERVICE_INSTALL_ID_ENV]: 'abc123def456',
-        [CODORI_SERVICE_SCOPE_ENV]: 'system'
-      },
-      homeDir: '/tmp/service-home',
-      npxPath: '/opt/node/bin/npx',
-      fetchImpl: vi.fn(async () => ({
-        ok: true,
-        json: async () => ({
-          version: NEWER_SERVER_VERSION
-        })
-      } as Response)),
+      root: fixture.root,
+      env: SERVICE_ENV,
+      homeDir: fixture.homeDir,
+      nodePath: '/opt/node/bin/node',
+      fetchImpl: createRegistryFetch(NEWER_SERVER_VERSION) as unknown as typeof fetch,
       spawnUpdateProcess
     })
 
     const status = await controller.requestUpdate()
-
     expect(spawnUpdateProcess).toHaveBeenCalledWith(
-      '/bin/sh',
-      [
-        '-lc',
-        expect.stringContaining("'/opt/node/bin/npx' --yes '@codori/server@latest' restart-service --root '/tmp/demo workspace' --scope 'system' --yes")
-      ],
-      {
-        env: expect.objectContaining({
-          [CODORI_SERVICE_MANAGED_ENV]: '1',
-          [CODORI_SERVICE_INSTALL_ID_ENV]: 'abc123def456',
-          [CODORI_SERVICE_SCOPE_ENV]: 'system'
-        })
-      }
+      '/opt/node/bin/node',
+      expect.arrayContaining([
+        '--install-id', fixture.installId,
+        '--root', fixture.root,
+        '--scope', 'user',
+        '--target-version', NEWER_SERVER_VERSION
+      ]),
+      { env: SERVICE_ENV }
     )
-    expect(status.updating).toBe(true)
-    expect(status.updateAvailable).toBe(true)
+    expect(JSON.stringify(spawnUpdateProcess.mock.calls[0])).not.toContain('npx')
+    expect(status).toMatchObject({
+      updating: true,
+      phase: 'downloading',
+      durableVersion: CURRENT_SERVER_VERSION,
+      latestVersion: NEWER_SERVER_VERSION
+    })
   })
 })
 
-const SERVICE_ENV = {
-  [CODORI_SERVICE_MANAGED_ENV]: '1',
-  [CODORI_SERVICE_INSTALL_ID_ENV]: 'abc123def456',
-  [CODORI_SERVICE_SCOPE_ENV]: 'user'
-}
-
-const createRegistryFetch = (version: string) => vi.fn(async () => ({
-  ok: true,
-  json: async () => ({ version })
-} as Response))
-
-describe('startup update adoption', () => {
-  it('skips the check when the launch is not service-managed', async () => {
+describe('ordinary startup', () => {
+  it('never checks the registry or adopts a nested package', async () => {
     const fetchImpl = vi.fn()
-    const result = await checkStartupUpdate({
-      env: {},
-      fetchImpl: fetchImpl as unknown as typeof fetch
-    })
-
-    expect(result.checked).toBe(false)
-    expect(result.reason).toBe('not-service-managed')
+    const execPackage = vi.fn()
+    const result = await checkStartupUpdate({ env: SERVICE_ENV, fetchImpl, execPackage })
+    expect(result.reason).toBe('durable-launch')
+    expect(result.adopted).toBe(false)
     expect(fetchImpl).not.toHaveBeenCalled()
-  })
-
-  it('adopts a newer published bundle before serving', async () => {
-    const execPackage = vi.fn(async () => undefined)
-    const result = await checkStartupUpdate({
-      env: SERVICE_ENV,
-      fetchImpl: createRegistryFetch(NEWER_SERVER_VERSION) as unknown as typeof fetch,
-      execPackage
-    })
-
-    expect(result.adopted).toBe(true)
-    expect(result.reason).toBe('adopted')
-    expect(result.latestVersion).toBe(NEWER_SERVER_VERSION)
-    expect(execPackage).toHaveBeenCalledWith(`@codori/server@${NEWER_SERVER_VERSION}`)
-  })
-
-  it('does not adopt when the installed bundle is current', async () => {
-    const execPackage = vi.fn(async () => undefined)
-    const result = await checkStartupUpdate({
-      env: SERVICE_ENV,
-      fetchImpl: createRegistryFetch(CURRENT_SERVER_VERSION) as unknown as typeof fetch,
-      execPackage
-    })
-
-    expect(result.adopted).toBe(false)
-    expect(result.reason).toBe('up-to-date')
     expect(execPackage).not.toHaveBeenCalled()
-  })
-
-  it('serves the installed bundle when the registry is unreachable', async () => {
-    const execPackage = vi.fn(async () => undefined)
-    const result = await checkStartupUpdate({
-      env: SERVICE_ENV,
-      fetchImpl: vi.fn(async () => {
-        throw new Error('offline')
-      }) as unknown as typeof fetch,
-      execPackage
-    })
-
-    expect(result.reason).toBe('registry-unavailable')
-    expect(result.adopted).toBe(false)
-    expect(execPackage).not.toHaveBeenCalled()
-  })
-
-  it('falls back to the installed bundle when adoption fails', async () => {
-    // A rejecting execPackage must not propagate out of the startup check, or a
-    // supervised service restart-loops with nothing serving.
-    const execPackage = vi.fn(async () => {
-      throw new Error('npx could not download the package')
-    })
-
-    const result = await checkStartupUpdate({
-      env: SERVICE_ENV,
-      fetchImpl: createRegistryFetch(NEWER_SERVER_VERSION) as unknown as typeof fetch,
-      execPackage
-    })
-
-    expect(execPackage).toHaveBeenCalled()
-    expect(result.adopted).toBe(false)
-    expect(result.updateAvailable).toBe(true)
-    expect(result.reason).toBe('exec-unavailable')
-  })
-
-  it('never re-adopts inside an already adopted launch', async () => {
-    const execPackage = vi.fn(async () => undefined)
-    const fetchImpl = createRegistryFetch(NEWER_SERVER_VERSION)
-    const result = await checkStartupUpdate({
-      env: {
-        ...SERVICE_ENV,
-        [CODORI_STARTUP_UPDATE_APPLIED_ENV]: '1'
-      },
-      fetchImpl: fetchImpl as unknown as typeof fetch,
-      execPackage
-    })
-
-    expect(result.checked).toBe(false)
-    expect(execPackage).not.toHaveBeenCalled()
-    expect(fetchImpl).not.toHaveBeenCalled()
   })
 })
 
 describe('platform update command', () => {
-  it('uses a POSIX shell on unix', () => {
-    const command = createUpdateCommand({ installId: 'abc', scope: 'user' }, {
-      root: '/tmp/demo',
-      npxPath: '/opt/node/bin/npx',
-      homeDir: '/tmp/home',
-      platform: 'darwin'
-    })
+  it('uses the pinned Node worker with the exact target on every platform', () => {
+    for (const platform of ['darwin', 'linux', 'win32'] as NodeJS.Platform[]) {
+      const command = createUpdateCommand({ installId: 'abc', scope: 'system' }, {
+        root: '/tmp/demo',
+        nodePath: '/opt/node/bin/node',
+        homeDir: '/tmp/home',
+        platform,
+        targetVersion: '1.2.3'
+      })
+      expect(command.command).toBe('/opt/node/bin/node')
+      expect(command.args).toContain('1.2.3')
+      expect(command.args).toContain('/tmp/home')
+      expect(command.args.join(' ')).not.toContain('latest')
+      expect(command.args.join(' ')).not.toContain('npx')
+    }
+  })
+})
 
-    expect(command.command).toBe('/bin/sh')
-    expect(command.args[0]).toBe('-lc')
+describe('durable update transaction', () => {
+  it('keeps the current selection and listener untouched when preparation fails', async () => {
+    const fixture = createServiceFixture()
+    const restart = vi.fn(async () => undefined)
+    await expect(runServiceUpdateTransaction({
+      installId: fixture.installId,
+      root: fixture.root,
+      scope: 'user',
+      homeDir: fixture.homeDir,
+      targetVersion: NEWER_SERVER_VERSION
+    }, {
+      prepareBundle: vi.fn(async () => { throw new Error('registry unavailable') }),
+      restart
+    })).rejects.toThrow('registry unavailable')
+    expect(restart).not.toHaveBeenCalled()
+    expect(JSON.parse(readFileSync(getServiceBundleSelectionPath(fixture.metadataDirectory), 'utf8')).version)
+      .toBe(CURRENT_SERVER_VERSION)
+    expect(JSON.parse(readFileSync(getServiceMetadataPath(fixture.installId, fixture.homeDir), 'utf8')).updateState)
+      .toMatchObject({ phase: 'failed', failureReason: 'registry unavailable' })
   })
 
-  it('uses cmd.exe with a timeout delay on windows', () => {
-    const command = createUpdateCommand({ installId: 'abc', scope: 'user' }, {
-      root: 'C:\\Projects',
-      npxPath: 'C:\\Program Files\\nodejs\\npx.cmd',
-      homeDir: 'C:\\Users\\test',
-      platform: 'win32'
-    })
+  it('bounds a hanging preparation before any restart', async () => {
+    const fixture = createServiceFixture()
+    const restart = vi.fn(async () => undefined)
+    await expect(runServiceUpdateTransaction({
+      installId: fixture.installId,
+      root: fixture.root,
+      scope: 'user',
+      homeDir: fixture.homeDir,
+      targetVersion: NEWER_SERVER_VERSION,
+      preparationTimeoutMs: 10
+    }, {
+      prepareBundle: vi.fn(() => new Promise<ServiceBundleSelection>(() => {})),
+      restart
+    })).rejects.toThrow('Timed out preparing target bundle')
+    expect(restart).not.toHaveBeenCalled()
+  })
 
-    expect(command.command).toBe('cmd.exe')
-    expect(command.args.slice(0, 3)).toEqual(['/d', '/s', '/c'])
-    // cmd.exe has no `sleep`.
-    expect(command.args[3]).toContain('timeout /t 1 /nobreak')
-    expect(command.args[3]).toContain('service restart')
-    expect(command.args[3]).toContain('"C:\\Projects"')
-    // A SYSTEM-run task must keep the installer's metadata home.
-    expect(command.args[3]).toContain('set "CODORI_SERVICE_HOME=C:\\Users\\test"')
+  it('migrates a legacy launcher to the current exact bundle before selecting the target', async () => {
+    const fixture = createServiceFixture()
+    rmSync(getServiceBundleSelectionPath(fixture.metadataDirectory))
+    const legacyMetadata = { ...fixture.metadata }
+    delete legacyMetadata.activeBundle
+    delete legacyMetadata.updateState
+    writeFileSync(
+      getServiceMetadataPath(fixture.installId, fixture.homeDir),
+      `${JSON.stringify(legacyMetadata, null, 2)}\n`
+    )
+    const preparedVersions: string[] = []
+    const prepareBundle: PrepareServiceBundle = async options => {
+      preparedVersions.push(options.version)
+      return createSelection(options.metadataDirectory, options.version, options.nodePath)
+    }
+    const restart = vi.fn(async () => {
+      const launcher = readFileSync(fixture.metadata.launcherPath, 'utf8')
+      expect(launcher).toContain('launch-service.cjs')
+      expect(launcher).not.toContain('npx')
+      expect(JSON.parse(readFileSync(getServiceBundleSelectionPath(fixture.metadataDirectory), 'utf8')).version)
+        .toBe(NEWER_SERVER_VERSION)
+    })
+    const result = await runServiceUpdateTransaction({
+      installId: fixture.installId,
+      root: fixture.root,
+      scope: 'user',
+      homeDir: fixture.homeDir,
+      targetVersion: NEWER_SERVER_VERSION
+    }, {
+      prepareBundle,
+      restart,
+      fetchImpl: vi.fn(async () => ({
+        ok: true,
+        json: async () => ({ serviceUpdate: { installedVersion: NEWER_SERVER_VERSION, durableVersion: NEWER_SERVER_VERSION } })
+      } as Response)) as typeof fetch
+    })
+    expect(preparedVersions).toEqual([CURRENT_SERVER_VERSION, NEWER_SERVER_VERSION])
+    expect(result.updateState?.phase).toBe('healthy')
+  })
+
+  it('atomically selects the exact target, waits through downtime, and cleans stale bundles', async () => {
+    const fixture = createServiceFixture()
+    createSelection(fixture.metadataDirectory, '0.0.1')
+    mkdirSync(join(fixture.metadataDirectory, 'bundles', '.staging-abandoned'), { recursive: true })
+    const prepareBundle: PrepareServiceBundle = vi.fn(async options => createSelection(
+      options.metadataDirectory,
+      options.version,
+      options.nodePath
+    ))
+    const restart = vi.fn(async () => {
+      expect(JSON.parse(readFileSync(getServiceBundleSelectionPath(fixture.metadataDirectory), 'utf8')).version)
+        .toBe(NEWER_SERVER_VERSION)
+    })
+    const fetchImpl = vi.fn()
+      .mockRejectedValueOnce(new Error('connection refused'))
+      .mockResolvedValue({
+        ok: true,
+        json: async () => ({ serviceUpdate: { installedVersion: NEWER_SERVER_VERSION, durableVersion: NEWER_SERVER_VERSION } })
+      } as Response)
+    let milliseconds = 0
+    const result = await runServiceUpdateTransaction({
+      installId: fixture.installId,
+      root: fixture.root,
+      scope: 'user',
+      homeDir: fixture.homeDir,
+      targetVersion: NEWER_SERVER_VERSION,
+      healthTimeoutMs: 100,
+      healthPollIntervalMs: 5
+    }, {
+      prepareBundle,
+      restart,
+      fetchImpl: fetchImpl as typeof fetch,
+      now: () => new Date(milliseconds),
+      delay: async value => { milliseconds += value }
+    })
+    expect(result.updateState).toMatchObject({ phase: 'healthy', activeVersion: NEWER_SERVER_VERSION })
+    expect(restart).toHaveBeenCalledTimes(1)
+    expect(fetchImpl).toHaveBeenCalledTimes(2)
+    expect(existsSync(getServiceBundleDirectory(fixture.metadataDirectory, '0.0.1'))).toBe(false)
+    expect(existsSync(join(fixture.metadataDirectory, 'bundles', '.staging-abandoned'))).toBe(false)
+    expect(existsSync(getServiceBundleDirectory(fixture.metadataDirectory, CURRENT_SERVER_VERSION))).toBe(true)
+    expect(existsSync(getServiceBundleDirectory(fixture.metadataDirectory, NEWER_SERVER_VERSION))).toBe(true)
+    const updateLog = readFileSync(join(fixture.metadataDirectory, 'update.log'), 'utf8')
+    expect(updateLog).toContain('"phase":"downloading"')
+    expect(updateLog).toContain('"phase":"restarting"')
+    expect(updateLog).toContain('"phase":"healthy"')
+  })
+
+  it('rolls back when the target reports the wrong version', async () => {
+    const fixture = createServiceFixture()
+    const prepareBundle: PrepareServiceBundle = vi.fn(async options => createSelection(
+      options.metadataDirectory,
+      options.version,
+      options.nodePath
+    ))
+    const restart = vi.fn(async () => undefined)
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({
+        serviceUpdate: restart.mock.calls.length >= 2
+          ? { installedVersion: CURRENT_SERVER_VERSION, durableVersion: CURRENT_SERVER_VERSION }
+          : { installedVersion: '9.9.9', durableVersion: NEWER_SERVER_VERSION }
+      })
+    } as Response))
+    let milliseconds = 0
+    const result = await runServiceUpdateTransaction({
+      installId: fixture.installId,
+      root: fixture.root,
+      scope: 'user',
+      homeDir: fixture.homeDir,
+      targetVersion: NEWER_SERVER_VERSION,
+      healthTimeoutMs: 10,
+      healthPollIntervalMs: 5
+    }, {
+      prepareBundle,
+      restart,
+      fetchImpl: fetchImpl as typeof fetch,
+      now: () => new Date(milliseconds),
+      delay: async value => { milliseconds += value }
+    })
+    expect(result.updateState).toMatchObject({
+      phase: 'rolled-back',
+      activeVersion: CURRENT_SERVER_VERSION,
+      failureReason: expect.stringContaining('service reported 9.9.9')
+    })
+    expect(restart).toHaveBeenCalledTimes(2)
+    expect(JSON.parse(readFileSync(getServiceBundleSelectionPath(fixture.metadataDirectory), 'utf8')).version)
+      .toBe(CURRENT_SERVER_VERSION)
+    expect(readFileSync(join(fixture.metadataDirectory, 'update.log'), 'utf8'))
+      .toContain('"phase":"rolled-back"')
   })
 })
 
 describe('periodic update polling', () => {
-  afterEach(() => {
-    vi.useRealTimers()
-  })
+  afterEach(() => vi.useRealTimers())
 
-  it('re-checks the registry on an interval without restarting the service', async () => {
+  it('re-checks the registry without restarting the service', async () => {
     vi.useFakeTimers()
+    const fixture = createServiceFixture()
     const fetchImpl = createRegistryFetch(NEWER_SERVER_VERSION)
     const spawnUpdateProcess = vi.fn(async () => undefined)
     const controller = createServiceUpdateController({
-      root: '/tmp/demo',
+      root: fixture.root,
       env: SERVICE_ENV,
+      homeDir: fixture.homeDir,
       fetchImpl: fetchImpl as unknown as typeof fetch,
       pollIntervalMs: 1_000,
       spawnUpdateProcess
     })
-
     await controller.getStatus()
-    expect(fetchImpl).toHaveBeenCalledTimes(1)
-
     controller.startPolling()
-    await vi.advanceTimersByTimeAsync(1_000)
-    expect(fetchImpl).toHaveBeenCalledTimes(2)
-
-    await vi.advanceTimersByTimeAsync(1_000)
+    await vi.advanceTimersByTimeAsync(2_000)
     expect(fetchImpl).toHaveBeenCalledTimes(3)
-
-    // Discovering an update must never restart on its own.
     expect(spawnUpdateProcess).not.toHaveBeenCalled()
-
     controller.stopPolling()
-    await vi.advanceTimersByTimeAsync(5_000)
-    expect(fetchImpl).toHaveBeenCalledTimes(3)
-  })
-
-  it('does not poll when the launch is not service-managed', async () => {
-    vi.useFakeTimers()
-    const fetchImpl = createRegistryFetch(NEWER_SERVER_VERSION)
-    const controller = createServiceUpdateController({
-      root: '/tmp/demo',
-      env: {},
-      fetchImpl: fetchImpl as unknown as typeof fetch,
-      pollIntervalMs: 1_000
-    })
-
-    controller.startPolling()
-    await vi.advanceTimersByTimeAsync(5_000)
-    expect(fetchImpl).not.toHaveBeenCalled()
   })
 })

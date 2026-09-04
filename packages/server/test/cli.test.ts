@@ -11,6 +11,7 @@ import {
   runCli
 } from '../src/cli.js'
 import { CodoriError } from '../src/errors.js'
+import { prepareTestServiceBundle } from './service-bundle-fixture.js'
 
 /**
  * A server launch records the served root in `~/.codori/last-root.json`, and
@@ -245,6 +246,7 @@ describe('cli service commands', () => {
       platform: 'darwin',
       nodePath: '/opt/node/bin/node',
       npxPath: '/opt/node/bin/npx',
+      prepareBundle: prepareTestServiceBundle,
       stdout: stdout.stream,
       runCommand: async () => ({ exitCode: 0, stdout: '', stderr: '' }),
       configureTailscaleServe
@@ -270,6 +272,7 @@ describe('cli service commands', () => {
       platform: 'darwin',
       nodePath: '/opt/node/bin/node',
       npxPath: '/opt/node/bin/npx',
+      prepareBundle: prepareTestServiceBundle,
       stdout: stdout.stream,
       runCommand: async () => ({ exitCode: 0, stdout: '', stderr: '' }),
       detectTailscaleServeEligibility: vi.fn(async () => ({
@@ -297,6 +300,7 @@ describe('cli service commands', () => {
       platform: 'darwin',
       nodePath: '/opt/node/bin/node',
       npxPath: '/opt/node/bin/npx',
+      prepareBundle: prepareTestServiceBundle,
       stdout: stdout.stream,
       runCommand: async (command) => ({
         exitCode: command === 'tailscale' ? 1 : 0,

@@ -129,7 +129,7 @@ describe('service helpers', () => {
     })
   })
 
-  it('builds a launcher script that pins the current node and npx paths', () => {
+  it('builds a launcher script that pins the managed bundle bootstrap without npx', () => {
     const script = buildLauncherScript({
       installId: 'abc123def456',
       root: '/tmp/workspace',
@@ -137,7 +137,7 @@ describe('service helpers', () => {
       port: 4310,
       scope: 'user',
       nodePath: '/opt/node/bin/node',
-      npxPath: '/opt/node/bin/npx',
+      bootstrapPath: '/tmp/service/launch-service.cjs',
       tailscaleServePolicy: 'disabled'
     })
 
@@ -150,7 +150,8 @@ describe('service helpers', () => {
     // root changed from Settings is not overridden on the next managed launch.
     expect(script).toContain("export CODORI_SERVICE_INSTALL_ROOT='/tmp/workspace'")
     expect(script).not.toContain('--root')
-    expect(script).toContain("exec '/opt/node/bin/npx' --yes @codori/server start --host '100.64.0.10' --port 4310 --no-tailscale-serve")
+    expect(script).toContain("exec '/opt/node/bin/node' '/tmp/service/launch-service.cjs' start --host '100.64.0.10' --port 4310 --no-tailscale-serve")
+    expect(script).not.toContain('npx')
     // A user-scoped service resolves the same home at runtime.
     expect(script).not.toContain('CODORI_SERVICE_HOME')
   })
@@ -163,7 +164,7 @@ describe('service helpers', () => {
       port: 4310,
       scope: 'system',
       nodePath: '/opt/node/bin/node',
-      npxPath: '/opt/node/bin/npx',
+      bootstrapPath: '/tmp/service/launch-service.cjs',
       homeDir: '/Users/installer'
     })
 

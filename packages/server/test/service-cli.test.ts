@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path'
 import { PassThrough } from 'node:stream'
 import { describe, expect, it } from 'vitest'
 import { CodoriError } from '../src/errors.js'
+import { prepareTestServiceBundle } from './service-bundle-fixture.js'
 import {
   installService,
   getServiceMetadataPath,
@@ -69,6 +70,7 @@ describe('service lifecycle orchestration', () => {
       platform: 'darwin',
       nodePath: '/opt/node/bin/node',
       npxPath: '/opt/node/bin/npx',
+      prepareBundle: prepareTestServiceBundle,
       runCommand,
       stdout: stdout.stream
     })
@@ -79,8 +81,9 @@ describe('service lifecycle orchestration', () => {
     expect(existsSync(installed.metadata.launcherPath)).toBe(true)
     expect(existsSync(installed.metadata.serviceFilePath)).toBe(true)
     expect(readFileSync(installed.metadata.launcherPath, 'utf8')).toContain(
-      "exec '/opt/node/bin/npx' --yes @codori/server start"
+      `exec '/opt/node/bin/node' '${join(homeDir, '.codori', 'services', installed.metadata.installId, 'launch-service.cjs')}' start`
     )
+    expect(readFileSync(installed.metadata.launcherPath, 'utf8')).not.toContain('npx')
     expect(stdout.read()).toContain('Service installation summary:')
     expect(commands).toContain(
       `launchctl bootstrap gui/${userId} ${installed.metadata.serviceFilePath}`
@@ -95,6 +98,7 @@ describe('service lifecycle orchestration', () => {
       platform: 'darwin',
       nodePath: '/opt/node/bin/node',
       npxPath: '/opt/node/bin/npx',
+      prepareBundle: prepareTestServiceBundle,
       runCommand,
       stdout: stdout.stream
     })
@@ -177,6 +181,7 @@ describe('service lifecycle orchestration', () => {
       platform: 'win32' as NodeJS.Platform,
       nodePath: 'C:\\Program Files\\nodejs\\node.exe',
       npxPath: 'C:\\Program Files\\nodejs\\npx.cmd',
+      prepareBundle: prepareTestServiceBundle,
       runCommand,
       stdout: stdout.stream
     }
@@ -198,7 +203,9 @@ describe('service lifecycle orchestration', () => {
     expect(launcher).toContain('set "CODORI_SERVICE_MANAGED=1"')
     expect(launcher).toContain(`set "CODORI_SERVICE_INSTALL_ID=${installed.metadata.installId}"`)
     expect(launcher).toContain('set "CODORI_SERVICE_SCOPE=user"')
-    expect(launcher).toContain('npx.cmd" --yes @codori/server start')
+    expect(launcher).toContain('node.exe" "')
+    expect(launcher).toContain('launch-service.cjs" start')
+    expect(launcher).not.toContain('npx')
     expect(launcher).toContain('--no-tailscale-serve')
 
     // The task definition must be UTF-16 for schtasks /XML to accept it.
@@ -240,6 +247,7 @@ describe('service lifecycle orchestration', () => {
       platform: 'darwin' as NodeJS.Platform,
       nodePath: '/opt/node/bin/node',
       npxPath: '/opt/node/bin/npx',
+      prepareBundle: prepareTestServiceBundle,
       runCommand: async () => ({ exitCode: 0, stdout: '', stderr: '' }),
       stdout: createOutput().stream
     }
@@ -275,6 +283,7 @@ describe('service lifecycle orchestration', () => {
       platform: 'linux' as NodeJS.Platform,
       nodePath: '/opt/node/bin/node',
       npxPath: '/opt/node/bin/npx',
+      prepareBundle: prepareTestServiceBundle,
       runCommand,
       stdout: createOutput().stream
     }
@@ -306,6 +315,7 @@ describe('service lifecycle orchestration', () => {
       platform: 'darwin' as NodeJS.Platform,
       nodePath: '/opt/node/bin/node',
       npxPath: '/opt/node/bin/npx',
+      prepareBundle: prepareTestServiceBundle,
       runCommand: async () => ({ exitCode: 0, stdout: '', stderr: '' }),
       stdout: createOutput().stream
     }
@@ -317,7 +327,7 @@ describe('service lifecycle orchestration', () => {
     }, dependencies)
     const legacyMetadata = Object.fromEntries(
       Object.entries(installed.metadata)
-        .filter(([key]) => key !== 'tailscaleServePolicy')
+        .filter(([key]) => !['tailscaleServePolicy', 'activeBundle', 'previousBundle', 'updateState'].includes(key))
     )
     writeFileSync(
       getServiceMetadataPath(installed.metadata.installId, homeDir),
@@ -330,8 +340,9 @@ describe('service lifecycle orchestration', () => {
     expect(restarted.metadata.host).toBe('127.0.0.1')
     expect(restarted.metadata.tailscaleServePolicy).toBe('auto')
     expect(readFileSync(restarted.metadata.launcherPath, 'utf8')).toContain(
-      "@codori/server start --host '127.0.0.1'"
+      "launch-service.cjs' start --host '127.0.0.1'"
     )
+    expect(readFileSync(restarted.metadata.launcherPath, 'utf8')).not.toContain('npx')
     expect(JSON.parse(readFileSync(
       getServiceMetadataPath(restarted.metadata.installId, homeDir),
       'utf8'
@@ -352,6 +363,7 @@ describe('service lifecycle orchestration', () => {
       platform: 'win32' as NodeJS.Platform,
       nodePath: 'C:\\Program Files\\nodejs\\node.exe',
       npxPath: 'C:\\Program Files\\nodejs\\npx.cmd',
+      prepareBundle: prepareTestServiceBundle,
       runCommand: async (command: string) => ({
         exitCode: command === 'net' ? 1 : 0,
         stdout: '',
@@ -507,6 +519,7 @@ describe('service lifecycle orchestration', () => {
       platform: 'darwin',
       nodePath: '/opt/node/bin/node',
       npxPath: '/opt/node/bin/npx',
+      prepareBundle: prepareTestServiceBundle,
       runCommand,
       stdout: stdout.stream
     })
@@ -606,6 +619,7 @@ describe('installed service root resolution', () => {
       platform: 'darwin' as NodeJS.Platform,
       nodePath: '/opt/node/bin/node',
       npxPath: '/opt/node/bin/npx',
+      prepareBundle: prepareTestServiceBundle,
       runCommand: async () => ({ exitCode: 0, stdout: '', stderr: '' }),
       stdout: createOutput().stream
     }
@@ -635,6 +649,7 @@ describe('linux service failures', () => {
     platform: 'linux' as NodeJS.Platform,
     nodePath: '/home/u/.nvm/versions/node/v22.12.0/bin/node',
     npxPath: '/home/u/.nvm/versions/node/v22.12.0/bin/npx',
+    prepareBundle: prepareTestServiceBundle,
     runCommand,
     stdout: createOutput().stream
   })

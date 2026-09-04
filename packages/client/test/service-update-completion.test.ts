@@ -135,6 +135,28 @@ describe('service update completion monitor', () => {
     expect(vi.getTimerCount()).toBe(0)
   })
 
+  it('stops without reloading when the durable update rolls back', async () => {
+    vi.useFakeTimers()
+    const refreshStatus = vi.fn(async () => createStatus({
+      updating: false,
+      installedVersion: '0.13.1',
+      phase: 'rolled-back',
+      failureReason: 'target reported the wrong version'
+    }))
+    const reload = vi.fn()
+    const monitor = createServiceUpdateCompletionMonitor({
+      refreshStatus,
+      reload,
+      intervalMs: 1_000
+    })
+
+    monitor.start('0.13.2')
+    await vi.advanceTimersByTimeAsync(1_000)
+
+    expect(reload).not.toHaveBeenCalled()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
   it('does not overlap slow status requests', async () => {
     vi.useFakeTimers()
     let resolveStatus!: (status: ServiceUpdateStatus) => void
