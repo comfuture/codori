@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url'
 
 export const SERVICE_PACKAGE_NAME = '@codori/server'
 export const DEFAULT_BUNDLE_PREPARATION_TIMEOUT_MS = 2 * 60 * 1_000
+export const DEFAULT_SERVICE_UPDATE_STALE_TIMEOUT_MS = 5 * 60 * 1_000
 const PACKAGE_MANIFEST_PATH = fileURLToPath(new URL('../package.json', import.meta.url))
 
 export type ServiceBundleSelection = {
@@ -318,26 +319,50 @@ export const cleanupServiceBundles = (
   }
 }
 
-export const buildServiceBundleBootstrap = (selectionPath: string) => [
-  "'use strict'",
-  "const { readFileSync } = require('node:fs')",
-  "const { spawn } = require('node:child_process')",
-  `const selection = JSON.parse(readFileSync(${JSON.stringify(selectionPath)}, 'utf8'))`,
-  "if (!selection || typeof selection.nodePath !== 'string' || typeof selection.entrypoint !== 'string') {",
-  "  throw new Error('Codori service bundle selection is malformed.')",
-  '}',
-  "const child = spawn(selection.nodePath, [selection.entrypoint, ...process.argv.slice(2)], { stdio: 'inherit', env: process.env, windowsHide: true })",
-  "for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => child.kill(signal))",
-  "child.once('error', error => { console.error(error); process.exit(1) })",
-  "child.once('exit', (code, signal) => {",
-  "  if (signal) process.kill(process.pid, signal)",
-  '  else process.exit(code ?? 1)',
-  '})'
-].join('\n')
+export const buildServiceBundleBootstrap = (metadataDirectory: string) => {
+  const selectionPath = getServiceBundleSelectionPath(metadataDirectory)
+  const previousSelectionPath = getPreviousServiceBundleSelectionPath(metadataDirectory)
+  const metadataPath = join(metadataDirectory, 'service.json')
+  const updateLogPath = join(metadataDirectory, 'update.log')
+  return [
+    "'use strict'",
+    "const { appendFileSync, readFileSync, renameSync, writeFileSync } = require('node:fs')",
+    "const { spawn } = require('node:child_process')",
+    `const selectionPath = ${JSON.stringify(selectionPath)}`,
+    'let selection = JSON.parse(readFileSync(selectionPath, \'utf8\'))',
+    'try {',
+    `  const metadata = JSON.parse(readFileSync(${JSON.stringify(metadataPath)}, 'utf8'))`,
+    "  const updatedAt = Date.parse(metadata.updateState?.updatedAt ?? '')",
+    `  const stale = metadata.updateState?.phase === 'restarting' && Number.isFinite(updatedAt) && Date.now() - updatedAt >= ${DEFAULT_SERVICE_UPDATE_STALE_TIMEOUT_MS}`,
+    '  if (stale) {',
+    `    const previous = JSON.parse(readFileSync(${JSON.stringify(previousSelectionPath)}, 'utf8'))`,
+    "    if (previous && typeof previous.nodePath === 'string' && typeof previous.entrypoint === 'string') {",
+    '      const temporaryPath = `${selectionPath}.recovery-${process.pid}`',
+    "      writeFileSync(temporaryPath, `${JSON.stringify(previous, null, 2)}\\n`, 'utf8')",
+    '      renameSync(temporaryPath, selectionPath)',
+    '      selection = previous',
+    `      appendFileSync(${JSON.stringify(updateLogPath)}, JSON.stringify({ timestamp: new Date().toISOString(), phase: 'bootstrap-rollback', activeVersion: previous.version }) + '\\n', 'utf8')`,
+    '    }',
+    '  }',
+    '} catch {',
+    '  // Missing recovery metadata must not prevent the selected bundle from starting.',
+    '}',
+    "if (!selection || typeof selection.nodePath !== 'string' || typeof selection.entrypoint !== 'string') {",
+    "  throw new Error('Codori service bundle selection is malformed.')",
+    '}',
+    "const child = spawn(selection.nodePath, [selection.entrypoint, ...process.argv.slice(2)], { stdio: 'inherit', env: process.env, windowsHide: true })",
+    "for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => child.kill(signal))",
+    "child.once('error', error => { console.error(error); process.exit(1) })",
+    "child.once('exit', (code, signal) => {",
+    "  if (signal) process.kill(process.pid, signal)",
+    '  else process.exit(code ?? 1)',
+    '})'
+  ].join('\n')
+}
 
 export const ensureServiceBundleBootstrap = (metadataDirectory: string) => {
   const path = getServiceBundleBootstrapPath(metadataDirectory)
-  atomicWrite(path, `${buildServiceBundleBootstrap(getServiceBundleSelectionPath(metadataDirectory))}\n`, 0o755)
+  atomicWrite(path, `${buildServiceBundleBootstrap(metadataDirectory)}\n`, 0o755)
   return path
 }
 
