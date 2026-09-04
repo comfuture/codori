@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import { randomUUID } from 'node:crypto'
 import { appendFileSync, readFileSync } from 'node:fs'
 import os from 'node:os'
 import { dirname, join } from 'node:path'
@@ -21,6 +22,7 @@ import {
 import {
   activateServiceBundleSelection,
   cleanupServiceBundles,
+  DEFAULT_SERVICE_UPDATE_STALE_TIMEOUT_MS,
   prepareServiceBundle,
   readServiceBundleSelection,
   type PrepareServiceBundle
@@ -159,9 +161,8 @@ export const createUpdateCommand = (
     platform: NodeJS.Platform
     targetVersion: string
   }
-): { command: string, args: string[] } => ({
-  command: options.nodePath,
-  args: [
+): { command: string, args: string[] } => {
+  const workerArgs = [
     UPDATE_WORKER_PATH,
     '--install-id', runtime.installId,
     '--root', options.root,
@@ -169,7 +170,23 @@ export const createUpdateCommand = (
     '--home', options.homeDir,
     '--target-version', options.targetVersion
   ]
-})
+  if (options.platform === 'linux') {
+    return {
+      command: 'systemd-run',
+      args: [
+        ...(runtime.scope === 'user' ? ['--user'] : []),
+        '--quiet',
+        '--collect',
+        `--unit=codori-update-${runtime.installId}-${randomUUID()}`,
+        '--property=Type=exec',
+        '--',
+        options.nodePath,
+        ...workerArgs
+      ]
+    }
+  }
+  return { command: options.nodePath, args: workerArgs }
+}
 
 const defaultSpawnUpdateProcess = async (
   command: string,
@@ -233,6 +250,58 @@ const readDurableState = (runtime: ServiceRuntimeContext, homeDir: string) => {
 const isUpdatingPhase = (phase: ServiceUpdatePhase | undefined) =>
   phase === 'downloading' || phase === 'restarting'
 
+const reconcileStaleUpdate = (
+  metadata: ServiceInstallMetadata | null,
+  runtime: ServiceRuntimeContext,
+  homeDir: string,
+  now: number
+) => {
+  const updateState = metadata?.updateState
+  if (!metadata || !updateState || !isUpdatingPhase(updateState.phase)) return metadata
+  const updatedAt = Date.parse(updateState.updatedAt)
+  if (!Number.isFinite(updatedAt) || now - updatedAt < DEFAULT_SERVICE_UPDATE_STALE_TIMEOUT_MS) return metadata
+
+  const selection = readServiceBundleSelection(getServiceMetadataDirectory(runtime.installId, homeDir))
+  const targetIsServing = updateState.phase === 'restarting'
+    && updateState.targetVersion === CURRENT_PACKAGE.version
+    && selection?.version === CURRENT_PACKAGE.version
+  const previousIsServing = updateState.phase === 'restarting'
+    && metadata.previousBundle?.version === CURRENT_PACKAGE.version
+    && selection?.version === CURRENT_PACKAGE.version
+  const phase: ServiceUpdatePhase = targetIsServing
+    ? 'healthy'
+    : previousIsServing ? 'rolled-back' : 'failed'
+  const failureReason = targetIsServing
+    ? null
+    : `Recovered an update abandoned in ${updateState.phase} after its ${DEFAULT_SERVICE_UPDATE_STALE_TIMEOUT_MS}ms lease expired.`
+  const next: ServiceInstallMetadata = {
+    ...metadata,
+    ...(previousIsServing
+      ? { activeBundle: metadata.previousBundle, previousBundle: metadata.activeBundle }
+      : {}),
+    updateState: {
+      ...updateState,
+      phase,
+      activeVersion: selection?.version ?? metadata.activeBundle?.version ?? null,
+      failureReason,
+      updatedAt: new Date(now).toISOString()
+    }
+  }
+  writeServiceMetadataAtomic(next, homeDir)
+  try {
+    appendFileSync(join(getServiceMetadataDirectory(runtime.installId, homeDir), 'update.log'), `${JSON.stringify({
+      timestamp: next.updateState?.updatedAt,
+      phase,
+      targetVersion: updateState.targetVersion,
+      activeVersion: next.updateState?.activeVersion,
+      failureReason
+    })}\n`, 'utf8')
+  } catch {
+    // Recovery metadata remains authoritative when optional diagnostics fail.
+  }
+  return next
+}
+
 export const createServiceUpdateController = (
   options: ServiceUpdateControllerOptions
 ): ServiceUpdateController => {
@@ -269,7 +338,7 @@ export const createServiceUpdateController = (
 
   const resolveStatus = async (): Promise<ServiceUpdateStatus> => {
     if (!runtime) return DISABLED_STATUS
-    const metadata = readDurableState(runtime, homeDir)
+    const metadata = reconcileStaleUpdate(readDurableState(runtime, homeDir), runtime, homeDir, now())
     const phase = metadata?.updateState?.phase ?? 'idle'
     // During a handoff this endpoint is also the readiness probe. Never make
     // exact-version health wait on the registry that was just used to stage the

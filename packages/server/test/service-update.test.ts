@@ -12,6 +12,7 @@ import {
 } from '../src/service-update.js'
 import {
   activateServiceBundleSelection,
+  DEFAULT_SERVICE_UPDATE_STALE_TIMEOUT_MS,
   getServiceBundleDirectory,
   getServiceBundleSelectionPath,
   type PrepareServiceBundle,
@@ -125,6 +126,7 @@ describe('service update controller', () => {
       env: SERVICE_ENV,
       homeDir: fixture.homeDir,
       nodePath: '/opt/node/bin/node',
+      platform: 'darwin',
       fetchImpl: createRegistryFetch(NEWER_SERVER_VERSION) as unknown as typeof fetch,
       spawnUpdateProcess
     })
@@ -163,8 +165,33 @@ describe('ordinary startup', () => {
 })
 
 describe('platform update command', () => {
-  it('uses the pinned Node worker with the exact target on every platform', () => {
-    for (const platform of ['darwin', 'linux', 'win32'] as NodeJS.Platform[]) {
+  it('uses a transient systemd unit on Linux so service restarts cannot kill the worker', () => {
+    for (const scope of ['user', 'system'] as const) {
+      const command = createUpdateCommand({ installId: 'abc', scope }, {
+        root: '/tmp/demo',
+        nodePath: '/opt/node/bin/node',
+        homeDir: '/tmp/home',
+        platform: 'linux',
+        targetVersion: '1.2.3'
+      })
+      expect(command.command).toBe('systemd-run')
+      expect(command.args).toEqual(expect.arrayContaining([
+        '--collect',
+        '--property=Type=exec',
+        '--',
+        '/opt/node/bin/node',
+        '--target-version',
+        '1.2.3'
+      ]))
+      expect(command.args.some(value => value.startsWith('--unit=codori-update-abc-'))).toBe(true)
+      expect(command.args.includes('--user')).toBe(scope === 'user')
+      expect(command.args.join(' ')).not.toContain('latest')
+      expect(command.args.join(' ')).not.toContain('npx')
+    }
+  })
+
+  it('uses the pinned Node worker with the exact target on macOS and Windows', () => {
+    for (const platform of ['darwin', 'win32'] as NodeJS.Platform[]) {
       const command = createUpdateCommand({ installId: 'abc', scope: 'system' }, {
         root: '/tmp/demo',
         nodePath: '/opt/node/bin/node',
@@ -178,6 +205,100 @@ describe('platform update command', () => {
       expect(command.args.join(' ')).not.toContain('latest')
       expect(command.args.join(' ')).not.toContain('npx')
     }
+  })
+})
+
+describe('abandoned update recovery', () => {
+  const staleUpdatedAt = new Date(Date.now() - DEFAULT_SERVICE_UPDATE_STALE_TIMEOUT_MS - 1_000).toISOString()
+
+  it('expires a stale downloading lease and allows a retry', async () => {
+    const fixture = createServiceFixture()
+    writeFileSync(getServiceMetadataPath(fixture.installId, fixture.homeDir), `${JSON.stringify({
+      ...fixture.metadata,
+      updateState: {
+        phase: 'downloading',
+        targetVersion: NEWER_SERVER_VERSION,
+        activeVersion: CURRENT_SERVER_VERSION,
+        failureReason: null,
+        updatedAt: staleUpdatedAt
+      }
+    }, null, 2)}\n`)
+    const spawnUpdateProcess = vi.fn(async () => undefined)
+    const controller = createServiceUpdateController({
+      root: fixture.root,
+      env: SERVICE_ENV,
+      homeDir: fixture.homeDir,
+      platform: 'darwin',
+      fetchImpl: createRegistryFetch(NEWER_SERVER_VERSION) as unknown as typeof fetch,
+      spawnUpdateProcess
+    })
+
+    await expect(controller.getStatus()).resolves.toMatchObject({
+      updating: false,
+      phase: 'failed',
+      failureReason: expect.stringContaining('lease expired')
+    })
+    await expect(controller.requestUpdate()).resolves.toMatchObject({ updating: true, phase: 'downloading' })
+    expect(spawnUpdateProcess).toHaveBeenCalledTimes(1)
+  })
+
+  it('marks a stale restart healthy when the exact target is serving durably', async () => {
+    const fixture = createServiceFixture()
+    writeFileSync(getServiceMetadataPath(fixture.installId, fixture.homeDir), `${JSON.stringify({
+      ...fixture.metadata,
+      updateState: {
+        phase: 'restarting',
+        targetVersion: CURRENT_SERVER_VERSION,
+        activeVersion: CURRENT_SERVER_VERSION,
+        failureReason: null,
+        updatedAt: staleUpdatedAt
+      }
+    }, null, 2)}\n`)
+    const controller = createServiceUpdateController({
+      root: fixture.root,
+      env: SERVICE_ENV,
+      homeDir: fixture.homeDir,
+      fetchImpl: createRegistryFetch(CURRENT_SERVER_VERSION) as unknown as typeof fetch
+    })
+
+    await expect(controller.getStatus()).resolves.toMatchObject({
+      updating: false,
+      phase: 'healthy',
+      durableVersion: CURRENT_SERVER_VERSION,
+      failureReason: null
+    })
+  })
+
+  it('records rollback when the bootstrap restored the previous exact bundle', async () => {
+    const fixture = createServiceFixture()
+    const failedTarget = createSelection(fixture.metadataDirectory, NEWER_SERVER_VERSION)
+    writeFileSync(getServiceMetadataPath(fixture.installId, fixture.homeDir), `${JSON.stringify({
+      ...fixture.metadata,
+      activeBundle: failedTarget,
+      previousBundle: fixture.activeBundle,
+      updateState: {
+        phase: 'restarting',
+        targetVersion: NEWER_SERVER_VERSION,
+        activeVersion: NEWER_SERVER_VERSION,
+        failureReason: null,
+        updatedAt: staleUpdatedAt
+      }
+    }, null, 2)}\n`)
+    const controller = createServiceUpdateController({
+      root: fixture.root,
+      env: SERVICE_ENV,
+      homeDir: fixture.homeDir,
+      fetchImpl: createRegistryFetch(CURRENT_SERVER_VERSION) as unknown as typeof fetch
+    })
+
+    await expect(controller.getStatus()).resolves.toMatchObject({
+      updating: false,
+      phase: 'rolled-back',
+      durableVersion: CURRENT_SERVER_VERSION,
+      failureReason: expect.stringContaining('lease expired')
+    })
+    expect(JSON.parse(readFileSync(getServiceMetadataPath(fixture.installId, fixture.homeDir), 'utf8')))
+      .toMatchObject({ activeBundle: { version: CURRENT_SERVER_VERSION }, previousBundle: { version: NEWER_SERVER_VERSION } })
   })
 })
 

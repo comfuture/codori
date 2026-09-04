@@ -1,9 +1,11 @@
+import { spawnSync } from 'node:child_process'
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
   activateServiceBundleSelection,
+  DEFAULT_SERVICE_UPDATE_STALE_TIMEOUT_MS,
   ensureServiceBundleBootstrap,
   getServiceBundleDirectory,
   getServiceBundleSelectionPath,
@@ -71,5 +73,31 @@ describe('managed service bundles', () => {
     const bootstrap = readFileSync(bootstrapPath, 'utf8')
     expect(bootstrap).toContain(getServiceBundleSelectionPath(metadataDirectory))
     expect(bootstrap).not.toContain('npx')
+  })
+
+  it('atomically restores the previous bundle when a restart lease was abandoned', () => {
+    const metadataDirectory = mkdtempSync(join(os.tmpdir(), 'codori-bundle-'))
+    const markerPath = join(metadataDirectory, 'started.txt')
+    const createRunnableSelection = (version: string, marker: string): ServiceBundleSelection => {
+      const entrypoint = join(metadataDirectory, `${marker}.cjs`)
+      writeFileSync(entrypoint, `require('node:fs').writeFileSync(${JSON.stringify(markerPath)}, ${JSON.stringify(marker)})\n`)
+      return { version, entrypoint, nodePath: process.execPath, activatedAt: new Date().toISOString() }
+    }
+    const previous = createRunnableSelection('1.2.2', 'previous')
+    const target = createRunnableSelection('1.2.3', 'target')
+    activateServiceBundleSelection(metadataDirectory, target, previous)
+    writeFileSync(join(metadataDirectory, 'service.json'), `${JSON.stringify({
+      updateState: {
+        phase: 'restarting',
+        updatedAt: new Date(Date.now() - DEFAULT_SERVICE_UPDATE_STALE_TIMEOUT_MS - 1_000).toISOString()
+      }
+    })}\n`)
+
+    const result = spawnSync(process.execPath, [ensureServiceBundleBootstrap(metadataDirectory)], { encoding: 'utf8' })
+
+    expect(result.status, result.stderr).toBe(0)
+    expect(readFileSync(markerPath, 'utf8')).toBe('previous')
+    expect(readServiceBundleSelection(metadataDirectory)).toEqual(previous)
+    expect(readFileSync(join(metadataDirectory, 'update.log'), 'utf8')).toContain('"phase":"bootstrap-rollback"')
   })
 })
