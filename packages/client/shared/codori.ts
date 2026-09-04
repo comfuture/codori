@@ -59,6 +59,24 @@ export type ServiceUpdateStatus = {
 
 export type ProjectsResponse = {
   projects: ProjectRecord[]
+  inventory: ProjectInventory
+}
+
+export type ProjectInventory = {
+  status: 'ready' | 'empty'
+  source: 'app-server-project-registry' | 'runtime-manager'
+  scope: 'server-local'
+  host: {
+    hostname: string
+  }
+  codexAppCatalog: {
+    status: 'unsupported'
+    upstreamIssue: 'https://github.com/openai/codex/issues/23527'
+  }
+  registration: {
+    supported: boolean
+    method: 'project/create' | null
+  }
 }
 
 export type ChatsResponse = {

@@ -135,9 +135,15 @@ const inlineThreadHydrations = new Map<string, Promise<void>>()
 const inlineThreadActiveTurnIds = new Map<string, string>()
 const {
   projects,
+  inventory,
   loaded,
   loading,
+  discoveryStatus,
+  discoveryAttempt,
+  discoveryMaxAttempts,
+  error: projectDiscoveryError,
   refreshProjects,
+  cancelProjectDiscovery,
   startProject,
   getProject
 } = useProjects()
@@ -514,6 +520,16 @@ const ensureInlineThreadSubscription = (
   }
 }
 
+const recoverProjectDiscovery = () => {
+  if (!loaded.value || discoveryStatus.value === 'error') {
+    void refreshProjects()
+  }
+}
+
+const openProjectRegistration = () => {
+  addProjectOpen.value = true
+}
+
 onMounted(() => {
   if (typeof navigator !== 'undefined') {
     platform.value = navigator.platform
@@ -525,6 +541,8 @@ onMounted(() => {
     void refreshChats()
   }
   void fetchInlineThreads()
+  window.addEventListener('online', recoverProjectDiscovery)
+  window.addEventListener('focus', recoverProjectDiscovery)
 })
 
 const resetInlineThreads = () => {
@@ -539,6 +557,9 @@ const resetInlineThreads = () => {
 
 onBeforeUnmount(() => {
   releaseInlineThreadSubscriptions()
+  cancelProjectDiscovery()
+  window.removeEventListener('online', recoverProjectDiscovery)
+  window.removeEventListener('focus', recoverProjectDiscovery)
 })
 
 const waitForProjectsRefresh = async () => {
@@ -1054,18 +1075,134 @@ const isThreadStatusItem = (item: NavigationMenuItem): item is ProjectThreadStat
             size="xs"
             :square="props.collapsed"
             aria-label="Add project"
-            @click="() => { addProjectOpen = true }"
+            @click="openProjectRegistration"
           />
         </UTooltip>
       </div>
     </div>
 
     <div
-      v-if="!projects.length && !loading"
+      v-if="!projects.length"
       class="rounded-lg border border-dashed border-muted px-3 py-4 text-sm text-muted"
     >
-      <span v-if="props.collapsed">0</span>
-      <span v-else>No Git projects were discovered under the configured root.</span>
+      <span v-if="props.collapsed">{{ loading ? '…' : '0' }}</span>
+      <div
+        v-else-if="discoveryStatus === 'idle' || discoveryStatus === 'loading'"
+        class="flex items-center gap-2"
+      >
+        <UIcon
+          name="i-lucide-loader-circle"
+          class="size-4 shrink-0 animate-spin motion-reduce:animate-none"
+        />
+        <span>{{ discoveryAttempt > 1 ? `Retrying project registry (${discoveryAttempt} of ${discoveryMaxAttempts})…` : 'Loading server projects…' }}</span>
+      </div>
+      <div
+        v-else-if="discoveryStatus === 'retrying'"
+        class="space-y-2"
+      >
+        <div class="flex items-center gap-2 text-highlighted">
+          <UIcon
+            name="i-lucide-loader-circle"
+            class="size-4 shrink-0 animate-spin motion-reduce:animate-none"
+          />
+          <span>Project registry is temporarily unavailable. Retrying ({{ discoveryAttempt + 1 }} of {{ discoveryMaxAttempts }})…</span>
+        </div>
+        <p
+          v-if="projectDiscoveryError"
+          class="text-xs"
+        >
+          {{ projectDiscoveryError }}
+        </p>
+      </div>
+      <div
+        v-else-if="discoveryStatus === 'error'"
+        class="space-y-3"
+      >
+        <div>
+          <div class="font-medium text-error">
+            Project registry unavailable
+          </div>
+          <p class="mt-1 text-xs">
+            {{ projectDiscoveryError || 'Codori could not reach the app-server project registry.' }}
+          </p>
+        </div>
+        <UButton
+          label="Retry"
+          icon="i-lucide-refresh-cw"
+          color="neutral"
+          variant="soft"
+          size="xs"
+          aria-label="Retry project discovery"
+          @click="refreshProjects"
+        />
+      </div>
+      <div
+        v-else
+        class="space-y-3"
+      >
+        <div>
+          <div class="font-medium text-highlighted">
+            No projects are registered on this server.
+          </div>
+          <p class="mt-1 text-xs">
+            This is an empty {{ inventory?.source === 'app-server-project-registry' ? 'app-server project registry' : 'server project registry' }} on {{ inventory?.host.hostname || 'this host' }}.
+          </p>
+        </div>
+        <div
+          v-if="inventory?.codexAppCatalog.status === 'unsupported'"
+          class="space-y-1 text-xs"
+        >
+          <p>Codex App catalog sync is unavailable. Desktop-managed SSH projects are not exposed to Codori by the current protocol.</p>
+          <a
+            :href="inventory.codexAppCatalog.upstreamIssue"
+            target="_blank"
+            rel="noreferrer"
+            class="font-medium text-primary hover:underline"
+          >
+            Track the upstream limitation
+          </a>
+        </div>
+        <UButton
+          v-if="inventory?.registration.supported"
+          label="Add a server project"
+          icon="i-lucide-folder-plus"
+          color="primary"
+          variant="soft"
+          size="xs"
+          aria-label="Add a server project"
+          @click="openProjectRegistration"
+        />
+      </div>
+    </div>
+
+    <div
+      v-else-if="!props.collapsed && (discoveryStatus === 'retrying' || (loading && discoveryAttempt > 1))"
+      class="rounded-md bg-warning/10 px-3 py-2 text-xs text-warning"
+    >
+      Project registry refresh failed. Retrying ({{ Math.min(discoveryAttempt + (discoveryStatus === 'retrying' ? 1 : 0), discoveryMaxAttempts) }} of {{ discoveryMaxAttempts }})…
+    </div>
+
+    <div
+      v-else-if="!props.collapsed && discoveryStatus === 'error'"
+      class="flex items-center justify-between gap-2 rounded-md bg-error/10 px-3 py-2 text-xs text-error"
+    >
+      <span>{{ projectDiscoveryError || 'Project registry refresh failed.' }}</span>
+      <UButton
+        label="Retry"
+        icon="i-lucide-refresh-cw"
+        color="error"
+        variant="ghost"
+        size="xs"
+        aria-label="Retry project discovery"
+        @click="refreshProjects"
+      />
+    </div>
+
+    <div
+      v-else-if="!props.collapsed && inventory?.codexAppCatalog.status === 'unsupported'"
+      class="rounded-md bg-elevated px-3 py-2 text-xs text-muted"
+    >
+      Showing the app-server registry on {{ inventory.host.hostname }}. Codex App catalog sync, including desktop-managed SSH projects, is unavailable.
     </div>
 
     <div class="min-h-0 flex-1 overflow-y-auto">

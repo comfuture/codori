@@ -238,7 +238,23 @@ describe('createHttpServer', () => {
     })
     expect(listResponse.statusCode).toBe(200)
     expect(listResponse.json()).toEqual({
-      projects: [createProjectRecord()]
+      projects: [createProjectRecord()],
+      inventory: {
+        status: 'ready',
+        source: 'runtime-manager',
+        scope: 'server-local',
+        host: {
+          hostname: os.hostname()
+        },
+        codexAppCatalog: {
+          status: 'unsupported',
+          upstreamIssue: 'https://github.com/openai/codex/issues/23527'
+        },
+        registration: {
+          supported: false,
+          method: null
+        }
+      }
     })
 
     const startResponse = await app.inject({
@@ -281,7 +297,7 @@ describe('createHttpServer', () => {
           socket.send(JSON.stringify({
             id: payload.id,
             result: cursor
-              ? { data: [{ id: 'project-2', name: 'Second', roots: [{ path: '/srv/second' }] }], nextCursor: null }
+              ? { data: [{ id: 'project-2', name: 'First', roots: [{ path: '/srv/second' }] }], nextCursor: null }
               : { data: [{ id: 'project-1', name: 'First', roots: [{ path: '/srv/first' }] }], nextCursor: 'page-2' }
           }))
           return
@@ -328,6 +344,8 @@ describe('createHttpServer', () => {
     expect(listResponse.statusCode).toBe(200)
     expect(listResponse.json().projects.map((project: ProjectStatusRecord) => project.projectId))
       .toEqual(['project-1', 'project-2'])
+    expect(listResponse.json().projects.map((project: ProjectStatusRecord) => project.projectName))
+      .toEqual(['First', 'First'])
     expect(listResponse.json().projects[0]).toMatchObject({
       projectId: 'project-1',
       projectPath: '/srv/first',
@@ -336,6 +354,22 @@ describe('createHttpServer', () => {
       status: 'running',
       pid: 123,
       activeSessionCount: 2
+    })
+    expect(listResponse.json().inventory).toEqual({
+      status: 'ready',
+      source: 'app-server-project-registry',
+      scope: 'server-local',
+      host: {
+        hostname: os.hostname()
+      },
+      codexAppCatalog: {
+        status: 'unsupported',
+        upstreamIssue: 'https://github.com/openai/codex/issues/23527'
+      },
+      registration: {
+        supported: true,
+        method: 'project/create'
+      }
     })
 
     const createResponse = await app.inject({
@@ -352,8 +386,152 @@ describe('createHttpServer', () => {
     expect(listedCursors).toEqual([null, 'page-2', null, 'page-2', null, 'page-2'])
     expect(setAppServerProjects).toHaveBeenLastCalledWith([
       { id: 'project-1', path: '/srv/first', name: 'First', roots: ['/srv/first'] },
-      { id: 'project-2', path: '/srv/second', name: 'Second', roots: ['/srv/second'] }
+      { id: 'project-2', path: '/srv/second', name: 'First', roots: ['/srv/second'] }
     ])
+  })
+
+  it('distinguishes an empty server registry from the unsupported Codex App catalog', async () => {
+    const backend = new WebSocketServer({ host: '127.0.0.1', port: 0 })
+    startedSocketServers.push(backend)
+    await new Promise<void>(resolvePromise => backend.once('listening', resolvePromise))
+    const address = backend.address()
+    if (!address || typeof address === 'string') {
+      throw new Error('Failed to get app-server test address.')
+    }
+
+    backend.on('connection', (socket: WebSocket) => {
+      socket.on('message', (message: WebSocket.RawData) => {
+        const payload = JSON.parse(rawDataToString(message)) as { id?: string, method?: string }
+        if (payload.method === 'initialize') {
+          socket.send(JSON.stringify({ id: payload.id, result: {} }))
+          return
+        }
+        if (payload.method === 'project/list') {
+          socket.send(JSON.stringify({
+            id: payload.id,
+            result: { data: [], nextCursor: null }
+          }))
+        }
+      })
+    })
+
+    const app = await createHttpServer(createManager({
+      getAppServerBridgeTarget: () => ({
+        target: {
+          kind: 'codori-managed',
+          transport: 'tcp-websocket',
+          port: address.port,
+          pid: 4321,
+          ownedByCodori: true,
+          appServerVersion: '0.150.1'
+        },
+        workspacePath: '/srv'
+      }),
+      setAppServerProjects: vi.fn()
+    }), { serverHostname: 'ssh-test' })
+    startedApps.push(app)
+
+    const response = await app.inject({ method: 'GET', url: '/api/projects' })
+    expect(response.statusCode).toBe(200)
+    expect(response.json()).toEqual({
+      projects: [],
+      inventory: {
+        status: 'empty',
+        source: 'app-server-project-registry',
+        scope: 'server-local',
+        host: { hostname: 'ssh-test' },
+        codexAppCatalog: {
+          status: 'unsupported',
+          upstreamIssue: 'https://github.com/openai/codex/issues/23527'
+        },
+        registration: { supported: true, method: 'project/create' }
+      }
+    })
+  })
+
+  it('starts through a bridge warmup failure and reports a retryable inventory error before recovery', async () => {
+    const backend = new WebSocketServer({ host: '127.0.0.1', port: 0 })
+    startedSocketServers.push(backend)
+    await new Promise<void>(resolvePromise => backend.once('listening', resolvePromise))
+    const address = backend.address()
+    if (!address || typeof address === 'string') {
+      throw new Error('Failed to get app-server test address.')
+    }
+
+    let listRequestCount = 0
+    backend.on('connection', (socket: WebSocket) => {
+      socket.on('message', (message: WebSocket.RawData) => {
+        const payload = JSON.parse(rawDataToString(message)) as { id?: string, method?: string }
+        if (payload.method === 'initialize') {
+          socket.send(JSON.stringify({ id: payload.id, result: {} }))
+          return
+        }
+        if (payload.method !== 'project/list') {
+          return
+        }
+        listRequestCount += 1
+        if (listRequestCount <= 2) {
+          socket.send(JSON.stringify({
+            id: payload.id,
+            error: { message: 'App-server is still starting.' }
+          }))
+          return
+        }
+        socket.send(JSON.stringify({
+          id: payload.id,
+          result: {
+            data: [{ id: 'opaque:project/id', name: 'Recovered', roots: [{ path: '/srv/recovered' }] }],
+            nextCursor: null
+          }
+        }))
+      })
+    })
+
+    const app = await createHttpServer(createManager({
+      getAppServerBridgeTarget: () => ({
+        target: {
+          kind: 'codori-managed',
+          transport: 'tcp-websocket',
+          port: address.port,
+          pid: 4321,
+          ownedByCodori: true,
+          appServerVersion: '0.150.1'
+        },
+        workspacePath: '/srv'
+      }),
+      setAppServerProjects: vi.fn()
+    }), { serverHostname: 'ssh-test' })
+    startedApps.push(app)
+
+    const unavailable = await app.inject({ method: 'GET', url: '/api/projects' })
+    expect(unavailable.statusCode).toBe(503)
+    expect(unavailable.json()).toMatchObject({
+      error: {
+        code: 'PROJECT_INVENTORY_UNAVAILABLE',
+        message: 'The app-server project registry is temporarily unavailable.',
+        details: {
+          retryable: true,
+          source: 'app-server-project-registry',
+          hostname: 'ssh-test',
+          reason: 'App-server is still starting.'
+        }
+      }
+    })
+
+    const recovered = await app.inject({ method: 'GET', url: '/api/projects' })
+    expect(recovered.statusCode).toBe(200)
+    expect(recovered.json().projects).toEqual([
+      expect.objectContaining({
+        projectId: 'opaque:project/id',
+        projectName: 'Recovered',
+        projectRoots: ['/srv/recovered']
+      })
+    ])
+    expect(recovered.json().inventory).toMatchObject({
+      status: 'ready',
+      source: 'app-server-project-registry',
+      host: { hostname: 'ssh-test' }
+    })
   })
 
   it('browses the server user home by default and reports its path separator', async () => {
@@ -1051,8 +1229,13 @@ describe('createHttpServer', () => {
       url: '/api/projects'
     })
     expect(apiResponse.statusCode).toBe(200)
-    expect(apiResponse.json()).toEqual({
+    expect(apiResponse.json()).toMatchObject({
       projects: [createProjectRecord()]
+    })
+    expect(apiResponse.json().inventory).toMatchObject({
+      status: 'ready',
+      source: 'runtime-manager',
+      scope: 'server-local'
     })
 
     const missingApiResponse = await app.inject({
