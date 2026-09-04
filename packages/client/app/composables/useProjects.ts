@@ -3,7 +3,10 @@ import { useRuntimeConfig, useState } from '#imports'
 import { $fetch, type FetchError } from 'ofetch'
 import { encodeProjectIdSegment } from '~~/shared/codori'
 import { resolveApiUrl, shouldUseServerProxy } from '~~/shared/network'
-import { createProjectDiscoveryRunner } from '../utils/project-discovery'
+import {
+  createProjectDiscoveryRunner,
+  createProjectDiscoveryRunnerRegistry
+} from '../utils/project-discovery'
 import type {
   CreateProjectResponse,
   CreateProjectRequest,
@@ -17,6 +20,8 @@ import type {
 } from '~~/shared/codori'
 
 export type ProjectDiscoveryStatus = 'idle' | 'loading' | 'retrying' | 'ready' | 'error'
+
+const projectDiscoveryRunners = createProjectDiscoveryRunnerRegistry<ProjectsResponse>()
 
 const toProjectDiscoveryErrorMessage = (caughtError: unknown) => {
   const fetchError = caughtError as FetchError<{
@@ -74,29 +79,31 @@ export const useProjects = () => {
       ? `/api/codori${path}`
       : resolveApiUrl(path, configuredBase)
 
-  const projectDiscovery = createProjectDiscoveryRunner<ProjectsResponse>({
-    discover: signal => $fetch<ProjectsResponse>(toApiUrl('/projects'), { signal }),
-    isRetryable: isRetryableProjectDiscoveryError,
-    onState: (state) => {
-      discoveryStatus.value = state.status
-      discoveryAttempt.value = state.attempt
-      discoveryMaxAttempts.value = state.maxAttempts
-      if (state.status === 'loading') {
-        if (state.attempt === 1) {
-          error.value = null
+  const projectDiscovery = projectDiscoveryRunners.get(projects, () =>
+    createProjectDiscoveryRunner<ProjectsResponse>({
+      discover: signal => $fetch<ProjectsResponse>(toApiUrl('/projects'), { signal }),
+      isRetryable: isRetryableProjectDiscoveryError,
+      onState: (state) => {
+        discoveryStatus.value = state.status
+        discoveryAttempt.value = state.attempt
+        discoveryMaxAttempts.value = state.maxAttempts
+        if (state.status === 'loading') {
+          if (state.attempt === 1) {
+            error.value = null
+          }
+          return
         }
-        return
+        if (state.status === 'retrying' || state.status === 'error') {
+          error.value = toProjectDiscoveryErrorMessage(state.error)
+          return
+        }
+        projects.value = state.result.projects
+        inventory.value = state.result.inventory
+        loaded.value = true
+        error.value = null
       }
-      if (state.status === 'retrying' || state.status === 'error') {
-        error.value = toProjectDiscoveryErrorMessage(state.error)
-        return
-      }
-      projects.value = state.result.projects
-      inventory.value = state.result.inventory
-      loaded.value = true
-      error.value = null
-    }
-  })
+    })
+  )
 
   const refreshProjects = async () => {
     void $fetch<ServiceUpdateResponse>(toApiUrl('/service/update'))
