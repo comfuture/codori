@@ -174,6 +174,8 @@ export type ChatMessage = {
   role: 'user' | 'assistant' | 'system'
   pending?: boolean
   delivery?: Extract<ThreadItem, { type: 'agentMessage' }>['delivery']
+  questions?: Extract<ThreadItem, { type: 'agentMessage' }>['questions']
+  toolOutput?: { name: string, namespace: string | null }
   parts: ChatPart[]
 }
 
@@ -340,13 +342,15 @@ export const asAgentMessageItem = (input: {
   phase?: MessagePhase | null
   memoryCitation?: MemoryCitation | null
   delivery?: Extract<ThreadItem, { type: 'agentMessage' }>['delivery']
+  questions?: Extract<ThreadItem, { type: 'agentMessage' }>['questions']
 }): Extract<ThreadItem, { type: 'agentMessage' }> => ({
   type: 'agentMessage',
   id: input.id,
   text: input.text,
   phase: input.phase ?? null,
   memoryCitation: input.memoryCitation ?? null,
-  delivery: input.delivery ?? null
+  delivery: input.delivery ?? null,
+  questions: input.questions ?? null
 })
 
 export const isSubagentActiveStatus = (status: SubagentAgentStatus) =>
@@ -676,11 +680,36 @@ export const itemToMessages = (
         id: item.id,
         role: 'assistant',
         ...(item.delivery ? { delivery: item.delivery } : {}),
+        ...(item.questions?.length ? { questions: item.questions } : {}),
         parts: [{
           type: 'text',
           text: item.text,
           state: 'done'
         }]
+      }]
+    case 'functionCallOutput':
+      return [{
+        id: item.id,
+        role: 'system',
+        toolOutput: { name: item.name, namespace: item.namespace },
+        parts: typeof item.output === 'string'
+          ? [{ type: 'text', text: item.output, state: 'done' }]
+          : item.output.map((content): ChatPart => {
+              switch (content.type) {
+                case 'input_text':
+                  return { type: 'text', text: content.text, state: 'done' }
+                case 'input_image':
+                  return { type: 'attachment', attachment: {
+                    kind: 'image', name: 'Tool output image', mediaType: 'image/*', url: content.image_url
+                  } }
+                case 'input_audio':
+                  return { type: 'attachment', attachment: {
+                    kind: 'audio', name: 'Tool output audio', mediaType: 'audio/*', url: content.audio_url
+                  } }
+                case 'encrypted_content':
+                  return { type: 'text', text: 'Encrypted tool output', state: 'done' }
+              }
+            })
       }]
     case 'plan':
       return [{

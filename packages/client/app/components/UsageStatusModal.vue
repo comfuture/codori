@@ -30,6 +30,7 @@ const {
 const loading = ref(false)
 const error = ref<string | null>(null)
 const buckets = ref<RateLimitBucket[]>([])
+const ordinaryUsageAllowed = ref<boolean | null>(null)
 const selectedProject = computed(() => getProject(props.projectId))
 let usageStatusLoadToken = 0
 let releaseUsageStatusSubscription: (() => void) | null = null
@@ -91,6 +92,7 @@ const resetUsageStatusState = () => {
   loading.value = false
   error.value = null
   buckets.value = []
+  ordinaryUsageAllowed.value = null
 }
 
 const closeUsageStatus = () => {
@@ -101,6 +103,12 @@ const closeUsageStatus = () => {
 }
 
 const applyUsageStatusSnapshot = (value: unknown, sparse = false) => {
+  if (!sparse) {
+    const allowed = value && typeof value === 'object' && 'ordinaryUsageAllowed' in value
+      ? value.ordinaryUsageAllowed
+      : null
+    ordinaryUsageAllowed.value = typeof allowed === 'boolean' ? allowed : null
+  }
   buckets.value = sparse
     ? mergeAccountRateLimits(buckets.value, value)
     : normalizeAccountRateLimits(value)
@@ -125,11 +133,21 @@ const openUsageStatus = async () => {
   loading.value = true
   error.value = null
   buckets.value = []
+  ordinaryUsageAllowed.value = null
 
   const client = getClient(props.projectId)
   releaseUsageStatusSubscription?.()
   releaseUsageStatusSubscription = client.subscribe((notification) => {
-    if (notification.method !== 'account/rateLimits/updated' || !props.open) {
+    if (!props.open || loadToken !== usageStatusLoadToken) {
+      return
+    }
+    // Rolling updates have no account identity. Invalidate both quota and
+    // permission on an account switch before reading the new account snapshot.
+    if (notification.method === 'account/updated') {
+      void openUsageStatus()
+      return
+    }
+    if (notification.method !== 'account/rateLimits/updated') {
       return
     }
 
@@ -184,6 +202,14 @@ onBeforeUnmount(() => {
   >
     <template #body>
       <div class="space-y-3">
+        <UAlert
+          v-if="ordinaryUsageAllowed === false"
+          color="warning"
+          variant="soft"
+          icon="i-lucide-circle-alert"
+          title="Included usage is currently unavailable for this account."
+        />
+
         <div
           v-if="loading"
           class="rounded-lg border border-default bg-elevated/40 px-4 py-6 text-sm text-muted"

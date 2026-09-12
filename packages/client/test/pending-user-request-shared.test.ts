@@ -64,6 +64,28 @@ const makeMcpElicitationRequest = (input: {
 })
 
 describe('pending user request shared helpers', () => {
+  it.each(['form', 'openai/form', 'openaiForm'])('renders supported fields for the %s elicitation mode', mode => {
+    const request: CodexRpcServerRequest = {
+      id: 'form-alias', method: 'mcpServer/elicitation/request', params: {
+        mode, threadId: 'thread', turnId: null, serverName: 'test', message: 'Your name', _meta: null,
+        requestedSchema: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] }
+      }
+    }
+    expect(parsePendingUserRequest(request)?.kind).toBe('mcpElicitationForm')
+  })
+
+  it('does not submit unsupported required fields or device verification as an ordinary form', () => {
+    expect(parsePendingUserRequest({ id: 'unsupported', method: 'mcpServer/elicitation/request', params: {
+      mode: 'openaiForm', message: 'Nested input', requestedSchema: {
+        type: 'object', properties: { name: { type: 'string' }, nested: { type: 'object' } }, required: ['nested']
+      }
+    } })).toBeNull()
+    expect(parsePendingUserRequest({ id: 'verification', method: 'mcpServer/elicitation/request', params: {
+      mode: 'openai/userVerification', threadId: 'thread', turnId: null, serverName: 'test',
+      title: 'Verify', description: 'Device verification', challenge: 'opaque-challenge'
+    } })).toBeNull()
+  })
+
   it('parses request-user-input questions and builds answers payloads', () => {
     const parsed = parsePendingUserRequest(makeRequestUserInputRequest({
       id: 7,

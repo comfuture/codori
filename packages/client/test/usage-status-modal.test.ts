@@ -165,6 +165,68 @@ describe('usage status modal', () => {
     expect(wrapper.text()).not.toContain('Next reset')
   })
 
+  it('shows backend usage permission independently of percentages and rolling updates', async () => {
+    mockRequest.mockResolvedValue({
+      ordinaryUsageAllowed: false,
+      rateLimits: {
+        limitId: null,
+        limitName: null,
+        primary: { usedPercent: 1, resetsAt: 1_800_000_000, windowDurationMins: 300 }
+      }
+    })
+    const wrapper = mountModal({ open: true })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Included usage is currently unavailable for this account.')
+    expect(wrapper.text()).toContain('99% remaining')
+    expect(wrapper.get('time').attributes('datetime')).toBe('2027-01-15T08:00:00.000Z')
+
+    mockSubscribe.mock.calls[0]?.[0]({
+      method: 'account/rateLimits/updated',
+      params: { rateLimits: { limitId: 'codex', primary: { usedPercent: 0 } } }
+    })
+    await flushPromises()
+    expect(wrapper.text()).toContain('100% remaining')
+    expect(wrapper.text()).toContain('Included usage is currently unavailable for this account.')
+  })
+
+  it('clears the previous account usage and permission when the account changes', async () => {
+    mockRequest.mockResolvedValueOnce({
+      accountId: 'previous-account',
+      ordinaryUsageAllowed: false,
+      rateLimits: { limitId: 'codex', primary: { usedPercent: 80 } }
+    })
+    let resolveNewAccount: (value: unknown) => void = () => {}
+    mockRequest.mockReturnValueOnce(new Promise((resolve) => {
+      resolveNewAccount = resolve
+    }))
+    const wrapper = mountModal({ open: true })
+    await flushPromises()
+    const previousAccountNotification = mockSubscribe.mock.calls[0]?.[0]
+    expect(wrapper.text()).toContain('20% remaining')
+    expect(wrapper.text()).toContain('Included usage is currently unavailable for this account.')
+
+    previousAccountNotification({ method: 'account/updated', params: { authMode: 'chatgpt' } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('Loading current quota windows...')
+    expect(wrapper.text()).not.toContain('20% remaining')
+    expect(wrapper.text()).not.toContain('Included usage is currently unavailable for this account.')
+
+    previousAccountNotification({
+      method: 'account/rateLimits/updated',
+      params: { rateLimits: { limitId: 'codex', primary: { usedPercent: 90 } } }
+    })
+    resolveNewAccount({
+      accountId: 'new-account',
+      ordinaryUsageAllowed: null,
+      rateLimits: { limitId: 'codex', primary: { usedPercent: 5 } }
+    })
+    await flushPromises()
+    expect(mockRequest).toHaveBeenCalledTimes(2)
+    expect(wrapper.text()).toContain('95% remaining')
+    expect(wrapper.text()).not.toContain('Included usage is currently unavailable for this account.')
+  })
+
   it('renders server errors when quota loading fails', async () => {
     mockRequest.mockRejectedValue(new Error('Failed to load rate limits.'))
 

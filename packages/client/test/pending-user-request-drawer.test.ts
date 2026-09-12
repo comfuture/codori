@@ -176,6 +176,64 @@ afterEach(() => {
 })
 
 describe('pending user request drawer', () => {
+  it('reuses the dismissible drawer and submits only the custom answer when Send response is used', async () => {
+    const wrapper = mountDrawer(null)
+    await wrapper.setProps({ asyncRequest: {
+      id: 'async-question',
+      questions: [{ title: 'Choose a direction', options: ['Small change', 'Redesign'] }]
+    } })
+    expect(wrapper.find('.drawer-stub').attributes('data-open')).toBe('true')
+    expect(wrapper.getComponent(DrawerStub).vm.$attrs.dismissible).toBe(true)
+    expect(wrapper.find('input[type="radio"]').exists()).toBe(false)
+    expect(wrapper.emitted('asyncRespond')).toBeUndefined()
+    await wrapper.get('textarea').setValue('Use an alternative')
+    await wrapper.get('form').trigger('submit')
+    expect(wrapper.emitted('asyncRespond')).toEqual([[{ text: 'Choose a direction\nUse an alternative', questionIndex: 0 }]])
+    expect(wrapper.emitted('respond')).toBeUndefined()
+    wrapper.getComponent(DrawerStub).vm.$emit('update:open', false)
+    await nextTick()
+    expect(wrapper.emitted('asyncDismiss')).toHaveLength(1)
+  })
+
+  it('sends a clicked option immediately without custom text or unchosen answers from later questions', async () => {
+    const wrapper = mountDrawer(null)
+    await wrapper.setProps({ asyncRequest: {
+      id: 'async-options', questions: [
+        { title: 'Choose a direction', options: ['Small change', 'Redesign'] },
+        { title: 'Any constraints?', options: null }
+      ]
+    } })
+    expect(wrapper.text()).toContain('1 / 2')
+    expect(wrapper.text()).not.toContain('Any constraints?')
+    await wrapper.get('textarea').setValue('Do not mix this with the option')
+    const option = wrapper.findAll('button').find(button => button.text() === 'Small change')!
+    await option.trigger('click')
+    expect(wrapper.emitted('asyncRespond')).toEqual([[{ text: 'Choose a direction\nSmall change', questionIndex: 0 }]])
+    await wrapper.setProps({ asyncRequest: {
+      id: 'async-options', questions: [
+        { title: 'Choose a direction', options: ['Small change', 'Redesign'] },
+        { title: 'Any constraints?', options: null }
+      ], questionIndex: 1
+    } })
+    expect(wrapper.text()).toContain('2 / 2')
+    expect(wrapper.get<HTMLTextAreaElement>('textarea').element.value).toBe('')
+    expect(wrapper.get<HTMLButtonElement>('button[type="submit"]').element.disabled).toBe(true)
+  })
+
+  it('keeps async dismiss available while sending and requires freeform questions to be answered', async () => {
+    const wrapper = mountDrawer(null)
+    await wrapper.setProps({ asyncRequest: {
+      id: 'async-freeform', questions: [{ title: 'What next?', options: null }]
+    } })
+    expect(wrapper.get<HTMLButtonElement>('button[type="submit"]').element.disabled).toBe(true)
+    await wrapper.get('textarea').setValue('Continue')
+    await wrapper.setProps({ asyncSubmitting: true })
+    await wrapper.get('form').trigger('submit')
+    expect(wrapper.emitted('asyncRespond')).toBeUndefined()
+    await wrapper.get('button[type="button"]').trigger('click')
+    expect(wrapper.emitted('asyncDismiss')).toHaveLength(1)
+  })
+
   it('renders request-user-input as a sequential flow and emits structured answers on the last answer', async () => {
     const wrapper = mountDrawer({
       kind: 'requestUserInput',
