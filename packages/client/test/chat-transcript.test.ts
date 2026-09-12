@@ -39,6 +39,11 @@ const makeTurn = (input: Pick<Turn, 'id' | 'items' | 'status' | 'error'> & Parti
 
 const makeThread = (input: Pick<Thread, 'id' | 'preview' | 'cwd' | 'createdAt' | 'updatedAt' | 'name' | 'turns'>): Thread => ({
   id: input.id,
+  environments: null,
+  model: null,
+  reasoningEffort: null,
+  originator: null,
+  daybreakEnabled: null,
   extra: null,
   sessionId: input.id,
   forkedFromId: null,
@@ -68,6 +73,33 @@ const makeThread = (input: Pick<Thread, 'id' | 'preview' | 'cwd' | 'createdAt' |
 })
 
 describe('chat transcript stability', () => {
+  it('preserves structured async questions in streamed replacements and reloaded history', () => {
+    const item = asAgentMessageItem({
+      id: 'question', text: 'Choose a direction', delivery: 'async',
+      questions: [{ title: 'Choose a direction', options: ['Small change', 'Redesign'] }]
+    })
+    const message = itemToMessages(item)[0]!
+    expect(message.questions).toEqual(item.questions)
+    expect(replaceStreamingMessage([{ ...message, pending: true }], message)[0]?.questions).toEqual(item.questions)
+    expect(asAgentMessageItem({ id: 'legacy', text: 'Older message' }).questions).toBeNull()
+  })
+
+  it('renders standalone tool outputs as tool content instead of dropping them or calling them user messages', () => {
+    const [message] = itemToMessages({
+      type: 'functionCallOutput', id: 'output', name: 'run_tests', namespace: 'tools',
+      output: [{ type: 'input_text', text: '42 tests passed' },
+        { type: 'input_image', image_url: 'https://example.com/test.png' },
+        { type: 'input_audio', audio_url: 'https://example.com/test.mp3' },
+        { type: 'encrypted_content', encrypted_content: 'must-not-render' }]
+    })
+    expect(message?.role).toBe('system')
+    expect(message?.toolOutput).toEqual({ name: 'run_tests', namespace: 'tools' })
+    expect(message?.parts.map(part => part.type)).toEqual(['text', 'attachment', 'attachment', 'text'])
+    expect(JSON.stringify(message)).not.toContain('must-not-render')
+    expect(itemToMessages({ type: 'functionCallOutput', id: 'string', name: 'check', namespace: null, output: 'OK' })[0]?.parts)
+      .toEqual([{ type: 'text', text: 'OK', state: 'done' }])
+  })
+
   it('preserves asynchronous agent-message delivery for rendering', () => {
     expect(itemToMessages(asAgentMessageItem({
       id: 'agent-async-1',

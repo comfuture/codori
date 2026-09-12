@@ -319,7 +319,7 @@ export const parsePendingUserRequest = (request: CodexRpcServerRequest): Pending
         }
       }
 
-      if (mode !== 'form') {
+      if (mode !== 'form' && mode !== 'openai/form' && mode !== 'openaiForm') {
         return null
       }
 
@@ -338,6 +338,11 @@ export const parsePendingUserRequest = (request: CodexRpcServerRequest): Pending
         .map(([key, value]) => parseElicitationField(key, value, requiredKeys))
         .filter((field): field is PendingElicitationField => field !== null)
       if (fields.length === 0) {
+        return null
+      }
+      // Extended OpenAI schemas may contain fields this form cannot represent.
+      // Do not offer to submit a form with a required answer silently omitted.
+      if ([...requiredKeys].some(key => !fields.some(field => field.key === key))) {
         return null
       }
 

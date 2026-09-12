@@ -237,7 +237,7 @@ describe('client package', () => {
         windowDurationMins: 300
       },
       secondary: {
-        usedPercent: 50,
+        usedPercent: 0.5,
         resetsAt: '2026-04-20T00:00:00.000Z',
         windowDurationMins: 10080
       }

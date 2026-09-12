@@ -84,6 +84,7 @@ import { useChats } from '../composables/useChats'
 import { useProjects } from '../composables/useProjects'
 import { useRpc } from '../composables/useRpc'
 import { useChatSubmitGuard } from '../composables/useChatSubmitGuard'
+import { useAsyncUserQuestions, type AsyncUserAnswer } from '../composables/useAsyncUserQuestions'
 import { useWorkspaceGitBranch } from '../composables/useWorkspaceGitBranch'
 import { useWorkspaceTerminalSurface } from '../composables/useWorkspaceTerminalSurface'
 import {
@@ -692,6 +693,9 @@ const submitError = computed(() => composerError.value ? new Error(composerError
 const interruptRequested = ref(false)
 const awaitingAssistantOutput = ref(false)
 const sendMessageLocked = ref(false)
+const asyncQuestions = useAsyncUserQuestions(workspaceSessionKey, activeThreadId)
+const activeAsyncQuestion = asyncQuestions.current
+const asyncAnswerError = ref<string | null>(null)
 const promptSelectionStart = ref(0)
 const promptSelectionEnd = ref(0)
 const isPromptFocused = ref(false)
@@ -2845,6 +2849,7 @@ const submitTurnStart = async (input: {
   uploadedAttachments?: PersistedProjectAttachment[]
   optimisticMessageId: string
   queueOptimisticMessage?: boolean
+  expectedThreadId?: string
 }) => {
   const {
     client,
@@ -2864,6 +2869,7 @@ const submitTurnStart = async (input: {
 
   const uploadedAttachments = existingUploadedAttachments
     ?? await uploadAttachments(liveStream.threadId, submittedAttachments)
+  assertAnswerThread(input.expectedThreadId, liveStream.threadId)
   const turnStart = await client.request<TurnStartResponse>('turn/start', {
     threadId: liveStream.threadId,
     clientUserMessageId: optimisticMessageId,
@@ -3144,19 +3150,18 @@ const hydrateThread = async (threadId: string) => {
           })
           return { resumeResponse, response: readResponse }
         },
-        ({ resumeResponse }) => {
+        ({ resumeResponse, response }) => {
           if (
-            !resumeResponse
-            || loadVersion.value !== requestVersion
+            loadVersion.value !== requestVersion
             || activeThreadId.value !== threadId
           ) {
             return
           }
 
           syncPromptSelectionFromThread(
-            resumeResponse.model ?? null,
-            (resumeResponse.reasoningEffort as ReasoningEffort | null | undefined) ?? null,
-            resumeResponse.serviceTier ?? null
+            resumeResponse?.model ?? response.thread.model ?? null,
+            resumeResponse?.reasoningEffort ?? response.thread.reasoningEffort ?? null,
+            resumeResponse ? resumeResponse.serviceTier : selectedServiceTier.value
           )
         }
       )
@@ -3719,6 +3724,10 @@ const applyItemCompletedNotification = (notification: CodexRpcNotification) => {
   }
   if (params.item.type === 'agentMessage') {
     messages.value = removeSyntheticReviewOutputMessagesInLatestTurn(messages.value, params.item.text)
+    if (params.item.questions?.length) {
+      asyncAnswerError.value = null
+      asyncQuestions.receive({ id: params.item.id, questions: params.item.questions }, notificationTurnId(notification))
+    }
   }
   markAssistantOutputStartedForItem(params.item)
   for (const nextMessage of itemToMessages(params.item, {
@@ -4004,12 +4013,20 @@ const applyNotification = (notification: CodexRpcNotification) => {
   }
 }
 
-const sendMessage = async () => {
+const sendMessage = async () => { await submitMessage() }
+
+const assertAnswerThread = (expectedThreadId: string | undefined, actualThreadId: string) => {
+  if (expectedThreadId && (activeThreadId.value !== expectedThreadId || actualThreadId !== expectedThreadId)) {
+    throw new Error('The active thread changed. Reopen the question to answer it.')
+  }
+}
+
+const submitMessage = async (asyncAnswer?: { text: string, threadId: string }) => {
   // Nuxt UI's UChatPrompt emits `submit` directly from its internal
   // `keydown.enter.exact` handler, so guarding only in our keydown callback is
   // not sufficient to stop Enter from racing into a send while the mention palette
   // is open. Keep the submit path itself aware of the palette state.
-  if (mentionAutocompleteOpen.value) {
+  if (!asyncAnswer && mentionAutocompleteOpen.value) {
     const item = highlightedMentionAutocompleteItem.value
     if (item) {
       await selectMentionAutocompleteItem(item)
@@ -4018,7 +4035,7 @@ const sendMessage = async () => {
     return
   }
 
-  if (skillAutocompleteOpen.value) {
+  if (!asyncAnswer && skillAutocompleteOpen.value) {
     const skill = highlightedSkillAutocompleteResult.value
     if (skill) {
       await selectSkillAutocompleteResult(skill)
@@ -4031,7 +4048,7 @@ const sendMessage = async () => {
     return
   }
 
-  if (!hasPromptSubmissionContent(input.value, attachments.value.length)) {
+  if (!hasPromptSubmissionContent(asyncAnswer?.text ?? input.value, asyncAnswer ? 0 : attachments.value.length)) {
     return
   }
 
@@ -4043,10 +4060,13 @@ const sendMessage = async () => {
     return
   }
   refreshWorkspaceGitBranchesInBackground('submit')
-  const rawText = input.value
-  const submittedAttachments = attachments.value.slice()
-  let submittedSkillMentions = cloneSkillMentions()
-  let submittedMentionSelections = cloneMentionSelections()
+  const rawText = asyncAnswer?.text ?? input.value
+  const submittedAttachments = asyncAnswer ? [] : attachments.value.slice()
+  let submittedSkillMentions = asyncAnswer ? [] : cloneSkillMentions()
+  let submittedMentionSelections = asyncAnswer ? [] : cloneMentionSelections()
+  const restoreSubmissionDraft = () => {
+    if (!asyncAnswer) restoreDraftIfPristine(effectiveRawText, submittedAttachments, submittedSkillMentions, submittedMentionSelections)
+  }
   let effectiveRawText = rawText
 
   if (!effectiveRawText.trim() && submittedAttachments.length === 0) {
@@ -4054,7 +4074,9 @@ const sendMessage = async () => {
     return
   }
 
-  const slashResult = await handleSlashCommandSubmission(effectiveRawText, submittedAttachments)
+  const slashResult = asyncAnswer
+    ? { consumed: false, replacementText: null }
+    : await handleSlashCommandSubmission(effectiveRawText, submittedAttachments)
   if (slashResult.consumed) {
     sendMessageLocked.value = false
     return
@@ -4075,7 +4097,7 @@ const sendMessage = async () => {
   }
   effectiveRawText = nextEffectiveRawText
 
-  if (hasSkillAutocompleteMentions(effectiveRawText)) {
+  if (!asyncAnswer && hasSkillAutocompleteMentions(effectiveRawText)) {
     try {
       await ensureSkillAutocompleteCatalogCurrent()
     } catch (caughtError) {
@@ -4094,23 +4116,25 @@ const sendMessage = async () => {
     return
   }
 
-  const text = preprocessSkillMentionsForSubmission(
+  const text = (asyncAnswer ? effectiveRawText : preprocessSkillMentionsForSubmission(
     effectiveRawText,
     submittedSkillMentions,
     skillAutocompleteCatalog.value
-  ).trim()
+  )).trim()
   if (!text && submittedAttachments.length === 0) {
     sendMessageLocked.value = false
     return
   }
 
-  applyDraftTextState('')
-  clearAttachments({ revoke: false })
+  if (!asyncAnswer) {
+    applyDraftTextState('')
+    clearAttachments({ revoke: false })
+  }
 
   try {
     await loadPromptControls()
   } catch (caughtError) {
-    restoreDraftIfPristine(effectiveRawText, submittedAttachments, submittedSkillMentions, submittedMentionSelections)
+    restoreSubmissionDraft()
     error.value = caughtError instanceof Error ? caughtError.message : String(caughtError)
     status.value = 'error'
     sendMessageLocked.value = false
@@ -4126,6 +4150,9 @@ const sendMessage = async () => {
     }
 
     updatePinnedState()
+    if (asyncAnswer && activeThreadId.value !== asyncAnswer.threadId) {
+      throw new Error('The active thread changed. Reopen the question to answer it.')
+    }
     error.value = null
     attachmentError.value = null
 
@@ -4138,7 +4165,7 @@ const sendMessage = async () => {
         additionalInput: submittedMentionInput.pluginInput
       })
       status.value = 'ready'
-      return
+      return true
     }
 
     const submissionMethod = resolveTurnSubmissionMethod(shouldSubmitWithTurnSteer())
@@ -4159,6 +4186,7 @@ const sendMessage = async () => {
 
       if (submissionMethod === 'turn/steer') {
         const liveStream = await ensurePendingLiveStream()
+        assertAnswerThread(asyncAnswer?.threadId, liveStream.threadId)
         updateThreadTitleFromUserInput(liveStream.threadId, text)
         queuePendingUserMessage(liveStream, optimisticMessageId)
         let uploadedAttachments: PersistedProjectAttachment[] | undefined
@@ -4167,6 +4195,7 @@ const sendMessage = async () => {
           uploadedAttachments = await uploadAttachments(liveStream.threadId, submittedAttachments)
           const turnId = await waitForLiveStreamTurnId(liveStream)
 
+          assertAnswerThread(asyncAnswer?.threadId, liveStream.threadId)
           await client.request<TurnSteerResponse>('turn/steer', {
             threadId: liveStream.threadId,
             expectedTurnId: turnId,
@@ -4179,6 +4208,7 @@ const sendMessage = async () => {
           if (!shouldRetrySteerWithTurnStart(errorToHandle.message)) {
             throw errorToHandle
           }
+          assertAnswerThread(asyncAnswer?.threadId, liveStream.threadId)
 
           executedSubmissionMethod = 'turn/start'
           startedLiveStream = liveStream
@@ -4195,17 +4225,19 @@ const sendMessage = async () => {
             collaborationMode,
             uploadedAttachments,
             optimisticMessageId,
-            queueOptimisticMessage: false
+            queueOptimisticMessage: false,
+            expectedThreadId: asyncAnswer?.threadId
           })
           await routeDraftChatToSession()
         }
-        return
+        return true
       }
 
       const liveStream = await runAfterPromptControlsReady(
         ensurePromptControlsReady,
         ensurePendingLiveStream
       )
+      assertAnswerThread(asyncAnswer?.threadId, liveStream.threadId)
       startedLiveStream = liveStream
       updateThreadTitleFromUserInput(liveStream.threadId, text)
       await submitTurnStart({
@@ -4215,9 +4247,11 @@ const sendMessage = async () => {
         submittedAttachments,
         additionalInput: submittedMentionInput.pluginInput,
         collaborationMode,
-        optimisticMessageId
+        optimisticMessageId,
+        expectedThreadId: asyncAnswer?.threadId
       })
       await routeDraftChatToSession()
+      return true
     } catch (caughtError) {
       const messageText = caughtError instanceof Error ? caughtError.message : String(caughtError)
 
@@ -4230,18 +4264,44 @@ const sendMessage = async () => {
           clearPendingOptimisticMessages(clearLiveStream(new Error(messageText)))
         }
         session.pendingLiveStream = null
-        restoreDraftIfPristine(effectiveRawText, submittedAttachments, submittedSkillMentions, submittedMentionSelections)
+        restoreSubmissionDraft()
         error.value = messageText
         status.value = 'error'
         return
       }
 
-      restoreDraftIfPristine(effectiveRawText, submittedAttachments, submittedSkillMentions, submittedMentionSelections)
+      restoreSubmissionDraft()
       error.value = messageText
       status.value = 'error'
     }
   } finally {
     sendMessageLocked.value = false
+  }
+}
+
+const openAsyncQuestion = (message: ChatMessage) => {
+  if (!message.questions?.length) return
+  asyncAnswerError.value = null
+  asyncQuestions.open({ id: message.id, questions: message.questions })
+}
+
+const respondToAsyncQuestion = async (answer: AsyncUserAnswer) => {
+  const request = activeAsyncQuestion.value
+  const threadId = activeThreadId.value
+  if (!request || !threadId) return
+  asyncAnswerError.value = null
+  try {
+    const sent = await submitMessage({ text: answer.text, threadId })
+    if (activeThreadId.value !== threadId || activeAsyncQuestion.value?.id !== request.id) return
+    if (sent) {
+      asyncQuestions.answered(request.id, answer.questionIndex)
+    } else {
+      asyncAnswerError.value = error.value ?? 'The response was not sent. Please try again.'
+    }
+  } catch (caughtError) {
+    if (activeThreadId.value === threadId && activeAsyncQuestion.value?.id === request.id) {
+      asyncAnswerError.value = caughtError instanceof Error ? caughtError.message : String(caughtError)
+    }
   }
 }
 
@@ -4599,6 +4659,7 @@ const ensureRuntimeSubscriptions = () => {
     const lifecycleThreadId = notificationThreadId(notification)
     if (lifecycleThreadId === activeThreadId.value) {
       if (notification.method === 'turn/started') {
+        asyncQuestions.turnStarted(notificationTurnId(notification))
         rememberThreadLastTurnStatus(lifecycleThreadId, 'inProgress')
       } else if (notification.method === 'turn/completed') {
         rememberThreadLastTurnStatus(lifecycleThreadId, notificationTurnStatus(notification))
@@ -5364,6 +5425,8 @@ watch(
               :project-id="workspaceKind === 'project' ? workspaceId : undefined"
               :workspace="{ kind: workspaceKind, id: workspaceId }"
               :workspace-root-path="selectedProject?.projectPath ?? null"
+              allow-async-reply
+              @answer="openAsyncQuestion"
             />
           </template>
           <template #indicator>
@@ -6091,7 +6154,12 @@ watch(
 
   <PendingUserRequestDrawer
     :request="pendingRequest"
+    :async-request="activeAsyncQuestion"
+    :async-submitting="sendMessageLocked || reviewStartPending"
+    :async-error="asyncAnswerError"
     @respond="respondToPendingRequest"
+    @async-respond="respondToAsyncQuestion"
+    @async-dismiss="asyncQuestions.dismiss()"
   />
 
   <PlanImplementationPromptDrawer

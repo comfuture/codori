@@ -10,18 +10,27 @@ import BottomDrawerShell from './BottomDrawerShell.vue'
 import McpElicitationForm from './pending-request/McpElicitationForm.vue'
 import McpElicitationUrlPrompt from './pending-request/McpElicitationUrlPrompt.vue'
 import RequestUserInputForm from './pending-request/RequestUserInputForm.vue'
+import AsyncQuestions from './message-part/AsyncQuestions.vue'
+import type { AsyncUserAnswer, AsyncUserQuestionRequest } from '../composables/useAsyncUserQuestions'
 
 const props = defineProps<{
   request: PendingUserRequestState | null
+  asyncRequest?: AsyncUserQuestionRequest | null
+  asyncSubmitting?: boolean
+  asyncError?: string | null
 }>()
 
 const emit = defineEmits<{
   respond: [payload: { requestId: string | number, response: unknown }]
+  asyncRespond: [answer: AsyncUserAnswer]
+  asyncDismiss: []
 }>()
 
 const isRequestUserInput = computed(() => props.request?.kind === 'requestUserInput')
+const isAsyncRequest = computed(() => !props.request && Boolean(props.asyncRequest))
 
 const title = computed(() => {
+  if (isAsyncRequest.value) return 'User Answer'
   switch (props.request?.kind) {
     case 'mcpElicitationForm':
       return 'Tool confirmation required'
@@ -44,6 +53,10 @@ const description = computed(() => {
 })
 
 const handleOpenChange = (nextOpen: boolean) => {
+  if (!nextOpen && isAsyncRequest.value) {
+    emit('asyncDismiss')
+    return
+  }
   if (nextOpen || !props.request || props.request.kind === 'requestUserInput') {
     return
   }
@@ -57,8 +70,8 @@ const handleOpenChange = (nextOpen: boolean) => {
 
 <template>
   <BottomDrawerShell
-    :key="request ? `${request.kind}:${String(request.requestId)}` : 'empty'"
-    :open="Boolean(request)"
+    :key="request ? `${request.kind}:${String(request.requestId)}` : asyncRequest?.id ?? 'empty'"
+    :open="Boolean(request || asyncRequest)"
     :hide-header="isRequestUserInput"
     :handle="!isRequestUserInput"
     :dismissible="!isRequestUserInput"
@@ -67,6 +80,32 @@ const handleOpenChange = (nextOpen: boolean) => {
     :body-class="isRequestUserInput ? 'px-3 pb-3 pt-3 md:px-4 md:pb-4 md:pt-4' : 'px-4 pb-4 pt-2 md:px-5'"
     @update:open="handleOpenChange"
   >
+    <template v-if="isAsyncRequest && asyncRequest">
+      <div class="mb-2 flex justify-end">
+        <UButton
+          type="button"
+          color="neutral"
+          variant="ghost"
+          size="xs"
+          @click="emit('asyncDismiss')"
+        >
+          Dismiss
+        </UButton>
+      </div>
+      <AsyncQuestions
+        :questions="asyncRequest.questions"
+        :question-index="asyncRequest.questionIndex"
+        :disabled="asyncSubmitting"
+        @reply="emit('asyncRespond', $event)"
+      />
+      <p
+        v-if="asyncError"
+        role="alert"
+        class="mt-2 text-sm text-error"
+      >
+        {{ asyncError }}
+      </p>
+    </template>
     <RequestUserInputForm
       v-if="request?.kind === 'requestUserInput'"
       :key="request.requestId"

@@ -39,11 +39,16 @@ const toPercent = (value: unknown) => {
     return null
   }
 
-  const normalized = parsed > 0 && parsed <= 1 ? parsed * 100 : parsed
-  return Math.max(0, Math.min(100, normalized))
+  // The protocol reports percentage points, including fractional values below 1%.
+  return Math.max(0, Math.min(100, parsed))
 }
 
 const toTimestamp = (value: unknown) => {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    const date = new Date(value * 1000)
+    return Number.isNaN(date.getTime()) ? null : date.toISOString()
+  }
+
   if (typeof value !== 'string' || !value.trim()) {
     return null
   }
@@ -91,7 +96,7 @@ const mergeRateLimitWindow = (
   }
 }
 
-const normalizeRateLimitBucket = (value: unknown): RateLimitBucket | null => {
+const normalizeRateLimitBucket = (value: unknown, fallbackId?: string): RateLimitBucket | null => {
   const record = isObjectRecord(value) ? value : null
   if (!record) {
     return null
@@ -104,7 +109,7 @@ const normalizeRateLimitBucket = (value: unknown): RateLimitBucket | null => {
     ? record.limitName.trim()
     : null
 
-  if (!limitId && !limitName) {
+  if (!limitId && !limitName && !fallbackId) {
     return null
   }
 
@@ -115,7 +120,7 @@ const normalizeRateLimitBucket = (value: unknown): RateLimitBucket | null => {
   }
 
   return {
-    limitId: limitId ?? limitName ?? 'unknown',
+    limitId: limitId ?? fallbackId ?? limitName ?? 'unknown',
     limitName,
     primary,
     secondary
@@ -130,19 +135,25 @@ const collectRateLimitCandidates = (value: unknown) => {
       ? [root.rateLimits]
       : []
   const rateLimitsByLimitId = isObjectRecord(root?.rateLimitsByLimitId)
-    ? Object.values(root.rateLimitsByLimitId)
+    ? Object.entries(root.rateLimitsByLimitId).map(([limitId, value]) => ({ value, fallbackId: limitId }))
     : []
 
   if (rateLimits.length > 0 || rateLimitsByLimitId.length > 0) {
-    return [...rateLimits, ...rateLimitsByLimitId]
+    return [
+      ...rateLimits.map(value => ({
+        value,
+        fallbackId: Array.isArray(root?.rateLimits) ? undefined : 'codex'
+      })),
+      ...rateLimitsByLimitId
+    ]
   }
 
   if (Array.isArray(value)) {
-    return value
+    return value.map(value => ({ value, fallbackId: undefined }))
   }
 
   return root && ('primary' in root || 'secondary' in root)
-    ? [root]
+    ? [{ value: root, fallbackId: 'codex' }]
     : []
 }
 
@@ -150,7 +161,7 @@ export const normalizeAccountRateLimits = (value: unknown): RateLimitBucket[] =>
   const bucketsById = new Map<string, RateLimitBucket>()
 
   for (const candidate of collectRateLimitCandidates(value)) {
-    const bucket = normalizeRateLimitBucket(candidate)
+    const bucket = normalizeRateLimitBucket(candidate.value, candidate.fallbackId)
     if (!bucket) {
       continue
     }
