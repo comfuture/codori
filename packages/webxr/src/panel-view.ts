@@ -49,6 +49,17 @@ export const PANEL_CONTROL_SIZE_METERS = 0.15
 export const PANEL_CONTROL_DEPTH_METERS = 0.028
 export const PANEL_CONTROL_RADIUS_METERS = 0.022
 
+export const createSpatialPanelFrameGeometry = (width: number, height: number) =>
+  new RoundedBoxGeometry(width + 0.018, height + 0.018, 0.012, 4, 0.05)
+
+export const createSpatialPanelOutlineMaterial = () => new LineBasicMaterial({
+  color: '#2abfe7', transparent: true, opacity: 0, depthTest: true, depthWrite: false
+})
+
+export const createSpatialPanelGlowMaterial = () => new LineBasicMaterial({
+  color: '#8cecff', transparent: true, opacity: 0, blending: AdditiveBlending, depthTest: true, depthWrite: false
+})
+
 export const resolvePanelControlLayout = (
   width: number,
   height: number
@@ -248,26 +259,13 @@ export class SpatialPanelView {
 
   private outlineGeometry: EdgesGeometry
 
-  private readonly outlineMaterial = new LineBasicMaterial({
-    color: '#2abfe7',
-    transparent: true,
-    opacity: 0,
-    depthTest: true,
-    depthWrite: false
-  })
+  private readonly outlineMaterial = createSpatialPanelOutlineMaterial()
 
   private readonly outline: LineSegments
 
   private glowGeometry: EdgesGeometry
 
-  private readonly glowMaterial = new LineBasicMaterial({
-    color: '#8cecff',
-    transparent: true,
-    opacity: 0,
-    blending: AdditiveBlending,
-    depthTest: true,
-    depthWrite: false
-  })
+  private readonly glowMaterial = createSpatialPanelGlowMaterial()
 
   private readonly glow: LineSegments
 
@@ -397,13 +395,7 @@ export class SpatialPanelView {
     this.snapshot = snapshot
     this.group.name = `panel:${snapshot.id}`
     this.group.userData.panelId = snapshot.id
-    const chromeGeometry = new RoundedBoxGeometry(
-      this.width + 0.018,
-      this.height + 0.018,
-      0.012,
-      4,
-      0.05
-    )
+    const chromeGeometry = createSpatialPanelFrameGeometry(this.width, this.height)
     this.outlineGeometry = new EdgesGeometry(chromeGeometry, 24)
     this.glowGeometry = new EdgesGeometry(chromeGeometry, 24)
     chromeGeometry.dispose()
@@ -651,13 +643,7 @@ export class SpatialPanelView {
       0.06
     )
     this.moveHit.position.y = interactionLayout.move.y
-    const chromeGeometry = new RoundedBoxGeometry(
-      this.width + 0.018,
-      this.height + 0.018,
-      0.012,
-      4,
-      0.05
-    )
+    const chromeGeometry = createSpatialPanelFrameGeometry(this.width, this.height)
     this.outlineGeometry.dispose()
     this.glowGeometry.dispose()
     this.outlineGeometry = new EdgesGeometry(chromeGeometry, 24)

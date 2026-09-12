@@ -263,6 +263,7 @@ const ensureScene = async () => {
           onStatusAction: (action) => {
             void handleStatusAction(action)
           },
+          onAsyncQuestionAction: action => { void workspaceRuntime?.handleAsyncQuestionAction(action) },
           onStatusOpened: () => {
             soundEffects.playStatusOpen()
           },
@@ -307,6 +308,7 @@ const startWorkspaceRuntime = async () => {
       latestWorkspace = snapshot
       lastWorkspaceError = snapshot.error
       immersiveScene?.setPanels(snapshot.panels)
+      immersiveScene?.setAsyncQuestions(snapshot.asyncQuestions)
       if (!voiceRuntime || !voiceSessionActive(voiceRuntime.getSnapshot())) {
         immersiveScene?.setActivity(snapshot.activity)
         immersiveScene?.setTranscript(

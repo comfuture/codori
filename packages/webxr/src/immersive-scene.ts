@@ -8,10 +8,13 @@ import {
   MeshBasicMaterial,
   PerspectiveCamera,
   PlaneGeometry,
+  Quaternion,
+  Raycaster,
   Scene,
   SRGBColorSpace,
   Timer,
   Vector3,
+  Vector2,
   WebGLRenderer
 } from 'three'
 import { AgentLightView } from './agent-light-view'
@@ -47,6 +50,10 @@ import {
 import { TranscriptBubbleView } from './transcript-bubble-view'
 import { WorldControls, type WorldControlAction } from './world-controls'
 import { WorldStatus } from './world-status'
+import { AsyncQuestionView, setAsyncQuestionHover } from './async-question-view'
+import { NativeAsyncQuestionTextInput } from './async-question-text-input'
+import { resolveAsyncQuestionPosition } from './async-question-placement'
+import type { AsyncQuestionAction, AsyncQuestionSnapshot } from './async-question-model'
 import {
   StatusWindowView
 } from './status-window-view'
@@ -83,6 +90,7 @@ export type ImmersiveSceneOptions = {
   onStatusOpened: () => void
   onStatusClosed: () => void
   onStatusFallbackChanged: (visible: boolean) => void
+  onAsyncQuestionAction?: (action: AsyncQuestionAction) => void
 }
 
 const viewerPosition = new Vector3()
@@ -165,6 +173,27 @@ export class ImmersiveScene {
   private readonly status = new WorldStatus()
 
   private readonly statusWindow = new StatusWindowView()
+  private readonly asyncQuestionView: AsyncQuestionView
+  private readonly asyncQuestionTextInput: NativeAsyncQuestionTextInput
+  private readonly viewerOrientation = new Quaternion()
+  private readonly questionRaycaster = new Raycaster()
+  private readonly questionPointer = new Vector2()
+  private readonly onQuestionPointerMove = (event: PointerEvent) => {
+    const target = this.questionTargetAt(event)
+    this.options.canvas.style.cursor = typeof target?.userData.asyncQuestionActivate === 'function' ? 'pointer' : ''
+    setAsyncQuestionHover(this.asyncQuestionView.hitTargets, target)
+  }
+  private readonly onQuestionPointerLeave = () => {
+    this.options.canvas.style.cursor = ''
+    setAsyncQuestionHover(this.asyncQuestionView.hitTargets, null)
+  }
+  private readonly onQuestionPointerDown = (event: PointerEvent) => {
+    const target = this.questionTargetAt(event)
+    if (target) {
+      event.preventDefault()
+      target.userData.asyncQuestionActivate?.()
+    }
+  }
 
   private readonly contrast = new PassthroughContrastView()
 
@@ -210,6 +239,8 @@ export class ImmersiveScene {
   private voiceToggleEnabled = true
 
   constructor(private readonly options: ImmersiveSceneOptions) {
+    this.asyncQuestionTextInput = new NativeAsyncQuestionTextInput(options.canvas.parentElement ?? document.body)
+    this.asyncQuestionView = new AsyncQuestionView(action => options.onAsyncQuestionAction?.(action), this.asyncQuestionTextInput)
     this.renderer = new WebGLRenderer({
       canvas: options.canvas,
       antialias: true,
@@ -235,6 +266,7 @@ export class ImmersiveScene {
       this.contrast.group
     )
     this.scene.add(this.statusWindow.group, this.statusWindow.menuGroup)
+    this.scene.add(this.asyncQuestionView.group)
     this.setWorldCenter(new Vector3(0, 1.65, 0))
 
     this.interaction = new ImmersiveInteractionSystem({
@@ -247,6 +279,10 @@ export class ImmersiveScene {
         this.controls.hitTargets
       ),
       getStatusTargets: () => this.statusWindow.actionHits,
+      getAsyncQuestionTargets: () => this.asyncQuestionView.group.visible ? this.asyncQuestionView.hitTargets : [],
+      onAsyncQuestionHover: target => {
+        if (this.renderer.xr.isPresenting) setAsyncQuestionHover(this.asyncQuestionView.hitTargets, target)
+      },
       getStatusMenuTarget: () => this.statusWindow.menuHit,
       isStatusOpen: () => this.statusWindow.isOpen,
       isStatusFullyOpen: () => this.statusWindow.isFullyOpen,
@@ -275,6 +311,20 @@ export class ImmersiveScene {
       this.renderFrame(timestamp)
     })
     this.resize()
+    options.canvas.addEventListener('pointermove', this.onQuestionPointerMove)
+    options.canvas.addEventListener('pointerleave', this.onQuestionPointerLeave)
+    options.canvas.addEventListener('pointerdown', this.onQuestionPointerDown)
+  }
+
+  private questionTargetAt(event: PointerEvent) {
+    if (this.renderer.xr.isPresenting || !this.asyncQuestionView.group.visible) return null
+    const bounds = this.options.canvas.getBoundingClientRect()
+    this.questionPointer.set(
+      ((event.clientX - bounds.left) / bounds.width) * 2 - 1,
+      -((event.clientY - bounds.top) / bounds.height) * 2 + 1
+    )
+    this.questionRaycaster.setFromCamera(this.questionPointer, this.camera)
+    return this.questionRaycaster.intersectObjects(this.asyncQuestionView.hitTargets, false)[0]?.object as Mesh | undefined ?? null
   }
 
   private createRoom() {
@@ -414,6 +464,10 @@ export class ImmersiveScene {
   setPanels(panels: readonly SpatialPanelSnapshot[]) {
     this.panelSnapshots = [...panels]
     this.syncPanelViews()
+  }
+
+  setAsyncQuestions(snapshot: AsyncQuestionSnapshot) {
+    this.asyncQuestionView.update(snapshot)
   }
 
   setStatus(message: string, error = false) {
@@ -669,6 +723,9 @@ export class ImmersiveScene {
       : this.camera
     camera.getWorldPosition(viewerPosition)
     const now = performance.now()
+    camera.getWorldQuaternion(this.viewerOrientation)
+    this.asyncQuestionView.group.position.copy(resolveAsyncQuestionPosition(viewerPosition, this.viewerOrientation))
+    this.asyncQuestionView.group.quaternion.copy(this.viewerOrientation)
     const anchor = this.interaction.statusAnchor()
     if (
       this.statusInvocation === 'hand'
@@ -728,8 +785,9 @@ export class ImmersiveScene {
         deltaSeconds
       )
     }
-    menuWorldPosition.copy(menuOffset).applyQuaternion(camera.quaternion)
-      .add(viewerPosition)
+    menuWorldPosition.copy(menuOffset)
+    if (this.asyncQuestionView.isOpen) menuWorldPosition.x += 0.22
+    menuWorldPosition.applyQuaternion(this.viewerOrientation).add(viewerPosition)
     this.statusWindow.menuGroup.position.copy(menuWorldPosition)
     const menuTarget = viewerFacingQuaternion(
       this.statusWindow.menuGroup.position,
@@ -779,6 +837,10 @@ export class ImmersiveScene {
       return
     }
     this.disposed = true
+    this.options.canvas.removeEventListener('pointermove', this.onQuestionPointerMove)
+    this.options.canvas.removeEventListener('pointerleave', this.onQuestionPointerLeave)
+    this.options.canvas.removeEventListener('pointerdown', this.onQuestionPointerDown)
+    this.options.canvas.style.cursor = ''
     this.renderer.setAnimationLoop(null)
     this.timer.dispose()
     this.interaction.dispose()
@@ -792,6 +854,8 @@ export class ImmersiveScene {
     this.controls.dispose()
     this.status.dispose()
     this.statusWindow.dispose()
+    this.asyncQuestionView.dispose()
+    this.asyncQuestionTextInput.dispose()
     this.agentLight.dispose()
     this.contrast.dispose()
     for (const hand of this.developmentHands) {

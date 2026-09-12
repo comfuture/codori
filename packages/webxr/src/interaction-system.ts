@@ -68,6 +68,9 @@ type SourceRuntime = {
   selecting: boolean
   pinching: boolean
   statusPressActive: boolean
+  asyncQuestionPressActive: boolean
+  asyncQuestionLastPressAt: number
+  asyncQuestionLastPressNative: boolean
   grabbedBy: 'select' | 'squeeze' | 'pinch' | 'touch' | null
   grabInitialPosition: Vector3
   grabInitialWorldPosition: Vector3
@@ -100,6 +103,8 @@ export type InteractionSystemOptions = {
   root: Object3D
   getPanels: () => ReadonlyMap<string, SpatialPanelView>
   getControlTargets: () => readonly Mesh[]
+  getAsyncQuestionTargets?: () => readonly Mesh[]
+  onAsyncQuestionHover?: (target: Mesh | null) => void
   getStatusTargets: () => readonly Mesh[]
   getStatusMenuTarget: () => Mesh | null
   isStatusOpen: () => boolean
@@ -368,6 +373,9 @@ export class ImmersiveInteractionSystem {
       selecting: false,
       pinching: false,
       statusPressActive: false,
+      asyncQuestionPressActive: false,
+      asyncQuestionLastPressAt: Number.NEGATIVE_INFINITY,
+      asyncQuestionLastPressNative: false,
       grabbedBy: null,
       grabInitialPosition: new Vector3(),
       grabInitialWorldPosition: new Vector3(),
@@ -395,6 +403,8 @@ export class ImmersiveInteractionSystem {
         ).data
         runtime.handOutline.setHandedness(runtime.inputSource.handedness)
         runtime.statusPressActive = false
+        runtime.asyncQuestionPressActive = false
+        runtime.asyncQuestionLastPressAt = Number.NEGATIVE_INFINITY
         runtime.contactActionId = null
         this.statusActions.updatePress(id, false)
         this.statusActions.updateContact(id, null)
@@ -408,6 +418,8 @@ export class ImmersiveInteractionSystem {
         runtime.selecting = false
         runtime.pinching = false
         runtime.statusPressActive = false
+        runtime.asyncQuestionPressActive = false
+        runtime.asyncQuestionLastPressAt = Number.NEGATIVE_INFINITY
         this.finalizeGrab(runtime, { refresh: false })
         runtime.inputSource = null
         runtime.contactActionId = null
@@ -430,6 +442,7 @@ export class ImmersiveInteractionSystem {
       },
       selectend: () => {
         runtime.statusPressActive = false
+        if (!runtime.pinching) runtime.asyncQuestionPressActive = false
         this.statusActions.updatePress(id, false)
         runtime.selecting = false
         this.model.selectEnd(id)
@@ -476,6 +489,7 @@ export class ImmersiveInteractionSystem {
       targets.push(panel.moveHit)
     }
     targets.push(...this.options.getControlTargets())
+    targets.push(...this.options.getAsyncQuestionTargets?.() ?? [])
     if (this.options.isStatusOpen()) {
       targets.push(...this.options.getStatusTargets())
     } else {
@@ -525,7 +539,24 @@ export class ImmersiveInteractionSystem {
     native: boolean,
     freshStatusPress = false
   ) {
+    // A consumed question gesture stays consumed if the panel advances or
+    // disappears before its duplicate native/synthesized event reaches us.
+    if (runtime.asyncQuestionPressActive || (
+      native !== runtime.asyncQuestionLastPressNative
+      && now - runtime.asyncQuestionLastPressAt < 250
+    )) return
     const intersection = this.raycast(runtime)
+    const asyncQuestionActivate = intersection?.object.userData.asyncQuestionActivate
+    if (typeof asyncQuestionActivate === 'function') {
+      // One hand pinch can also produce a native select event. Consume it once,
+      // even when a successful answer has already advanced the panel underneath.
+      runtime.asyncQuestionPressActive = true
+      runtime.asyncQuestionLastPressAt = now
+      runtime.asyncQuestionLastPressNative = native
+      asyncQuestionActivate()
+      return
+    }
+    if (intersection?.object.userData.asyncQuestionBlocker === true) return
     if (intersection?.object.userData.statusMenu === true) {
       this.options.onStatusToggle('fallback')
       return
@@ -1341,6 +1372,7 @@ export class ImmersiveInteractionSystem {
       return
     }
     runtime.pinching = false
+    if (!runtime.statusPressActive) runtime.asyncQuestionPressActive = false
     runtime.selecting = false
     this.model.selectEnd(runtime.id)
     if (runtime.grabbedBy === 'pinch') {
@@ -1438,12 +1470,16 @@ export class ImmersiveInteractionSystem {
       fullyOpen: this.options.isStatusFullyOpen?.() ?? false
     })
     this.updateStatusHandEngagement()
+    let asyncQuestionHover: Mesh | null = null
     for (const runtime of this.sources) {
       this.statusActions.updatePress(
         runtime.id,
         runtime.statusPressActive
       )
       const intersection = this.raycast(runtime)
+      if (typeof intersection?.object.userData.asyncQuestionActivate === 'function') {
+        asyncQuestionHover = intersection.object as Mesh
+      }
       this.model.hover(
         runtime.id,
         intersection ? this.hitFromObject(intersection.object) : null
@@ -1477,6 +1513,7 @@ export class ImmersiveInteractionSystem {
       }
     }
     this.updateStatusPressedVisual()
+    this.options.onAsyncQuestionHover?.(asyncQuestionHover)
     this.updateHandOutlines()
     this.updateInputCapabilities()
     this.updateStatusGesture(now)

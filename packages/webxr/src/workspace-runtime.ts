@@ -1,5 +1,6 @@
 import {
   notificationThreadId,
+  notificationTurnId,
   type CodexRpcConnectionState,
   type CodexRpcNotification,
   CodexRpcClient
@@ -8,7 +9,11 @@ import type {
   GetAccountRateLimitsResponse,
   Thread,
   ThreadReadResponse,
-  ThreadResumeResponse
+  ThreadResumeResponse,
+  TurnStartParams,
+  TurnStartResponse,
+  TurnSteerParams,
+  TurnSteerResponse
 } from '@codori/client/shared/generated/codex-app-server/v2'
 import {
   mergeAccountRateLimits,
@@ -56,6 +61,7 @@ import {
 } from './panel-model'
 import type { RealtimeVisualActivity } from './light-model'
 import type { SpatialPoint } from './panel-layout'
+import { AsyncQuestionModel, type AsyncQuestionAction, type AsyncQuestionSnapshot } from './async-question-model'
 
 export type WorkspaceRuntimeSnapshot = {
   connection: CodexRpcConnectionState
@@ -67,6 +73,7 @@ export type WorkspaceRuntimeSnapshot = {
   thread: Thread | null
   rateLimits: RateLimitBucket[]
   context: ContextWindowState
+  asyncQuestions: AsyncQuestionSnapshot
 }
 
 export type WorkspaceRuntimeOptions = {
@@ -187,6 +194,8 @@ export class WorkspaceRuntime {
   private readonly clearInterval: typeof globalThis.clearInterval
 
   private readonly panelModel = new SpatialPanelModel()
+  private readonly asyncQuestions = new AsyncQuestionModel()
+  private activeTurnId: string | null = null
 
   private toolStore: ToolItemStore = createToolItemStore()
 
@@ -213,6 +222,7 @@ export class WorkspaceRuntime {
   private backgroundTerminals: BackgroundTerminalModel[] = []
 
   private suspended = false
+  private disposed = false
 
   private backgroundRefresh: Promise<void> | null = null
 
@@ -261,11 +271,13 @@ export class WorkspaceRuntime {
         primary: bucket.primary ? { ...bucket.primary } : null,
         secondary: bucket.secondary ? { ...bucket.secondary } : null
       })),
-      context: resolveContextWindowState(this.tokenUsage, null)
+      context: resolveContextWindowState(this.tokenUsage, null),
+      asyncQuestions: this.asyncQuestions.snapshot()
     }
   }
 
   private emit() {
+    if (this.disposed) return
     const snapshot = this.snapshot()
     for (const listener of this.listeners) {
       listener(snapshot)
@@ -273,6 +285,7 @@ export class WorkspaceRuntime {
   }
 
   async start() {
+    if (this.disposed) throw new Error('This immersive workspace has been closed.')
     if (!this.releaseNotification) {
       this.releaseNotification = this.client.subscribe(notification => {
         this.handleNotification(notification)
@@ -308,6 +321,14 @@ export class WorkspaceRuntime {
       throw new Error('Immersive Codori requires a materialized thread.')
     }
     this.thread = response.thread
+    this.activeTurnId = [...response.thread.turns].reverse().find(turn => turn.status === 'inProgress')?.id ?? null
+    for (const turn of response.thread.turns) {
+      for (const item of turn.items) {
+        if (item.type === 'agentMessage' && item.questions?.length) {
+          this.asyncQuestions.receive(item.id, item.questions, false)
+        }
+      }
+    }
     this.seedRunningItems(response.thread)
     try {
       const rateLimits = await this.client.request<GetAccountRateLimitsResponse>(
@@ -477,12 +498,14 @@ export class WorkspaceRuntime {
         this.activity = 'idle'
         break
       case 'turn/started':
+        this.activeTurnId = notificationTurnId(notification)
         if (!this.realtimeStarted) {
           this.activity = 'working'
         }
         void this.refreshBackgroundTerminals()
         break
       case 'turn/completed':
+        if (!notificationTurnId(notification) || notificationTurnId(notification) === this.activeTurnId) this.activeTurnId = null
         if (!this.realtimeStarted) {
           this.activity = 'idle'
         }
@@ -490,6 +513,12 @@ export class WorkspaceRuntime {
         break
       case 'item/started':
       case 'item/completed':
+        if (notification.method === 'item/completed') {
+          const item = (notification.params as { item?: import('@codori/client/shared/generated/codex-app-server/v2').ThreadItem }).item
+          if (item?.type === 'agentMessage' && item.questions?.length) {
+            this.asyncQuestions.receive(item.id, item.questions)
+          }
+        }
         void this.refreshBackgroundTerminals()
         break
     }
@@ -553,6 +582,7 @@ export class WorkspaceRuntime {
   }
 
   setSuspended(suspended: boolean) {
+    if (this.disposed) return
     this.suspended = suspended
     if (suspended) {
       this.stopTimers()
@@ -600,7 +630,52 @@ export class WorkspaceRuntime {
     }
   }
 
+  async handleAsyncQuestionAction(action: AsyncQuestionAction) {
+    if (this.disposed) return
+    if (action.type === 'open') this.asyncQuestions.open(action.id)
+    else if (action.type === 'dismiss') this.asyncQuestions.dismiss()
+    else if (action.type === 'answer') this.asyncQuestions.answer(action.index, action.text, action.id)
+    else {
+      const submission = this.asyncQuestions.beginSubmit(action.index, action.text)
+      if (!submission) return
+      this.emit()
+      const threadId = this.options.identity.threadId
+      const input = [{ type: 'text' as const, text: submission.text, text_elements: [] }]
+      const clientUserMessageId = crypto.randomUUID()
+      const requireActiveWorkspace = () => {
+        if (this.disposed || this.suspended) throw new Error('Resume the immersive workspace before sending your answer.')
+      }
+      const start = async () => {
+        requireActiveWorkspace()
+        const response = await this.client.request<TurnStartResponse>('turn/start', {
+          threadId, clientUserMessageId, input
+        } satisfies TurnStartParams)
+        if (!this.disposed) this.activeTurnId = response.turn.id
+      }
+      try {
+        requireActiveWorkspace()
+        if (this.activeTurnId) {
+          try {
+            await this.client.request<TurnSteerResponse>('turn/steer', {
+              threadId, expectedTurnId: this.activeTurnId, clientUserMessageId, input
+            } satisfies TurnSteerParams)
+          } catch (error) {
+            if (!/no active turn to steer|active turn is no longer available/i.test(error instanceof Error ? error.message : String(error))) throw error
+            await start()
+          }
+        } else {
+          await start()
+        }
+        this.asyncQuestions.finishSubmit(submission.id, submission.index)
+      } catch (error) {
+        this.asyncQuestions.finishSubmit(submission.id, submission.index, error instanceof Error ? error.message : String(error))
+      }
+    }
+    this.emit()
+  }
+
   async dispose() {
+    this.disposed = true
     this.stopTimers()
     this.releaseNotification?.()
     this.releaseNotification = null
