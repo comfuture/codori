@@ -37,6 +37,46 @@
 
 :root {
   --app-viewport-height: 100dvh;
+  --composer-skill-pattern: #8b5cbe;
+  --composer-skill-selected: #7525ad;
+  --composer-skill-background: rgb(147 51 234 / 16%);
+  --composer-mention-pattern: #4c79b2;
+  --composer-plugin-selected: #1d4ed8;
+  --composer-plugin-background: rgb(59 130 246 / 16%);
+  --composer-link: #1d4ed8;
+}
+
+.dark {
+  --composer-skill-pattern: #b6a0e5;
+  --composer-skill-selected: #dcc6ff;
+  --composer-skill-background: rgb(168 85 247 / 24%);
+  --composer-mention-pattern: #89b5e9;
+  --composer-plugin-selected: #bfdcff;
+  --composer-plugin-background: rgb(59 130 246 / 24%);
+  --composer-link: #93c5fd;
+}
+
+textarea.cd-composer::highlight(codori-composer-skill-pattern) {
+  color: var(--composer-skill-pattern);
+}
+
+textarea.cd-composer::highlight(codori-composer-mention-pattern) {
+  color: var(--composer-mention-pattern);
+}
+
+textarea.cd-composer::highlight(codori-composer-selected-skill) {
+  color: var(--composer-skill-selected);
+  background-color: var(--composer-skill-background);
+}
+
+textarea.cd-composer::highlight(codori-composer-selected-plugin) {
+  color: var(--composer-plugin-selected);
+  background-color: var(--composer-plugin-background);
+}
+
+textarea.cd-composer::highlight(codori-composer-link) {
+  color: var(--composer-link);
+  text-decoration: underline;
 }
 
 html,
