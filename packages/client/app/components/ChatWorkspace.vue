@@ -66,6 +66,7 @@ import {
   type ThreadReactivationReason
 } from '../utils/thread-reactivation'
 import { useChatAttachments, type DraftAttachment } from '../composables/useChatAttachments'
+import { useComposerHighlights } from '../composables/useComposerHighlights'
 import { useChatGoalWorkflow } from '../composables/useChatGoalWorkflow'
 import { useChatPlanWorkflow } from '../composables/useChatPlanWorkflow'
 import { useChatReviewWorkflow } from '../composables/useChatReviewWorkflow'
@@ -1827,6 +1828,13 @@ const getPromptTextarea = () => {
 
   return null
 }
+
+useComposerHighlights({
+  getTextarea: getPromptTextarea,
+  text: input,
+  skills: insertedSkillMentions,
+  mentions: insertedMentionSelections
+})
 
 const syncPromptSelectionFromDom = () => {
   const textarea = getPromptTextarea()
@@ -5702,9 +5710,10 @@ watch(
             :placeholder="composerPlaceholder"
             :error="submitError"
             :disabled="isComposerDisabled"
+            :spellcheck="false"
             :ui="{
               root: 'px-2.5 pt-1 pb-2',
-              base: 'px-2.5 pt-1 pb-1.5'
+              base: 'cd-composer px-2.5 pt-1 pb-1.5'
             }"
             autoresize
             @submit.prevent="sendMessage"

@@ -36,7 +36,19 @@ policy may still deny or release it, and manual screen-off/background capture
 requires the separate native companion tracked in issue #91.
 
 The composer keeps transient microphone, output, stop, and live-status
-controls. `/settings/voice` lists Codex-compatible voices even without a
+controls. On browsers supporting OpaqueRange and CSS Custom Highlights,
+`$` skill patterns appear in light purple and `@` mention patterns in light
+blue. Explicitly selected skills and plugins also receive a translucent
+background at their selected position; manually typed copies remain patterns.
+HTTP(S) URLs appear in blue with an underline, including Markdown link
+destinations, with surrounding delimiters and sentence punctuation excluded.
+URL query symbols do not become skill or mention highlights. Bare `www.` and
+other URL schemes are outside this highlighting grammar. Browsers without
+these APIs retain the plain textarea and the same autocomplete behavior.
+Native spell checking is disabled in the composer so skill and plugin names
+do not receive spelling-error underlines.
+
+`/settings/voice` lists Codex-compatible voices even without a
 materialized workspace. Its default omits the per-session voice override,
 while an explicit selection is persisted only in browser storage and applies
 to the next conversation. Nine compact Opus samples provide local previews
