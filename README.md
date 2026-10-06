@@ -60,7 +60,7 @@ Prefer not to install anything?
 npx @codori/server start
 ```
 
-Requires Node.js 22.22.2+. A matching Codex CLI ships with the package, so a
+Requires Node.js 22.22.3+, 24.15.0+, or 26+ (supported release lines). A matching Codex CLI ships with the package, so a
 separate `codex` install is not required.
 
 ## Who this is for
