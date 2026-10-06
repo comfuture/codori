@@ -52,6 +52,16 @@ const collectLinkRanges = (text: string): ComposerHighlightRange[] => {
   return ranges
 }
 
+const matchesSelectedToken = (
+  token: string,
+  start: number,
+  selection: { end: number },
+  selectedToken: string
+) => selection.end === start + selectedToken.length
+  && token.startsWith(selectedToken)
+  // Only punctuation may follow the selected span; token extensions stay patterns.
+  && /^[.,!?;:…。，！？、；：)\]}"'`]*$/u.test(token.slice(selectedToken.length))
+
 /** Offsets are UTF-16 indices, matching textarea selection and OpaqueRange. */
 export const collectComposerHighlightRanges = (
   text: string,
@@ -60,31 +70,32 @@ export const collectComposerHighlightRanges = (
 ): ComposerHighlightRange[] => {
   const links = collectLinkRanges(text)
   const ranges = [...links]
-  const selectedSkills = new Map(skills.map(selection => [`${selection.start}:${selection.end}`, selection]))
+  const selectedSkills = new Map(skills.map(selection => [selection.start, selection]))
   const selectedPlugins = new Map(mentions
     .filter(selection => selection.kind === 'plugin')
-    .map(selection => [`${selection.start}:${selection.end}`, selection]))
+    .map(selection => [selection.start, selection]))
 
   for (const token of text.matchAll(/\S+/gu)) {
     const start = token.index
     const end = start + token[0].length
     if (links.some(link => start < link.end && end > link.start)) continue
 
-    const key = `${start}:${end}`
-    if (token[0].startsWith('$') && findActiveSkillAutocompleteMatch(text, end, end)) {
-      const selected = selectedSkills.get(key)
-      ranges.push({
-        start,
-        end,
-        kind: selected && token[0] === `$${selected.name}` ? 'selected-skill' : 'skill-pattern'
-      })
+    if (token[0].startsWith('$')) {
+      const selected = selectedSkills.get(start)
+      const selectedToken = selected ? `$${selected.name}` : ''
+      if (selected && matchesSelectedToken(token[0], start, selected, selectedToken)
+        && findActiveSkillAutocompleteMatch(selectedToken, selectedToken.length, selectedToken.length)) {
+        ranges.push({ start, end: selected.end, kind: 'selected-skill' })
+      } else if (findActiveSkillAutocompleteMatch(text, end, end)) {
+        ranges.push({ start, end, kind: 'skill-pattern' })
+      }
     } else if (token[0].startsWith('@') && findActiveMentionAutocompleteMatch(text, end, end)) {
-      const selected = selectedPlugins.get(key)
-      ranges.push({
-        start,
-        end,
-        kind: selected && token[0] === selected.token ? 'selected-plugin' : 'mention-pattern'
-      })
+      const selected = selectedPlugins.get(start)
+      if (selected && matchesSelectedToken(token[0], start, selected, selected.token)) {
+        ranges.push({ start, end: selected.end, kind: 'selected-plugin' })
+      } else {
+        ranges.push({ start, end, kind: 'mention-pattern' })
+      }
     }
   }
   return ranges.sort((left, right) => left.start - right.start)
