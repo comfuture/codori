@@ -23,6 +23,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   respond: [payload: { requestId: string | number, response: unknown }]
   asyncRespond: [answer: AsyncUserAnswer]
+  asyncDraftChange: [draft: AsyncUserAnswer]
   asyncDismiss: []
 }>()
 
@@ -95,8 +96,10 @@ const handleOpenChange = (nextOpen: boolean) => {
       <AsyncQuestions
         :questions="asyncRequest.questions"
         :question-index="asyncRequest.questionIndex"
+        :answer-draft="asyncRequest.answerDraft"
         :disabled="asyncSubmitting"
         @reply="emit('asyncRespond', $event)"
+        @draft-change="emit('asyncDraftChange', $event)"
       />
       <p
         v-if="asyncError"

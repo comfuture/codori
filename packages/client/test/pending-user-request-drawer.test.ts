@@ -2,9 +2,10 @@
 // @vitest-environment jsdom
 
 import { mount } from '@vue/test-utils'
-import { defineComponent, h, nextTick } from 'vue'
+import { defineComponent, h, nextTick, ref } from 'vue'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import PendingUserRequestDrawer from '../app/components/PendingUserRequestDrawer.vue'
+import { useAsyncUserQuestions, type AsyncUserAnswer } from '../app/composables/useAsyncUserQuestions'
 import type { PendingUserRequest, PendingUserRequestState } from '../shared/pending-user-request'
 
 const DrawerStub = defineComponent({
@@ -232,6 +233,49 @@ describe('pending user request drawer', () => {
     expect(wrapper.emitted('asyncRespond')).toBeUndefined()
     await wrapper.get('button[type="button"]').trigger('click')
     expect(wrapper.emitted('asyncDismiss')).toHaveLength(1)
+  })
+
+  it.each(['dismiss', 'pending request'] as const)('restores an unsent custom answer after %s unmounts the async form', async (interruption) => {
+    const controller = useAsyncUserQuestions(`drawer-draft-${interruption}`, ref('thread'))
+    const questions = [
+      { title: 'Which direction?', options: ['Small change'] },
+      { title: 'Any constraints?', options: null }
+    ]
+    controller.receive({ id: 'async-draft', questions }, 'turn-1')
+    const wrapper = mountDrawer(null)
+    await wrapper.setProps({
+      asyncRequest: controller.current.value,
+      onAsyncDraftChange: (draft: AsyncUserAnswer) => controller.updateDraft('async-draft', draft.questionIndex, draft.text)
+    })
+    await wrapper.get('textarea').setValue('  Keep the existing layout\nAnd spacing  ')
+
+    if (interruption === 'dismiss') {
+      controller.dismiss()
+      await wrapper.setProps({ asyncRequest: null })
+    } else {
+      await wrapper.setProps({ request: {
+        kind: 'requestUserInput', requestId: 'blocking', threadId: 'thread',
+        turnId: 'turn-1', itemId: 'blocking', submitting: false, questions: []
+      } })
+    }
+    expect(wrapper.find('textarea').exists()).toBe(false)
+    controller.open({ id: 'async-draft', questions })
+    await wrapper.setProps({ request: null, asyncRequest: controller.current.value })
+    expect(wrapper.get<HTMLTextAreaElement>('textarea').element.value).toBe('  Keep the existing layout\nAnd spacing  ')
+    await wrapper.get('form').trigger('submit')
+    await wrapper.setProps({ asyncError: 'Send failed' })
+    expect(wrapper.get<HTMLTextAreaElement>('textarea').element.value).toBe('  Keep the existing layout\nAnd spacing  ')
+
+    controller.answered('async-draft', 0)
+    await nextTick()
+    expect(wrapper.get<HTMLTextAreaElement>('textarea').element.value).toBe('')
+    expect(wrapper.text()).toContain('Any constraints?')
+    await wrapper.get('textarea').setValue('Keep it accessible')
+    controller.dismiss()
+    await wrapper.setProps({ asyncRequest: null })
+    controller.open({ id: 'async-draft', questions })
+    await wrapper.setProps({ asyncRequest: controller.current.value })
+    expect(wrapper.get<HTMLTextAreaElement>('textarea').element.value).toBe('Keep it accessible')
   })
 
   it('renders request-user-input as a sequential flow and emits structured answers on the last answer', async () => {

@@ -4292,10 +4292,9 @@ const respondToAsyncQuestion = async (answer: AsyncUserAnswer) => {
   asyncAnswerError.value = null
   try {
     const sent = await submitMessage({ text: answer.text, threadId })
-    if (activeThreadId.value !== threadId || activeAsyncQuestion.value?.id !== request.id) return
     if (sent) {
-      asyncQuestions.answered(request.id, answer.questionIndex)
-    } else {
+      asyncQuestions.answered(request.id, answer.questionIndex, threadId)
+    } else if (activeThreadId.value === threadId && activeAsyncQuestion.value?.id === request.id) {
       asyncAnswerError.value = error.value ?? 'The response was not sent. Please try again.'
     }
   } catch (caughtError) {
@@ -4303,6 +4302,11 @@ const respondToAsyncQuestion = async (answer: AsyncUserAnswer) => {
       asyncAnswerError.value = caughtError instanceof Error ? caughtError.message : String(caughtError)
     }
   }
+}
+
+const updateAsyncQuestionDraft = (draft: AsyncUserAnswer) => {
+  const request = activeAsyncQuestion.value
+  if (request) asyncQuestions.updateDraft(request.id, draft.questionIndex, draft.text)
 }
 
 const queueCurrentPrompt = async () => {
@@ -6159,6 +6163,7 @@ watch(
     :async-error="asyncAnswerError"
     @respond="respondToPendingRequest"
     @async-respond="respondToAsyncQuestion"
+    @async-draft-change="updateAsyncQuestionDraft"
     @async-dismiss="asyncQuestions.dismiss()"
   />
 
