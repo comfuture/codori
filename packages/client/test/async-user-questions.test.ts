@@ -52,6 +52,55 @@ describe('async question drawer lifecycle', () => {
     expect(controller.current.value?.questions).toEqual(question.questions)
   })
 
+  it.each(['dismiss', 'auto-close', 'replacement'] as const)('resumes the next unanswered question after %s and a fresh badge reopen', (close) => {
+    const threadId = ref<string | null>('thread')
+    const workspaceKey = `resume-${close}`
+    const controller = useAsyncUserQuestions(workspaceKey, threadId)
+    const questions = [
+      { title: 'Choose a color', options: ['Blue'] }, { title: 'Why?', options: null }
+    ]
+    controller.receive({ id: 'multiple', questions }, 'turn-1')
+    controller.answered('multiple', 0)
+    if (close === 'dismiss') controller.dismiss()
+    else if (close === 'auto-close') {
+      controller.turnStarted('turn-2')
+      controller.turnStarted('turn-3')
+    } else controller.receive(question, 'turn-2')
+
+    // Transcript badges recreate the request without a question index.
+    const remounted = useAsyncUserQuestions(workspaceKey, threadId)
+    remounted.open({ id: 'multiple', questions })
+    expect(remounted.current.value?.questionIndex).toBe(1)
+    remounted.answered('multiple', 0)
+    expect(remounted.current.value?.questionIndex).toBe(1)
+    remounted.answered('multiple', 1)
+    expect(remounted.current.value).toBeNull()
+    remounted.open({ id: 'multiple', questions })
+    expect(remounted.current.value).toBeNull()
+  })
+
+  it('scopes saved answer progress by workspace, thread, and item', () => {
+    const threadId = ref<string | null>('first')
+    const controller = useAsyncUserQuestions('progress-scoped', threadId)
+    const questions = [
+      { title: 'Choose a color', options: ['Blue'] }, { title: 'Why?', options: null }
+    ]
+    controller.open({ id: 'multiple', questions })
+    controller.answered('multiple', 0)
+    controller.dismiss()
+    threadId.value = 'second'
+    controller.open({ id: 'multiple', questions })
+    expect(controller.current.value?.questionIndex ?? 0).toBe(0)
+    threadId.value = 'first'
+    controller.open({ id: 'other-item', questions })
+    expect(controller.current.value?.questionIndex ?? 0).toBe(0)
+    controller.open({ id: 'multiple', questions })
+    expect(controller.current.value?.questionIndex).toBe(1)
+    const otherWorkspace = useAsyncUserQuestions('other-progress-workspace', threadId)
+    otherWorkspace.open({ id: 'multiple', questions })
+    expect(otherWorkspace.current.value?.questionIndex ?? 0).toBe(0)
+  })
+
   it('keeps thread state separate and a previous answer cannot close a newer question', () => {
     const threadId = ref<string | null>('first')
     const controller = useAsyncUserQuestions('scoped', threadId)
@@ -63,5 +112,70 @@ describe('async question drawer lifecycle', () => {
     expect(controller.current.value?.id).toBe('second-question')
     threadId.value = 'first'
     expect(controller.current.value?.id).toBe(question.id)
+  })
+
+  it('isolates drafts by workspace, thread, item, and question until an answer is acknowledged', () => {
+    const threadId = ref<string | null>('first')
+    const controller = useAsyncUserQuestions('draft-scoped', threadId)
+    const questions = [
+      { title: 'Choose a color', options: ['Blue'] }, { title: 'Why?', options: null }
+    ]
+    controller.open({ id: 'multiple', questions })
+    controller.updateDraft('multiple', 0, 'My first answer')
+    controller.updateDraft('wrong-item', 0, 'Wrong item')
+    controller.updateDraft('multiple', 1, 'Wrong question')
+    controller.dismiss()
+    controller.open({ id: 'other-item', questions })
+    expect(controller.current.value?.answerDraft).toBe('')
+    controller.updateDraft('other-item', 0, 'Another answer')
+    threadId.value = 'second'
+    controller.open({ id: 'multiple', questions })
+    expect(controller.current.value?.answerDraft).toBe('')
+    controller.updateDraft('multiple', 0, 'Another thread')
+    threadId.value = 'first'
+    controller.open({ id: 'multiple', questions })
+    expect(controller.current.value?.answerDraft).toBe('My first answer')
+    controller.answered('multiple', 0)
+    expect(controller.current.value?.answerDraft).toBe('')
+    controller.updateDraft('multiple', 1, 'My second answer')
+    controller.dismiss()
+    const remounted = useAsyncUserQuestions('draft-scoped', threadId)
+    remounted.open({ id: 'multiple', questions })
+    expect(remounted.current.value?.answerDraft).toBe('My second answer')
+    remounted.open({ id: 'other-item', questions })
+    expect(remounted.current.value?.answerDraft).toBe('Another answer')
+    const otherWorkspace = useAsyncUserQuestions('other-draft-workspace', threadId)
+    otherWorkspace.open({ id: 'multiple', questions })
+    expect(otherWorkspace.current.value?.answerDraft).toBe('')
+  })
+
+  it.each(['dismiss', 'replacement', 'thread navigation'] as const)('records a successful late answer after %s without changing another request', (interruption) => {
+    const threadId = ref<string | null>('first')
+    const controller = useAsyncUserQuestions(`late-answer-${interruption}`, threadId)
+    const questions = [
+      { title: 'Choose a color', options: ['Blue'] }, { title: 'Why?', options: null }
+    ]
+    controller.open({ id: 'multiple', questions })
+    controller.updateDraft('multiple', 0, 'Sent answer')
+    controller.dismiss()
+    if (interruption === 'thread navigation') threadId.value = 'second'
+    if (interruption !== 'dismiss') {
+      controller.open({ id: interruption === 'replacement' ? 'newer' : 'multiple', questions })
+      controller.updateDraft(controller.current.value!.id, 0, 'Newer draft')
+    }
+    controller.answered('multiple', 0, 'first')
+    if (interruption === 'dismiss') expect(controller.current.value).toBeNull()
+    else {
+      expect(controller.current.value?.questionIndex).toBe(0)
+      expect(controller.current.value?.answerDraft).toBe('Newer draft')
+    }
+    threadId.value = 'first'
+    controller.open({ id: 'multiple', questions })
+    expect(controller.current.value?.questionIndex).toBe(1)
+    expect(controller.current.value?.answerDraft).toBe('')
+    controller.updateDraft('multiple', 1, 'Next answer')
+    controller.answered('multiple', 0, 'first')
+    expect(controller.current.value?.questionIndex).toBe(1)
+    expect(controller.current.value?.answerDraft).toBe('Next answer')
   })
 })

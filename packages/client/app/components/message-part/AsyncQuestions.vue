@@ -6,17 +6,28 @@ import type { AsyncUserAnswer } from '../../composables/useAsyncUserQuestions'
 const props = defineProps<{
   questions: AsyncUserInputQuestion[]
   questionIndex?: number
+  answerDraft?: string
   disabled?: boolean
 }>()
 
 const emit = defineEmits<{
   reply: [answer: AsyncUserAnswer]
+  draftChange: [draft: AsyncUserAnswer]
 }>()
 
-const customAnswer = ref('')
+const localAnswer = ref(props.answerDraft ?? '')
 const currentIndex = computed(() => props.questionIndex ?? 0)
 const question = computed(() => props.questions[currentIndex.value])
-watch(() => [props.questions, currentIndex.value], () => { customAnswer.value = '' })
+const customAnswer = computed({
+  get: () => localAnswer.value,
+  set: (text: string) => {
+    localAnswer.value = text
+    emit('draftChange', { text, questionIndex: currentIndex.value })
+  }
+})
+watch(() => [props.questions, currentIndex.value, props.answerDraft], () => {
+  localAnswer.value = props.answerDraft ?? ''
+})
 
 const sendAnswer = (answer: string) => {
   if (props.disabled || !question.value || !answer.trim()) return

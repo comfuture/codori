@@ -5,12 +5,15 @@ export type AsyncUserQuestionRequest = {
   id: string
   questions: AsyncUserInputQuestion[]
   questionIndex?: number
+  answerDraft?: string
 }
 
 export type AsyncUserAnswer = { text: string, questionIndex: number }
 
 type QuestionSession = {
   current: AsyncUserQuestionRequest | null
+  nextQuestionByItem: Map<string, number>
+  draftsByItem: Map<string, Map<number, string>>
   seenItems: Set<string>
   followingTurns: Set<string>
   seenTurns: Set<string>
@@ -19,18 +22,30 @@ type QuestionSession = {
 const sessions = new Map<string, QuestionSession>()
 
 export const useAsyncUserQuestions = (workspaceKey: string, threadId: Ref<string | null>) => {
-  const session = computed(() => {
-    const key = `${workspaceKey}::${threadId.value ?? '__draft__'}`
+  const getSession = (id: string | null) => {
+    const key = `${workspaceKey}::${id ?? '__draft__'}`
     let value = sessions.get(key)
     if (!value) {
-      value = reactive({ current: null, seenItems: new Set<string>(), followingTurns: new Set<string>(), seenTurns: new Set<string>() })
+      value = reactive({
+        current: null,
+        nextQuestionByItem: new Map<string, number>(),
+        draftsByItem: new Map<string, Map<number, string>>(),
+        seenItems: new Set<string>(),
+        followingTurns: new Set<string>(),
+        seenTurns: new Set<string>()
+      })
       sessions.set(key, value)
     }
     return value
-  })
+  }
+  const session = computed(() => getSession(threadId.value))
 
   const open = (request: AsyncUserQuestionRequest) => {
-    session.value.current = request
+    const questionIndex = session.value.nextQuestionByItem.get(request.id) ?? request.questionIndex ?? 0
+    if (questionIndex >= request.questions.length) return
+    session.value.nextQuestionByItem.set(request.id, questionIndex)
+    const answerDraft = session.value.draftsByItem.get(request.id)?.get(questionIndex) ?? ''
+    session.value.current = { ...request, questionIndex, answerDraft }
     session.value.followingTurns.clear()
   }
   const dismiss = (id?: string) => {
@@ -50,12 +65,31 @@ export const useAsyncUserQuestions = (workspaceKey: string, threadId: Ref<string
     if (session.value.followingTurns.size >= 2) dismiss()
   }
 
-  const answered = (id: string, questionIndex: number) => {
+  const updateDraft = (id: string, questionIndex: number, text: string) => {
     const request = session.value.current
     if (!request || request.id !== id || (request.questionIndex ?? 0) !== questionIndex) return
-    if (questionIndex + 1 >= request.questions.length) dismiss(id)
-    else request.questionIndex = questionIndex + 1
+    let drafts = session.value.draftsByItem.get(id)
+    if (!drafts) {
+      drafts = new Map<number, string>()
+      session.value.draftsByItem.set(id, drafts)
+    }
+    drafts.set(questionIndex, text)
+    request.answerDraft = text
   }
 
-  return { current: computed(() => session.value.current), open, dismiss, receive, turnStarted, answered }
+  const answered = (id: string, questionIndex: number, answeredThreadId = threadId.value) => {
+    const origin = getSession(answeredThreadId)
+    if (origin.nextQuestionByItem.get(id) !== questionIndex) return
+    origin.nextQuestionByItem.set(id, questionIndex + 1)
+    origin.draftsByItem.get(id)?.delete(questionIndex)
+    const request = origin.current
+    if (!request || request.id !== id || (request.questionIndex ?? 0) !== questionIndex) return
+    if (questionIndex + 1 >= request.questions.length) origin.current = null
+    else {
+      request.questionIndex = questionIndex + 1
+      request.answerDraft = origin.draftsByItem.get(id)?.get(questionIndex + 1) ?? ''
+    }
+  }
+
+  return { current: computed(() => session.value.current), open, dismiss, receive, turnStarted, updateDraft, answered }
 }
