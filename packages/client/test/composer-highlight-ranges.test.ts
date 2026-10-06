@@ -34,6 +34,32 @@ describe('composer highlight ranges', () => {
     ])
   })
 
+  it.each([',', '.', '!', '?', ';', ':', ')', ']', '}', '…', '。', '！？', '"', "'", '`'])('keeps selected spans when a trailing space becomes %s', (punctuation) => {
+    const beforeSkill = '$nuxt-ui '
+    const afterSkill = `$nuxt-ui${punctuation}`
+    const skills = reconcileSkillAutocompleteSelections(beforeSkill, afterSkill, [skill(0)])
+    expect(skills).toEqual([skill(0)])
+    expect(collectComposerHighlightRanges(afterSkill, skills)).toEqual([
+      { start: 0, end: 8, kind: 'selected-skill' }
+    ])
+
+    const beforePlugin = '@google-drive '
+    const afterPlugin = `@google-drive${punctuation}`
+    const mentions = reconcileMentionAutocompleteSelections(beforePlugin, afterPlugin, [plugin(0)])
+    expect(mentions).toEqual([plugin(0)])
+    expect(collectComposerHighlightRanges(afterPlugin, [], mentions)).toEqual([
+      { start: 0, end: 13, kind: 'selected-plugin' }
+    ])
+  })
+
+  it('keeps punctuation outside selected spans without promoting manually typed copies', () => {
+    const text = '$nuxt-ui, $nuxt-ui, @google-drive! @google-drive!'
+    expect(summarize(text, [skill(0)], [plugin(text.indexOf('@google-drive'))])).toEqual([
+      ['$nuxt-ui', 'selected-skill'], ['@google-drive', 'selected-plugin'],
+      ['@google-drive!', 'mention-pattern']
+    ])
+  })
+
   it('uses UTF-16 offsets and the existing selection reconciliation after prefix edits', () => {
     const before = '$nuxt-ui @google-drive'
     const after = `한글 😀 ${before}`
@@ -52,6 +78,32 @@ describe('composer highlight ranges', () => {
     expect(summarize('$nuxt-ui @google-drive', [skill(-1), skill(0, 'different')], [
       { ...plugin(9), token: '@wrong' }
     ])).toEqual([['$nuxt-ui', 'skill-pattern'], ['@google-drive', 'mention-pattern']])
+  })
+
+  it.each(['-extra', '.extra', ':extra', '/extra', '_extra', '2'])('rejects selections inside extended tokens ending in %s', (suffix) => {
+    const skillText = `$nuxt-ui${suffix}`
+    const pluginText = `@google-drive${suffix}`
+    expect(summarize(skillText, [skill(0)])).toEqual([[skillText, 'skill-pattern']])
+    expect(summarize(pluginText, [], [plugin(0)])).toEqual([[pluginText, 'mention-pattern']])
+  })
+
+  it('rejects stale bounds and token text even beside punctuation', () => {
+    expect(summarize('$nuxt-ui, @google-drive!', [
+      { ...skill(0), end: 100 }, skill(-1), skill(0, 'different')
+    ], [{ ...plugin(10), token: '@wrong' }])).toEqual([['@google-drive!', 'mention-pattern']])
+    expect(summarize('$nuxt-ui', [{ ...skill(0), end: 100 }])).toEqual([['$nuxt-ui', 'skill-pattern']])
+    expect(summarize('@google-drive', [], [{ ...plugin(0), end: 100 }])).toEqual([['@google-drive', 'mention-pattern']])
+    expect(summarize('$bad!', [skill(0, 'bad!')])).toEqual([])
+  })
+
+  it('does not highlight selections inside URLs or tokens adjoining URLs', () => {
+    const text = 'https://example.com/?skill=$nuxt-ui&plugin=@google-drive @google-drive,https://other.example'
+    expect(summarize(text, [skill(text.indexOf('$nuxt-ui'))], [
+      plugin(text.indexOf('@google-drive')), plugin(text.lastIndexOf('@google-drive'))
+    ])).toEqual([
+      ['https://example.com/?skill=$nuxt-ui&plugin=@google-drive', 'link'],
+      ['https://other.example', 'link']
+    ])
   })
 
   it('keeps URL queries and nested URL text out of skill and mention ranges', () => {
