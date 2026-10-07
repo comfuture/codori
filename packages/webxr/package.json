@@ -20,7 +20,7 @@
     "url": "https://github.com/comfuture/codori/issues"
   },
   "engines": {
-    "node": "^22.22.3 || ^24.15.0 || >=26.0.0"
+    "node": ">=22.22.3 <23.0.0 || ^24.15.0 || >=26.0.0"
   },
   "keywords": [
     "codori",

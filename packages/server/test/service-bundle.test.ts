@@ -11,10 +11,16 @@ import {
   getServiceBundleSelectionPath,
   prepareServiceBundle,
   readServiceBundleSelection,
+  satisfiesNodeEngine,
   type ServiceBundleSelection
 } from '../src/service-bundle.js'
 
-const seedBundle = (metadataDirectory: string, directoryVersion: string, manifestVersion = directoryVersion) => {
+const seedBundle = (
+  metadataDirectory: string,
+  directoryVersion: string,
+  manifestVersion = directoryVersion,
+  nodeEngine = '>=22.22.2'
+) => {
   const packageDirectory = join(
     getServiceBundleDirectory(metadataDirectory, directoryVersion),
     'node_modules',
@@ -26,7 +32,7 @@ const seedBundle = (metadataDirectory: string, directoryVersion: string, manifes
   writeFileSync(join(packageDirectory, 'package.json'), JSON.stringify({
     name: '@codori/server',
     version: manifestVersion,
-    engines: { node: '>=22.22.2' },
+    engines: { node: nodeEngine },
     bin: { 'codori-server': 'dist/cli.js' }
   }))
 }
@@ -45,6 +51,21 @@ describe('managed service bundles', () => {
     expect(selection.entrypoint).toBe(
       join(getServiceBundleDirectory(metadataDirectory, '1.2.3'), 'node_modules', '@codori', 'server', 'dist', 'cli.js')
     )
+  })
+
+  it('prepares a service bundle using the published Node engine range', async () => {
+    const metadataDirectory = mkdtempSync(join(os.tmpdir(), 'codori-bundle-engine-'))
+    const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {
+      engines: { node: string }
+    }
+    seedBundle(metadataDirectory, '1.2.3', '1.2.3', manifest.engines.node)
+
+    await expect(prepareServiceBundle({
+      metadataDirectory,
+      version: '1.2.3',
+      nodePath: process.execPath,
+      npmPath: '/path/that/must/not/run'
+    })).resolves.toMatchObject({ version: '1.2.3', nodePath: process.execPath })
   })
 
   it('rejects a staged directory whose manifest does not match the requested version', async () => {
@@ -99,5 +120,60 @@ describe('managed service bundles', () => {
     expect(readFileSync(markerPath, 'utf8')).toBe('previous')
     expect(readServiceBundleSelection(metadataDirectory)).toEqual(previous)
     expect(readFileSync(join(metadataDirectory, 'update.log'), 'utf8')).toContain('"phase":"bootstrap-rollback"')
+  })
+})
+
+describe('Node engine compatibility', () => {
+  const supportedRange = '^22.22.3 || ^24.15.0 || >=26.0.0'
+
+  it.each(['22.22.3', 'v22.23.0', '24.15.0', 'v24.19.0', '26.0.0', '27.0.0'])(
+    'accepts supported Node %s',
+    version => expect(satisfiesNodeEngine(supportedRange, version)).toBe(true)
+  )
+
+  it.each(['20.20.0', '22.22.2', '23.0.0', '24.14.9', '25.0.0', '26.0.0-rc.1'])(
+    'rejects unsupported Node %s',
+    version => expect(satisfiesNodeEngine(supportedRange, version)).toBe(false)
+  )
+
+  it.each(['', 'not-a-version', 'v24', '24.15', '24.15.0junk', '24.15.0.1'])(
+    'rejects malformed Node version %j',
+    version => expect(satisfiesNodeEngine(supportedRange, version)).toBe(false)
+  )
+
+  it.each(['', '   ', 'not-a-range', '>=22.22.2 garbage', '^22.22.3 || invalid'])(
+    'rejects empty or malformed engine range %j',
+    range => expect(satisfiesNodeEngine(range, '24.19.0')).toBe(false)
+  )
+
+  it('keeps the published range equivalent while allowing legacy updaters to parse its minimum', () => {
+    const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')) as {
+      engines: { node: string }
+    }
+    // Existing installations run this minimum-only check before activating the new bundle.
+    // Preserve its accepted prefix, while the new validator enforces every range branch.
+    const legacyMinimum = manifest.engines.node.match(/^>=\s*(\d+\.\d+\.\d+)/u)?.[1]
+    expect(legacyMinimum).toBe('22.22.3')
+    for (const version of ['22.22.3', '24.15.0', '26.0.0']) {
+      const required = legacyMinimum!.split('.').map(Number)
+      const actual = version.split('.').map(Number)
+      const firstDifference = actual.findIndex((part, index) => part !== required[index])
+      expect(firstDifference === -1 || actual[firstDifference] > required[firstDifference], version).toBe(true)
+    }
+    for (const version of [
+      '22.22.2', '22.22.3', '22.23.0', '23.0.0-rc.1', '23.0.0',
+      '24.14.9', '24.15.0', '24.19.0', '25.0.0-rc.1', '25.0.0',
+      '26.0.0-rc.1', '26.0.0', '27.0.0'
+    ]) {
+      expect(satisfiesNodeEngine(manifest.engines.node, version), version)
+        .toBe(satisfiesNodeEngine(supportedRange, version))
+    }
+  })
+
+  it('preserves legacy minimum-version ranges without ignoring upper bounds', () => {
+    expect(satisfiesNodeEngine('>=22.22.2', 'v22.22.2')).toBe(true)
+    expect(satisfiesNodeEngine('>=22.22.2', '24.19.0')).toBe(true)
+    expect(satisfiesNodeEngine('>=22.22.2', '22.22.1')).toBe(false)
+    expect(satisfiesNodeEngine('>=22.22.2 <24', '24.19.0')).toBe(false)
   })
 })

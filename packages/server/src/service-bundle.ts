@@ -13,6 +13,7 @@ import {
 import { basename, dirname, join, resolve } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
+import satisfies from 'semver/functions/satisfies.js'
 
 export const SERVICE_PACKAGE_NAME = '@codori/server'
 export const DEFAULT_BUNDLE_PREPARATION_TIMEOUT_MS = 2 * 60 * 1_000
@@ -138,25 +139,8 @@ export const activateServiceBundleSelection = (
   writeJsonAtomic(getServiceBundleSelectionPath(metadataDirectory), selection)
 }
 
-const parseVersion = (version: string) => version.split('.').slice(0, 3).map((part) => {
-  const parsed = Number.parseInt(part, 10)
-  return Number.isFinite(parsed) ? parsed : 0
-})
-
-const satisfiesNodeEngine = (engine: string, nodeVersion: string) => {
-  const match = engine.trim().match(/^>=\s*(\d+\.\d+\.\d+)/u)
-  if (!match) {
-    return false
-  }
-  const required = parseVersion(match[1])
-  const actual = parseVersion(nodeVersion.replace(/^v/u, ''))
-  for (let index = 0; index < 3; index += 1) {
-    if (actual[index] !== required[index]) {
-      return actual[index] > required[index]
-    }
-  }
-  return true
-}
+export const satisfiesNodeEngine = (engine: string, nodeVersion: string) =>
+  engine.trim().length > 0 && satisfies(nodeVersion, engine)
 
 const resolveManifestEntrypoint = (
   manifest: PackageManifest,
