@@ -695,6 +695,7 @@ const awaitingAssistantOutput = ref(false)
 const sendMessageLocked = ref(false)
 const asyncQuestions = useAsyncUserQuestions(workspaceSessionKey, activeThreadId)
 const activeAsyncQuestion = asyncQuestions.current
+const asyncQuestionSubmitting = asyncQuestions.submitting
 const asyncAnswerError = ref<string | null>(null)
 const promptSelectionStart = ref(0)
 const promptSelectionEnd = ref(0)
@@ -4289,6 +4290,7 @@ const respondToAsyncQuestion = async (answer: AsyncUserAnswer) => {
   const request = activeAsyncQuestion.value
   const threadId = activeThreadId.value
   if (!request || !threadId) return
+  if (!asyncQuestions.beginAnswer(request.id, answer.questionIndex)) return
   asyncAnswerError.value = null
   try {
     const sent = await submitMessage({ text: answer.text, threadId })
@@ -4301,6 +4303,8 @@ const respondToAsyncQuestion = async (answer: AsyncUserAnswer) => {
     if (activeThreadId.value === threadId && activeAsyncQuestion.value?.id === request.id) {
       asyncAnswerError.value = caughtError instanceof Error ? caughtError.message : String(caughtError)
     }
+  } finally {
+    asyncQuestions.finishAnswer(request.id, answer.questionIndex, threadId)
   }
 }
 
@@ -6159,7 +6163,7 @@ watch(
   <PendingUserRequestDrawer
     :request="pendingRequest"
     :async-request="activeAsyncQuestion"
-    :async-submitting="sendMessageLocked || reviewStartPending"
+    :async-submitting="sendMessageLocked || reviewStartPending || asyncQuestionSubmitting"
     :async-error="asyncAnswerError"
     @respond="respondToPendingRequest"
     @async-respond="respondToAsyncQuestion"
