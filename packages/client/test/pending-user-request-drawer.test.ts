@@ -278,6 +278,36 @@ describe('pending user request drawer', () => {
     expect(wrapper.get<HTMLTextAreaElement>('textarea').element.value).toBe('Keep it accessible')
   })
 
+  it('keeps a remounted async form disabled until a delayed answer succeeds', async () => {
+    const questions = [
+      { title: 'Which direction?', options: ['Small change'] },
+      { title: 'Any constraints?', options: null }
+    ]
+    const controller = useAsyncUserQuestions('drawer-pending-remount', ref('thread'))
+    controller.open({ id: 'async-pending', questions })
+    controller.updateDraft('async-pending', 0, 'Original answer')
+    expect(controller.beginAnswer('async-pending', 0)).toBe(true)
+    controller.dismiss()
+
+    const remounted = useAsyncUserQuestions('drawer-pending-remount', ref('thread'))
+    remounted.open({ id: 'async-pending', questions })
+    const wrapper = mountDrawer(null)
+    await wrapper.setProps({ asyncRequest: remounted.current.value, asyncSubmitting: remounted.submitting.value })
+    expect(wrapper.get<HTMLTextAreaElement>('textarea').element.value).toBe('Original answer')
+    expect(wrapper.get<HTMLTextAreaElement>('textarea').element.disabled).toBe(true)
+    expect(wrapper.get<HTMLButtonElement>('button[type="submit"]').element.disabled).toBe(true)
+    expect(wrapper.findAll('button').find(button => button.text() === 'Small change')!.element.disabled).toBe(true)
+    await wrapper.get('form').trigger('submit')
+    expect(wrapper.emitted('asyncRespond')).toBeUndefined()
+
+    controller.answered('async-pending', 0, 'thread')
+    controller.finishAnswer('async-pending', 0, 'thread')
+    await wrapper.setProps({ asyncSubmitting: remounted.submitting.value })
+    expect(wrapper.text()).toContain('Any constraints?')
+    expect(wrapper.get<HTMLTextAreaElement>('textarea').element.value).toBe('')
+    expect(wrapper.get<HTMLTextAreaElement>('textarea').element.disabled).toBe(false)
+  })
+
   it('renders request-user-input as a sequential flow and emits structured answers on the last answer', async () => {
     const wrapper = mountDrawer({
       kind: 'requestUserInput',
